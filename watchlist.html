@@ -1098,9 +1098,9 @@ function renderGroupedTable(list, td) {
     const isExpanded = expandedShows.has(title);
     const network = seasons[0].theme;
     const bc = badgeClass(network);
-    const confirmedSeasons = seasons.filter(s => s.status === 'confirmed');
-    const watchedCount = confirmedSeasons.filter(s => s.watched).length;
-    const totalCount = confirmedSeasons.length;
+    const trackableSeasons = seasons.filter(s => s.status !== 'skipped');
+    const watchedCount = trackableSeasons.filter(s => s.watched).length;
+    const totalCount = trackableSeasons.length;
     const anyNew = seasons.some(s => td.newKeys.includes(s.item_key));
 
     // aggregate status: if any season is 'watching', show that; else highest-priority status among seasons
