@@ -1079,13 +1079,19 @@ function statusOptionsHtml(status) {
 }
 
 function renderGroupedTable(list, td) {
-  // group rows by title, preserving earliest-date order for the group
+  // Which shows are visible is determined by the filtered `list`.
+  // But once a show is visible, its season breakdown/progress/badges should reflect
+  // ALL of that show's seasons in Supabase — not just the ones surviving the current filter —
+  // otherwise progress counts (e.g. "2/3 watched") get skewed by filters like "Not watched".
+  const visibleTitles = new Set(list.map(r => r.title));
+
   const groups = new Map();
-  list.forEach(r => {
+  td.rows.forEach(r => {
+    if (!visibleTitles.has(r.title)) return;
     if (!groups.has(r.title)) groups.set(r.title, []);
     groups.get(r.title).push(r);
   });
-  // sort each group's seasons chronologically, and sort groups by their earliest date
+
   const groupList = [...groups.entries()].map(([title, seasons]) => {
     seasons.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     return { title, seasons, earliestDate: seasons[0].date_sort };
