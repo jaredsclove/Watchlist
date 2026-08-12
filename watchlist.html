@@ -723,11 +723,26 @@ const NETWORK_COLORS = {
 };
 function networkColor(name) {
   if (NETWORK_COLORS[name]) return NETWORK_COLORS[name];
-  // simple deterministic hash -> hue
+  // simple deterministic hash -> hex color (must be hex, not hsl, so alpha-suffix works in networkBadgeStyle)
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 55%, 55%)`;
+  return hslToHex(hue, 55, 55);
+}
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const c = (1 - Math.abs(2*l - 1)) * s;
+  const x = c * (1 - Math.abs((h/60) % 2 - 1));
+  const m = l - c/2;
+  let r=0, g=0, b=0;
+  if (h < 60)       { r=c; g=x; b=0; }
+  else if (h < 120) { r=x; g=c; b=0; }
+  else if (h < 180) { r=0; g=c; b=x; }
+  else if (h < 240) { r=0; g=x; b=c; }
+  else if (h < 300) { r=x; g=0; b=c; }
+  else              { r=c; g=0; b=x; }
+  const toHex = v => Math.round((v+m)*255).toString(16).padStart(2,'0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 function networkBadgeStyle(name) {
   const color = networkColor(name);
@@ -1092,27 +1107,33 @@ function renderGroupedTable(list, td) {
     groups.get(r.title).push(r);
   });
 
+  // Status priority order for sorting: Watching > High Priority > On List > Pending > Maybe Later > Skipped
+  const statusOrder = ['watching','highpriority','confirmed','pending','maybe','skipped'];
+
   const groupList = [...groups.entries()].map(([title, seasons]) => {
     seasons.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
-    return { title, seasons, earliestDate: seasons[0].date_sort };
+    // aggregate status: earliest-priority status present among this show's seasons
+    let aggStatus = 'confirmed';
+    for (const s of statusOrder) { if (seasons.some(x => x.status === s)) { aggStatus = s; break; } }
+    return { title, seasons, earliestDate: seasons[0].date_sort, aggStatus };
   });
-  groupList.sort((a,b) => a.earliestDate.localeCompare(b.earliestDate));
+  groupList.sort((a,b) => {
+    const rankDiff = statusOrder.indexOf(a.aggStatus) - statusOrder.indexOf(b.aggStatus);
+    if (rankDiff !== 0) return rankDiff;
+    return a.earliestDate.localeCompare(b.earliestDate);
+  });
 
   let html = '', cardHtml = '';
   groupList.forEach(group => {
-    const { title, seasons } = group;
+    const { title, seasons, aggStatus } = group;
     const isExpanded = expandedShows.has(title);
-    const network = seasons[0].theme;
-    const bc = badgeClass(network);
+    const network = seasons[0].theme || 'Unknown';
+    const badgeStyle = networkBadgeStyle(network);
     const trackableSeasons = seasons.filter(s => s.status !== 'skipped');
     const watchedCount = trackableSeasons.filter(s => s.watched).length;
     const totalCount = trackableSeasons.length;
     const anyNew = seasons.some(s => td.newKeys.includes(s.item_key));
 
-    // aggregate status: if any season is 'watching', show that; else highest-priority status among seasons
-    const statusPriority = ['watching','highpriority','pending','maybe','confirmed','skipped'];
-    let aggStatus = 'confirmed';
-    for (const s of statusPriority) { if (seasons.some(x => x.status === s)) { aggStatus = s; break; } }
     const aggClass = `s-${aggStatus}`;
 
     const progressLabel = totalCount > 0 ? `${watchedCount}/${totalCount} watched` : `${seasons.length} season${seasons.length===1?'':'s'}`;
@@ -1130,6 +1151,7 @@ function renderGroupedTable(list, td) {
           <span class="season-lbl">${esc(r.season)}</span>
           ${td.newKeys.includes(r.item_key)?'<span class="new-tag">New</span>':''}
         </td>
+        <td></td>
         <td class="date-cell">${esc(r.display_date)}</td>
         <td>${statusCell}</td>
         <td>${!isSkipped
@@ -1141,14 +1163,16 @@ function renderGroupedTable(list, td) {
     }).join('');
 
     html += `<tr class="show-group-row" onclick="toggleShowExpand('${titleEsc}')">
-      <td colspan="2">
+      <td>
         <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
         <span class="show-title">${esc(title)}</span>
         ${anyNew?'<span class="new-tag">New</span>':''}
       </td>
-      <td><span class="badge ${bc}">${esc(network)}</span></td>
+      <td><span class="badge" ${badgeStyle}>${esc(network)}</span></td>
+      <td class="date-cell">${esc(seasons[0].display_date)}</td>
       <td>${masterStatusCell}</td>
-      <td colspan="2" class="card-date">${progressLabel}</td>
+      <td class="card-date">${progressLabel}</td>
+      <td></td>
     </tr>`;
     if (isExpanded) html += seasonRowsHtml;
 
@@ -1161,8 +1185,8 @@ function renderGroupedTable(list, td) {
         </div>
       </div>
       <div class="card-meta">
-        <span class="badge ${bc}">${esc(network)}</span>
-        <span class="card-date">${progressLabel}</span>
+        <span class="badge" ${badgeStyle}>${esc(network)}</span>
+        <span class="card-date">${esc(seasons[0].display_date)} · ${progressLabel}</span>
       </div>
       <div class="card-actions" onclick="event.stopPropagation()">
         ${masterStatusCell}
