@@ -93,6 +93,18 @@ select:focus { border-color: var(--accent); }
 table { width: 100%; border-collapse: collapse; }
 thead th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .year-group td { background: var(--surface); padding: 5px 12px; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); }
+
+.show-group-row { cursor: pointer; }
+.show-group-row:hover td { background: var(--surface); }
+.expand-chevron { display: inline-block; width: 14px; color: var(--text3); font-size: 11px; }
+.sub-row td { background: var(--bg); }
+.sub-row .season-lbl { color: var(--text2); font-size: 13px; }
+
+.card-subseasons { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.card-subseason-row { display: flex; flex-direction: column; gap: 6px; }
+.card-subseason-row .card-actions { display: flex; gap: 6px; align-items: center; }
+.card-subseason-row .status-select { flex: 1; }
+.card-subseason-row .watch-btn { flex: 1; text-align: center; }
 tbody tr:not(.year-group):hover td { background: var(--surface); }
 tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .show-title { font-weight: 500; color: var(--text); }
@@ -729,6 +741,7 @@ let tabData = {}; // { [collectionId]: { rows: [], loaded: false, newKeys: [] } 
 let addOpen = false;
 let tmdbSelectedShow = null; // { id, name } — currently previewed TMDB show
 let tmdbShowSpecials = false;
+let expandedShows = new Set(); // titles currently expanded on grouped (dynamic) tabs
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function badgeClass(theme) {
@@ -768,6 +781,7 @@ function switchTab(id) {
   activeTabId = id;
   addOpen = false;
   tmdbSelectedShow = null;
+  expandedShows = new Set();
   document.getElementById('addForm').style.display = 'none';
   document.getElementById('banner').innerHTML = '';
   buildTabs();
@@ -881,7 +895,7 @@ function renderFilters() {
       </select>
       <select id="fWatch" onchange="renderTable()">
         <option value="">All statuses</option>
-        <option value="unwatched">Not watched</option>
+        <option value="unwatched" selected>Not watched</option>
         <option value="watched">Watched</option>
       </select>
       <select id="fStatus" onchange="renderTable()">
@@ -936,6 +950,7 @@ function renderFilters() {
 function renderTable() {
   const td = tabData[activeTabId];
   if (!td) return;
+  const col = COLLECTIONS.find(c => c.id === activeTabId);
 
   const fSearch = document.getElementById('fSearch')?.value.trim().toLowerCase() || '';
   const fTheme  = document.getElementById('fTheme')?.value  || '';
@@ -983,6 +998,15 @@ function renderTable() {
     return;
   }
 
+  if (col.dynamic) {
+    renderGroupedTable(list, td);
+  } else {
+    renderFlatTable(list, td);
+  }
+}
+
+// ─── Flat rendering (Disney+, 90 Day, Sheridan) ───────────────────────────────
+function renderFlatTable(list, td) {
   let html = '', cardHtml = '', lastYear = '';
   list.forEach(r => {
     const yr = r.date_sort.substring(0,4);
@@ -995,16 +1019,8 @@ function renderTable() {
     const bc = badgeClass(r.theme);
     const isSkipped = r.status === 'skipped';
     const isMaybe   = r.status === 'maybe';
-    const isPending  = r.status === 'pending';
     const statusClass = `s-${r.status}`;
-    const statusOptions = `
-      <option value="confirmed"${r.status==='confirmed'?' selected':''}>✓ On List</option>
-      <option value="highpriority"${r.status==='highpriority'?' selected':''}>⭐ High Priority</option>
-      <option value="watching"${r.status==='watching'?' selected':''}>▶ Watching</option>
-      <option value="pending"${r.status==='pending'?' selected':''}>⏳ Pending</option>
-      <option value="maybe"${r.status==='maybe'?' selected':''}>? Maybe Later</option>
-      <option value="skipped"${r.status==='skipped'?' selected':''}>✕ Skipped</option>
-    `;
+    const statusOptions = statusOptionsHtml(r.status);
     const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptions}</select>`;
     const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
 
@@ -1048,6 +1064,128 @@ function renderTable() {
   });
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
+}
+
+// ─── Grouped rendering (Other TV, True Crime/Docs) ────────────────────────────
+function statusOptionsHtml(status) {
+  return `
+    <option value="confirmed"${status==='confirmed'?' selected':''}>✓ On List</option>
+    <option value="highpriority"${status==='highpriority'?' selected':''}>⭐ High Priority</option>
+    <option value="watching"${status==='watching'?' selected':''}>▶ Watching</option>
+    <option value="pending"${status==='pending'?' selected':''}>⏳ Pending</option>
+    <option value="maybe"${status==='maybe'?' selected':''}>? Maybe Later</option>
+    <option value="skipped"${status==='skipped'?' selected':''}>✕ Skipped</option>
+  `;
+}
+
+function renderGroupedTable(list, td) {
+  // group rows by title, preserving earliest-date order for the group
+  const groups = new Map();
+  list.forEach(r => {
+    if (!groups.has(r.title)) groups.set(r.title, []);
+    groups.get(r.title).push(r);
+  });
+  // sort each group's seasons chronologically, and sort groups by their earliest date
+  const groupList = [...groups.entries()].map(([title, seasons]) => {
+    seasons.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    return { title, seasons, earliestDate: seasons[0].date_sort };
+  });
+  groupList.sort((a,b) => a.earliestDate.localeCompare(b.earliestDate));
+
+  let html = '', cardHtml = '';
+  groupList.forEach(group => {
+    const { title, seasons } = group;
+    const isExpanded = expandedShows.has(title);
+    const network = seasons[0].theme;
+    const bc = badgeClass(network);
+    const confirmedSeasons = seasons.filter(s => s.status === 'confirmed');
+    const watchedCount = confirmedSeasons.filter(s => s.watched).length;
+    const totalCount = confirmedSeasons.length;
+    const anyNew = seasons.some(s => td.newKeys.includes(s.item_key));
+
+    // aggregate status label: if any season is 'watching', show that; else highest-priority status among seasons
+    const statusPriority = ['watching','highpriority','pending','maybe','confirmed','skipped'];
+    let aggStatus = 'confirmed';
+    for (const s of statusPriority) { if (seasons.some(x => x.status === s)) { aggStatus = s; break; } }
+    const aggLabel = {
+      watching: '▶ Watching', highpriority: '⭐ High Priority', pending: '⏳ Pending',
+      maybe: '? Maybe Later', confirmed: '✓ On List', skipped: '✕ Skipped'
+    }[aggStatus];
+    const aggClass = `s-${aggStatus}`;
+
+    const progressLabel = totalCount > 0 ? `${watchedCount}/${totalCount} watched` : `${seasons.length} season${seasons.length===1?'':'s'}`;
+
+    const seasonRowsHtml = seasons.map(r => {
+      const isSkipped = r.status === 'skipped';
+      const isMaybe   = r.status === 'maybe';
+      const statusClass = `s-${r.status}`;
+      const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>`;
+      const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
+      return `<tr class="${rowClass} sub-row">
+        <td style="padding-left:28px">
+          <span class="season-lbl">${esc(r.season)}</span>
+          ${td.newKeys.includes(r.item_key)?'<span class="new-tag">New</span>':''}
+        </td>
+        <td class="date-cell">${esc(r.display_date)}</td>
+        <td>${statusCell}</td>
+        <td>${!isSkipped
+          ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓ Watched':'Mark watched'}</button>`
+          : `<span class="confirmed-lbl">—</span>`
+        }</td>
+        <td><button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button></td>
+      </tr>`;
+    }).join('');
+
+    html += `<tr class="show-group-row" onclick="toggleShowExpand('${esc(title).replace(/'/g,"\\'")}')">
+      <td colspan="2">
+        <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
+        <span class="show-title">${esc(title)}</span>
+        ${anyNew?'<span class="new-tag">New</span>':''}
+      </td>
+      <td><span class="badge ${bc}">${esc(network)}</span></td>
+      <td><span class="badge ${aggClass==='s-confirmed'?'':aggClass}" style="background:none;border:none;padding:0;color:var(--text2)">${aggLabel}</span></td>
+      <td colspan="2" class="card-date">${progressLabel}</td>
+    </tr>`;
+    if (isExpanded) html += seasonRowsHtml;
+
+    cardHtml += `<div class="item-card show-group-card">
+      <div class="card-top" onclick="toggleShowExpand('${esc(title).replace(/'/g,"\\'")}')" style="cursor:pointer">
+        <div class="card-title-block">
+          <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
+          <span class="card-title">${esc(title)}</span>
+          ${anyNew?'<span class="new-tag">New</span>':''}
+        </div>
+      </div>
+      <div class="card-meta">
+        <span class="badge ${bc}">${esc(network)}</span>
+        <span class="card-date">${progressLabel} · ${aggLabel}</span>
+      </div>
+      ${isExpanded ? `<div class="card-subseasons">${seasons.map(r => {
+        const isSkipped = r.status === 'skipped';
+        const statusClass = `s-${r.status}`;
+        return `<div class="card-subseason-row">
+          <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}</span>
+          <div class="card-actions">
+            <select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>
+            ${!isSkipped
+              ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓':'Mark watched'}</button>`
+              : ''
+            }
+            <button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>
+          </div>
+        </div>`;
+      }).join('')}</div>` : ''}
+    </div>`;
+  });
+
+  document.getElementById('tbody').innerHTML = html;
+  document.getElementById('cardList').innerHTML = cardHtml;
+}
+
+function toggleShowExpand(title) {
+  if (expandedShows.has(title)) expandedShows.delete(title);
+  else expandedShows.add(title);
+  renderTable();
 }
 
 
