@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watchlist Tracker</title>
+<style>
+:root {
+  --bg: #0d0f14;
+  --surface: #161a23;
+  --surface2: #1e2330;
+  --border: #2a2f3d;
+  --border2: #353b4d;
+  --text: #e8eaf0;
+  --text2: #8b91a8;
+  --text3: #555d77;
+  --accent: #4f7ef8;
+  --accent-dim: #1a2a5e;
+  --green: #3ecf8e;
+  --green-dim: #0d3324;
+  --green-border: #1a6645;
+  --red: #c0392b;
+  --red-bg: #2d1015;
+  --orange: #e67e22;
+  --orange-bg: #2d1a08;
+  --amber: #d4a843;
+  --amber-bg: #2d2008;
+  --amber-border: #4d3a10;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --radius: 6px;
+  --radius-lg: 10px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; min-height: 100vh; line-height: 1.5; }
+
+/* ── Topbar ── */
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; }
+.logo { display: flex; align-items: center; gap: 10px; }
+.logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg, #1a6ef5, #6f3de8); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.logo-text { font-size: 16px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+.save-status { font-size: 11px; color: var(--green); opacity: 0; transition: opacity 0.3s; }
+.save-status.visible { opacity: 1; }
+
+/* ── Tabs ── */
+.tabs { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 0; overflow-x: auto; }
+.tab { padding: 10px 18px; font-size: 13px; font-weight: 500; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: color 0.15s, border-color 0.15s; user-select: none; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-icon { margin-right: 6px; }
+
+/* ── Main ── */
+.main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+.stats-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px 16px; min-width: 90px; }
+.stat-num { font-size: 22px; font-weight: 600; color: var(--text); line-height: 1.2; }
+.stat-label { font-size: 11px; color: var(--text2); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+.progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 6px; width: 80px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
+
+.filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+.filter-label { font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 2px; }
+
+.search-input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px 6px 28px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  width: 180px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23555d77' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 8px center;
+  transition: border-color 0.15s, width 0.2s;
+}
+.search-input:focus { border-color: var(--accent); width: 220px; }
+.search-input::placeholder { color: var(--text3); }
+select { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; color: var(--text); font-size: 13px; cursor: pointer; outline: none; }
+select:focus { border-color: var(--accent); }
+
+.banner { background: var(--green-dim); border: 1px solid var(--green-border); border-radius: var(--radius); padding: 10px 14px; font-size: 13px; color: var(--green); margin-bottom: 16px; }
+.error-banner { background: #2d1015; border: 1px solid #4d1520; border-radius: var(--radius); padding: 10px 14px; font-size: 13px; color: #e07070; margin-bottom: 16px; }
+.loading { text-align: center; padding: 3rem; color: var(--text3); font-size: 13px; }
+
+table { width: 100%; border-collapse: collapse; }
+thead th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.year-group td { background: var(--surface); padding: 5px 12px; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); }
+tbody tr:not(.year-group):hover td { background: var(--surface); }
+tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.show-title { font-weight: 500; color: var(--text); }
+.season-lbl { color: var(--text2); font-size: 12px; }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; white-space: nowrap; border: 1px solid transparent; }
+
+/* ── Disney+ badges ── */
+.b-Marvel       { background: #2d1015; color: #c0392b; border-color: #4d1520; }
+.b-StarWars     { background: #0d1e35; color: #3a8fde; border-color: #0d3060; }
+.b-Fantasy      { background: #1e0d2d; color: #9b59b6; border-color: #3a1555; }
+.b-SciFi        { background: #0d2420; color: #1abc9c; border-color: #0d3830; }
+.b-Drama        { background: #2d1a08; color: #e67e22; border-color: #4d2a10; }
+.b-Animation    { background: #2d0820; color: #e91e8c; border-color: #4d1035; }
+.b-Action       { background: #2d2508; color: #f1c40f; border-color: #4d3d08; }
+.b-Family       { background: #0d2018; color: #27ae60; border-color: #0d3520; }
+.b-Musical      { background: #2d0820; color: #e84393; border-color: #4d1035; }
+.b-Horror       { background: #2d1015; color: #c0392b; border-color: #4d1520; }
+.b-Documentary  { background: #1a1c20; color: #7f8c8d; border-color: #2a2c30; }
+.b-Reality      { background: #2d2008; color: #f39c12; border-color: #4d3510; }
+.b-Comedy       { background: #1e2a08; color: #8bc34a; border-color: #3a4d10; }
+
+/* ── 90 Day badges ── */
+.b-MainShow         { background: #2d1015; color: #c0392b; border-color: #4d1520; }
+.b-HappilyEverAfter { background: #2d1a08; color: #e67e22; border-color: #4d2a10; }
+.b-BeforeThe90Days  { background: #1e0d2d; color: #9b59b6; border-color: #3a1555; }
+.b-TheOtherWay      { background: #0d1e35; color: #3a8fde; border-color: #0d3060; }
+.b-Spinoff          { background: #0d2420; color: #1abc9c; border-color: #0d3830; }
+.b-TellAll          { background: #2d2508; color: #f1c40f; border-color: #4d3d08; }
+
+/* ── Sheridan badges ── */
+.b-Yellowstone      { background: #2d1508; color: #d4a843; border-color: #4d2e0a; }
+.b-1883             { background: #2a1508; color: #a0522d; border-color: #4a2510; }
+.b-1923             { background: #1a1008; color: #c8860a; border-color: #3d2a08; }
+.b-6666             { background: #0d1a10; color: #3ecf8e; border-color: #0d3520; }
+.b-1944             { background: #1a1520; color: #9b59b6; border-color: #3a1555; }
+.b-DuttonRanch      { background: #2d1a08; color: #e67e22; border-color: #4d2a10; }
+.b-Marshals         { background: #0d1e35; color: #3a8fde; border-color: #0d3060; }
+.b-TheMadison       { background: #1e0820; color: #e91e8c; border-color: #4d1035; }
+.b-MayorofKingstown { background: #2d1015; color: #c0392b; border-color: #4d1520; }
+.b-TulsaKing        { background: #2d2008; color: #f1c40f; border-color: #4d3d08; }
+.b-SpecialOpsLioness{ background: #0d2420; color: #1abc9c; border-color: #0d3830; }
+.b-LawmenBassReeves { background: #1a1008; color: #c8860a; border-color: #3d2a08; }
+.b-Landman          { background: #0d1520; color: #5b9bd5; border-color: #0d2a40; }
+.b-FriscoKing       { background: #2d0820; color: #e84393; border-color: #4d1035; }
+.b-Film             { background: #1a1c20; color: #8b91a8; border-color: #2a2c30; }
+
+.date-cell { color: var(--text2); font-size: 12px; white-space: nowrap; }
+.watch-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 11px; cursor: pointer; font-size: 12px; color: var(--text2); transition: all 0.15s; white-space: nowrap; }
+.watch-btn:hover { border-color: var(--border2); color: var(--text); }
+.watch-btn.watched { background: var(--green-dim); border-color: var(--green-border); color: var(--green); }
+.watch-btn:disabled { opacity: 0.3; cursor: default; }
+
+.row-maybe td { opacity: 0.65; }
+.row-skipped td { opacity: 0.4; }
+
+.status-select {
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 20px;
+  padding: 3px 22px 3px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid;
+  outline: none;
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 8px;
+  transition: opacity 0.15s;
+}
+.status-select:hover { opacity: 0.85; }
+.status-select.s-confirmed { background-color: var(--green-dim); color: var(--green); border-color: var(--green-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%233ecf8e' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-pending   { background-color: var(--orange-bg); color: var(--orange); border-color: #4d2a10; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e67e22' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-maybe     { background-color: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23d4a843' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-skipped   { background-color: var(--red-bg); color: var(--red); border-color: #4d1520; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+
+.del-btn { background: none; border: none; cursor: pointer; color: var(--text3); padding: 2px 6px; border-radius: 4px; font-size: 16px; line-height: 1; transition: color 0.15s; }
+.del-btn:hover { color: var(--red); }
+
+.pending-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; background: var(--orange-bg); color: var(--orange); border: 1px solid #4d2a10; margin-left: 5px; vertical-align: middle; }
+.new-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); margin-left: 5px; vertical-align: middle; }
+.confirmed-lbl { font-size: 11px; color: var(--text3); }
+.empty-row td { text-align: center; padding: 2.5rem; color: var(--text3); font-size: 13px; }
+
+.btn { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 14px; color: var(--text); font-size: 13px; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
+.btn:hover { background: var(--border); }
+.btn-accent { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.btn-accent:hover { background: #253a7a; }
+
+.add-form { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-top: 16px; }
+.add-form-title { font-size: 13px; font-weight: 500; margin-bottom: 12px; color: var(--text); }
+.add-form-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr auto; gap: 8px; align-items: end; }
+.add-form-grid label { display: block; font-size: 11px; color: var(--text3); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.add-form-grid input, .add-form-grid select { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 10px; color: var(--text); font-size: 13px; }
+.add-form-grid input:focus, .add-form-grid select:focus { outline: none; border-color: var(--accent); }
+
+@media (max-width: 700px) {
+  .add-form-grid { grid-template-columns: 1fr 1fr; }
+  .main { padding: 12px; }
+  .tabs { padding: 0 12px; }
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-icon">📺</div>
+    <div><div class="logo-text">Watchlist Tracker</div></div>
+  </div>
+  <div class="topbar-right">
+    <span class="save-status" id="saveStatus">Saved ✓</span>
+  </div>
+</div>
+
+<div class="tabs" id="tabBar"></div>
+
+<div class="main">
+  <div id="banner"></div>
+  <div id="errorBanner"></div>
+  <div class="stats-row" id="statsRow"></div>
+
+  <div class="filters" id="filtersRow"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Show &amp; Season</th>
+        <th>Theme</th>
+        <th>Premiere</th>
+        <th>Status</th>
+        <th>Watched</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <div class="add-form" id="addForm" style="display:none">
+    <div class="add-form-title">Add a new entry</div>
+    <div class="add-form-grid" id="addFormGrid"></div>
+  </div>
+</div>
+
+<script>
+// ─── Supabase config ──────────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://elunjvvvrotapdtigomo.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_yLAuk8Z0Yg_fvwZ0DfypPw_U2_fYUi9';
+const TABLE = 'watchlist_items';
+
+async function sbFetch(method, path, body) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': method === 'POST' ? 'return=representation' : 'return=minimal'
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Supabase error ${res.status}: ${err}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// ─── Collection definitions ───────────────────────────────────────────────────
+const COLLECTIONS = [
+  {
+    id: 'disney',
+    label: 'Disney+',
+    icon: '🎬',
+    themes: ['Marvel','Star Wars','Fantasy','Sci-Fi','Action','Drama','Animation','Family','Musical','Horror','Documentary','Reality','Comedy'],
+    years: ['1984','1985','1986','2003','2005','2008','2009','2010','2011','2012','2013','2014','2015','2016','2017','2018','2019','2020','2021','2022','2023','2024','2025','2026','2027'],
+    defaults: [
+  {k:"the mandalorian|season 1",t:"The Mandalorian",s:"Season 1",th:"Star Wars",d:"Nov 12, 2019",ds:"2019-11-12"},
+  {k:"the clone wars|season 7",t:"The Clone Wars",s:"Season 7",th:"Star Wars",d:"Feb 21, 2020",ds:"2020-02-21"},
+  {k:"lego star wars holiday special|special",t:"LEGO Star Wars Holiday Special",s:"Special",th:"Star Wars",d:"Nov 17, 2020",ds:"2020-11-17"},
+  {k:"the mandalorian|season 2",t:"The Mandalorian",s:"Season 2",th:"Star Wars",d:"Oct 30, 2020",ds:"2020-10-30"},
+  {k:"star wars: the bad batch|season 1",t:"Star Wars: The Bad Batch",s:"Season 1",th:"Star Wars",d:"May 4, 2021",ds:"2021-05-04"},
+  {k:"star wars: visions|volume 1",t:"Star Wars: Visions",s:"Volume 1",th:"Star Wars",d:"Sep 22, 2021",ds:"2021-09-22"},
+  {k:"star wars: the book of boba fett|season 1",t:"Star Wars: The Book of Boba Fett",s:"Season 1",th:"Star Wars",d:"Dec 29, 2021",ds:"2021-12-29"},
+  {k:"lego star wars: terrifying tales|special",t:"LEGO Star Wars: Terrifying Tales",s:"Special",th:"Star Wars",d:"Oct 1, 2021",ds:"2021-10-01"},
+  {k:"star wars: obi-wan kenobi|season 1",t:"Star Wars: Obi-Wan Kenobi",s:"Season 1",th:"Star Wars",d:"May 27, 2022",ds:"2022-05-27"},
+  {k:"andor|season 1",t:"Andor",s:"Season 1",th:"Star Wars",d:"Sep 21, 2022",ds:"2022-09-21"},
+  {k:"star wars: tales of the jedi|season 1",t:"Star Wars: Tales of the Jedi",s:"Season 1",th:"Star Wars",d:"Oct 26, 2022",ds:"2022-10-26"},
+  {k:"lego star wars: summer vacation|special",t:"LEGO Star Wars: Summer Vacation",s:"Special",th:"Star Wars",d:"Aug 5, 2022",ds:"2022-08-05"},
+  {k:"star wars: the bad batch|season 2",t:"Star Wars: The Bad Batch",s:"Season 2",th:"Star Wars",d:"Jan 4, 2023",ds:"2023-01-04"},
+  {k:"the mandalorian|season 3",t:"The Mandalorian",s:"Season 3",th:"Star Wars",d:"Mar 1, 2023",ds:"2023-03-01"},
+  {k:"star wars: visions|volume 2",t:"Star Wars: Visions",s:"Volume 2",th:"Star Wars",d:"May 4, 2023",ds:"2023-05-04"},
+  {k:"star wars: young jedi adventures|season 1",t:"Star Wars: Young Jedi Adventures",s:"Season 1",th:"Star Wars",d:"May 4, 2023",ds:"2023-05-04"},
+  {k:"star wars: young jedi adventures|season 2",t:"Star Wars: Young Jedi Adventures",s:"Season 2",th:"Star Wars",d:"2025",ds:"2025-06-01"},
+  {k:"star wars: young jedi adventures|season 3",t:"Star Wars: Young Jedi Adventures",s:"Season 3",th:"Star Wars",d:"Dec 8, 2025",ds:"2025-12-08"},
+  {k:"ahsoka|season 1",t:"Ahsoka",s:"Season 1",th:"Star Wars",d:"Aug 22, 2023",ds:"2023-08-22"},
+  {k:"star wars: tales of the jedi|season 2",t:"Star Wars: Tales of the Jedi",s:"Season 2",th:"Star Wars",d:"Oct 26, 2023",ds:"2023-10-26"},
+  {k:"star wars: the bad batch|season 3",t:"Star Wars: The Bad Batch",s:"Season 3",th:"Star Wars",d:"Feb 21, 2024",ds:"2024-02-21"},
+  {k:"star wars: the acolyte|season 1",t:"Star Wars: The Acolyte",s:"Season 1",th:"Star Wars",d:"Jun 4, 2024",ds:"2024-06-04"},
+  {k:"star wars: skeleton crew|season 1",t:"Star Wars: Skeleton Crew",s:"Season 1",th:"Star Wars",d:"Nov 3, 2024",ds:"2024-11-03"},
+  {k:"andor|season 2",t:"Andor",s:"Season 2",th:"Star Wars",d:"Apr 22, 2025",ds:"2025-04-22"},
+  {k:"the mandalorian and grogu|film",t:"The Mandalorian & Grogu",s:"Film",th:"Star Wars",d:"May 22, 2026",ds:"2026-05-22"},
+  {k:"star wars: tales of the underworld|season 1",t:"Star Wars: Tales of the Underworld",s:"Season 1",th:"Star Wars",d:"May 4, 2025",ds:"2025-05-04"},
+  {k:"star wars: visions|volume 3",t:"Star Wars: Visions",s:"Volume 3",th:"Star Wars",d:"Oct 2025",ds:"2025-10-01"},
+  {k:"star wars: maul – shadow lord|season 1",t:"Star Wars: Maul – Shadow Lord",s:"Season 1",th:"Star Wars",d:"Apr 6, 2026",ds:"2026-04-06"},
+  {k:"ahsoka|season 2",t:"Ahsoka",s:"Season 2",th:"Star Wars",d:"Early 2027",ds:"2027-02-01"},
+  {k:"star wars: visions presents: the ninth jedi|season 1",t:"Star Wars: Visions Presents: The Ninth Jedi",s:"Season 1",th:"Star Wars",d:"2026 (TBA)",ds:"2026-09-01"},
+  {k:"wandavision|season 1",t:"WandaVision",s:"Season 1",th:"Marvel",d:"Jan 15, 2021",ds:"2021-01-15"},
+  {k:"the falcon and the winter soldier|season 1",t:"The Falcon and the Winter Soldier",s:"Season 1",th:"Marvel",d:"Mar 19, 2021",ds:"2021-03-19"},
+  {k:"loki|season 1",t:"Loki",s:"Season 1",th:"Marvel",d:"Jun 9, 2021",ds:"2021-06-09"},
+  {k:"what if...?|season 1",t:"What If...?",s:"Season 1",th:"Marvel",d:"Aug 11, 2021",ds:"2021-08-11"},
+  {k:"hawkeye|season 1",t:"Hawkeye",s:"Season 1",th:"Marvel",d:"Nov 24, 2021",ds:"2021-11-24"},
+  {k:"moon knight|season 1",t:"Moon Knight",s:"Season 1",th:"Marvel",d:"Mar 30, 2022",ds:"2022-03-30"},
+  {k:"ms. marvel|season 1",t:"Ms. Marvel",s:"Season 1",th:"Marvel",d:"Jun 8, 2022",ds:"2022-06-08"},
+  {k:"i am groot|season 1",t:"I Am Groot",s:"Season 1",th:"Marvel",d:"Aug 10, 2022",ds:"2022-08-10"},
+  {k:"she-hulk: attorney at law|season 1",t:"She-Hulk: Attorney at Law",s:"Season 1",th:"Marvel",d:"Aug 17, 2022",ds:"2022-08-17"},
+  {k:"werewolf by night|special",t:"Werewolf by Night",s:"Special",th:"Marvel",d:"Oct 7, 2022",ds:"2022-10-07"},
+  {k:"guardians of the galaxy holiday special|special",t:"Guardians of the Galaxy Holiday Special",s:"Special",th:"Marvel",d:"Nov 25, 2022",ds:"2022-11-25"},
+  {k:"secret invasion|season 1",t:"Secret Invasion",s:"Season 1",th:"Marvel",d:"Jun 21, 2023",ds:"2023-06-21"},
+  {k:"loki|season 2",t:"Loki",s:"Season 2",th:"Marvel",d:"Oct 5, 2023",ds:"2023-10-05"},
+  {k:"i am groot|season 2",t:"I Am Groot",s:"Season 2",th:"Marvel",d:"Sep 6, 2023",ds:"2023-09-06"},
+  {k:"what if...?|season 2",t:"What If...?",s:"Season 2",th:"Marvel",d:"Dec 22, 2023",ds:"2023-12-22"},
+  {k:"echo|season 1",t:"Echo",s:"Season 1",th:"Marvel",d:"Jan 9, 2024",ds:"2024-01-09"},
+  {k:"x-men '97|season 1",t:"X-Men '97",s:"Season 1",th:"Marvel",d:"Mar 20, 2024",ds:"2024-03-20"},
+  {k:"agatha all along|season 1",t:"Agatha All Along",s:"Season 1",th:"Marvel",d:"Sep 18, 2024",ds:"2024-09-18"},
+  {k:"your friendly neighborhood spider-man|season 1",t:"Your Friendly Neighborhood Spider-Man",s:"Season 1",th:"Marvel",d:"Jan 29, 2025",ds:"2025-01-29"},
+  {k:"daredevil: born again|season 1",t:"Daredevil: Born Again",s:"Season 1",th:"Marvel",d:"Mar 4, 2025",ds:"2025-03-04"},
+  {k:"ironheart|season 1",t:"Ironheart",s:"Season 1",th:"Marvel",d:"Jun 24, 2025",ds:"2025-06-24"},
+  {k:"eyes of wakanda|season 1",t:"Eyes of Wakanda",s:"Season 1",th:"Marvel",d:"Aug 6, 2025",ds:"2025-08-06"},
+  {k:"marvel zombies|season 1",t:"Marvel Zombies",s:"Season 1",th:"Marvel",d:"Sep 24, 2025",ds:"2025-09-24"},
+  {k:"what if...?|season 3",t:"What If...?",s:"Season 3",th:"Marvel",d:"Dec 2025",ds:"2025-12-01"},
+  {k:"wonder man|season 1",t:"Wonder Man",s:"Season 1",th:"Marvel",d:"Jan 27, 2026",ds:"2026-01-27"},
+  {k:"daredevil: born again|season 2",t:"Daredevil: Born Again",s:"Season 2",th:"Marvel",d:"Mar 4, 2026",ds:"2026-03-04"},
+  {k:"the punisher: one last kill|special",t:"The Punisher: One Last Kill",s:"Special",th:"Marvel",d:"May 7, 2026",ds:"2026-05-07"},
+  {k:"x-men '97|season 2",t:"X-Men '97",s:"Season 2",th:"Marvel",d:"Jul 1, 2026",ds:"2026-07-01"},
+  {k:"visionquest|season 1",t:"VisionQuest",s:"Season 1",th:"Marvel",d:"Oct 14, 2026",ds:"2026-10-14"},
+  {k:"your friendly neighborhood spider-man|season 2",t:"Your Friendly Neighborhood Spider-Man",s:"Season 2",th:"Marvel",d:"Fall 2026",ds:"2026-10-02"},
+  {k:"wonder man|season 2",t:"Wonder Man",s:"Season 2",th:"Marvel",d:"TBA",ds:"2027-01-01"},
+  {k:"daredevil: born again|season 3",t:"Daredevil: Born Again",s:"Season 3",th:"Marvel",d:"2027",ds:"2027-03-01"},
+  {k:"marvel zombies|season 2",t:"Marvel Zombies",s:"Season 2",th:"Marvel",d:"TBA",ds:"2027-06-01"},
+  {k:"olaf's frozen adventure|special",t:"Olaf's Frozen Adventure",s:"Special",th:"Animation",d:"Nov 12, 2019",ds:"2019-11-12"},
+  {k:"forky asks a question|season 1",t:"Forky Asks a Question",s:"Season 1",th:"Animation",d:"Nov 12, 2019",ds:"2019-11-12"},
+  {k:"lamp life|special",t:"Lamp Life",s:"Special",th:"Animation",d:"Jan 10, 2020",ds:"2020-01-10"},
+  {k:"once upon a snowman|special",t:"Once Upon a Snowman",s:"Special",th:"Animation",d:"Oct 23, 2020",ds:"2020-10-23"},
+  {k:"myth: a frozen tale|special",t:"Myth: A Frozen Tale",s:"Special",th:"Animation",d:"Feb 26, 2021",ds:"2021-02-26"},
+  {k:"dug days|season 1",t:"Dug Days",s:"Season 1",th:"Animation",d:"Sep 1, 2021",ds:"2021-09-01"},
+  {k:"muppets haunted mansion|special",t:"Muppets Haunted Mansion",s:"Special",th:"Family",d:"Oct 8, 2021",ds:"2021-10-08"},
+  {k:"olaf presents|season 1",t:"Olaf Presents",s:"Season 1",th:"Animation",d:"Nov 12, 2021",ds:"2021-11-12"},
+  {k:"ciao alberto|special",t:"Ciao Alberto",s:"Special",th:"Animation",d:"Nov 12, 2021",ds:"2021-11-12"},
+  {k:"frozen fever|special",t:"Frozen Fever",s:"Special",th:"Animation",d:"Nov 12, 2021",ds:"2021-11-12"},
+  {k:"baymax!|season 1",t:"Baymax!",s:"Season 1",th:"Animation",d:"Jun 29, 2022",ds:"2022-06-29"},
+  {k:"cars on the road|season 1",t:"Cars on the Road",s:"Season 1",th:"Animation",d:"Sep 8, 2022",ds:"2022-09-08"},
+  {k:"the muppets mayhem|season 1",t:"The Muppets Mayhem",s:"Season 1",th:"Family",d:"May 10, 2023",ds:"2023-05-10"},
+  {k:"dream productions|season 1",t:"Dream Productions",s:"Season 1",th:"Animation",d:"Nov 22, 2024",ds:"2024-11-22"},
+  {k:"star wars: the clone wars (2008)|film",t:"Star Wars: The Clone Wars (2008)",s:"Film",th:"Star Wars",d:"Aug 15, 2008",ds:"2008-08-15"},
+  {k:"star wars: the clone wars (2008)|season 1",t:"Star Wars: The Clone Wars (2008)",s:"Season 1",th:"Star Wars",d:"Oct 3, 2008",ds:"2008-10-03"},
+  {k:"star wars: the clone wars (2008)|season 2",t:"Star Wars: The Clone Wars (2008)",s:"Season 2",th:"Star Wars",d:"Oct 2, 2009",ds:"2009-10-02"},
+  {k:"star wars: the clone wars (2008)|season 3",t:"Star Wars: The Clone Wars (2008)",s:"Season 3",th:"Star Wars",d:"Sep 17, 2010",ds:"2010-09-17"},
+  {k:"star wars: the clone wars (2008)|season 4",t:"Star Wars: The Clone Wars (2008)",s:"Season 4",th:"Star Wars",d:"Sep 16, 2011",ds:"2011-09-16"},
+  {k:"star wars: the clone wars (2008)|season 5",t:"Star Wars: The Clone Wars (2008)",s:"Season 5",th:"Star Wars",d:"Sep 29, 2012",ds:"2012-09-29"},
+  {k:"star wars: the clone wars (2008)|season 6",t:"Star Wars: The Clone Wars (2008)",s:"Season 6",th:"Star Wars",d:"Mar 7, 2014",ds:"2014-03-07"},
+  {k:"star wars rebels|season 1",t:"Star Wars Rebels",s:"Season 1",th:"Star Wars",d:"Oct 3, 2014",ds:"2014-10-03"},
+  {k:"star wars rebels|season 2",t:"Star Wars Rebels",s:"Season 2",th:"Star Wars",d:"Jun 20, 2015",ds:"2015-06-20"},
+  {k:"star wars rebels|season 3",t:"Star Wars Rebels",s:"Season 3",th:"Star Wars",d:"Sep 24, 2016",ds:"2016-09-24"},
+  {k:"star wars rebels|season 4",t:"Star Wars Rebels",s:"Season 4",th:"Star Wars",d:"Oct 16, 2017",ds:"2017-10-16"},
+  {k:"star wars resistance|season 1",t:"Star Wars Resistance",s:"Season 1",th:"Star Wars",d:"Oct 7, 2018",ds:"2018-10-07"},
+  {k:"star wars resistance|season 2",t:"Star Wars Resistance",s:"Season 2",th:"Star Wars",d:"Oct 6, 2019",ds:"2019-10-06"},
+  {k:"agents of s.h.i.e.l.d.|season 1",t:"Agents of S.H.I.E.L.D.",s:"Season 1",th:"Marvel",d:"Sep 24, 2013",ds:"2013-09-24"},
+  {k:"agents of s.h.i.e.l.d.|season 2",t:"Agents of S.H.I.E.L.D.",s:"Season 2",th:"Marvel",d:"Sep 23, 2014",ds:"2014-09-23"},
+  {k:"agent carter|season 1",t:"Agent Carter",s:"Season 1",th:"Marvel",d:"Jan 6, 2015",ds:"2015-01-06"},
+  {k:"daredevil (netflix)|season 1",t:"Daredevil (Netflix)",s:"Season 1",th:"Marvel",d:"Apr 10, 2015",ds:"2015-04-10"},
+  {k:"jessica jones|season 1",t:"Jessica Jones",s:"Season 1",th:"Marvel",d:"Nov 20, 2015",ds:"2015-11-20"},
+  {k:"agents of s.h.i.e.l.d.|season 3",t:"Agents of S.H.I.E.L.D.",s:"Season 3",th:"Marvel",d:"Sep 29, 2015",ds:"2015-09-29"},
+  {k:"agent carter|season 2",t:"Agent Carter",s:"Season 2",th:"Marvel",d:"Jan 19, 2016",ds:"2016-01-19"},
+  {k:"daredevil (netflix)|season 2",t:"Daredevil (Netflix)",s:"Season 2",th:"Marvel",d:"Mar 18, 2016",ds:"2016-03-18"},
+  {k:"agents of s.h.i.e.l.d.|season 4",t:"Agents of S.H.I.E.L.D.",s:"Season 4",th:"Marvel",d:"Sep 20, 2016",ds:"2016-09-20"},
+  {k:"luke cage|season 1",t:"Luke Cage",s:"Season 1",th:"Marvel",d:"Sep 30, 2016",ds:"2016-09-30"},
+  {k:"iron fist|season 1",t:"Iron Fist",s:"Season 1",th:"Marvel",d:"Mar 17, 2017",ds:"2017-03-17"},
+  {k:"the defenders|season 1",t:"The Defenders",s:"Season 1",th:"Marvel",d:"Aug 18, 2017",ds:"2017-08-18"},
+  {k:"the punisher (netflix)|season 1",t:"The Punisher (Netflix)",s:"Season 1",th:"Marvel",d:"Nov 17, 2017",ds:"2017-11-17"},
+  {k:"agents of s.h.i.e.l.d.|season 5",t:"Agents of S.H.I.E.L.D.",s:"Season 5",th:"Marvel",d:"Dec 1, 2017",ds:"2017-12-01"},
+  {k:"jessica jones|season 2",t:"Jessica Jones",s:"Season 2",th:"Marvel",d:"Mar 8, 2018",ds:"2018-03-08"},
+  {k:"luke cage|season 2",t:"Luke Cage",s:"Season 2",th:"Marvel",d:"Jun 22, 2018",ds:"2018-06-22"},
+  {k:"iron fist|season 2",t:"Iron Fist",s:"Season 2",th:"Marvel",d:"Sep 7, 2018",ds:"2018-09-07"},
+  {k:"daredevil (netflix)|season 3",t:"Daredevil (Netflix)",s:"Season 3",th:"Marvel",d:"Oct 19, 2018",ds:"2018-10-19"},
+  {k:"the punisher (netflix)|season 2",t:"The Punisher (Netflix)",s:"Season 2",th:"Marvel",d:"Jan 18, 2019",ds:"2019-01-18"},
+  {k:"jessica jones|season 3",t:"Jessica Jones",s:"Season 3",th:"Marvel",d:"Jun 14, 2019",ds:"2019-06-14"},
+  {k:"agents of s.h.i.e.l.d.|season 6",t:"Agents of S.H.I.E.L.D.",s:"Season 6",th:"Marvel",d:"May 10, 2019",ds:"2019-05-10"},
+  {k:"agents of s.h.i.e.l.d.|season 7",t:"Agents of S.H.I.E.L.D.",s:"Season 7",th:"Marvel",d:"May 27, 2020",ds:"2020-05-27"},
+  {k:"star wars: clone wars (2003)|volume 1",t:"Star Wars: Clone Wars (2003)",s:"Volume 1",th:"Star Wars",d:"Nov 7, 2003",ds:"2003-11-07",p:true},
+  {k:"star wars: clone wars (2003)|volume 2",t:"Star Wars: Clone Wars (2003)",s:"Volume 2",th:"Star Wars",d:"Mar 21, 2005",ds:"2005-03-21",p:true},
+  {k:"caravan of courage: an ewok adventure|film",t:"Caravan of Courage: An Ewok Adventure",s:"Film",th:"Star Wars",d:"Nov 25, 1984",ds:"1984-11-25",p:true},
+  {k:"ewoks: the battle for endor|film",t:"Ewoks: The Battle for Endor",s:"Film",th:"Star Wars",d:"Nov 24, 1985",ds:"1985-11-24",p:true},
+  {k:"star wars: droids|season 1",t:"Star Wars: Droids",s:"Season 1",th:"Star Wars",d:"Sep 7, 1985",ds:"1985-09-07",p:true},
+  {k:"star wars: ewoks|season 1",t:"Star Wars: Ewoks",s:"Season 1",th:"Star Wars",d:"Sep 7, 1985",ds:"1985-09-07",p:true},
+  {k:"star wars: ewoks|season 2",t:"Star Wars: Ewoks",s:"Season 2",th:"Star Wars",d:"Sep 13, 1986",ds:"1986-09-13",p:true},
+  {k:"marvel's inhumans|season 1",t:"Marvel's Inhumans",s:"Season 1",th:"Marvel",d:"Sep 29, 2017",ds:"2017-09-29",p:true},
+  {k:"marvel's runaways|season 1",t:"Marvel's Runaways",s:"Season 1",th:"Marvel",d:"Nov 21, 2017",ds:"2017-11-21",p:true},
+  {k:"marvel's runaways|season 2",t:"Marvel's Runaways",s:"Season 2",th:"Marvel",d:"Dec 21, 2018",ds:"2018-12-21",p:true},
+  {k:"marvel's cloak & dagger|season 1",t:"Marvel's Cloak & Dagger",s:"Season 1",th:"Marvel",d:"Jun 7, 2018",ds:"2018-06-07",p:true},
+  {k:"marvel's cloak & dagger|season 2",t:"Marvel's Cloak & Dagger",s:"Season 2",th:"Marvel",d:"Apr 4, 2019",ds:"2019-04-04",p:true},
+  {k:"marvel's runaways|season 3",t:"Marvel's Runaways",s:"Season 3",th:"Marvel",d:"Dec 13, 2019",ds:"2019-12-13",p:true},
+  {k:"helstrom|season 1",t:"Helstrom",s:"Season 1",th:"Marvel",d:"Oct 16, 2020",ds:"2020-10-16",p:true},
+  {k:"high school musical: the musical: the series|season 1",t:"High School Musical: The Musical: The Series",s:"Season 1",th:"Musical",d:"Nov 12, 2019",ds:"2019-11-12",p:true},
+  {k:"diary of a future president|season 1",t:"Diary of a Future President",s:"Season 1",th:"Drama",d:"Jan 17, 2020",ds:"2020-01-17",p:true},
+  {k:"muppets now|season 1",t:"Muppets Now",s:"Season 1",th:"Comedy",d:"Jul 31, 2020",ds:"2020-07-31",p:true},
+  {k:"the right stuff|season 1",t:"The Right Stuff",s:"Season 1",th:"Drama",d:"Oct 9, 2020",ds:"2020-10-09",p:true},
+  {k:"high school musical: the musical: the series|season 2",t:"High School Musical: The Musical: The Series",s:"Season 2",th:"Musical",d:"May 14, 2021",ds:"2021-05-14",p:true},
+  {k:"the mighty ducks: game changers|season 1",t:"The Mighty Ducks: Game Changers",s:"Season 1",th:"Family",d:"Mar 26, 2021",ds:"2021-03-26",p:true},
+  {k:"big shot|season 1",t:"Big Shot",s:"Season 1",th:"Drama",d:"Apr 16, 2021",ds:"2021-04-16",p:true},
+  {k:"monsters at work|season 1",t:"Monsters at Work",s:"Season 1",th:"Animation",d:"Jul 2, 2021",ds:"2021-07-02",p:true},
+  {k:"turner & hooch|season 1",t:"Turner & Hooch",s:"Season 1",th:"Comedy",d:"Jul 21, 2021",ds:"2021-07-21",p:true},
+  {k:"the mysterious benedict society|season 1",t:"The Mysterious Benedict Society",s:"Season 1",th:"Family",d:"Jun 25, 2021",ds:"2021-06-25",p:true},
+  {k:"doogie kamealoha, m.d.|season 1",t:"Doogie Kameāloha, M.D.",s:"Season 1",th:"Drama",d:"Sep 8, 2021",ds:"2021-09-08",p:true},
+  {k:"just beyond|season 1",t:"Just Beyond",s:"Season 1",th:"Horror",d:"Oct 13, 2021",ds:"2021-10-13",p:true},
+  {k:"diary of a future president|season 2",t:"Diary of a Future President",s:"Season 2",th:"Drama",d:"Aug 18, 2021",ds:"2021-08-18",p:true},
+  {k:"the proud family: louder and prouder|season 1",t:"The Proud Family: Louder and Prouder",s:"Season 1",th:"Animation",d:"Feb 23, 2022",ds:"2022-02-23",p:true},
+  {k:"the bear|season 1",t:"The Bear",s:"Season 1",th:"Drama",d:"Jun 23, 2022",ds:"2022-06-23",p:true},
+  {k:"the mighty ducks: game changers|season 2",t:"The Mighty Ducks: Game Changers",s:"Season 2",th:"Family",d:"Sep 28, 2022",ds:"2022-09-28",p:true},
+  {k:"big shot|season 2",t:"Big Shot",s:"Season 2",th:"Drama",d:"Oct 12, 2022",ds:"2022-10-12",p:true},
+  {k:"the mysterious benedict society|season 2",t:"The Mysterious Benedict Society",s:"Season 2",th:"Family",d:"Oct 26, 2022",ds:"2022-10-26",p:true},
+  {k:"national treasure: edge of history|season 1",t:"National Treasure: Edge of History",s:"Season 1",th:"Action",d:"Dec 14, 2022",ds:"2022-12-14",p:true},
+  {k:"willow|season 1",t:"Willow",s:"Season 1",th:"Fantasy",d:"Nov 30, 2022",ds:"2022-11-30",p:true},
+  {k:"limitless with chris hemsworth|season 1",t:"Limitless with Chris Hemsworth",s:"Season 1",th:"Documentary",d:"Nov 16, 2022",ds:"2022-11-16",p:true},
+  {k:"doogie kamealoha, m.d.|season 2",t:"Doogie Kameāloha, M.D.",s:"Season 2",th:"Drama",d:"Mar 31, 2023",ds:"2023-03-31",p:true},
+  {k:"high school musical: the musical: the series|season 3",t:"High School Musical: The Musical: The Series",s:"Season 3",th:"Musical",d:"Aug 10, 2022",ds:"2022-08-10",p:true},
+  {k:"the proud family: louder and prouder|season 2",t:"The Proud Family: Louder and Prouder",s:"Season 2",th:"Animation",d:"Sep 28, 2023",ds:"2023-09-28",p:true},
+  {k:"high school musical: the musical: the series|season 4",t:"High School Musical: The Musical: The Series",s:"Season 4",th:"Musical",d:"Aug 9, 2023",ds:"2023-08-09",p:true},
+  {k:"american born chinese|season 1",t:"American Born Chinese",s:"Season 1",th:"Fantasy",d:"May 24, 2023",ds:"2023-05-24",p:true},
+  {k:"culprits|season 1",t:"Culprits",s:"Season 1",th:"Action",d:"Nov 8, 2023",ds:"2023-11-08",p:true},
+  {k:"percy jackson and the olympians|season 1",t:"Percy Jackson and the Olympians",s:"Season 1",th:"Fantasy",d:"Dec 19, 2023",ds:"2023-12-19",p:true},
+  {k:"shogun|season 1",t:"Shōgun",s:"Season 1",th:"Drama",d:"Feb 27, 2024",ds:"2024-02-27",p:true},
+  {k:"renegade nell|season 1",t:"Renegade Nell",s:"Season 1",th:"Fantasy",d:"Mar 29, 2024",ds:"2024-03-29",p:true},
+  {k:"monsters at work|season 2",t:"Monsters at Work",s:"Season 2",th:"Animation",d:"Apr 3, 2024",ds:"2024-04-03",p:true},
+  {k:"doctor who|season 1",t:"Doctor Who",s:"Season 1",th:"Sci-Fi",d:"May 11, 2024",ds:"2024-05-11",p:true},
+  {k:"doctor odyssey|season 1",t:"Doctor Odyssey",s:"Season 1",th:"Drama",d:"Sep 26, 2024",ds:"2024-09-26",p:true},
+  {k:"say nothing|season 1",t:"Say Nothing",s:"Season 1",th:"Drama",d:"Nov 14, 2024",ds:"2024-11-14",p:true},
+  {k:"interior chinatown|season 1",t:"Interior Chinatown",s:"Season 1",th:"Drama",d:"Nov 19, 2024",ds:"2024-11-19",p:true},
+  {k:"win or lose|season 1",t:"Win or Lose",s:"Season 1",th:"Animation",d:"Feb 19, 2025",ds:"2025-02-19",p:true},
+  {k:"doctor who|season 2",t:"Doctor Who",s:"Season 2",th:"Sci-Fi",d:"Apr 12, 2025",ds:"2025-04-12",p:true},
+  {k:"alien: earth|season 1",t:"Alien: Earth",s:"Season 1",th:"Sci-Fi",d:"Aug 13, 2025",ds:"2025-08-13",p:true},
+  {k:"percy jackson and the olympians|season 2",t:"Percy Jackson and the Olympians",s:"Season 2",th:"Fantasy",d:"Jan 7, 2026",ds:"2026-01-07",p:true},
+  {k:"the testaments|season 1",t:"The Testaments",s:"Season 1",th:"Drama",d:"Apr 8, 2026",ds:"2026-04-08",p:true},
+  {k:"percy jackson and the olympians|season 3",t:"Percy Jackson and the Olympians",s:"Season 3",th:"Fantasy",d:"Late 2026",ds:"2026-11-01",p:true},
+  {k:"alien: earth|season 2",t:"Alien: Earth",s:"Season 2",th:"Sci-Fi",d:"TBA",ds:"2027-06-01",p:true},
+    ]
+  },
+  {
+    id: '90day',
+    label: '90 Day',
+    icon: '💍',
+    themes: ['Main Show','Happily Ever After','Before the 90 Days','The Other Way','Spinoff','Tell All','Documentary'],
+    years: ['2014','2015','2016','2017','2018','2019','2020','2021','2022','2023','2024','2025','2026'],
+    defaults: [
+  {k:'90 day fiancé|season 1',t:'90 Day Fiancé',s:'Season 1',th:'Main Show',d:'Jan 12, 2014',ds:'2014-01-12'},
+  {k:'90 day fiancé|season 2',t:'90 Day Fiancé',s:'Season 2',th:'Main Show',d:'Oct 19, 2014',ds:'2014-10-19'},
+  {k:'90 day fiancé|season 3',t:'90 Day Fiancé',s:'Season 3',th:'Main Show',d:'Oct 11, 2015',ds:'2015-10-11'},
+  {k:'90 day fiancé|season 4',t:'90 Day Fiancé',s:'Season 4',th:'Main Show',d:'Sep 11, 2016',ds:'2016-09-11'},
+  {k:'90 day fiancé|season 5',t:'90 Day Fiancé',s:'Season 5',th:'Main Show',d:'Oct 8, 2017',ds:'2017-10-08'},
+  {k:'90 day fiancé|season 6',t:'90 Day Fiancé',s:'Season 6',th:'Main Show',d:'Oct 21, 2018',ds:'2018-10-21'},
+  {k:'90 day fiancé|season 7',t:'90 Day Fiancé',s:'Season 7',th:'Main Show',d:'Nov 3, 2019',ds:'2019-11-03'},
+  {k:'90 day fiancé|season 8',t:'90 Day Fiancé',s:'Season 8',th:'Main Show',d:'Dec 6, 2020',ds:'2020-12-06'},
+  {k:'90 day fiancé|season 9',t:'90 Day Fiancé',s:'Season 9',th:'Main Show',d:'Apr 17, 2022',ds:'2022-04-17'},
+  {k:'90 day fiancé|season 10',t:'90 Day Fiancé',s:'Season 10',th:'Main Show',d:'Oct 8, 2023',ds:'2023-10-08'},
+  {k:'90 day fiancé|season 11',t:'90 Day Fiancé',s:'Season 11',th:'Main Show',d:'Feb 16, 2025',ds:'2025-02-16'},
+  {k:'90 day fiancé|season 12',t:'90 Day Fiancé',s:'Season 12',th:'Main Show',d:'May 10, 2026',ds:'2026-05-10'},
+  {k:'90 day fiancé: happily ever after?|season 1',t:'90 Day Fiancé: Happily Ever After?',s:'Season 1',th:'Happily Ever After',d:'Sep 11, 2016',ds:'2016-09-11'},
+  {k:'90 day fiancé: happily ever after?|season 2',t:'90 Day Fiancé: Happily Ever After?',s:'Season 2',th:'Happily Ever After',d:'Jun 25, 2017',ds:'2017-06-25'},
+  {k:'90 day fiancé: happily ever after?|season 3',t:'90 Day Fiancé: Happily Ever After?',s:'Season 3',th:'Happily Ever After',d:'May 20, 2018',ds:'2018-05-20'},
+  {k:'90 day fiancé: happily ever after?|season 4',t:'90 Day Fiancé: Happily Ever After?',s:'Season 4',th:'Happily Ever After',d:'Apr 28, 2019',ds:'2019-04-28'},
+  {k:'90 day fiancé: happily ever after?|season 5',t:'90 Day Fiancé: Happily Ever After?',s:'Season 5',th:'Happily Ever After',d:'Jun 14, 2020',ds:'2020-06-14'},
+  {k:'90 day fiancé: happily ever after?|season 6',t:'90 Day Fiancé: Happily Ever After?',s:'Season 6',th:'Happily Ever After',d:'Apr 25, 2021',ds:'2021-04-25'},
+  {k:'90 day fiancé: happily ever after?|season 7',t:'90 Day Fiancé: Happily Ever After?',s:'Season 7',th:'Happily Ever After',d:'Aug 28, 2022',ds:'2022-08-28'},
+  {k:'90 day fiancé: happily ever after?|season 8',t:'90 Day Fiancé: Happily Ever After?',s:'Season 8',th:'Happily Ever After',d:'Mar 17, 2024',ds:'2024-03-17'},
+  {k:'90 day fiancé: happily ever after?|season 9',t:'90 Day Fiancé: Happily Ever After?',s:'Season 9',th:'Happily Ever After',d:'Jul 6, 2025',ds:'2025-07-06'},
+  {k:'90 day fiancé: happily ever after?|season 10',t:'90 Day Fiancé: Happily Ever After?',s:'Season 10',th:'Happily Ever After',d:'TBA 2026',ds:'2026-06-01'},
+  {k:'90 day fiancé: before the 90 days|season 1',t:'90 Day Fiancé: Before the 90 Days',s:'Season 1',th:'Before the 90 Days',d:'Aug 6, 2017',ds:'2017-08-06'},
+  {k:'90 day fiancé: before the 90 days|season 2',t:'90 Day Fiancé: Before the 90 Days',s:'Season 2',th:'Before the 90 Days',d:'Aug 5, 2018',ds:'2018-08-05'},
+  {k:'90 day fiancé: before the 90 days|season 3',t:'90 Day Fiancé: Before the 90 Days',s:'Season 3',th:'Before the 90 Days',d:'Aug 4, 2019',ds:'2019-08-04'},
+  {k:'90 day fiancé: before the 90 days|season 4',t:'90 Day Fiancé: Before the 90 Days',s:'Season 4',th:'Before the 90 Days',d:'Feb 23, 2020',ds:'2020-02-23'},
+  {k:'90 day fiancé: before the 90 days|season 5',t:'90 Day Fiancé: Before the 90 Days',s:'Season 5',th:'Before the 90 Days',d:'Dec 12, 2021',ds:'2021-12-12'},
+  {k:'90 day fiancé: before the 90 days|season 6',t:'90 Day Fiancé: Before the 90 Days',s:'Season 6',th:'Before the 90 Days',d:'Jun 4, 2023',ds:'2023-06-04'},
+  {k:'90 day fiancé: before the 90 days|season 7',t:'90 Day Fiancé: Before the 90 Days',s:'Season 7',th:'Before the 90 Days',d:'Sep 1, 2024',ds:'2024-09-01'},
+  {k:'90 day fiancé: before the 90 days|season 8',t:'90 Day Fiancé: Before the 90 Days',s:'Season 8',th:'Before the 90 Days',d:'Dec 7, 2025',ds:'2025-12-07'},
+  {k:'90 day fiancé: the other way|season 1',t:'90 Day Fiancé: The Other Way',s:'Season 1',th:'The Other Way',d:'Jun 3, 2019',ds:'2019-06-03'},
+  {k:'90 day fiancé: the other way|season 2',t:'90 Day Fiancé: The Other Way',s:'Season 2',th:'The Other Way',d:'Jun 8, 2020',ds:'2020-06-08'},
+  {k:'90 day fiancé: the other way|season 3',t:'90 Day Fiancé: The Other Way',s:'Season 3',th:'The Other Way',d:'Aug 29, 2021',ds:'2021-08-29'},
+  {k:'90 day fiancé: the other way|season 4',t:'90 Day Fiancé: The Other Way',s:'Season 4',th:'The Other Way',d:'Jan 29, 2023',ds:'2023-01-29'},
+  {k:'90 day fiancé: the other way|season 5',t:'90 Day Fiancé: The Other Way',s:'Season 5',th:'The Other Way',d:'Jul 10, 2023',ds:'2023-07-10'},
+  {k:'90 day fiancé: the other way|season 6',t:'90 Day Fiancé: The Other Way',s:'Season 6',th:'The Other Way',d:'Jul 1, 2024',ds:'2024-07-01'},
+  {k:'90 day fiancé: the other way|season 7',t:'90 Day Fiancé: The Other Way',s:'Season 7',th:'The Other Way',d:'Sep 8, 2025',ds:'2025-09-08'},
+  {k:'90 day fiancé: the other way|season 8',t:'90 Day Fiancé: The Other Way',s:'Season 8',th:'The Other Way',d:'TBA 2026',ds:'2026-06-01'},
+  {k:'90 day fiancé: what now?|season 1',t:'90 Day Fiancé: What Now?',s:'Season 1',th:'Spinoff',d:'Jul 30, 2017',ds:'2017-07-30',p:true},
+  {k:'90 day fiancé: what now?|season 2',t:'90 Day Fiancé: What Now?',s:'Season 2',th:'Spinoff',d:'Jul 15, 2018',ds:'2018-07-15',p:true},
+  {k:'90 day fiancé: what now?|season 3',t:'90 Day Fiancé: What Now?',s:'Season 3',th:'Spinoff',d:'Apr 28, 2019',ds:'2019-04-28',p:true},
+  {k:'90 day fiancé: what now?|season 4',t:'90 Day Fiancé: What Now?',s:'Season 4',th:'Spinoff',d:'Apr 20, 2020',ds:'2020-04-20',p:true},
+  {k:'90 day fiancé: self-quarantined|season 1',t:'90 Day Fiancé: Self-Quarantined',s:'Season 1',th:'Spinoff',d:'Apr 20, 2020',ds:'2020-04-20',p:true},
+  {k:'the family chantel|season 1',t:'The Family Chantel',s:'Season 1',th:'Spinoff',d:'Jul 22, 2019',ds:'2019-07-22',p:true},
+  {k:'the family chantel|season 2',t:'The Family Chantel',s:'Season 2',th:'Spinoff',d:'Oct 12, 2020',ds:'2020-10-12',p:true},
+  {k:'the family chantel|season 3',t:'The Family Chantel',s:'Season 3',th:'Spinoff',d:'Oct 11, 2021',ds:'2021-10-11',p:true},
+  {k:'the family chantel|season 4',t:'The Family Chantel',s:'Season 4',th:'Spinoff',d:'Jun 6, 2022',ds:'2022-06-06',p:true},
+  {k:'darcey & stacey|season 1',t:'Darcey & Stacey',s:'Season 1',th:'Spinoff',d:'Aug 16, 2020',ds:'2020-08-16',p:true},
+  {k:'darcey & stacey|season 2',t:'Darcey & Stacey',s:'Season 2',th:'Spinoff',d:'Jul 19, 2021',ds:'2021-07-19',p:true},
+  {k:'darcey & stacey|season 3',t:'Darcey & Stacey',s:'Season 3',th:'Spinoff',d:'Jan 10, 2022',ds:'2022-01-10',p:true},
+  {k:'darcey & stacey|season 4',t:'Darcey & Stacey',s:'Season 4',th:'Spinoff',d:'Jan 23, 2023',ds:'2023-01-23',p:true},
+  {k:'90 day fiancé: love in paradise|season 1',t:'90 Day Fiancé: Love in Paradise',s:'Season 1',th:'Spinoff',d:'Jul 18, 2021',ds:'2021-07-18',p:true},
+  {k:'90 day fiancé: love in paradise|season 2',t:'90 Day Fiancé: Love in Paradise',s:'Season 2',th:'Spinoff',d:'Jun 10, 2022',ds:'2022-06-10',p:true},
+  {k:'90 day fiancé: love in paradise|season 3',t:'90 Day Fiancé: Love in Paradise',s:'Season 3',th:'Spinoff',d:'Jun 16, 2023',ds:'2023-06-16',p:true},
+  {k:'90 day fiancé: love in paradise|season 4',t:'90 Day Fiancé: Love in Paradise',s:'Season 4',th:'Spinoff',d:'Apr 15, 2024',ds:'2024-04-15',p:true},
+  {k:'90 day: the single life|season 1',t:'90 Day: The Single Life',s:'Season 1',th:'Spinoff',d:'Aug 9, 2021',ds:'2021-08-09',p:true},
+  {k:'90 day: the single life|season 2',t:'90 Day: The Single Life',s:'Season 2',th:'Spinoff',d:'Nov 12, 2021',ds:'2021-11-12',p:true},
+  {k:'90 day: the single life|season 3',t:'90 Day: The Single Life',s:'Season 3',th:'Spinoff',d:'Sep 12, 2022',ds:'2022-09-12',p:true},
+  {k:'90 day: the single life|season 4',t:'90 Day: The Single Life',s:'Season 4',th:'Spinoff',d:'Jan 1, 2024',ds:'2024-01-01',p:true},
+  {k:'90 day: the single life|season 5',t:'90 Day: The Single Life',s:'Season 5',th:'Spinoff',d:'Feb 9, 2026',ds:'2026-02-09',p:true},
+  {k:'90 day: the last resort|season 1',t:'90 Day: The Last Resort',s:'Season 1',th:'Spinoff',d:'Aug 28, 2023',ds:'2023-08-28',p:true},
+  {k:'90 day: the last resort|season 2',t:'90 Day: The Last Resort',s:'Season 2',th:'Spinoff',d:'Dec 2, 2024',ds:'2024-12-02',p:true},
+  {k:'90 day: the last resort|season 3',t:'90 Day: The Last Resort',s:'Season 3',th:'Spinoff',d:'TBA 2026',ds:'2026-06-01',p:true},
+  {k:'90 day: hunt for love|season 1',t:'90 Day: Hunt for Love',s:'Season 1',th:'Spinoff',d:'May 26, 2025',ds:'2025-05-26',p:true},
+  {k:'90 day: hunt for love|season 2',t:'90 Day: Hunt for Love',s:'Season 2',th:'Spinoff',d:'TBA 2026',ds:'2026-06-01',p:true},
+  {k:'90 day fiancé uk|season 1',t:'90 Day Fiancé UK',s:'Season 1',th:'Spinoff',d:'Jul 24, 2022',ds:'2022-07-24',p:true},
+  {k:'90 day fiancé uk|season 2',t:'90 Day Fiancé UK',s:'Season 2',th:'Spinoff',d:'Jul 16, 2023',ds:'2023-07-16',p:true},
+  {k:'90 day fiancé uk|season 3',t:'90 Day Fiancé UK',s:'Season 3',th:'Spinoff',d:'May 27, 2024',ds:'2024-05-27',p:true},
+  {k:'90 day fiancé uk|season 4',t:'90 Day Fiancé UK',s:'Season 4',th:'Spinoff',d:'Jul 13, 2025',ds:'2025-07-13',p:true},
+  {k:'90 day fiancé: bares all|season 1',t:'90 Day Fiancé: Bares All',s:'Season 1',th:'Documentary',d:'Jan 1, 2021',ds:'2021-01-01',p:true},
+  {k:'90 day fiancé: bares all|season 2',t:'90 Day Fiancé: Bares All',s:'Season 2',th:'Documentary',d:'Sep 12, 2021',ds:'2021-09-12',p:true},
+  {k:'90 day fiancé: foody call|season 1',t:'90 Day Fiancé: Foody Call',s:'Season 1',th:'Documentary',d:'May 29, 2021',ds:'2021-05-29',p:true},
+    ]
+  },
+  {
+    id: 'sheridan',
+    label: 'Sheridan',
+    icon: '🤠',
+    themes: ['Yellowstone','1883','1923','6666','1944','Dutton Ranch','Marshals','The Madison','Mayor of Kingstown','Tulsa King','Special Ops Lioness','Lawmen Bass Reeves','Landman','Frisco King','Film'],
+    years: ['2015','2016','2017','2018','2019','2020','2021','2022','2023','2024','2025','2026','2027'],
+    defaults: [
+  {k:"sicario|film",t:"Sicario",s:"Film",th:"Film",d:"Sep 18, 2015",ds:"2015-09-18"},
+  {k:"hell or high water|film",t:"Hell or High Water",s:"Film",th:"Film",d:"Aug 12, 2016",ds:"2016-08-12"},
+  {k:"wind river|film",t:"Wind River",s:"Film",th:"Film",d:"Aug 4, 2017",ds:"2017-08-04"},
+  {k:"yellowstone|season 1",t:"Yellowstone",s:"Season 1",th:"Yellowstone",d:"Jun 20, 2018",ds:"2018-06-20"},
+  {k:"sicario: day of the soldado|film",t:"Sicario: Day of the Soldado",s:"Film",th:"Film",d:"Jun 29, 2018",ds:"2018-06-29"},
+  {k:"yellowstone|season 2",t:"Yellowstone",s:"Season 2",th:"Yellowstone",d:"Jun 19, 2019",ds:"2019-06-19"},
+  {k:"yellowstone|season 3",t:"Yellowstone",s:"Season 3",th:"Yellowstone",d:"Jun 21, 2020",ds:"2020-06-21"},
+  {k:"without remorse|film",t:"Without Remorse",s:"Film",th:"Film",d:"Apr 30, 2021",ds:"2021-04-30"},
+  {k:"those who wish me dead|film",t:"Those Who Wish Me Dead",s:"Film",th:"Film",d:"May 14, 2021",ds:"2021-05-14"},
+  {k:"yellowstone|season 4",t:"Yellowstone",s:"Season 4",th:"Yellowstone",d:"Nov 7, 2021",ds:"2021-11-07"},
+  {k:"mayor of kingstown|season 1",t:"Mayor of Kingstown",s:"Season 1",th:"Mayor of Kingstown",d:"Nov 14, 2021",ds:"2021-11-14"},
+  {k:"1883|season 1",t:"1883",s:"Season 1",th:"1883",d:"Dec 19, 2021",ds:"2021-12-19"},
+  {k:"yellowstone|season 5 (part 1)",t:"Yellowstone",s:"Season 5 (Part 1)",th:"Yellowstone",d:"Nov 13, 2022",ds:"2022-11-13"},
+  {k:"tulsa king|season 1",t:"Tulsa King",s:"Season 1",th:"Tulsa King",d:"Nov 13, 2022",ds:"2022-11-13"},
+  {k:"1923|season 1",t:"1923",s:"Season 1",th:"1923",d:"Dec 18, 2022",ds:"2022-12-18"},
+  {k:"mayor of kingstown|season 2",t:"Mayor of Kingstown",s:"Season 2",th:"Mayor of Kingstown",d:"Jan 15, 2023",ds:"2023-01-15"},
+  {k:"special ops: lioness|season 1",t:"Special Ops: Lioness",s:"Season 1",th:"Special Ops Lioness",d:"Jul 23, 2023",ds:"2023-07-23"},
+  {k:"lawmen: bass reeves|season 1",t:"Lawmen: Bass Reeves",s:"Season 1",th:"Lawmen Bass Reeves",d:"Nov 5, 2023",ds:"2023-11-05"},
+  {k:"mayor of kingstown|season 3",t:"Mayor of Kingstown",s:"Season 3",th:"Mayor of Kingstown",d:"Jun 2, 2024",ds:"2024-06-02"},
+  {k:"tulsa king|season 2",t:"Tulsa King",s:"Season 2",th:"Tulsa King",d:"Sep 15, 2024",ds:"2024-09-15"},
+  {k:"special ops: lioness|season 2",t:"Special Ops: Lioness",s:"Season 2",th:"Special Ops Lioness",d:"Oct 27, 2024",ds:"2024-10-27"},
+  {k:"yellowstone|season 5 (part 2)",t:"Yellowstone",s:"Season 5 (Part 2)",th:"Yellowstone",d:"Nov 10, 2024",ds:"2024-11-10"},
+  {k:"landman|season 1",t:"Landman",s:"Season 1",th:"Landman",d:"Nov 17, 2024",ds:"2024-11-17"},
+  {k:"1923|season 2",t:"1923",s:"Season 2",th:"1923",d:"Feb 23, 2025",ds:"2025-02-23"},
+  {k:"tulsa king|season 3",t:"Tulsa King",s:"Season 3",th:"Tulsa King",d:"Sep 21, 2025",ds:"2025-09-21"},
+  {k:"mayor of kingstown|season 4",t:"Mayor of Kingstown",s:"Season 4",th:"Mayor of Kingstown",d:"Oct 26, 2025",ds:"2025-10-26"},
+  {k:"landman|season 2",t:"Landman",s:"Season 2",th:"Landman",d:"Dec 2025",ds:"2025-12-01"},
+  {k:"marshals|season 1",t:"Marshals",s:"Season 1",th:"Marshals",d:"Mar 1, 2026",ds:"2026-03-01"},
+  {k:"the madison|season 1",t:"The Madison",s:"Season 1",th:"The Madison",d:"Mar 14, 2026",ds:"2026-03-14"},
+  {k:"dutton ranch|season 1",t:"Dutton Ranch",s:"Season 1",th:"Dutton Ranch",d:"May 15, 2026",ds:"2026-05-15"},
+  {k:"special ops: lioness|season 3",t:"Special Ops: Lioness",s:"Season 3",th:"Special Ops Lioness",d:"Aug 2, 2026",ds:"2026-08-02"},
+  {k:"tulsa king|season 4",t:"Tulsa King",s:"Season 4",th:"Tulsa King",d:"Late 2026",ds:"2026-09-01"},
+  {k:"mayor of kingstown|season 5",t:"Mayor of Kingstown",s:"Season 5 (Final)",th:"Mayor of Kingstown",d:"Late 2026",ds:"2026-11-01"},
+  {k:"landman|season 3",t:"Landman",s:"Season 3",th:"Landman",d:"Early 2027",ds:"2027-01-01",p:true},
+  {k:"dutton ranch|season 2",t:"Dutton Ranch",s:"Season 2",th:"Dutton Ranch",d:"TBA (announced)",ds:"2027-05-01",p:true},
+  {k:"marshals|season 2",t:"Marshals",s:"Season 2",th:"Marshals",d:"TBA (announced)",ds:"2027-03-01",p:true},
+  {k:"f.a.s.t.|film",t:"F.A.S.T.",s:"Film",th:"Film",d:"Apr 23, 2027",ds:"2027-04-23"},
+  {k:"the madison|season 2",t:"The Madison",s:"Season 2",th:"The Madison",d:"TBA (announced)",ds:"2027-03-01",p:true},
+  {k:"6666|season 1",t:"6666",s:"Season 1",th:"6666",d:"TBA (in development)",ds:"2027-06-01",p:true},
+  {k:"1944|season 1",t:"1944",s:"Season 1",th:"1944",d:"TBA (in development)",ds:"2027-06-01",p:true},
+  {k:"frisco king|season 1",t:"Frisco King",s:"Season 1",th:"Frisco King",d:"TBA (expected 2027)",ds:"2027-06-01",p:true},
+    ]
+  }
+];
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let activeTabId = COLLECTIONS[0].id;
+let tabData = {}; // { [collectionId]: { rows: [], loaded: false, newKeys: [] } }
+let addOpen = false;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function badgeClass(theme) {
+  return 'b-' + theme.replace(/\s/g,'').replace(/[^a-zA-Z0-9]/g,'');
+}
+function esc(t) {
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function parseDate(d) {
+  const mo = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  const m = d.match(/(\w+)\s+(\d+),?\s+(\d{4})/);
+  if (m) return `${m[3]}-${mo[m[1]]||'01'}-${m[2].padStart(2,'0')}`;
+  const y = d.match(/(\d{4})/);
+  return y ? `${y[1]}-06-01` : '2025-01-01';
+}
+function showSaved() {
+  const el = document.getElementById('saveStatus');
+  el.classList.add('visible');
+  setTimeout(() => el.classList.remove('visible'), 2000);
+}
+function showError(msg) {
+  document.getElementById('errorBanner').innerHTML = msg
+    ? `<div class="error-banner">⚠️ ${esc(msg)}</div>` : '';
+}
+
+// ─── Tab bar ──────────────────────────────────────────────────────────────────
+function buildTabs() {
+  const bar = document.getElementById('tabBar');
+  bar.innerHTML = COLLECTIONS.map(c =>
+    `<div class="tab${c.id===activeTabId?' active':''}" onclick="switchTab('${c.id}')">
+      <span class="tab-icon">${c.icon}</span>${esc(c.label)}
+    </div>`
+  ).join('');
+}
+
+function switchTab(id) {
+  activeTabId = id;
+  addOpen = false;
+  document.getElementById('addForm').style.display = 'none';
+  document.getElementById('banner').innerHTML = '';
+  buildTabs();
+  const td = tabData[id];
+  if (!td || !td.loaded) {
+    loadTab(id);
+  } else {
+    renderFilters();
+    renderTable();
+  }
+}
+
+// ─── Load tab data from Supabase ─────────────────────────────────────────────
+async function loadTab(collectionId) {
+  document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">Loading…</td></tr>`;
+  document.getElementById('statsRow').innerHTML = '';
+  document.getElementById('filtersRow').innerHTML = '';
+  showError('');
+
+  try {
+    const rows = await sbFetch('GET',
+      `${TABLE}?collection=eq.${encodeURIComponent(collectionId)}&order=date_sort.asc&select=*`,
+      null
+    );
+
+    const col = COLLECTIONS.find(c => c.id === collectionId);
+    const existingKeys = new Set(rows.map(r => r.item_key));
+    const toInsert = [];
+    const newKeys = [];
+
+    for (const d of col.defaults) {
+      if (!existingKeys.has(d.k)) {
+        toInsert.push({
+          collection: collectionId,
+          item_key: d.k,
+          title: d.t,
+          season: d.s,
+          theme: d.th,
+          display_date: d.d,
+          date_sort: d.ds,
+          watched: false,
+          status: d.p ? 'pending' : 'confirmed'
+        });
+        newKeys.push(d.k);
+      } else {
+        // refresh TBA dates
+        const existing = rows.find(r => r.item_key === d.k);
+        if (existing && /TBA/i.test(existing.display_date) && !/TBA/i.test(d.d)) {
+          await sbFetch('PATCH',
+            `${TABLE}?collection=eq.${encodeURIComponent(collectionId)}&item_key=eq.${encodeURIComponent(d.k)}`,
+            { display_date: d.d, date_sort: d.ds }
+          );
+          existing.display_date = d.d;
+          existing.date_sort = d.ds;
+        }
+      }
+    }
+
+    if (toInsert.length > 0) {
+      const inserted = await sbFetch('POST', TABLE, toInsert);
+      if (inserted) rows.push(...inserted);
+    }
+
+    rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+
+    tabData[collectionId] = { rows, loaded: true, newKeys };
+
+    if (newKeys.length > 0) {
+      document.getElementById('banner').innerHTML =
+        `<div class="banner">✦ ${newKeys.length} new entr${newKeys.length===1?'y':'ies'} added.</div>`;
+    }
+
+    renderFilters();
+    renderTable();
+  } catch(e) {
+    showError(e.message);
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">Failed to load. Check console for details.</td></tr>`;
+    console.error(e);
+  }
+}
+
+// ─── Filters ──────────────────────────────────────────────────────────────────
+function renderFilters() {
+  const col = COLLECTIONS.find(c => c.id === activeTabId);
+  const themeOpts = col.themes.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  const yearOpts = col.years.map(y => `<option value="${y}">${y}</option>`).join('');
+
+  document.getElementById('filtersRow').innerHTML = `
+    <span class="filter-label">Filter:</span>
+    <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" oninput="renderTable()">
+    <select id="fTheme" onchange="renderTable()">
+      <option value="">All themes</option>${themeOpts}
+    </select>
+    <select id="fYear" onchange="renderTable()">
+      <option value="">All years</option>${yearOpts}
+    </select>
+    <select id="fWatch" onchange="renderTable()">
+      <option value="">All statuses</option>
+      <option value="unwatched">Not watched</option>
+      <option value="watched">Watched</option>
+    </select>
+    <select id="fStatus" onchange="renderTable()">
+      <option value="">Confirmed + Pending + Maybe</option>
+      <option value="confirmed">On list only</option>
+      <option value="pending">Pending only</option>
+      <option value="maybe">Maybe Later only</option>
+      <option value="skipped">Skipped</option>
+    </select>
+    <button class="btn" onclick="toggleAdd()" id="addToggleBtn">+ Add entry</button>
+  `;
+
+  // build add form
+  const themeSelectOpts = col.themes.map(t => `<option>${esc(t)}</option>`).join('');
+  document.getElementById('addFormGrid').innerHTML = `
+    <div><label>Title</label><input id="nTitle" type="text" placeholder="Show title"></div>
+    <div><label>Season</label><input id="nSeason" type="text" value="Season 1"></div>
+    <div><label>Theme</label><select id="nTheme">${themeSelectOpts}</select></div>
+    <div><label>Premiere date</label><input id="nDate" type="text" placeholder="e.g. Jan 12, 2014"></div>
+    <button class="btn btn-accent" onclick="addEntry()" style="margin-bottom:0">Add</button>
+  `;
+}
+
+// ─── Render table ─────────────────────────────────────────────────────────────
+function renderTable() {
+  const td = tabData[activeTabId];
+  if (!td) return;
+
+  const fSearch = document.getElementById('fSearch')?.value.trim().toLowerCase() || '';
+  const fTheme  = document.getElementById('fTheme')?.value  || '';
+  const fYear   = document.getElementById('fYear')?.value   || '';
+  const fWatch  = document.getElementById('fWatch')?.value  || '';
+  const fStatus = document.getElementById('fStatus')?.value || '';
+
+  let list = [...td.rows].sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+
+  if (fStatus === 'pending')        list = list.filter(r => r.status === 'pending');
+  else if (fStatus === 'skipped')   list = list.filter(r => r.status === 'skipped');
+  else if (fStatus === 'maybe')     list = list.filter(r => r.status === 'maybe');
+  else if (fStatus === 'confirmed') list = list.filter(r => r.status === 'confirmed');
+  else list = list.filter(r => r.status !== 'skipped');
+
+  if (fSearch) list = list.filter(r => r.title.toLowerCase().includes(fSearch));
+  if (fTheme) list = list.filter(r => r.theme === fTheme);
+  if (fYear)  list = list.filter(r => r.date_sort.startsWith(fYear));
+  if (fWatch === 'watched')   list = list.filter(r => r.watched);
+  if (fWatch === 'unwatched') list = list.filter(r => !r.watched);
+
+  const confirmed = list.filter(r => r.status === 'confirmed');
+  const watched   = confirmed.filter(r => r.watched).length;
+  const total     = confirmed.length;
+  const pct       = total > 0 ? Math.round(watched/total*100) : 0;
+  const pending   = list.filter(r => r.status === 'pending').length;
+  const maybe     = list.filter(r => r.status === 'maybe').length;
+
+  document.getElementById('statsRow').innerHTML = `
+    <div class="stat"><div class="stat-num">${total}</div><div class="stat-label">On List</div></div>
+    <div class="stat"><div class="stat-num">${watched}</div><div class="stat-label">Watched</div></div>
+    <div class="stat"><div class="stat-num">${total-watched}</div><div class="stat-label">To Watch</div></div>
+    <div class="stat">
+      <div class="stat-num">${pct}%</div><div class="stat-label">Complete</div>
+      <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+    </div>
+    ${pending>0?`<div class="stat"><div class="stat-num">${pending}</div><div class="stat-label">Pending</div></div>`:''}
+    ${maybe>0?`<div class="stat"><div class="stat-num">${maybe}</div><div class="stat-label">Maybe Later</div></div>`:''}
+  `;
+
+  if (list.length === 0) {
+    document.getElementById('tbody').innerHTML = '<tr class="empty-row"><td colspan="6">No entries match your filters.</td></tr>';
+    return;
+  }
+
+  let html = '', lastYear = '';
+  list.forEach(r => {
+    const yr = r.date_sort.substring(0,4);
+    if (yr !== lastYear) {
+      html += `<tr class="year-group"><td colspan="6">${yr}</td></tr>`;
+      lastYear = yr;
+    }
+    const isNew = td.newKeys.includes(r.item_key);
+    const bc = badgeClass(r.theme);
+    const isSkipped = r.status === 'skipped';
+    const isMaybe   = r.status === 'maybe';
+    const isPending  = r.status === 'pending';
+    const statusClass = `s-${r.status}`;
+    const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">
+      <option value="confirmed"${r.status==='confirmed'?' selected':''}>✓ On List</option>
+      <option value="pending"${r.status==='pending'?' selected':''}>⏳ Pending</option>
+      <option value="maybe"${r.status==='maybe'?' selected':''}>? Maybe Later</option>
+      <option value="skipped"${r.status==='skipped'?' selected':''}>✕ Skipped</option>
+    </select>`;
+    html += `<tr class="${isSkipped?'row-skipped':isMaybe?'row-maybe':''}">
+      <td>
+        <span class="show-title">${esc(r.title)}</span>
+        <span class="season-lbl"> · ${esc(r.season)}</span>
+        ${isNew?'<span class="new-tag">New</span>':''}
+      </td>
+      <td><span class="badge ${bc}">${esc(r.theme)}</span></td>
+      <td class="date-cell">${esc(r.display_date)}</td>
+      <td>${statusCell}</td>
+      <td>${!isSkipped
+        ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓ Watched':'Mark watched'}</button>`
+        : `<span class="confirmed-lbl">—</span>`
+      }</td>
+      <td><button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button></td>
+    </tr>`;
+  });
+  document.getElementById('tbody').innerHTML = html;
+}
+
+// ─── Actions ──────────────────────────────────────────────────────────────────
+async function toggleWatch(id) {
+  const td = tabData[activeTabId];
+  const row = td.rows.find(r => r.id === id);
+  if (!row) return;
+  const newVal = !row.watched;
+  row.watched = newVal;
+  renderTable();
+  try {
+    await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { watched: newVal });
+    showSaved();
+  } catch(e) {
+    row.watched = !newVal;
+    renderTable();
+    showError(e.message);
+  }
+}
+
+async function setStatus(id, status, selectEl) {
+  const td = tabData[activeTabId];
+  const row = td.rows.find(r => r.id === id);
+  if (!row) return;
+  const old = row.status;
+  row.status = status;
+  // update select styling immediately
+  if (selectEl) {
+    selectEl.className = `status-select s-${status}`;
+  }
+  // update row opacity immediately
+  const tr = selectEl?.closest('tr');
+  if (tr) {
+    tr.className = status==='skipped'?'row-skipped':status==='maybe'?'row-maybe':'';
+  }
+  try {
+    await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { status });
+    showSaved();
+    // full re-render to update watch button availability and stats
+    renderTable();
+  } catch(e) {
+    row.status = old;
+    renderTable();
+    showError(e.message);
+  }
+}
+
+async function delRow(id) {
+  if (!confirm('Remove this entry?')) return;
+  const td = tabData[activeTabId];
+  const idx = td.rows.findIndex(r => r.id === id);
+  if (idx === -1) return;
+  const [removed] = td.rows.splice(idx, 1);
+  renderTable();
+  try {
+    await sbFetch('DELETE', `${TABLE}?id=eq.${id}`, null);
+    showSaved();
+  } catch(e) {
+    td.rows.splice(idx, 0, removed);
+    renderTable();
+    showError(e.message);
+  }
+}
+
+function toggleAdd() {
+  addOpen = !addOpen;
+  document.getElementById('addForm').style.display = addOpen ? 'block' : 'none';
+  document.getElementById('addToggleBtn').textContent = addOpen ? '✕ Cancel' : '+ Add entry';
+}
+
+async function addEntry() {
+  const title  = document.getElementById('nTitle').value.trim();
+  const season = document.getElementById('nSeason').value.trim() || 'Season 1';
+  const theme  = document.getElementById('nTheme').value;
+  const date   = document.getElementById('nDate').value.trim();
+  if (!title || !date) { alert('Please fill in title and premiere date.'); return; }
+  const key = title.toLowerCase().trim() + '|' + season.toLowerCase().trim();
+  const ds  = parseDate(date);
+  const newRow = {
+    collection: activeTabId,
+    item_key: key,
+    title, season, theme,
+    display_date: date,
+    date_sort: ds,
+    watched: false,
+    status: 'confirmed'
+  };
+  try {
+    const inserted = await sbFetch('POST', TABLE, [newRow]);
+    if (inserted && inserted[0]) {
+      tabData[activeTabId].rows.push(inserted[0]);
+      tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    }
+    showSaved();
+    document.getElementById('nTitle').value = '';
+    document.getElementById('nDate').value = '';
+    document.getElementById('nSeason').value = 'Season 1';
+    toggleAdd();
+    renderTable();
+  } catch(e) {
+    showError(e.message);
+  }
+}
+
+// ─── Boot ────────────────────────────────────────────────────────────────────
+buildTabs();
+loadTab(activeTabId);
+</script>
+</body>
+</html>
