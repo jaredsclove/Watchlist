@@ -184,10 +184,56 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .add-form-grid input, .add-form-grid select { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 10px; color: var(--text); font-size: 13px; }
 .add-form-grid input:focus, .add-form-grid select:focus { outline: none; border-color: var(--accent); }
 
+/* ── Card list (mobile) ── */
+.card-list { display: none; flex-direction: column; gap: 10px; }
+.card-year-group { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; padding: 10px 4px 2px; }
+.card-year-group:first-child { padding-top: 0; }
+.item-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; }
+.item-card.row-skipped { opacity: 0.45; }
+.item-card.row-maybe { opacity: 0.7; }
+.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.card-title-block { flex: 1; min-width: 0; }
+.card-title { font-weight: 500; color: var(--text); font-size: 15px; display: block; }
+.card-season { color: var(--text2); font-size: 12px; }
+.card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.card-date { color: var(--text2); font-size: 12px; }
+.card-actions { display: flex; gap: 8px; align-items: center; }
+.card-actions .status-select { flex: 1; font-size: 12px; padding: 7px 26px 7px 10px; }
+.card-actions .watch-btn { flex: 1; text-align: center; padding: 7px 10px; }
+.card-del-btn { background: none; border: none; cursor: pointer; color: var(--text3); padding: 4px 8px; font-size: 18px; line-height: 1; flex-shrink: 0; }
+.card-del-btn:hover { color: var(--red); }
+
+/* ── Filter toggle (mobile) ── */
+.filter-toggle-btn { display: none; }
+.filters-inner { display: contents; }
+
 @media (max-width: 700px) {
-  .add-form-grid { grid-template-columns: 1fr 1fr; }
   .main { padding: 12px; }
   .tabs { padding: 0 12px; }
+
+  #desktopTable { display: none; }
+  .card-list { display: flex; }
+
+  .add-form-grid { grid-template-columns: 1fr 1fr; }
+
+  .filter-toggle-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 12px; color: var(--text); font-size: 13px; cursor: pointer; width: 100%;
+    justify-content: space-between;
+  }
+  .filters { flex-direction: column; align-items: stretch; }
+  .filters.collapsed .filters-inner { display: none; }
+  .filters-inner {
+    display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
+  }
+  .filters-inner > * { width: 100%; }
+  .search-input { width: 100%; }
+  .search-input:focus { width: 100%; }
+
+  .stats-row { gap: 6px; }
+  .stat { flex: 1; min-width: 78px; padding: 8px 10px; }
+  .stat-num { font-size: 18px; }
 }
 </style>
 </head>
@@ -212,7 +258,7 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 
   <div class="filters" id="filtersRow"></div>
 
-  <table>
+  <table id="desktopTable">
     <thead>
       <tr>
         <th>Show &amp; Season</th>
@@ -225,6 +271,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
     </thead>
     <tbody id="tbody"></tbody>
   </table>
+
+  <div id="cardList" class="card-list"></div>
 
   <div class="add-form" id="addForm" style="display:none">
     <div class="add-form-title">Add a new entry</div>
@@ -626,6 +674,7 @@ function switchTab(id) {
 // ─── Load tab data from Supabase ─────────────────────────────────────────────
 async function loadTab(collectionId) {
   document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">Loading…</td></tr>`;
+  document.getElementById('cardList').innerHTML = `<div class="loading">Loading…</div>`;
   document.getElementById('statsRow').innerHTML = '';
   document.getElementById('filtersRow').innerHTML = '';
   showError('');
@@ -688,6 +737,7 @@ async function loadTab(collectionId) {
   } catch(e) {
     showError(e.message);
     document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">Failed to load. Check console for details.</td></tr>`;
+    document.getElementById('cardList').innerHTML = `<div class="loading">Failed to load. Check console for details.</div>`;
     console.error(e);
   }
 }
@@ -699,28 +749,37 @@ function renderFilters() {
   const yearOpts = col.years.map(y => `<option value="${y}">${y}</option>`).join('');
 
   document.getElementById('filtersRow').innerHTML = `
-    <span class="filter-label">Filter:</span>
-    <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" oninput="renderTable()">
-    <select id="fTheme" onchange="renderTable()">
-      <option value="">All themes</option>${themeOpts}
-    </select>
-    <select id="fYear" onchange="renderTable()">
-      <option value="">All years</option>${yearOpts}
-    </select>
-    <select id="fWatch" onchange="renderTable()">
-      <option value="">All statuses</option>
-      <option value="unwatched">Not watched</option>
-      <option value="watched">Watched</option>
-    </select>
-    <select id="fStatus" onchange="renderTable()">
-      <option value="">Confirmed + Pending + Maybe</option>
-      <option value="confirmed">On list only</option>
-      <option value="pending">Pending only</option>
-      <option value="maybe">Maybe Later only</option>
-      <option value="skipped">Skipped</option>
-    </select>
-    <button class="btn" onclick="toggleAdd()" id="addToggleBtn">+ Add entry</button>
+    <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
+      <span>🔍 Search &amp; Filter</span><span id="filterToggleChevron">▾</span>
+    </button>
+    <div class="filters-inner">
+      <span class="filter-label">Filter:</span>
+      <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" oninput="renderTable()">
+      <select id="fTheme" onchange="renderTable()">
+        <option value="">All themes</option>${themeOpts}
+      </select>
+      <select id="fYear" onchange="renderTable()">
+        <option value="">All years</option>${yearOpts}
+      </select>
+      <select id="fWatch" onchange="renderTable()">
+        <option value="">All statuses</option>
+        <option value="unwatched">Not watched</option>
+        <option value="watched">Watched</option>
+      </select>
+      <select id="fStatus" onchange="renderTable()">
+        <option value="">Confirmed + Pending + Maybe</option>
+        <option value="confirmed">On list only</option>
+        <option value="pending">Pending only</option>
+        <option value="maybe">Maybe Later only</option>
+        <option value="skipped">Skipped</option>
+      </select>
+      <button class="btn" onclick="toggleAdd()" id="addToggleBtn">+ Add entry</button>
+    </div>
   `;
+  // start collapsed on mobile widths
+  if (window.innerWidth <= 700) {
+    document.getElementById('filtersRow').classList.add('collapsed');
+  }
 
   // build add form
   const themeSelectOpts = col.themes.map(t => `<option>${esc(t)}</option>`).join('');
@@ -779,14 +838,16 @@ function renderTable() {
 
   if (list.length === 0) {
     document.getElementById('tbody').innerHTML = '<tr class="empty-row"><td colspan="6">No entries match your filters.</td></tr>';
+    document.getElementById('cardList').innerHTML = '<div class="empty-row" style="padding:2rem 0">No entries match your filters.</div>';
     return;
   }
 
-  let html = '', lastYear = '';
+  let html = '', cardHtml = '', lastYear = '';
   list.forEach(r => {
     const yr = r.date_sort.substring(0,4);
     if (yr !== lastYear) {
       html += `<tr class="year-group"><td colspan="6">${yr}</td></tr>`;
+      cardHtml += `<div class="card-year-group">${yr}</div>`;
       lastYear = yr;
     }
     const isNew = td.newKeys.includes(r.item_key);
@@ -795,13 +856,16 @@ function renderTable() {
     const isMaybe   = r.status === 'maybe';
     const isPending  = r.status === 'pending';
     const statusClass = `s-${r.status}`;
-    const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">
+    const statusOptions = `
       <option value="confirmed"${r.status==='confirmed'?' selected':''}>✓ On List</option>
       <option value="pending"${r.status==='pending'?' selected':''}>⏳ Pending</option>
       <option value="maybe"${r.status==='maybe'?' selected':''}>? Maybe Later</option>
       <option value="skipped"${r.status==='skipped'?' selected':''}>✕ Skipped</option>
-    </select>`;
-    html += `<tr class="${isSkipped?'row-skipped':isMaybe?'row-maybe':''}">
+    `;
+    const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptions}</select>`;
+    const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
+
+    html += `<tr class="${rowClass}">
       <td>
         <span class="show-title">${esc(r.title)}</span>
         <span class="season-lbl"> · ${esc(r.season)}</span>
@@ -816,9 +880,33 @@ function renderTable() {
       }</td>
       <td><button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button></td>
     </tr>`;
+
+    cardHtml += `<div class="item-card ${rowClass}">
+      <div class="card-top">
+        <div class="card-title-block">
+          <span class="card-title">${esc(r.title)}</span>
+          <span class="card-season">${esc(r.season)}</span>
+          ${isNew?'<span class="new-tag">New</span>':''}
+        </div>
+        <button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>
+      </div>
+      <div class="card-meta">
+        <span class="badge ${bc}">${esc(r.theme)}</span>
+        <span class="card-date">${esc(r.display_date)}</span>
+      </div>
+      <div class="card-actions">
+        <select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptions}</select>
+        ${!isSkipped
+          ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓ Watched':'Mark watched'}</button>`
+          : ''
+        }
+      </div>
+    </div>`;
   });
   document.getElementById('tbody').innerHTML = html;
+  document.getElementById('cardList').innerHTML = cardHtml;
 }
+
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 async function toggleWatch(id) {
@@ -886,6 +974,13 @@ function toggleAdd() {
   addOpen = !addOpen;
   document.getElementById('addForm').style.display = addOpen ? 'block' : 'none';
   document.getElementById('addToggleBtn').textContent = addOpen ? '✕ Cancel' : '+ Add entry';
+}
+
+function toggleFilters() {
+  const el = document.getElementById('filtersRow');
+  el.classList.toggle('collapsed');
+  const chevron = document.getElementById('filterToggleChevron');
+  if (chevron) chevron.textContent = el.classList.contains('collapsed') ? '▾' : '▴';
 }
 
 async function addEntry() {
