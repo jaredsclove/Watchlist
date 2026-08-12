@@ -26,6 +26,12 @@
   --amber: #d4a843;
   --amber-bg: #2d2008;
   --amber-border: #4d3a10;
+  --blue: #4f7ef8;
+  --blue-bg: #14204d;
+  --blue-border: #26399e;
+  --gold: #e8b923;
+  --gold-bg: #332705;
+  --gold-border: #6b4e0a;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --radius: 6px;
   --radius-lg: 10px;
@@ -160,6 +166,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 }
 .status-select:hover { opacity: 0.85; }
 .status-select.s-confirmed { background-color: var(--green-dim); color: var(--green); border-color: var(--green-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%233ecf8e' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-highpriority { background-color: var(--gold-bg); color: var(--gold); border-color: var(--gold-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e8b923' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-watching  { background-color: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%234f7ef8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-pending   { background-color: var(--orange-bg); color: var(--orange); border-color: #4d2a10; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e67e22' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-maybe     { background-color: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23d4a843' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-skipped   { background-color: var(--red-bg); color: var(--red); border-color: #4d1520; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
@@ -176,6 +184,33 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .btn:hover { background: var(--border); }
 .btn-accent { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
 .btn-accent:hover { background: #253a7a; }
+
+.tmdb-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; margin-bottom: 16px; }
+.tmdb-search-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.tmdb-search-row input { flex: 1; min-width: 160px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; color: var(--text); font-size: 13px; outline: none; }
+.tmdb-search-row input:focus { border-color: var(--accent); }
+.tmdb-result-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.tmdb-result-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; transition: border-color 0.15s; }
+.tmdb-result-item:hover { border-color: var(--accent); }
+.tmdb-result-poster { width: 32px; height: 46px; object-fit: cover; border-radius: 3px; background: var(--border); flex-shrink: 0; }
+.tmdb-result-info { flex: 1; min-width: 0; }
+.tmdb-result-title { font-size: 13px; font-weight: 500; color: var(--text); }
+.tmdb-result-meta { font-size: 11px; color: var(--text2); }
+.tmdb-preview { margin-top: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+.tmdb-preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+.tmdb-preview-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.tmdb-specials-toggle { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.tmdb-season-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.tmdb-season-row:last-child { border-bottom: none; }
+.tmdb-season-row.already-added { opacity: 0.4; }
+.tmdb-season-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); flex-shrink: 0; }
+.tmdb-season-name { flex: 1; color: var(--text); }
+.tmdb-season-meta { color: var(--text2); font-size: 12px; white-space: nowrap; }
+.tmdb-already-tag { font-size: 10px; color: var(--text3); }
+.tmdb-preview-actions { margin-top: 12px; display: flex; gap: 8px; }
+.tmdb-refresh-summary { margin-top: 10px; font-size: 13px; color: var(--text2); }
+.tmdb-loading { font-size: 13px; color: var(--text3); padding: 10px 0; }
+.tmdb-no-results { font-size: 13px; color: var(--text3); padding: 10px 0; }
 
 .add-form { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-top: 16px; }
 .add-form-title { font-size: 13px; font-weight: 500; margin-bottom: 12px; color: var(--text); }
@@ -234,6 +269,9 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   .stats-row { gap: 6px; }
   .stat { flex: 1; min-width: 78px; padding: 8px 10px; }
   .stat-num { font-size: 18px; }
+
+  .tmdb-search-row { flex-direction: column; }
+  .tmdb-search-row input, .tmdb-search-row button { width: 100%; }
 }
 </style>
 </head>
@@ -257,6 +295,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   <div class="stats-row" id="statsRow"></div>
 
   <div class="filters" id="filtersRow"></div>
+
+  <div id="tmdbPanel" class="tmdb-panel" style="display:none"></div>
 
   <table id="desktopTable">
     <thead>
@@ -614,13 +654,81 @@ const COLLECTIONS = [
   {k:"1944|season 1",t:"1944",s:"Season 1",th:"1944",d:"TBA (in development)",ds:"2027-06-01",p:true},
   {k:"frisco king|season 1",t:"Frisco King",s:"Season 1",th:"Frisco King",d:"TBA (expected 2027)",ds:"2027-06-01",p:true},
     ]
+  },
+  {
+    id: 'othertv',
+    label: 'Other TV',
+    icon: '📡',
+    dynamic: true,
+    themes: [],
+    years: [],
+    defaults: []
+  },
+  {
+    id: 'truecrime',
+    label: 'True Crime / Docs',
+    icon: '🔎',
+    dynamic: true,
+    themes: [],
+    years: [],
+    defaults: []
   }
 ];
+
+// ─── TMDB config ──────────────────────────────────────────────────────────────
+const TMDB_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIyOTJhYjcyNDU0ZDFjYzJhZmExNjhiZjBhZTkxZWIxZCIsIm5iZiI6MTc4NTE2NTk4OS45MTEsInN1YiI6IjZhNjc3OGE1ZmNhODlhNWUxOTk4MDNiZCIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.IlLvRk2FD-eY2I5SKGzLDAqMrBRhh58Zxz_zx62YzRE';
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+
+async function tmdbFetch(path) {
+  const res = await fetch(`${TMDB_BASE}${path}`, {
+    headers: {
+      'Authorization': `Bearer ${TMDB_TOKEN}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  if (!res.ok) throw new Error(`TMDB error ${res.status}`);
+  return res.json();
+}
+
+// Hardcoded network colors; unknown networks fall back to a hashed color.
+const NETWORK_COLORS = {
+  'HBO': '#8b5cf6', 'HBO Max': '#8b5cf6', 'Max': '#8b5cf6',
+  'Netflix': '#e50914',
+  'AMC': '#c8a951', 'AMC+': '#c8a951',
+  'FX': '#1a73e8', 'FX on Hulu': '#1a73e8',
+  'Apple TV+': '#8e8e93',
+  'Showtime': '#e63946',
+  'NBC': '#f4a261',
+  'ABC': '#2a9d8f',
+  'CBS': '#457b9d',
+  'Amazon': '#00a8e1', 'Prime Video': '#00a8e1',
+  'Disney+': '#1a6ef5', 'Disney Plus': '#1a6ef5',
+  'Peacock': '#f7c59f',
+  'Hulu': '#1ce783',
+  'Paramount+': '#0064ff', 'Paramount Plus': '#0064ff',
+  'BBC': '#c0392b', 'BBC One': '#c0392b', 'BBC Two': '#c0392b',
+  'A&E': '#5b8def', 'Investigation Discovery': '#5b8def', 'ID': '#5b8def'
+};
+function networkColor(name) {
+  if (NETWORK_COLORS[name]) return NETWORK_COLORS[name];
+  // simple deterministic hash -> hue
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 55%, 55%)`;
+}
+function networkBadgeStyle(name) {
+  const color = networkColor(name);
+  return `style="background:${color}22; color:${color}; border-color:${color}55"`;
+}
+
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let activeTabId = COLLECTIONS[0].id;
 let tabData = {}; // { [collectionId]: { rows: [], loaded: false, newKeys: [] } }
 let addOpen = false;
+let tmdbSelectedShow = null; // { id, name } — currently previewed TMDB show
+let tmdbShowSpecials = false;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function badgeClass(theme) {
@@ -659,6 +767,7 @@ function buildTabs() {
 function switchTab(id) {
   activeTabId = id;
   addOpen = false;
+  tmdbSelectedShow = null;
   document.getElementById('addForm').style.display = 'none';
   document.getElementById('banner').innerHTML = '';
   buildTabs();
@@ -745,8 +854,17 @@ async function loadTab(collectionId) {
 // ─── Filters ──────────────────────────────────────────────────────────────────
 function renderFilters() {
   const col = COLLECTIONS.find(c => c.id === activeTabId);
-  const themeOpts = col.themes.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
-  const yearOpts = col.years.map(y => `<option value="${y}">${y}</option>`).join('');
+  const td = tabData[activeTabId];
+
+  let themeList = col.themes;
+  let yearList  = col.years;
+  if (col.dynamic && td) {
+    themeList = [...new Set(td.rows.map(r => r.theme).filter(Boolean))].sort();
+    yearList  = [...new Set(td.rows.map(r => r.date_sort.substring(0,4)))].sort();
+  }
+
+  const themeOpts = themeList.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  const yearOpts  = yearList.map(y => `<option value="${y}">${y}</option>`).join('');
 
   document.getElementById('filtersRow').innerHTML = `
     <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
@@ -767,8 +885,10 @@ function renderFilters() {
         <option value="watched">Watched</option>
       </select>
       <select id="fStatus" onchange="renderTable()">
-        <option value="">Confirmed + Pending + Maybe</option>
+        <option value="">All (except Skipped)</option>
         <option value="confirmed">On list only</option>
+        <option value="highpriority">High Priority only</option>
+        <option value="watching">Watching only</option>
         <option value="pending">Pending only</option>
         <option value="maybe">Maybe Later only</option>
         <option value="skipped">Skipped</option>
@@ -781,15 +901,35 @@ function renderFilters() {
     document.getElementById('filtersRow').classList.add('collapsed');
   }
 
-  // build add form
-  const themeSelectOpts = col.themes.map(t => `<option>${esc(t)}</option>`).join('');
+  // build add form (dynamic tabs use free-text network field instead of fixed theme list)
+  const themeFieldHtml = col.dynamic
+    ? `<input id="nTheme" type="text" placeholder="e.g. HBO, Netflix">`
+    : `<select id="nTheme">${col.themes.map(t => `<option>${esc(t)}</option>`).join('')}</select>`;
   document.getElementById('addFormGrid').innerHTML = `
     <div><label>Title</label><input id="nTitle" type="text" placeholder="Show title"></div>
     <div><label>Season</label><input id="nSeason" type="text" value="Season 1"></div>
-    <div><label>Theme</label><select id="nTheme">${themeSelectOpts}</select></div>
+    <div><label>${col.dynamic?'Network':'Theme'}</label>${themeFieldHtml}</div>
     <div><label>Premiere date</label><input id="nDate" type="text" placeholder="e.g. Jan 12, 2014"></div>
     <button class="btn btn-accent" onclick="addEntry()" style="margin-bottom:0">Add</button>
   `;
+
+  // TMDB search panel (dynamic tabs only)
+  const tmdbPanel = document.getElementById('tmdbPanel');
+  if (col.dynamic) {
+    tmdbPanel.style.display = 'block';
+    tmdbPanel.innerHTML = `
+      <div class="tmdb-search-row">
+        <input id="tmdbQuery" type="text" placeholder="Search for a show…" onkeydown="if(event.key==='Enter'){searchTMDB();}">
+        <button class="btn btn-accent" onclick="searchTMDB()">Search</button>
+        <button class="btn" onclick="refreshShows()" title="Check for new seasons of shows already on this list">↻ Refresh shows</button>
+      </div>
+      <div id="tmdbResults"></div>
+      <div id="tmdbPreview"></div>
+    `;
+  } else {
+    tmdbPanel.style.display = 'none';
+    tmdbPanel.innerHTML = '';
+  }
 }
 
 // ─── Render table ─────────────────────────────────────────────────────────────
@@ -805,10 +945,7 @@ function renderTable() {
 
   let list = [...td.rows].sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
-  if (fStatus === 'pending')        list = list.filter(r => r.status === 'pending');
-  else if (fStatus === 'skipped')   list = list.filter(r => r.status === 'skipped');
-  else if (fStatus === 'maybe')     list = list.filter(r => r.status === 'maybe');
-  else if (fStatus === 'confirmed') list = list.filter(r => r.status === 'confirmed');
+  if (fStatus) list = list.filter(r => r.status === fStatus);
   else list = list.filter(r => r.status !== 'skipped');
 
   if (fSearch) list = list.filter(r => r.title.toLowerCase().includes(fSearch));
@@ -823,6 +960,8 @@ function renderTable() {
   const pct       = total > 0 ? Math.round(watched/total*100) : 0;
   const pending   = list.filter(r => r.status === 'pending').length;
   const maybe     = list.filter(r => r.status === 'maybe').length;
+  const watching     = list.filter(r => r.status === 'watching').length;
+  const highPriority = list.filter(r => r.status === 'highpriority').length;
 
   document.getElementById('statsRow').innerHTML = `
     <div class="stat"><div class="stat-num">${total}</div><div class="stat-label">On List</div></div>
@@ -832,6 +971,8 @@ function renderTable() {
       <div class="stat-num">${pct}%</div><div class="stat-label">Complete</div>
       <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
     </div>
+    ${watching>0?`<div class="stat"><div class="stat-num">${watching}</div><div class="stat-label">Watching</div></div>`:''}
+    ${highPriority>0?`<div class="stat"><div class="stat-num">${highPriority}</div><div class="stat-label">High Priority</div></div>`:''}
     ${pending>0?`<div class="stat"><div class="stat-num">${pending}</div><div class="stat-label">Pending</div></div>`:''}
     ${maybe>0?`<div class="stat"><div class="stat-num">${maybe}</div><div class="stat-label">Maybe Later</div></div>`:''}
   `;
@@ -858,6 +999,8 @@ function renderTable() {
     const statusClass = `s-${r.status}`;
     const statusOptions = `
       <option value="confirmed"${r.status==='confirmed'?' selected':''}>✓ On List</option>
+      <option value="highpriority"${r.status==='highpriority'?' selected':''}>⭐ High Priority</option>
+      <option value="watching"${r.status==='watching'?' selected':''}>▶ Watching</option>
       <option value="pending"${r.status==='pending'?' selected':''}>⏳ Pending</option>
       <option value="maybe"${r.status==='maybe'?' selected':''}>? Maybe Later</option>
       <option value="skipped"${r.status==='skipped'?' selected':''}>✕ Skipped</option>
@@ -936,10 +1079,15 @@ async function setStatus(id, status, selectEl) {
   if (selectEl) {
     selectEl.className = `status-select s-${status}`;
   }
-  // update row opacity immediately
-  const tr = selectEl?.closest('tr');
-  if (tr) {
-    tr.className = status==='skipped'?'row-skipped':status==='maybe'?'row-maybe':'';
+  // update row/card opacity immediately (works for both desktop <tr> and mobile .item-card)
+  const container = selectEl?.closest('tr, .item-card');
+  if (container) {
+    const dimClass = status==='skipped'?'row-skipped':status==='maybe'?'row-maybe':'';
+    if (container.tagName === 'TR') {
+      container.className = dimClass;
+    } else {
+      container.className = `item-card ${dimClass}`;
+    }
   }
   try {
     await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { status });
@@ -1011,6 +1159,280 @@ async function addEntry() {
     document.getElementById('nDate').value = '';
     document.getElementById('nSeason').value = 'Season 1';
     toggleAdd();
+    renderTable();
+  } catch(e) {
+    showError(e.message);
+  }
+}
+
+// ─── TMDB: Search ─────────────────────────────────────────────────────────────
+async function searchTMDB() {
+  const query = document.getElementById('tmdbQuery').value.trim();
+  const resultsEl = document.getElementById('tmdbResults');
+  document.getElementById('tmdbPreview').innerHTML = '';
+  tmdbSelectedShow = null;
+  if (!query) { resultsEl.innerHTML = ''; return; }
+
+  resultsEl.innerHTML = `<div class="tmdb-loading">Searching…</div>`;
+  try {
+    const data = await tmdbFetch(`/search/tv?query=${encodeURIComponent(query)}&page=1`);
+    const results = (data.results || []).slice(0, 5);
+    if (results.length === 0) {
+      resultsEl.innerHTML = `<div class="tmdb-no-results">No results found for "${esc(query)}".</div>`;
+      return;
+    }
+    resultsEl.innerHTML = `<div class="tmdb-result-list">${results.map(r => {
+      const year = r.first_air_date ? r.first_air_date.substring(0,4) : '—';
+      const poster = r.poster_path ? `https://image.tmdb.org/t/p/w92${r.poster_path}` : '';
+      return `<div class="tmdb-result-item" onclick="selectTMDBShow(${r.id}, '${esc(r.name).replace(/'/g,"\\'")}')">
+        ${poster ? `<img class="tmdb-result-poster" src="${poster}" alt="">` : '<div class="tmdb-result-poster"></div>'}
+        <div class="tmdb-result-info">
+          <div class="tmdb-result-title">${esc(r.name)}</div>
+          <div class="tmdb-result-meta">${year}${r.origin_country?.length ? ' · ' + esc(r.origin_country.join(', ')) : ''}</div>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  } catch(e) {
+    resultsEl.innerHTML = `<div class="tmdb-no-results">Search failed: ${esc(e.message)}</div>`;
+  }
+}
+
+async function selectTMDBShow(tmdbId, name) {
+  tmdbSelectedShow = { id: tmdbId, name };
+  tmdbShowSpecials = false;
+  const previewEl = document.getElementById('tmdbPreview');
+  previewEl.innerHTML = `<div class="tmdb-loading">Loading seasons…</div>`;
+  try {
+    const details = await tmdbFetch(`/tv/${tmdbId}`);
+    tmdbSelectedShow.details = details;
+    renderTMDBPreview();
+  } catch(e) {
+    previewEl.innerHTML = `<div class="tmdb-no-results">Failed to load show details: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderTMDBPreview() {
+  const previewEl = document.getElementById('tmdbPreview');
+  if (!tmdbSelectedShow || !tmdbSelectedShow.details) return;
+  const details = tmdbSelectedShow.details;
+  const network = (details.networks && details.networks[0]?.name) || 'Unknown';
+  const existingKeys = new Set((tabData[activeTabId]?.rows || []).map(r => r.item_key));
+  const showKeyBase = tmdbSelectedShow.name.toLowerCase().trim();
+
+  let seasons = (details.seasons || []).filter(s => tmdbShowSpecials || s.season_number !== 0);
+  seasons.sort((a,b) => a.season_number - b.season_number);
+
+  const rowsHtml = seasons.map(s => {
+    const seasonLabel = s.season_number === 0 ? 'Specials' : `Season ${s.season_number}`;
+    const key = `${showKeyBase}|${seasonLabel.toLowerCase()}`;
+    const alreadyAdded = existingKeys.has(key);
+    const date = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
+    return `<div class="tmdb-season-row ${alreadyAdded?'already-added':''}">
+      <input type="checkbox" ${alreadyAdded?'disabled':'checked'} data-season="${s.season_number}" id="szn_${s.season_number}">
+      <span class="tmdb-season-name">${esc(seasonLabel)}</span>
+      <span class="tmdb-season-meta">${s.episode_count||0} episodes · ${esc(date)}</span>
+      ${alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}
+    </div>`;
+  }).join('');
+
+  previewEl.innerHTML = `
+    <div class="tmdb-preview">
+      <div class="tmdb-preview-header">
+        <div>
+          <div class="tmdb-preview-title">${esc(tmdbSelectedShow.name)}</div>
+          <div class="tmdb-result-meta">${esc(network)}</div>
+        </div>
+        <label class="tmdb-specials-toggle">
+          <input type="checkbox" id="tmdbSpecialsToggle" ${tmdbShowSpecials?'checked':''} onchange="toggleTMDBSpecials()">
+          Include specials
+        </label>
+      </div>
+      ${rowsHtml || '<div class="tmdb-no-results">No seasons found.</div>'}
+      <div class="tmdb-preview-actions">
+        <button class="btn btn-accent" onclick="addSelectedTMDBSeasons()">Add selected seasons</button>
+        <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+
+function toggleTMDBSpecials() {
+  tmdbShowSpecials = document.getElementById('tmdbSpecialsToggle').checked;
+  renderTMDBPreview();
+}
+
+function cancelTMDBPreview() {
+  tmdbSelectedShow = null;
+  document.getElementById('tmdbPreview').innerHTML = '';
+  document.getElementById('tmdbResults').innerHTML = '';
+  document.getElementById('tmdbQuery').value = '';
+}
+
+function formatDisplayDate(isoDate) {
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const [y,m,d] = isoDate.split('-').map(Number);
+  if (!y || !m || !d) return isoDate;
+  return `${months[m-1]} ${d}, ${y}`;
+}
+
+async function addSelectedTMDBSeasons() {
+  if (!tmdbSelectedShow || !tmdbSelectedShow.details) return;
+  const details = tmdbSelectedShow.details;
+  const network = (details.networks && details.networks[0]?.name) || 'Unknown';
+  const showName = tmdbSelectedShow.name;
+  const showKeyBase = showName.toLowerCase().trim();
+
+  const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-season]');
+  const seasonsByNum = {};
+  (details.seasons || []).forEach(s => seasonsByNum[s.season_number] = s);
+
+  const toInsert = [];
+  checkboxes.forEach(cb => {
+    if (!cb.checked || cb.disabled) return;
+    const num = parseInt(cb.dataset.season, 10);
+    const s = seasonsByNum[num];
+    if (!s) return;
+    const seasonLabel = num === 0 ? 'Specials' : `Season ${num}`;
+    const key = `${showKeyBase}|${seasonLabel.toLowerCase()}`;
+    const displayDate = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
+    const dateSort = s.air_date || '2099-01-01';
+    toInsert.push({
+      collection: activeTabId,
+      item_key: key,
+      title: showName,
+      season: seasonLabel,
+      theme: network,
+      display_date: displayDate,
+      date_sort: dateSort,
+      watched: false,
+      status: 'confirmed'
+    });
+  });
+
+  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+
+  try {
+    const inserted = await sbFetch('POST', TABLE, toInsert);
+    if (inserted) tabData[activeTabId].rows.push(...inserted);
+    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+
+    // track this show for future refresh lookups
+    await sbFetch('POST', 'othertv_shows', [{
+      tmdb_id: tmdbSelectedShow.id, title: showName, network
+    }]).catch(() => { /* ignore duplicate-key errors on the unique tmdb_id */ });
+
+    showSaved();
+    cancelTMDBPreview();
+    renderFilters();
+    renderTable();
+  } catch(e) {
+    showError(e.message);
+  }
+}
+
+// ─── TMDB: Refresh existing shows ─────────────────────────────────────────────
+async function refreshShows() {
+  const previewEl = document.getElementById('tmdbPreview');
+  const resultsEl = document.getElementById('tmdbResults');
+  resultsEl.innerHTML = '';
+  previewEl.innerHTML = `<div class="tmdb-loading">Checking for new seasons…</div>`;
+
+  try {
+    const trackedShows = await sbFetch('GET', `othertv_shows?select=*`, null);
+    if (!trackedShows || trackedShows.length === 0) {
+      previewEl.innerHTML = `<div class="tmdb-no-results">No shows added via search yet — nothing to refresh.</div>`;
+      return;
+    }
+
+    const existingKeys = new Set((tabData[activeTabId]?.rows || []).map(r => r.item_key));
+    const newSeasonsByShow = [];
+
+    for (const show of trackedShows) {
+      let details;
+      try {
+        details = await tmdbFetch(`/tv/${show.tmdb_id}`);
+      } catch(e) { continue; }
+      const showKeyBase = show.title.toLowerCase().trim();
+      const seasons = (details.seasons || []).filter(s => tmdbShowSpecials || s.season_number !== 0);
+      const newOnes = seasons.filter(s => {
+        const label = s.season_number === 0 ? 'specials' : `season ${s.season_number}`;
+        return !existingKeys.has(`${showKeyBase}|${label}`);
+      });
+      if (newOnes.length > 0) {
+        newSeasonsByShow.push({ show, details, newOnes });
+      }
+    }
+
+    if (newSeasonsByShow.length === 0) {
+      previewEl.innerHTML = `<div class="tmdb-refresh-summary">✓ Everything's up to date — no new seasons found across ${trackedShows.length} tracked show${trackedShows.length===1?'':'s'}.</div>`;
+      return;
+    }
+
+    let html = `<div class="tmdb-preview"><div class="tmdb-preview-title">New seasons found</div>`;
+    newSeasonsByShow.forEach(({show, newOnes}, idx) => {
+      html += `<div style="margin-top:10px"><div class="tmdb-result-title">${esc(show.title)}</div>`;
+      newOnes.forEach(s => {
+        const label = s.season_number === 0 ? 'Specials' : `Season ${s.season_number}`;
+        const date = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
+        html += `<div class="tmdb-season-row">
+          <input type="checkbox" checked data-show-idx="${idx}" data-season="${s.season_number}">
+          <span class="tmdb-season-name">${esc(label)}</span>
+          <span class="tmdb-season-meta">${s.episode_count||0} episodes · ${esc(date)}</span>
+        </div>`;
+      });
+      html += `</div>`;
+    });
+    html += `<div class="tmdb-preview-actions">
+      <button class="btn btn-accent" onclick="addRefreshedSeasons()">Add selected seasons</button>
+      <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
+    </div></div>`;
+    previewEl.innerHTML = html;
+    window.__refreshData = newSeasonsByShow;
+  } catch(e) {
+    previewEl.innerHTML = `<div class="tmdb-no-results">Refresh failed: ${esc(e.message)}</div>`;
+  }
+}
+
+async function addRefreshedSeasons() {
+  const data = window.__refreshData || [];
+  const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-show-idx]');
+  const toInsert = [];
+
+  checkboxes.forEach(cb => {
+    if (!cb.checked) return;
+    const idx = parseInt(cb.dataset.showIdx, 10);
+    const num = parseInt(cb.dataset.season, 10);
+    const entry = data[idx];
+    if (!entry) return;
+    const s = entry.newOnes.find(x => x.season_number === num);
+    if (!s) return;
+    const network = (entry.details.networks && entry.details.networks[0]?.name) || 'Unknown';
+    const seasonLabel = num === 0 ? 'Specials' : `Season ${num}`;
+    const key = `${entry.show.title.toLowerCase().trim()}|${seasonLabel.toLowerCase()}`;
+    const displayDate = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
+    const dateSort = s.air_date || '2099-01-01';
+    toInsert.push({
+      collection: activeTabId,
+      item_key: key,
+      title: entry.show.title,
+      season: seasonLabel,
+      theme: network,
+      display_date: displayDate,
+      date_sort: dateSort,
+      watched: false,
+      status: 'confirmed'
+    });
+  });
+
+  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+
+  try {
+    const inserted = await sbFetch('POST', TABLE, toInsert);
+    if (inserted) tabData[activeTabId].rows.push(...inserted);
+    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    showSaved();
+    cancelTMDBPreview();
+    renderFilters();
     renderTable();
   } catch(e) {
     showError(e.message);
