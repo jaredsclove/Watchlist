@@ -1103,17 +1103,15 @@ function renderGroupedTable(list, td) {
     const totalCount = confirmedSeasons.length;
     const anyNew = seasons.some(s => td.newKeys.includes(s.item_key));
 
-    // aggregate status label: if any season is 'watching', show that; else highest-priority status among seasons
+    // aggregate status: if any season is 'watching', show that; else highest-priority status among seasons
     const statusPriority = ['watching','highpriority','pending','maybe','confirmed','skipped'];
     let aggStatus = 'confirmed';
     for (const s of statusPriority) { if (seasons.some(x => x.status === s)) { aggStatus = s; break; } }
-    const aggLabel = {
-      watching: '▶ Watching', highpriority: '⭐ High Priority', pending: '⏳ Pending',
-      maybe: '? Maybe Later', confirmed: '✓ On List', skipped: '✕ Skipped'
-    }[aggStatus];
     const aggClass = `s-${aggStatus}`;
 
     const progressLabel = totalCount > 0 ? `${watchedCount}/${totalCount} watched` : `${seasons.length} season${seasons.length===1?'':'s'}`;
+    const titleEsc = esc(title).replace(/'/g,"\\'");
+    const masterStatusCell = `<select class="status-select ${aggClass}" onclick="event.stopPropagation()" onchange="event.stopPropagation(); setShowStatus('${titleEsc}', this.value)">${statusOptionsHtml(aggStatus)}</select>`;
 
     const seasonRowsHtml = seasons.map(r => {
       const isSkipped = r.status === 'skipped';
@@ -1136,20 +1134,20 @@ function renderGroupedTable(list, td) {
       </tr>`;
     }).join('');
 
-    html += `<tr class="show-group-row" onclick="toggleShowExpand('${esc(title).replace(/'/g,"\\'")}')">
+    html += `<tr class="show-group-row" onclick="toggleShowExpand('${titleEsc}')">
       <td colspan="2">
         <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
         <span class="show-title">${esc(title)}</span>
         ${anyNew?'<span class="new-tag">New</span>':''}
       </td>
       <td><span class="badge ${bc}">${esc(network)}</span></td>
-      <td><span class="badge ${aggClass==='s-confirmed'?'':aggClass}" style="background:none;border:none;padding:0;color:var(--text2)">${aggLabel}</span></td>
+      <td>${masterStatusCell}</td>
       <td colspan="2" class="card-date">${progressLabel}</td>
     </tr>`;
     if (isExpanded) html += seasonRowsHtml;
 
     cardHtml += `<div class="item-card show-group-card">
-      <div class="card-top" onclick="toggleShowExpand('${esc(title).replace(/'/g,"\\'")}')" style="cursor:pointer">
+      <div class="card-top" onclick="toggleShowExpand('${titleEsc}')" style="cursor:pointer">
         <div class="card-title-block">
           <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
           <span class="card-title">${esc(title)}</span>
@@ -1158,7 +1156,10 @@ function renderGroupedTable(list, td) {
       </div>
       <div class="card-meta">
         <span class="badge ${bc}">${esc(network)}</span>
-        <span class="card-date">${progressLabel} · ${aggLabel}</span>
+        <span class="card-date">${progressLabel}</span>
+      </div>
+      <div class="card-actions" onclick="event.stopPropagation()">
+        ${masterStatusCell}
       </div>
       ${isExpanded ? `<div class="card-subseasons">${seasons.map(r => {
         const isSkipped = r.status === 'skipped';
@@ -1186,6 +1187,29 @@ function toggleShowExpand(title) {
   if (expandedShows.has(title)) expandedShows.delete(title);
   else expandedShows.add(title);
   renderTable();
+}
+
+async function setShowStatus(title, status) {
+  const td = tabData[activeTabId];
+  if (!td) return;
+  const rows = td.rows.filter(r => r.title === title);
+  if (rows.length === 0) return;
+
+  const previousStatuses = rows.map(r => r.status);
+  rows.forEach(r => { r.status = status; });
+  renderTable();
+
+  try {
+    await sbFetch('PATCH',
+      `${TABLE}?collection=eq.${encodeURIComponent(activeTabId)}&title=eq.${encodeURIComponent(title)}`,
+      { status }
+    );
+    showSaved();
+  } catch(e) {
+    rows.forEach((r, i) => { r.status = previousStatuses[i]; });
+    renderTable();
+    showError(e.message);
+  }
 }
 
 
