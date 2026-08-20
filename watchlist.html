@@ -982,17 +982,23 @@ function renderTable() {
   if (fSearch) list = list.filter(r => r.title.toLowerCase().includes(fSearch));
   if (fTheme) list = list.filter(r => r.theme === fTheme);
   if (fYear)  list = list.filter(r => r.date_sort.startsWith(fYear));
+
+  // statsList mirrors list's theme/year/status/search scope, but ignores the
+  // watched/unwatched filter — stats should reflect real progress, not be
+  // zeroed out just because the table is currently showing only unwatched rows.
+  const statsList = list;
+
   if (fWatch === 'watched')   list = list.filter(r => r.watched);
   if (fWatch === 'unwatched') list = list.filter(r => !r.watched);
 
-  const confirmed = list.filter(r => r.status === 'confirmed');
-  const watched   = confirmed.filter(r => r.watched).length;
-  const total     = confirmed.length;
+  const trackable = statsList.filter(r => r.status !== 'skipped');
+  const watched   = trackable.filter(r => r.watched).length;
+  const total     = trackable.length;
   const pct       = total > 0 ? Math.round(watched/total*100) : 0;
-  const pending   = list.filter(r => r.status === 'pending').length;
-  const maybe     = list.filter(r => r.status === 'maybe').length;
-  const watching     = list.filter(r => r.status === 'watching').length;
-  const highPriority = list.filter(r => r.status === 'highpriority').length;
+  const pending   = statsList.filter(r => r.status === 'pending').length;
+  const maybe     = statsList.filter(r => r.status === 'maybe').length;
+  const watching     = statsList.filter(r => r.status === 'watching').length;
+  const highPriority = statsList.filter(r => r.status === 'highpriority').length;
 
   document.getElementById('statsRow').innerHTML = `
     <div class="stat"><div class="stat-num">${total}</div><div class="stat-label">On List</div></div>
