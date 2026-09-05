@@ -208,6 +208,9 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .tmdb-result-info { flex: 1; min-width: 0; }
 .tmdb-result-title { font-size: 13px; font-weight: 500; color: var(--text); }
 .tmdb-result-meta { font-size: 11px; color: var(--text2); }
+.tmdb-type-tag { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; }
+.tmdb-type-tv { background: var(--blue-bg); color: var(--blue); }
+.tmdb-type-movie { background: var(--amber-bg); color: var(--amber); }
 .tmdb-preview { margin-top: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
 .tmdb-preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
 .tmdb-preview-title { font-size: 14px; font-weight: 600; color: var(--text); }
@@ -1374,19 +1377,31 @@ async function searchTMDB() {
 
   resultsEl.innerHTML = `<div class="tmdb-loading">Searching…</div>`;
   try {
-    const data = await tmdbFetch(`/search/tv?query=${encodeURIComponent(query)}&page=1`);
-    const results = (data.results || []).slice(0, 5);
+    const [tvData, movieData] = await Promise.all([
+      tmdbFetch(`/search/tv?query=${encodeURIComponent(query)}&page=1`),
+      tmdbFetch(`/search/movie?query=${encodeURIComponent(query)}&page=1`)
+    ]);
+    const tvResults = (tvData.results || []).map(r => ({ ...r, mediaType: 'tv' }));
+    const movieResults = (movieData.results || []).map(r => ({ ...r, mediaType: 'movie' }));
+    // interleave-ish: keep TV first (most searches on these two tabs are series), then movies, cap combined at 6
+    const results = [...tvResults.slice(0,4), ...movieResults.slice(0,4)].slice(0, 6);
+
     if (results.length === 0) {
       resultsEl.innerHTML = `<div class="tmdb-no-results">No results found for "${esc(query)}".</div>`;
       return;
     }
     resultsEl.innerHTML = `<div class="tmdb-result-list">${results.map(r => {
-      const year = r.first_air_date ? r.first_air_date.substring(0,4) : '—';
+      const isMovie = r.mediaType === 'movie';
+      const title = isMovie ? r.title : r.name;
+      const dateStr = isMovie ? r.release_date : r.first_air_date;
+      const year = dateStr ? dateStr.substring(0,4) : '—';
       const poster = r.poster_path ? `https://image.tmdb.org/t/p/w92${r.poster_path}` : '';
-      return `<div class="tmdb-result-item" onclick="selectTMDBShow(${r.id}, '${esc(r.name).replace(/'/g,"\\'")}')">
+      const typeTag = isMovie ? '<span class="tmdb-type-tag tmdb-type-movie">Film</span>' : '<span class="tmdb-type-tag tmdb-type-tv">Series</span>';
+      const titleEsc = esc(title).replace(/'/g,"\\'");
+      return `<div class="tmdb-result-item" onclick="selectTMDBShow(${r.id}, '${titleEsc}', '${r.mediaType}')">
         ${poster ? `<img class="tmdb-result-poster" src="${poster}" alt="">` : '<div class="tmdb-result-poster"></div>'}
         <div class="tmdb-result-info">
-          <div class="tmdb-result-title">${esc(r.name)}</div>
+          <div class="tmdb-result-title">${esc(title)} ${typeTag}</div>
           <div class="tmdb-result-meta">${year}${r.origin_country?.length ? ' · ' + esc(r.origin_country.join(', ')) : ''}</div>
         </div>
       </div>`;
@@ -1396,17 +1411,17 @@ async function searchTMDB() {
   }
 }
 
-async function selectTMDBShow(tmdbId, name) {
-  tmdbSelectedShow = { id: tmdbId, name };
+async function selectTMDBShow(tmdbId, name, mediaType) {
+  tmdbSelectedShow = { id: tmdbId, name, mediaType: mediaType || 'tv' };
   tmdbShowSpecials = false;
   const previewEl = document.getElementById('tmdbPreview');
-  previewEl.innerHTML = `<div class="tmdb-loading">Loading seasons…</div>`;
+  previewEl.innerHTML = `<div class="tmdb-loading">Loading details…</div>`;
   try {
-    const details = await tmdbFetch(`/tv/${tmdbId}`);
+    const details = await tmdbFetch(`/${tmdbSelectedShow.mediaType}/${tmdbId}`);
     tmdbSelectedShow.details = details;
     renderTMDBPreview();
   } catch(e) {
-    previewEl.innerHTML = `<div class="tmdb-no-results">Failed to load show details: ${esc(e.message)}</div>`;
+    previewEl.innerHTML = `<div class="tmdb-no-results">Failed to load details: ${esc(e.message)}</div>`;
   }
 }
 
@@ -1414,9 +1429,39 @@ function renderTMDBPreview() {
   const previewEl = document.getElementById('tmdbPreview');
   if (!tmdbSelectedShow || !tmdbSelectedShow.details) return;
   const details = tmdbSelectedShow.details;
-  const network = (details.networks && details.networks[0]?.name) || 'Unknown';
   const existingKeys = new Set((tabData[activeTabId]?.rows || []).map(r => r.item_key));
   const showKeyBase = tmdbSelectedShow.name.toLowerCase().trim();
+
+  if (tmdbSelectedShow.mediaType === 'movie') {
+    const network = (details.production_companies && details.production_companies[0]?.name) || 'Film';
+    const key = `${showKeyBase}|film`;
+    const alreadyAdded = existingKeys.has(key);
+    const date = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
+    const runtime = details.runtime ? `${details.runtime} min` : '';
+    previewEl.innerHTML = `
+      <div class="tmdb-preview">
+        <div class="tmdb-preview-header">
+          <div>
+            <div class="tmdb-preview-title">${esc(tmdbSelectedShow.name)}</div>
+            <div class="tmdb-result-meta">${esc(network)}</div>
+          </div>
+        </div>
+        <div class="tmdb-season-row ${alreadyAdded?'already-added':''}">
+          <input type="checkbox" ${alreadyAdded?'disabled':'checked'} data-season="film" id="szn_film">
+          <span class="tmdb-season-name">Film</span>
+          <span class="tmdb-season-meta">${esc(runtime)}${runtime?' · ':''}${esc(date)}</span>
+          ${alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}
+        </div>
+        <div class="tmdb-preview-actions">
+          <button class="btn btn-accent" onclick="addSelectedTMDBSeasons()">Add film</button>
+          <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const network = (details.networks && details.networks[0]?.name) || 'Unknown';
 
   let seasons = (details.seasons || []).filter(s => tmdbShowSpecials || s.season_number !== 0);
   seasons.sort((a,b) => a.season_number - b.season_number);
@@ -1477,36 +1522,59 @@ function formatDisplayDate(isoDate) {
 async function addSelectedTMDBSeasons() {
   if (!tmdbSelectedShow || !tmdbSelectedShow.details) return;
   const details = tmdbSelectedShow.details;
-  const network = (details.networks && details.networks[0]?.name) || 'Unknown';
   const showName = tmdbSelectedShow.name;
   const showKeyBase = showName.toLowerCase().trim();
+  const isMovie = tmdbSelectedShow.mediaType === 'movie';
 
-  const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-season]');
-  const seasonsByNum = {};
-  (details.seasons || []).forEach(s => seasonsByNum[s.season_number] = s);
+  let toInsert = [];
+  let network;
 
-  const toInsert = [];
-  checkboxes.forEach(cb => {
-    if (!cb.checked || cb.disabled) return;
-    const num = parseInt(cb.dataset.season, 10);
-    const s = seasonsByNum[num];
-    if (!s) return;
-    const seasonLabel = num === 0 ? 'Specials' : `Season ${num}`;
-    const key = `${showKeyBase}|${seasonLabel.toLowerCase()}`;
-    const displayDate = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
-    const dateSort = s.air_date || '2099-01-01';
+  if (isMovie) {
+    const cb = document.querySelector('#tmdbPreview input[type="checkbox"][data-season="film"]');
+    if (!cb || !cb.checked || cb.disabled) { cancelTMDBPreview(); return; }
+    network = (details.production_companies && details.production_companies[0]?.name) || 'Film';
+    const key = `${showKeyBase}|film`;
+    const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
+    const dateSort = details.release_date || '2099-01-01';
     toInsert.push({
       collection: activeTabId,
       item_key: key,
       title: showName,
-      season: seasonLabel,
+      season: 'Film',
       theme: network,
       display_date: displayDate,
       date_sort: dateSort,
       watched: false,
       status: 'confirmed'
     });
-  });
+  } else {
+    network = (details.networks && details.networks[0]?.name) || 'Unknown';
+    const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-season]');
+    const seasonsByNum = {};
+    (details.seasons || []).forEach(s => seasonsByNum[s.season_number] = s);
+
+    checkboxes.forEach(cb => {
+      if (!cb.checked || cb.disabled) return;
+      const num = parseInt(cb.dataset.season, 10);
+      const s = seasonsByNum[num];
+      if (!s) return;
+      const seasonLabel = num === 0 ? 'Specials' : `Season ${num}`;
+      const key = `${showKeyBase}|${seasonLabel.toLowerCase()}`;
+      const displayDate = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
+      const dateSort = s.air_date || '2099-01-01';
+      toInsert.push({
+        collection: activeTabId,
+        item_key: key,
+        title: showName,
+        season: seasonLabel,
+        theme: network,
+        display_date: displayDate,
+        date_sort: dateSort,
+        watched: false,
+        status: 'confirmed'
+      });
+    });
+  }
 
   if (toInsert.length === 0) { cancelTMDBPreview(); return; }
 
@@ -1515,10 +1583,12 @@ async function addSelectedTMDBSeasons() {
     if (inserted) tabData[activeTabId].rows.push(...inserted);
     tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
-    // track this show for future refresh lookups
-    await sbFetch('POST', 'othertv_shows', [{
-      tmdb_id: tmdbSelectedShow.id, title: showName, network
-    }]).catch(() => { /* ignore duplicate-key errors on the unique tmdb_id */ });
+    // track this show for future refresh lookups (TV shows only — a film has no future seasons)
+    if (!isMovie) {
+      await sbFetch('POST', 'othertv_shows', [{
+        tmdb_id: tmdbSelectedShow.id, title: showName, network
+      }]).catch(() => { /* ignore duplicate-key errors on the unique tmdb_id */ });
+    }
 
     showSaved();
     cancelTMDBPreview();
