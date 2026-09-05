@@ -394,11 +394,12 @@ const COLLECTIONS = [
   {k:"star wars: the acolyte|season 1",t:"Star Wars: The Acolyte",s:"Season 1",th:"Star Wars",d:"Jun 4, 2024",ds:"2024-06-04"},
   {k:"star wars: skeleton crew|season 1",t:"Star Wars: Skeleton Crew",s:"Season 1",th:"Star Wars",d:"Nov 3, 2024",ds:"2024-11-03"},
   {k:"andor|season 2",t:"Andor",s:"Season 2",th:"Star Wars",d:"Apr 22, 2025",ds:"2025-04-22"},
-  {k:"the mandalorian and grogu|film",t:"The Mandalorian & Grogu",s:"Film",th:"Star Wars",d:"May 22, 2026",ds:"2026-05-22"},
+  {k:"the mandalorian and grogu|film",t:"The Mandalorian & Grogu",s:"Film",th:"Star Wars",d:"Sep 2, 2026",ds:"2026-09-02"},
   {k:"star wars: tales of the underworld|season 1",t:"Star Wars: Tales of the Underworld",s:"Season 1",th:"Star Wars",d:"May 4, 2025",ds:"2025-05-04"},
   {k:"star wars: visions|volume 3",t:"Star Wars: Visions",s:"Volume 3",th:"Star Wars",d:"Oct 2025",ds:"2025-10-01"},
   {k:"star wars: maul – shadow lord|season 1",t:"Star Wars: Maul – Shadow Lord",s:"Season 1",th:"Star Wars",d:"Apr 6, 2026",ds:"2026-04-06"},
-  {k:"ahsoka|season 2",t:"Ahsoka",s:"Season 2",th:"Star Wars",d:"Early 2027",ds:"2027-02-01"},
+  {k:"lego star wars: the mandalorian|special",t:"LEGO Star Wars: The Mandalorian",s:"Special",th:"Star Wars",d:"Sep 2, 2026",ds:"2026-09-02"},
+  {k:"ahsoka|season 2",t:"Ahsoka",s:"Season 2",th:"Star Wars",d:"Jan 20, 2027",ds:"2027-01-20"},
   {k:"star wars: visions presents: the ninth jedi|season 1",t:"Star Wars: Visions Presents: The Ninth Jedi",s:"Season 1",th:"Star Wars",d:"2026 (TBA)",ds:"2026-09-01"},
   {k:"wandavision|season 1",t:"WandaVision",s:"Season 1",th:"Marvel",d:"Jan 15, 2021",ds:"2021-01-15"},
   {k:"the falcon and the winter soldier|season 1",t:"The Falcon and the Winter Soldier",s:"Season 1",th:"Marvel",d:"Mar 19, 2021",ds:"2021-03-19"},
@@ -429,7 +430,7 @@ const COLLECTIONS = [
   {k:"the punisher: one last kill|special",t:"The Punisher: One Last Kill",s:"Special",th:"Marvel",d:"May 7, 2026",ds:"2026-05-07"},
   {k:"x-men '97|season 2",t:"X-Men '97",s:"Season 2",th:"Marvel",d:"Jul 1, 2026",ds:"2026-07-01"},
   {k:"visionquest|season 1",t:"VisionQuest",s:"Season 1",th:"Marvel",d:"Oct 14, 2026",ds:"2026-10-14"},
-  {k:"your friendly neighborhood spider-man|season 2",t:"Your Friendly Neighborhood Spider-Man",s:"Season 2",th:"Marvel",d:"Fall 2026",ds:"2026-10-02"},
+  {k:"your friendly neighborhood spider-man|season 2",t:"Your Friendly Neighborhood Spider-Man",s:"Season 2",th:"Marvel",d:"Jan 2027",ds:"2027-01-15"},
   {k:"wonder man|season 2",t:"Wonder Man",s:"Season 2",th:"Marvel",d:"TBA",ds:"2027-01-01"},
   {k:"daredevil: born again|season 3",t:"Daredevil: Born Again",s:"Season 3",th:"Marvel",d:"2027",ds:"2027-03-01"},
   {k:"marvel zombies|season 2",t:"Marvel Zombies",s:"Season 2",th:"Marvel",d:"TBA",ds:"2027-06-01"},
@@ -584,7 +585,7 @@ const COLLECTIONS = [
   {k:'90 day fiancé: the other way|season 5',t:'90 Day Fiancé: The Other Way',s:'Season 5',th:'The Other Way',d:'Jul 10, 2023',ds:'2023-07-10'},
   {k:'90 day fiancé: the other way|season 6',t:'90 Day Fiancé: The Other Way',s:'Season 6',th:'The Other Way',d:'Jul 1, 2024',ds:'2024-07-01'},
   {k:'90 day fiancé: the other way|season 7',t:'90 Day Fiancé: The Other Way',s:'Season 7',th:'The Other Way',d:'Sep 8, 2025',ds:'2025-09-08'},
-  {k:'90 day fiancé: the other way|season 8',t:'90 Day Fiancé: The Other Way',s:'Season 8',th:'The Other Way',d:'TBA 2026',ds:'2026-06-01'},
+  {k:'90 day fiancé: the other way|season 8',t:'90 Day Fiancé: The Other Way',s:'Season 8',th:'The Other Way',d:'Oct 8, 2026',ds:'2026-10-08'},
   {k:'90 day fiancé: what now?|season 1',t:'90 Day Fiancé: What Now?',s:'Season 1',th:'Spinoff',d:'Jul 30, 2017',ds:'2017-07-30',p:true},
   {k:'90 day fiancé: what now?|season 2',t:'90 Day Fiancé: What Now?',s:'Season 2',th:'Spinoff',d:'Jul 15, 2018',ds:'2018-07-15',p:true},
   {k:'90 day fiancé: what now?|season 3',t:'90 Day Fiancé: What Now?',s:'Season 3',th:'Spinoff',d:'Apr 28, 2019',ds:'2019-04-28',p:true},
@@ -1584,10 +1585,11 @@ async function addSelectedTMDBSeasons() {
     tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
     // track this show for future refresh lookups (TV shows only — a film has no future seasons)
+    // scoped by collection so refresh on one tab doesn't pull in shows from another
     if (!isMovie) {
       await sbFetch('POST', 'othertv_shows', [{
-        tmdb_id: tmdbSelectedShow.id, title: showName, network
-      }]).catch(() => { /* ignore duplicate-key errors on the unique tmdb_id */ });
+        tmdb_id: tmdbSelectedShow.id, title: showName, network, collection: activeTabId
+      }]).catch(() => { /* ignore duplicate-key errors on the unique (collection, tmdb_id) */ });
     }
 
     showSaved();
@@ -1607,7 +1609,7 @@ async function refreshShows() {
   previewEl.innerHTML = `<div class="tmdb-loading">Checking for new seasons…</div>`;
 
   try {
-    const trackedShows = await sbFetch('GET', `othertv_shows?select=*`, null);
+    const trackedShows = await sbFetch('GET', `othertv_shows?collection=eq.${encodeURIComponent(activeTabId)}&select=*`, null);
     if (!trackedShows || trackedShows.length === 0) {
       previewEl.innerHTML = `<div class="tmdb-no-results">No shows added via search yet — nothing to refresh.</div>`;
       return;
