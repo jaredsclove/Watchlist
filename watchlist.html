@@ -49,6 +49,11 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .save-status.visible { opacity: 1; }
 
 /* ── Tabs ── */
+.media-switch { background: var(--bg); padding: 10px 24px 0; display: flex; gap: 8px; }
+.media-switch-btn { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 18px; font-size: 14px; font-weight: 500; color: var(--text2); cursor: pointer; transition: all 0.15s; }
+.media-switch-btn:hover { color: var(--text); }
+.media-switch-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
 .tabs { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 0; overflow-x: auto; }
 .tab { padding: 10px 18px; font-size: 13px; font-weight: 500; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: color 0.15s, border-color 0.15s; user-select: none; }
 .tab:hover { color: var(--text); }
@@ -190,6 +195,32 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .pending-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; background: var(--orange-bg); color: var(--orange); border: 1px solid #4d2a10; margin-left: 5px; vertical-align: middle; }
 .new-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); margin-left: 5px; vertical-align: middle; }
 .confirmed-lbl { font-size: 11px; color: var(--text3); }
+
+/* ── Movie-specific: condensed single row, inline tags, "more" popover ── */
+.movie-row-condensed td { padding-top: 9px; padding-bottom: 9px; }
+.inline-tags { display: inline-flex; gap: 4px; margin-left: 8px; flex-wrap: wrap; vertical-align: middle; }
+.ww-tag { display: inline-block; padding: 1px 8px; border-radius: 20px; font-size: 10px; font-weight: 500; background: var(--purple-bg); color: var(--purple); border: 1px solid #3a1555; font-family: inherit; }
+.ww-tag-clickable { cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.ww-tag-clickable:hover { background: var(--purple); color: var(--bg); border-color: var(--purple); }
+.collection-tag { display: inline-block; padding: 1px 7px; border-radius: 20px; font-size: 10px; font-weight: 500; background: var(--teal-bg); color: var(--teal); border: 1px solid #0d3830; font-family: inherit; }
+.collection-tag-clickable { cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.collection-tag-clickable:hover { background: var(--teal); color: var(--bg); border-color: var(--teal); }
+
+.more-cell { position: relative; }
+.more-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius); width: 28px; height: 28px; font-size: 14px; line-height: 1; color: var(--text2); cursor: pointer; }
+.more-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.more-popover { position: absolute; z-index: 60; top: 100%; right: 0; margin-top: 4px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; min-width: 190px; box-shadow: 0 6px 18px rgba(0,0,0,0.45); text-align: left; }
+.popover-section-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+.ww-options-grid { display: flex; flex-direction: column; gap: 6px; }
+.ww-option { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }
+.ww-option input { accent-color: var(--accent); }
+.popover-action { display: block; width: 100%; text-align: left; background: none; border: 1px solid var(--teal); border-radius: var(--radius); padding: 5px 9px; font-size: 11px; color: var(--teal); cursor: pointer; }
+.popover-action:hover { background: var(--teal-bg); }
+
+.movie-card-condensed .card-top { position: relative; }
+.card-row-actions { display: flex; gap: 6px; align-items: center; }
+
 .empty-row td { text-align: center; padding: 2.5rem; color: var(--text3); font-size: 13px; }
 
 .btn { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 14px; color: var(--text); font-size: 13px; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
@@ -201,6 +232,24 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .tmdb-search-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .tmdb-search-row input { flex: 1; min-width: 160px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; color: var(--text); font-size: 13px; outline: none; }
 .tmdb-search-row input:focus { border-color: var(--accent); }
+.tmdb-universe-row { margin-top: 6px; }
+.universe-link { background: none; border: none; padding: 0; font-size: 11px; color: var(--text3); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.universe-link:hover { color: var(--text2); }
+.universe-sep { font-size: 11px; color: var(--text3); margin: 0 6px; }
+.person-collection-prompt { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); }
+.person-collection-prompt input { flex: 1; min-width: 140px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 10px; color: var(--text); font-size: 13px; outline: none; }
+.person-collection-prompt input:focus { border-color: var(--accent); }
+.person-match-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; transition: border-color 0.15s; margin-top: 6px; }
+.person-match-item:hover { border-color: var(--accent); }
+.person-match-photo { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: var(--border); flex-shrink: 0; }
+.person-match-info { flex: 1; min-width: 0; }
+.person-match-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.person-match-known { font-size: 11px; color: var(--text2); }
+.person-role-options { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.person-role-option { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
+.person-role-option input { accent-color: var(--accent); }
+.collection-refresh-link { background: none; border: none; padding: 0; font-size: 11px; color: var(--text3); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; margin-left: 4px; }
+.collection-refresh-link:hover { color: var(--text2); }
 .tmdb-result-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
 .tmdb-result-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; transition: border-color 0.15s; }
 .tmdb-result-item:hover { border-color: var(--accent); }
@@ -226,6 +275,7 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .tmdb-refresh-summary { margin-top: 10px; font-size: 13px; color: var(--text2); }
 .tmdb-loading { font-size: 13px; color: var(--text3); padding: 10px 0; }
 .tmdb-no-results { font-size: 13px; color: var(--text3); padding: 10px 0; }
+.tmdb-collection-note { font-size: 12px; color: var(--teal); background: var(--teal-bg); border: 1px solid #0d3830; border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; }
 
 .add-form { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-top: 16px; }
 .add-form-title { font-size: 13px; font-weight: 500; margin-bottom: 12px; color: var(--text); }
@@ -260,6 +310,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 @media (max-width: 700px) {
   .main { padding: 12px; }
   .tabs { padding: 0 12px; }
+  .media-switch { padding: 8px 12px 0; }
+  .media-switch-btn { flex: 1; text-align: center; }
 
   #desktopTable { display: none; }
   .card-list { display: flex; }
@@ -302,6 +354,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   </div>
 </div>
 
+<div class="media-switch" id="mediaSwitch"></div>
+
 <div class="tabs" id="tabBar"></div>
 
 <div class="main">
@@ -314,7 +368,7 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   <div id="tmdbPanel" class="tmdb-panel" style="display:none"></div>
 
   <table id="desktopTable">
-    <thead>
+    <thead id="tableHead">
       <tr>
         <th>Show &amp; Season</th>
         <th>Theme</th>
@@ -366,6 +420,7 @@ const COLLECTIONS = [
     id: 'disney',
     label: 'Disney+',
     icon: '🎬',
+    mediaType: 'tv',
     themes: ['Marvel','Star Wars','Fantasy','Sci-Fi','Action','Drama','Animation','Family','Musical','Horror','Documentary','Reality','Comedy'],
     years: ['1984','1985','1986','2003','2005','2008','2009','2010','2011','2012','2013','2014','2015','2016','2017','2018','2019','2020','2021','2022','2023','2024','2025','2026','2027'],
     defaults: [
@@ -545,6 +600,7 @@ const COLLECTIONS = [
     id: '90day',
     label: '90 Day',
     icon: '💍',
+    mediaType: 'tv',
     themes: ['Main Show','Happily Ever After','Before the 90 Days','The Other Way','Spinoff','Tell All','Documentary'],
     years: ['2014','2015','2016','2017','2018','2019','2020','2021','2022','2023','2024','2025','2026'],
     defaults: [
@@ -626,6 +682,7 @@ const COLLECTIONS = [
     id: 'sheridan',
     label: 'Sheridan',
     icon: '🤠',
+    mediaType: 'tv',
     themes: ['Yellowstone','1883','1923','6666','1944','Dutton Ranch','Marshals','The Madison','Mayor of Kingstown','Tulsa King','Special Ops Lioness','Lawmen Bass Reeves','Landman','Frisco King','Film'],
     years: ['2015','2016','2017','2018','2019','2020','2021','2022','2023','2024','2025','2026','2027'],
     defaults: [
@@ -676,6 +733,7 @@ const COLLECTIONS = [
     id: 'othertv',
     label: 'Other TV',
     icon: '📡',
+    mediaType: 'tv',
     dynamic: true,
     themes: [],
     years: [],
@@ -685,12 +743,50 @@ const COLLECTIONS = [
     id: 'truecrime',
     label: 'True Crime / Docs',
     icon: '🔎',
+    mediaType: 'tv',
     dynamic: true,
+    themes: [],
+    years: [],
+    defaults: []
+  },
+  {
+    id: 'movies',
+    label: 'Movies',
+    icon: '🎞️',
+    mediaType: 'movie',
+    dynamic: true,
+    isMovieTab: true,
     themes: [],
     years: [],
     defaults: []
   }
 ];
+
+const WATCH_WITH_OPTIONS = ['Alone', 'Suzanne', 'Rina', 'Whole Family'];
+
+// ─── Curated universe lists ────────────────────────────────────────────────────
+// Hand-maintained since there's no single TMDB field for "is this part of the MCU".
+// To refresh: ask Claude to check for newly announced/released MCU films and update this list.
+const MCU_MOVIES = [
+  // Phase 1
+  'Iron Man', 'The Incredible Hulk', 'Iron Man 2', 'Thor', 'Captain America: The First Avenger', 'The Avengers',
+  // Phase 2
+  'Iron Man 3', 'Thor: The Dark World', 'Captain America: The Winter Soldier', 'Guardians of the Galaxy',
+  'Avengers: Age of Ultron', 'Ant-Man',
+  // Phase 3
+  'Captain America: Civil War', 'Doctor Strange', 'Guardians of the Galaxy Vol. 2', 'Spider-Man: Homecoming',
+  'Thor: Ragnarok', 'Black Panther', 'Avengers: Infinity War', 'Ant-Man and the Wasp', 'Captain Marvel',
+  'Avengers: Endgame', 'Spider-Man: Far From Home',
+  // Phase 4
+  'Black Widow', 'Shang-Chi and the Legend of the Ten Rings', 'Eternals', 'Spider-Man: No Way Home',
+  'Doctor Strange in the Multiverse of Madness', 'Thor: Love and Thunder', 'Black Panther: Wakanda Forever',
+  // Phase 5
+  'Ant-Man and the Wasp: Quantumania', 'Guardians of the Galaxy Vol. 3', 'The Marvels',
+  'Captain America: Brave New World', 'Thunderbolts*',
+  // Phase 6
+  'The Fantastic Four: First Steps', 'Spider-Man: Brand New Day', 'Avengers: Doomsday', 'Avengers: Secret Wars'
+];
+
 
 // ─── TMDB config ──────────────────────────────────────────────────────────────
 const TMDB_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIyOTJhYjcyNDU0ZDFjYzJhZmExNjhiZjBhZTkxZWIxZCIsIm5iZiI6MTc4NTE2NTk4OS45MTEsInN1YiI6IjZhNjc3OGE1ZmNhODlhNWUxOTk4MDNiZCIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.IlLvRk2FD-eY2I5SKGzLDAqMrBRhh58Zxz_zx62YzRE';
@@ -756,7 +852,8 @@ function networkBadgeStyle(name) {
 
 
 // ─── State ────────────────────────────────────────────────────────────────────
-let activeTabId = COLLECTIONS[0].id;
+let activeMediaType = 'tv'; // 'tv' | 'movie' — controls which tabs are visible
+let activeTabId = COLLECTIONS.find(c => c.mediaType === 'tv').id;
 let tabData = {}; // { [collectionId]: { rows: [], loaded: false, newKeys: [] } }
 let addOpen = false;
 let tmdbSelectedShow = null; // { id, name } — currently previewed TMDB show
@@ -790,11 +887,31 @@ function showError(msg) {
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 function buildTabs() {
   const bar = document.getElementById('tabBar');
-  bar.innerHTML = COLLECTIONS.map(c =>
+  const visibleCollections = COLLECTIONS.filter(c => c.mediaType === activeMediaType);
+  bar.innerHTML = visibleCollections.map(c =>
     `<div class="tab${c.id===activeTabId?' active':''}" onclick="switchTab('${c.id}')">
       <span class="tab-icon">${c.icon}</span>${esc(c.label)}
     </div>`
   ).join('');
+}
+
+function buildMediaSwitch() {
+  const el = document.getElementById('mediaSwitch');
+  if (!el) return;
+  el.innerHTML = `
+    <button class="media-switch-btn${activeMediaType==='tv'?' active':''}" onclick="switchMediaType('tv')">📺 TV</button>
+    <button class="media-switch-btn${activeMediaType==='movie'?' active':''}" onclick="switchMediaType('movie')">🎬 Movies</button>
+  `;
+}
+
+function switchMediaType(type) {
+  if (type === activeMediaType) return;
+  activeMediaType = type;
+  const firstInMode = COLLECTIONS.find(c => c.mediaType === type);
+  if (firstInMode) {
+    switchTab(firstInMode.id);
+  }
+  buildMediaSwitch();
 }
 
 function switchTab(id) {
@@ -900,6 +1017,27 @@ function renderFilters() {
   const themeOpts = themeList.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
   const yearOpts  = yearList.map(y => `<option value="${y}">${y}</option>`).join('');
 
+  let collectionsFilterHtml = '';
+  let watchWithFilterHtml = '';
+  if (col.isMovieTab && td) {
+    const collectionSet = new Set();
+    td.rows.forEach(r => (r.collections || []).forEach(c => collectionSet.add(c)));
+    const collectionList = [...collectionSet].sort();
+    if (collectionList.length > 0) {
+      const collectionOpts = collectionList.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+      collectionsFilterHtml = `
+      <select id="fCollection" onchange="renderTable(); updateCollectionRefreshLink();">
+        <option value="">All collections</option>${collectionOpts}
+      </select>
+      <span id="collectionRefreshLink"></span>`;
+    }
+    const watchWithOpts = WATCH_WITH_OPTIONS.map(w => `<option value="${esc(w)}">${esc(w)}</option>`).join('');
+    watchWithFilterHtml = `
+      <select id="fWatchWith" onchange="renderTable()">
+        <option value="">Watch with: anyone</option>${watchWithOpts}
+      </select>`;
+  }
+
   document.getElementById('filtersRow').innerHTML = `
     <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
       <span>🔍 Search &amp; Filter</span><span id="filterToggleChevron">▾</span>
@@ -913,6 +1051,8 @@ function renderFilters() {
       <select id="fYear" onchange="renderTable()">
         <option value="">All years</option>${yearOpts}
       </select>
+      ${collectionsFilterHtml}
+      ${watchWithFilterHtml}
       <select id="fWatch" onchange="renderTable()">
         <option value="">All statuses</option>
         <option value="unwatched" selected>Not watched</option>
@@ -951,15 +1091,33 @@ function renderFilters() {
   const tmdbPanel = document.getElementById('tmdbPanel');
   if (col.dynamic) {
     tmdbPanel.style.display = 'block';
-    tmdbPanel.innerHTML = `
-      <div class="tmdb-search-row">
-        <input id="tmdbQuery" type="text" placeholder="Search for a show…" onkeydown="if(event.key==='Enter'){searchTMDB();}">
-        <button class="btn btn-accent" onclick="searchTMDB()">Search</button>
-        <button class="btn" onclick="refreshShows()" title="Check for new seasons of shows already on this list">↻ Refresh shows</button>
-      </div>
-      <div id="tmdbResults"></div>
-      <div id="tmdbPreview"></div>
-    `;
+    if (col.isMovieTab) {
+      tmdbPanel.innerHTML = `
+        <div class="tmdb-search-row">
+          <input id="tmdbQuery" type="text" placeholder="Search for a movie…" onkeydown="if(event.key==='Enter'){searchTMDB();}">
+          <button class="btn btn-accent" onclick="searchTMDB()">Search</button>
+          <button class="btn" onclick="refreshCollections()" title="Check your tracked collections/franchises for movies you haven't added yet">↻ Refresh collections</button>
+        </div>
+        <div class="tmdb-universe-row">
+          <button class="universe-link" onclick="pullUniverse('mcu')">+ pull entire MCU</button>
+          <span class="universe-sep">·</span>
+          <button class="universe-link" onclick="togglePersonCollectionPrompt()">+ start a person collection</button>
+        </div>
+        <div id="personCollectionPrompt" style="display:none"></div>
+        <div id="tmdbResults"></div>
+        <div id="tmdbPreview"></div>
+      `;
+    } else {
+      tmdbPanel.innerHTML = `
+        <div class="tmdb-search-row">
+          <input id="tmdbQuery" type="text" placeholder="Search for a show…" onkeydown="if(event.key==='Enter'){searchTMDB();}">
+          <button class="btn btn-accent" onclick="searchTMDB()">Search</button>
+          <button class="btn" onclick="refreshShows()" title="Check for new seasons of shows already on this list">↻ Refresh shows</button>
+        </div>
+        <div id="tmdbResults"></div>
+        <div id="tmdbPreview"></div>
+      `;
+    }
   } else {
     tmdbPanel.style.display = 'none';
     tmdbPanel.innerHTML = '';
@@ -975,6 +1133,8 @@ function renderTable() {
   const fSearch = document.getElementById('fSearch')?.value.trim().toLowerCase() || '';
   const fTheme  = document.getElementById('fTheme')?.value  || '';
   const fYear   = document.getElementById('fYear')?.value   || '';
+  const fCollection = document.getElementById('fCollection')?.value || '';
+  const fWatchWith = document.getElementById('fWatchWith')?.value || '';
   const fWatch  = document.getElementById('fWatch')?.value  || '';
   const fStatus = document.getElementById('fStatus')?.value || '';
 
@@ -986,6 +1146,8 @@ function renderTable() {
   if (fSearch) list = list.filter(r => r.title.toLowerCase().includes(fSearch));
   if (fTheme) list = list.filter(r => r.theme === fTheme);
   if (fYear)  list = list.filter(r => r.date_sort.startsWith(fYear));
+  if (fCollection) list = list.filter(r => (r.collections || []).includes(fCollection));
+  if (fWatchWith) list = list.filter(r => (r.watch_with || []).includes(fWatchWith));
 
   // statsList mirrors list's theme/year/status/search scope, but ignores the
   // watched/unwatched filter — stats should reflect real progress, not be
@@ -1019,15 +1181,47 @@ function renderTable() {
   `;
 
   if (list.length === 0) {
-    document.getElementById('tbody').innerHTML = '<tr class="empty-row"><td colspan="6">No entries match your filters.</td></tr>';
+    const colCount = col.isMovieTab ? 7 : 6;
+    document.getElementById('tbody').innerHTML = `<tr class="empty-row"><td colspan="${colCount}">No entries match your filters.</td></tr>`;
     document.getElementById('cardList').innerHTML = '<div class="empty-row" style="padding:2rem 0">No entries match your filters.</div>';
     return;
   }
 
-  if (col.dynamic) {
+  updateTableHeader(col);
+
+  if (col.dynamic && !col.isMovieTab) {
     renderGroupedTable(list, td);
+  } else if (col.isMovieTab) {
+    renderMoviesTable(list, td);
   } else {
     renderFlatTable(list, td);
+  }
+}
+
+function updateTableHeader(col) {
+  const thead = document.getElementById('tableHead');
+  if (!thead) return;
+  if (col.isMovieTab) {
+    thead.innerHTML = `
+      <tr>
+        <th>Title</th>
+        <th>Genre</th>
+        <th>Release Date</th>
+        <th>Status</th>
+        <th>Watched</th>
+        <th></th>
+        <th></th>
+      </tr>`;
+  } else {
+    thead.innerHTML = `
+      <tr>
+        <th>Show &amp; Season</th>
+        <th>Theme</th>
+        <th>Premiere</th>
+        <th>Status</th>
+        <th>Watched</th>
+        <th></th>
+      </tr>`;
   }
 }
 
@@ -1090,6 +1284,129 @@ function renderFlatTable(list, td) {
   });
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
+}
+
+// ─── Movies rendering (standalone films, with Watch With + Collections tags) ──
+function watchWithPickerHtml(rowId, current) {
+  current = current || [];
+  return WATCH_WITH_OPTIONS.map(opt => {
+    const checked = current.includes(opt) ? 'checked' : '';
+    return `<label class="ww-option"><input type="checkbox" value="${esc(opt)}" ${checked} onchange="toggleWatchWith('${rowId}', '${esc(opt).replace(/'/g,"\\'")}', this.checked)"> ${esc(opt)}</label>`;
+  }).join('');
+}
+
+function renderMoviesTable(list, td) {
+  let html = '', cardHtml = '';
+  list.forEach(r => {
+    const isNew = td.newKeys.includes(r.item_key);
+    const bc = badgeClass(r.theme);
+    const isSkipped = r.status === 'skipped';
+    const isMaybe   = r.status === 'maybe';
+    const statusClass = `s-${r.status}`;
+    const statusOptions = statusOptionsHtml(r.status);
+    const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptions}</select>`;
+    const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
+
+    const watchWith = r.watch_with || [];
+    const collections = r.collections || [];
+    const inlineTagsHtml = [
+      ...collections.map(c => `<button class="collection-tag collection-tag-clickable" onclick="event.stopPropagation(); toggleCollectionFilterFromTag('${esc(c).replace(/'/g,"\\'")}')" title="Filter by this collection">${esc(c)}</button>`),
+      ...watchWith.map(w => `<button class="ww-tag ww-tag-clickable" onclick="event.stopPropagation(); toggleWatchWithFilterFromTag('${esc(w).replace(/'/g,"\\'")}')" title="Filter by this person">${esc(w)}</button>`)
+    ].join('');
+    const pullBtnHtml = r.tmdb_collection_id
+      ? `<button class="popover-action" onclick="openPullCollection('${r.id}', ${r.tmdb_collection_id}, '${esc(r.tmdb_collection_name||'').replace(/'/g,"\\'")}')">🔗 Pull rest of ${esc(r.tmdb_collection_name||'collection')}</button>`
+      : '';
+
+    const morePopover = `
+      <div class="more-popover" id="more-popover-${r.id}" style="display:none">
+        <div class="popover-section-label">Watch with</div>
+        <div class="ww-options-grid">${watchWithPickerHtml(r.id, watchWith)}</div>
+        ${pullBtnHtml ? `<div class="popover-section-label" style="margin-top:8px">Collection</div>${pullBtnHtml}` : ''}
+      </div>`;
+
+    html += `<tr class="${rowClass} movie-row-condensed">
+      <td>
+        <span class="show-title">${esc(r.title)}</span>
+        ${isNew?'<span class="new-tag">New</span>':''}
+        ${inlineTagsHtml ? `<span class="inline-tags">${inlineTagsHtml}</span>` : ''}
+      </td>
+      <td><span class="badge ${bc}">${esc(r.theme)}</span></td>
+      <td class="date-cell">${esc(r.display_date)}</td>
+      <td>${statusCell}</td>
+      <td>${!isSkipped
+        ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓ Watched':'Mark watched'}</button>`
+        : `<span class="confirmed-lbl">—</span>`
+      }</td>
+      <td class="more-cell">
+        <button class="more-btn" onclick="toggleMorePopover('${r.id}')" title="Watch with / collection">⋯</button>
+        ${morePopover}
+      </td>
+      <td><button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button></td>
+    </tr>`;
+
+    cardHtml += `<div class="item-card ${rowClass} movie-card-condensed">
+      <div class="card-top">
+        <div class="card-title-block">
+          <span class="card-title">${esc(r.title)}</span>
+          ${isNew?'<span class="new-tag">New</span>':''}
+          ${inlineTagsHtml ? `<div class="inline-tags">${inlineTagsHtml}</div>` : ''}
+        </div>
+        <div class="card-row-actions">
+          <button class="more-btn" onclick="toggleMorePopover('${r.id}')" title="Watch with / collection">⋯</button>
+          <button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>
+        </div>
+        ${morePopover}
+      </div>
+      <div class="card-meta">
+        <span class="badge ${bc}">${esc(r.theme)}</span>
+        <span class="card-date">${esc(r.display_date)}</span>
+      </div>
+      <div class="card-actions">
+        <select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptions}</select>
+        ${!isSkipped
+          ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓ Watched':'Mark watched'}</button>`
+          : ''
+        }
+      </div>
+    </div>`;
+  });
+  document.getElementById('tbody').innerHTML = html;
+  document.getElementById('cardList').innerHTML = cardHtml;
+}
+
+function toggleMorePopover(rowId) {
+  const el = document.getElementById(`more-popover-${rowId}`);
+  if (!el) return;
+  const isOpen = el.style.display !== 'none';
+  // close any other open popovers first
+  document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
+  el.style.display = isOpen ? 'none' : 'block';
+}
+
+// close any open popover when clicking elsewhere on the page
+document.addEventListener('click', function(e) {
+  if (e.target.closest('.more-popover') || e.target.closest('.more-btn')) return;
+  document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
+});
+
+async function toggleWatchWith(rowId, tag, checked) {
+  const td = tabData[activeTabId];
+  const row = td.rows.find(r => r.id === rowId);
+  if (!row) return;
+  const current = new Set(row.watch_with || []);
+  if (checked) current.add(tag); else current.delete(tag);
+  const updated = [...current];
+  const previous = row.watch_with || [];
+  row.watch_with = updated;
+  try {
+    await sbFetch('PATCH', `${TABLE}?id=eq.${rowId}`, { watch_with: updated });
+    showSaved();
+    renderTable();
+  } catch(e) {
+    row.watch_with = previous;
+    renderTable();
+    showError(e.message);
+  }
 }
 
 // ─── Grouped rendering (Other TV, True Crime/Docs) ────────────────────────────
@@ -1434,11 +1751,15 @@ function renderTMDBPreview() {
   const showKeyBase = tmdbSelectedShow.name.toLowerCase().trim();
 
   if (tmdbSelectedShow.mediaType === 'movie') {
-    const network = (details.production_companies && details.production_companies[0]?.name) || 'Film';
+    const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+    const network = isMoviesTab
+      ? ((details.genres && details.genres[0]?.name) || 'Film')
+      : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
     const key = `${showKeyBase}|film`;
     const alreadyAdded = existingKeys.has(key);
     const date = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
     const runtime = details.runtime ? `${details.runtime} min` : '';
+    const belongsTo = details.belongs_to_collection;
     previewEl.innerHTML = `
       <div class="tmdb-preview">
         <div class="tmdb-preview-header">
@@ -1447,6 +1768,7 @@ function renderTMDBPreview() {
             <div class="tmdb-result-meta">${esc(network)}</div>
           </div>
         </div>
+        ${belongsTo ? `<div class="tmdb-collection-note">🔗 Part of <strong>${esc(belongsTo.name)}</strong> — you can pull the rest of this collection after adding.</div>` : ''}
         <div class="tmdb-season-row ${alreadyAdded?'already-added':''}">
           <input type="checkbox" ${alreadyAdded?'disabled':'checked'} data-season="film" id="szn_film">
           <span class="tmdb-season-name">Film</span>
@@ -1533,10 +1855,17 @@ async function addSelectedTMDBSeasons() {
   if (isMovie) {
     const cb = document.querySelector('#tmdbPreview input[type="checkbox"][data-season="film"]');
     if (!cb || !cb.checked || cb.disabled) { cancelTMDBPreview(); return; }
-    network = (details.production_companies && details.production_companies[0]?.name) || 'Film';
+    // for the Movies tab, use genre as theme; for True Crime/Docs (movies mixed in there) fall back to production company
+    const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+    if (isMoviesTab) {
+      network = (details.genres && details.genres[0]?.name) || 'Film';
+    } else {
+      network = (details.production_companies && details.production_companies[0]?.name) || 'Film';
+    }
     const key = `${showKeyBase}|film`;
     const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
     const dateSort = details.release_date || '2099-01-01';
+    const belongsTo = details.belongs_to_collection;
     toInsert.push({
       collection: activeTabId,
       item_key: key,
@@ -1546,7 +1875,10 @@ async function addSelectedTMDBSeasons() {
       display_date: displayDate,
       date_sort: dateSort,
       watched: false,
-      status: 'confirmed'
+      status: 'confirmed',
+      tmdb_collection_id: belongsTo ? belongsTo.id : null,
+      tmdb_collection_name: belongsTo ? belongsTo.name : null,
+      collections: belongsTo ? [belongsTo.name] : []
     });
   } else {
     network = (details.networks && details.networks[0]?.name) || 'Unknown';
@@ -1592,6 +1924,108 @@ async function addSelectedTMDBSeasons() {
       }]).catch(() => { /* ignore duplicate-key errors on the unique (collection, tmdb_id) */ });
     }
 
+    showSaved();
+    cancelTMDBPreview();
+    renderFilters();
+    renderTable();
+  } catch(e) {
+    showError(e.message);
+  }
+}
+
+// ─── TMDB: Refresh existing shows ─────────────────────────────────────────────
+// ─── Pull entire collection (available anytime from any movie row) ───────────
+async function openPullCollection(rowId, collectionId, collectionName) {
+  // scroll the TMDB panel into view and show loading state
+  const previewEl = document.getElementById('tmdbPreview');
+  const resultsEl = document.getElementById('tmdbResults');
+  if (!previewEl) return;
+  resultsEl.innerHTML = '';
+  document.getElementById('tmdbQuery').value = '';
+  previewEl.innerHTML = `<div class="tmdb-loading">Loading ${esc(collectionName)}…</div>`;
+  previewEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  try {
+    const data = await tmdbFetch(`/collection/${collectionId}`);
+    const movies = (data.parts || []).slice().sort((a,b) => (a.release_date||'9999').localeCompare(b.release_date||'9999'));
+    const existingKeys = new Set((tabData[activeTabId]?.rows || []).map(r => r.item_key));
+
+    const rowsHtml = movies.map(m => {
+      const key = `${m.title.toLowerCase().trim()}|film`;
+      const alreadyAdded = existingKeys.has(key);
+      const date = m.release_date ? formatDisplayDate(m.release_date) : 'TBA';
+      return `<div class="tmdb-season-row ${alreadyAdded?'already-added':''}">
+        <input type="checkbox" ${alreadyAdded?'disabled':'checked'} data-movie-id="${m.id}" id="pull_${m.id}">
+        <span class="tmdb-season-name">${esc(m.title)}</span>
+        <span class="tmdb-season-meta">${esc(date)}</span>
+        ${alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}
+      </div>`;
+    }).join('');
+
+    window.__pullCollectionData = { collectionId, collectionName, movies };
+
+    previewEl.innerHTML = `
+      <div class="tmdb-preview">
+        <div class="tmdb-preview-header">
+          <div class="tmdb-preview-title">${esc(collectionName)}</div>
+        </div>
+        ${rowsHtml || '<div class="tmdb-no-results">No other movies found in this collection.</div>'}
+        <div class="tmdb-preview-actions">
+          <button class="btn btn-accent" onclick="addPulledCollectionMovies()">Add selected</button>
+          <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    previewEl.innerHTML = `<div class="tmdb-no-results">Failed to load collection: ${esc(e.message)}</div>`;
+  }
+}
+
+async function addPulledCollectionMovies() {
+  const data = window.__pullCollectionData;
+  if (!data) return;
+  const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+  const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-movie-id]');
+  const moviesById = {};
+  data.movies.forEach(m => moviesById[m.id] = m);
+
+  const toInsert = [];
+  for (const cb of checkboxes) {
+    if (!cb.checked || cb.disabled) continue;
+    const movieId = parseInt(cb.dataset.movieId, 10);
+    const summary = moviesById[movieId];
+    if (!summary) continue;
+    // fetch full details for genre/runtime accuracy, same as a normal add
+    let details;
+    try { details = await tmdbFetch(`/movie/${movieId}`); } catch(e) { continue; }
+    const network = isMoviesTab
+      ? ((details.genres && details.genres[0]?.name) || 'Film')
+      : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
+    const key = `${summary.title.toLowerCase().trim()}|film`;
+    const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
+    const dateSort = details.release_date || '2099-01-01';
+    toInsert.push({
+      collection: activeTabId,
+      item_key: key,
+      title: summary.title,
+      season: 'Film',
+      theme: network,
+      display_date: displayDate,
+      date_sort: dateSort,
+      watched: false,
+      status: 'confirmed',
+      tmdb_collection_id: data.collectionId,
+      tmdb_collection_name: data.collectionName,
+      collections: [data.collectionName]
+    });
+  }
+
+  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+
+  try {
+    const inserted = await sbFetch('POST', TABLE, toInsert);
+    if (inserted) tabData[activeTabId].rows.push(...inserted);
+    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     showSaved();
     cancelTMDBPreview();
     renderFilters();
@@ -1664,6 +2098,579 @@ async function refreshShows() {
   }
 }
 
+// ─── Movies: Refresh tracked collections/franchises ───────────────────────────
+async function refreshCollections() {
+  const previewEl = document.getElementById('tmdbPreview');
+  const resultsEl = document.getElementById('tmdbResults');
+  resultsEl.innerHTML = '';
+  document.getElementById('tmdbQuery').value = '';
+  previewEl.innerHTML = `<div class="tmdb-loading">Checking your tracked collections…</div>`;
+
+  const td = tabData[activeTabId];
+  const rows = td?.rows || [];
+  const existingKeys = new Set(rows.map(r => r.item_key));
+
+  // distinct collections already represented in this tab's movies
+  const collectionsMap = new Map(); // id -> name
+  rows.forEach(r => {
+    if (r.tmdb_collection_id) collectionsMap.set(r.tmdb_collection_id, r.tmdb_collection_name || 'Collection');
+  });
+
+  if (collectionsMap.size === 0) {
+    previewEl.innerHTML = `<div class="tmdb-no-results">No tracked collections yet — add a movie that belongs to a franchise (e.g. a Marvel or Bourne film) to start tracking one.</div>`;
+    return;
+  }
+
+  try {
+    const newByCollection = [];
+    for (const [collectionId, collectionName] of collectionsMap.entries()) {
+      let data;
+      try { data = await tmdbFetch(`/collection/${collectionId}`); } catch(e) { continue; }
+      const movies = data.parts || [];
+      const newOnes = movies.filter(m => !existingKeys.has(`${m.title.toLowerCase().trim()}|film`));
+      if (newOnes.length > 0) {
+        newByCollection.push({ collectionId, collectionName, newOnes });
+      }
+    }
+
+    if (newByCollection.length === 0) {
+      previewEl.innerHTML = `<div class="tmdb-refresh-summary">✓ Everything's up to date — no new movies found across ${collectionsMap.size} tracked collection${collectionsMap.size===1?'':'s'}.</div>`;
+      return;
+    }
+
+    let html = `<div class="tmdb-preview"><div class="tmdb-preview-title">New movies found</div>`;
+    newByCollection.forEach(({collectionName, newOnes}, idx) => {
+      html += `<div style="margin-top:10px"><div class="tmdb-result-title">${esc(collectionName)}</div>`;
+      newOnes.forEach(m => {
+        const date = m.release_date ? formatDisplayDate(m.release_date) : 'TBA';
+        html += `<div class="tmdb-season-row">
+          <input type="checkbox" checked data-collection-idx="${idx}" data-movie-id="${m.id}">
+          <span class="tmdb-season-name">${esc(m.title)}</span>
+          <span class="tmdb-season-meta">${esc(date)}</span>
+        </div>`;
+      });
+      html += `</div>`;
+    });
+    html += `<div class="tmdb-preview-actions">
+      <button class="btn btn-accent" onclick="addRefreshedCollectionMovies()">Add selected</button>
+      <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
+    </div></div>`;
+    previewEl.innerHTML = html;
+    window.__refreshCollectionsData = newByCollection;
+  } catch(e) {
+    previewEl.innerHTML = `<div class="tmdb-no-results">Refresh failed: ${esc(e.message)}</div>`;
+  }
+}
+
+async function addRefreshedCollectionMovies() {
+  const data = window.__refreshCollectionsData || [];
+  const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+  const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-collection-idx]');
+  const toInsert = [];
+
+  for (const cb of checkboxes) {
+    if (!cb.checked) continue;
+    const idx = parseInt(cb.dataset.collectionIdx, 10);
+    const movieId = parseInt(cb.dataset.movieId, 10);
+    const entry = data[idx];
+    if (!entry) continue;
+    const summary = entry.newOnes.find(m => m.id === movieId);
+    if (!summary) continue;
+    let details;
+    try { details = await tmdbFetch(`/movie/${movieId}`); } catch(e) { continue; }
+    const network = isMoviesTab
+      ? ((details.genres && details.genres[0]?.name) || 'Film')
+      : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
+    const key = `${summary.title.toLowerCase().trim()}|film`;
+    const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
+    const dateSort = details.release_date || '2099-01-01';
+    toInsert.push({
+      collection: activeTabId,
+      item_key: key,
+      title: summary.title,
+      season: 'Film',
+      theme: network,
+      display_date: displayDate,
+      date_sort: dateSort,
+      watched: false,
+      status: 'confirmed',
+      tmdb_collection_id: entry.collectionId,
+      tmdb_collection_name: entry.collectionName,
+      collections: [entry.collectionName]
+    });
+  }
+
+  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+
+  try {
+    const inserted = await sbFetch('POST', TABLE, toInsert);
+    if (inserted) tabData[activeTabId].rows.push(...inserted);
+    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    showSaved();
+    cancelTMDBPreview();
+    renderFilters();
+    renderTable();
+  } catch(e) {
+    showError(e.message);
+  }
+}
+
+// ─── Curated universe pull (MCU, and any future hand-maintained universes) ────
+const UNIVERSE_LISTS = {
+  mcu: { label: 'MCU', titles: MCU_MOVIES }
+};
+
+async function pullUniverse(universeKey) {
+  const universe = UNIVERSE_LISTS[universeKey];
+  if (!universe) return;
+  const resultsEl = document.getElementById('tmdbResults');
+  const previewEl = document.getElementById('tmdbPreview');
+  resultsEl.innerHTML = '';
+  previewEl.innerHTML = `<div class="tmdb-loading">Looking up ${esc(universe.label)} titles…</div>`;
+
+  const td = tabData[activeTabId];
+  const rowsByKey = new Map((td?.rows || []).map(r => [r.item_key, r]));
+  const found = [];
+  const notFound = [];
+  let backfilled = 0;
+
+  for (const title of universe.titles) {
+    const key = `${title.toLowerCase().trim()}|film`;
+    const existingRow = rowsByKey.get(key);
+    if (existingRow) {
+      found.push({ title, alreadyAdded: true });
+      // backfill the universe tag if this row predates the universe-pull feature
+      const currentCollections = existingRow.collections || [];
+      if (!currentCollections.includes(universe.label)) {
+        const updated = [...currentCollections, universe.label];
+        try {
+          await sbFetch('PATCH', `${TABLE}?id=eq.${existingRow.id}`, { collections: updated });
+          existingRow.collections = updated;
+          backfilled++;
+        } catch(e) { /* non-fatal — leave it as-is if the patch fails */ }
+      }
+      continue;
+    }
+    try {
+      const data = await tmdbFetch(`/search/movie?query=${encodeURIComponent(title)}`);
+      const match = (data.results || []).find(m => m.title.toLowerCase() === title.toLowerCase()) || (data.results || [])[0];
+      if (match) {
+        found.push({ title, tmdbId: match.id, releaseDate: match.release_date, alreadyAdded: false });
+      } else {
+        notFound.push(title);
+      }
+    } catch(e) {
+      notFound.push(title);
+    }
+  }
+
+  found.sort((a,b) => (a.releaseDate||'9999').localeCompare(b.releaseDate||'9999'));
+
+  const rowsHtml = found.map(m => {
+    const date = m.releaseDate ? formatDisplayDate(m.releaseDate) : 'TBA';
+    return `<div class="tmdb-season-row ${m.alreadyAdded?'already-added':''}">
+      <input type="checkbox" ${m.alreadyAdded?'disabled':'checked'} data-tmdb-id="${m.tmdbId||''}" data-title="${esc(m.title).replace(/'/g,"\\'")}" id="uni_${m.tmdbId||m.title.replace(/\W/g,'')}">
+      <span class="tmdb-season-name">${esc(m.title)}</span>
+      <span class="tmdb-season-meta">${esc(date)}</span>
+      ${m.alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}
+    </div>`;
+  }).join('');
+
+  const notFoundHtml = notFound.length
+    ? `<div class="tmdb-refresh-summary">Couldn't find on TMDB: ${notFound.map(esc).join(', ')}</div>`
+    : '';
+  const backfillHtml = backfilled > 0
+    ? `<div class="tmdb-refresh-summary">✓ Tagged ${backfilled} already-added movie${backfilled===1?'':'s'} with "${esc(universe.label)}" that were missing it.</div>`
+    : '';
+
+  window.__universePullKey = universeKey;
+
+  previewEl.innerHTML = `
+    <div class="tmdb-preview">
+      <div class="tmdb-preview-header">
+        <div class="tmdb-preview-title">${esc(universe.label)}</div>
+        <div class="tmdb-result-meta">${found.filter(f=>!f.alreadyAdded).length} new, ${found.filter(f=>f.alreadyAdded).length} already on your list</div>
+      </div>
+      ${backfillHtml}
+      ${rowsHtml || '<div class="tmdb-no-results">Nothing found.</div>'}
+      ${notFoundHtml}
+      <div class="tmdb-preview-actions">
+        <button class="btn btn-accent" onclick="addPulledUniverseMovies()">Add selected</button>
+        <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
+      </div>
+    </div>
+  `;
+  if (backfilled > 0) { showSaved(); renderTable(); }
+}
+
+async function addPulledUniverseMovies() {
+  const universeKey = window.__universePullKey;
+  const universe = UNIVERSE_LISTS[universeKey];
+  const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+  const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
+  const toInsert = [];
+
+  for (const cb of checkboxes) {
+    if (!cb.checked || cb.disabled) continue;
+    const tmdbId = cb.dataset.tmdbId;
+    const title = cb.dataset.title;
+    if (!tmdbId) continue;
+    let details;
+    try { details = await tmdbFetch(`/movie/${tmdbId}`); } catch(e) { continue; }
+    const network = isMoviesTab
+      ? ((details.genres && details.genres[0]?.name) || 'Film')
+      : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
+    const key = `${title.toLowerCase().trim()}|film`;
+    const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
+    const dateSort = details.release_date || '2099-01-01';
+    const belongsTo = details.belongs_to_collection;
+    const collections = belongsTo ? [belongsTo.name, universe?.label || universeKey] : [universe?.label || universeKey];
+    toInsert.push({
+      collection: activeTabId,
+      item_key: key,
+      title,
+      season: 'Film',
+      theme: network,
+      display_date: displayDate,
+      date_sort: dateSort,
+      watched: false,
+      status: 'confirmed',
+      tmdb_collection_id: belongsTo ? belongsTo.id : null,
+      tmdb_collection_name: belongsTo ? belongsTo.name : null,
+      collections
+    });
+  }
+
+  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+
+  try {
+    const inserted = await sbFetch('POST', TABLE, toInsert);
+    if (inserted) tabData[activeTabId].rows.push(...inserted);
+    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    showSaved();
+    cancelTMDBPreview();
+    renderFilters();
+    renderTable();
+  } catch(e) {
+    showError(e.message);
+  }
+}
+
+// ─── Person-based collections (director/actor filmographies) ─────────────────
+let personCollectionPromptOpen = false;
+
+function toggleWatchWithFilterFromTag(watchWithName) {
+  const select = document.getElementById('fWatchWith');
+  if (!select) return;
+  const isAlreadySelected = select.value === watchWithName;
+  select.value = isAlreadySelected ? '' : watchWithName;
+  // if the filter row is collapsed (mobile), expand it so the active filter is visible
+  const filtersEl = document.getElementById('filtersRow');
+  if (filtersEl && filtersEl.classList.contains('collapsed')) {
+    filtersEl.classList.remove('collapsed');
+    const chevron = document.getElementById('filterToggleChevron');
+    if (chevron) chevron.textContent = '▴';
+  }
+  renderTable();
+}
+
+function toggleCollectionFilterFromTag(collectionName) {
+  const select = document.getElementById('fCollection');
+  if (!select) return; // filter dropdown not built yet (e.g. no collections tagged at all)
+  const isAlreadySelected = select.value === collectionName;
+  select.value = isAlreadySelected ? '' : collectionName;
+  // if the filter row is collapsed (mobile), expand it so the active filter is visible
+  const filtersEl = document.getElementById('filtersRow');
+  if (filtersEl && filtersEl.classList.contains('collapsed')) {
+    filtersEl.classList.remove('collapsed');
+    const chevron = document.getElementById('filterToggleChevron');
+    if (chevron) chevron.textContent = '▴';
+  }
+  updateCollectionRefreshLink();
+  renderTable();
+}
+
+function updateCollectionRefreshLink() {
+  const select = document.getElementById('fCollection');
+  const linkSpan = document.getElementById('collectionRefreshLink');
+  if (!select || !linkSpan) return;
+  const selected = select.value;
+  if (!selected || selected === UNIVERSE_LISTS.mcu?.label) {
+    // MCU refreshes via its own "pull entire MCU" link, not this one — hide here
+    linkSpan.innerHTML = '';
+    return;
+  }
+  const nameEsc = esc(selected).replace(/'/g,"\\'");
+  linkSpan.innerHTML = `<button class="collection-refresh-link" onclick="refreshPersonCollection('${nameEsc}')">↻ Refresh</button>`;
+}
+
+function togglePersonCollectionPrompt() {
+  personCollectionPromptOpen = !personCollectionPromptOpen;
+  const el = document.getElementById('personCollectionPrompt');
+  if (!el) return;
+  if (personCollectionPromptOpen) {
+    el.style.display = 'block';
+    el.innerHTML = `
+      <div class="person-collection-prompt">
+        <input id="personNameInput" type="text" placeholder="Director or actor name…" onkeydown="if(event.key==='Enter'){searchPersonForCollection();}">
+        <button class="btn btn-accent" onclick="searchPersonForCollection()">Search</button>
+      </div>
+      <div id="personMatchResults"></div>
+    `;
+  } else {
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
+}
+
+async function searchPersonForCollection() {
+  const name = document.getElementById('personNameInput').value.trim();
+  const resultsEl = document.getElementById('personMatchResults');
+  if (!name) return;
+  resultsEl.innerHTML = `<div class="tmdb-loading">Searching…</div>`;
+  try {
+    const data = await tmdbFetch(`/search/person?query=${encodeURIComponent(name)}`);
+    const matches = (data.results || []).slice(0, 5);
+    if (matches.length === 0) {
+      resultsEl.innerHTML = `<div class="tmdb-no-results">No one found matching "${esc(name)}".</div>`;
+      return;
+    }
+    resultsEl.innerHTML = matches.map(p => {
+      const photo = p.profile_path ? `https://image.tmdb.org/t/p/w92${p.profile_path}` : '';
+      const known = (p.known_for || []).map(k => k.title || k.name).filter(Boolean).slice(0,3).join(', ');
+      const nameEsc = esc(p.name).replace(/'/g,"\\'");
+      return `<div class="person-match-item" onclick="selectPersonForCollection(${p.id}, '${nameEsc}')">
+        ${photo ? `<img class="person-match-photo" src="${photo}" alt="">` : '<div class="person-match-photo"></div>'}
+        <div class="person-match-info">
+          <div class="person-match-name">${esc(p.name)}</div>
+          ${known ? `<div class="person-match-known">Known for: ${esc(known)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    resultsEl.innerHTML = `<div class="tmdb-no-results">Search failed: ${esc(e.message)}</div>`;
+  }
+}
+
+async function selectPersonForCollection(personId, personName) {
+  document.getElementById('personMatchResults').innerHTML = '';
+  document.getElementById('personCollectionPrompt').style.display = 'none';
+  personCollectionPromptOpen = false;
+
+  const previewEl = document.getElementById('tmdbPreview');
+  previewEl.innerHTML = `<div class="tmdb-loading">Checking ${esc(personName)}'s credits…</div>`;
+
+  let credits;
+  try {
+    credits = await tmdbFetch(`/person/${personId}/movie_credits`);
+  } catch(e) {
+    previewEl.innerHTML = `<div class="tmdb-no-results">Failed to load credits: ${esc(e.message)}</div>`;
+    return;
+  }
+  const directorCount = (credits.crew || []).filter(c => c.job === 'Director').length;
+  const castCount = (credits.cast || []).length;
+
+  // smart default: if they've directed anything, default to Director; otherwise Actor
+  const defaultRole = directorCount > 0 ? 'director' : 'actor';
+  window.__personPullPending = { personId, personName, credits };
+
+  previewEl.innerHTML = `
+    <div class="tmdb-preview">
+      <div class="tmdb-preview-header">
+        <div class="tmdb-preview-title">${esc(personName)}</div>
+        <div class="tmdb-result-meta">Which credits should count toward this collection?</div>
+      </div>
+      <div class="person-role-options">
+        ${directorCount > 0 ? `<label class="person-role-option"><input type="radio" name="personRole" value="director" ${defaultRole==='director'?'checked':''}> Director only (${directorCount} film${directorCount===1?'':'s'})</label>` : ''}
+        <label class="person-role-option"><input type="radio" name="personRole" value="actor" ${defaultRole==='actor'?'checked':''}> Actor only, lead/major roles (billing ≤ 15)</label>
+        <label class="person-role-option"><input type="radio" name="personRole" value="actor-all"> Actor only, every credited role (${castCount} total — often very noisy)</label>
+        ${directorCount > 0 ? `<label class="person-role-option"><input type="radio" name="personRole" value="both"> Both director and major acting roles</label>` : ''}
+      </div>
+      <div class="tmdb-preview-actions">
+        <button class="btn btn-accent" onclick="confirmPersonRole()">Continue</button>
+        <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+
+async function confirmPersonRole() {
+  const pending = window.__personPullPending;
+  if (!pending) return;
+  const selected = document.querySelector('input[name="personRole"]:checked');
+  const role = selected ? selected.value : 'director';
+  await pullPersonFilmography(pending.personId, pending.personName, /*isNewCollection*/ true, role, pending.credits);
+}
+
+async function pullPersonFilmography(personId, personName, isNewCollection, role, preloadedCredits) {
+
+  const resultsEl = document.getElementById('tmdbResults');
+  const previewEl = document.getElementById('tmdbPreview');
+  resultsEl.innerHTML = '';
+  previewEl.innerHTML = `<div class="tmdb-loading">Loading ${esc(personName)}'s filmography…</div>`;
+
+  const td = tabData[activeTabId];
+  const rowsByKey = new Map((td?.rows || []).map(r => [r.item_key, r]));
+
+  try {
+    const credits = preloadedCredits || await tmdbFetch(`/person/${personId}/movie_credits`);
+    const CAST_ORDER_CUTOFF = 15; // roughly "billed in the main cast", excludes background/cameo noise
+    const asDirector = (credits.crew || []).filter(c => c.job === 'Director');
+    const asMajorCast = (credits.cast || []).filter(c => typeof c.order === 'number' && c.order <= CAST_ORDER_CUTOFF);
+    const asAllCast = credits.cast || [];
+
+    let sourceLists = [];
+    if (role === 'director') sourceLists = [asDirector];
+    else if (role === 'actor') sourceLists = [asMajorCast];
+    else if (role === 'actor-all') sourceLists = [asAllCast];
+    else if (role === 'both') sourceLists = [asDirector, asMajorCast];
+    else sourceLists = [asDirector]; // fallback default
+
+    const merged = new Map();
+    sourceLists.flat().forEach(m => { if (!merged.has(m.id)) merged.set(m.id, m); });
+    const movies = [...merged.values()].sort((a,b) => (a.release_date||'9999').localeCompare(b.release_date||'9999'));
+
+    if (isNewCollection) {
+      // save the collection definition once (including the role filter), so a later refresh
+      // knows who to re-check and applies the same director/actor filter consistently
+      await sbFetch('POST', 'custom_collections', [{ name: personName, tmdb_person_id: personId, role }])
+        .catch(() => { /* ignore if it already exists */ });
+    }
+
+    let backfilled = 0;
+    const found = [];
+    for (const m of movies) {
+      const title = m.title;
+      const key = `${title.toLowerCase().trim()}|film`;
+      const existingRow = rowsByKey.get(key);
+      if (existingRow) {
+        const currentCollections = existingRow.collections || [];
+        if (!currentCollections.includes(personName)) {
+          const updated = [...currentCollections, personName];
+          try {
+            await sbFetch('PATCH', `${TABLE}?id=eq.${existingRow.id}`, { collections: updated });
+            existingRow.collections = updated;
+            backfilled++;
+          } catch(e) { /* non-fatal */ }
+        }
+        found.push({ title, alreadyAdded: true, releaseDate: m.release_date });
+      } else {
+        found.push({ title, tmdbId: m.id, releaseDate: m.release_date, alreadyAdded: false });
+      }
+    }
+
+    const rowsHtml = found.map(m => {
+      const date = m.releaseDate ? formatDisplayDate(m.releaseDate) : 'TBA';
+      return `<div class="tmdb-season-row ${m.alreadyAdded?'already-added':''}">
+        <input type="checkbox" ${m.alreadyAdded?'disabled':'checked'} data-tmdb-id="${m.tmdbId||''}" data-title="${esc(m.title).replace(/'/g,"\\'")}" id="pc_${m.tmdbId||m.title.replace(/\W/g,'')}">
+        <span class="tmdb-season-name">${esc(m.title)}</span>
+        <span class="tmdb-season-meta">${esc(date)}</span>
+        ${m.alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}
+      </div>`;
+    }).join('');
+
+    const backfillHtml = backfilled > 0
+      ? `<div class="tmdb-refresh-summary">✓ Tagged ${backfilled} already-added movie${backfilled===1?'':'s'} with "${esc(personName)}" that were missing it.</div>`
+      : '';
+
+    window.__personPullName = personName;
+
+    previewEl.innerHTML = `
+      <div class="tmdb-preview">
+        <div class="tmdb-preview-header">
+          <div class="tmdb-preview-title">${esc(personName)}</div>
+          <div class="tmdb-result-meta">${found.filter(f=>!f.alreadyAdded).length} new, ${found.filter(f=>f.alreadyAdded).length} already on your list — everything's checked, deselect anything you don't want</div>
+        </div>
+        ${backfillHtml}
+        ${rowsHtml || '<div class="tmdb-no-results">No film credits found.</div>'}
+        <div class="tmdb-preview-actions">
+          <button class="btn btn-accent" onclick="addPulledPersonMovies()">Add selected</button>
+          <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
+        </div>
+      </div>
+    `;
+    if (backfilled > 0) { showSaved(); renderFilters(); renderTable(); }
+  } catch(e) {
+    previewEl.innerHTML = `<div class="tmdb-no-results">Failed to load filmography: ${esc(e.message)}</div>`;
+  }
+}
+
+async function addPulledPersonMovies() {
+  const personName = window.__personPullName;
+  if (!personName) return;
+  const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+  const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
+  const seenKeys = new Set();
+  const toInsert = [];
+
+  for (const cb of checkboxes) {
+    if (!cb.checked || cb.disabled) continue;
+    const tmdbId = cb.dataset.tmdbId;
+    const title = cb.dataset.title;
+    if (!tmdbId) continue;
+    const key = `${title.toLowerCase().trim()}|film`;
+    if (seenKeys.has(key)) continue; // guard against duplicate titles within this batch itself
+    seenKeys.add(key);
+    let details;
+    try { details = await tmdbFetch(`/movie/${tmdbId}`); } catch(e) { continue; }
+    const network = isMoviesTab
+      ? ((details.genres && details.genres[0]?.name) || 'Film')
+      : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
+    const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
+    const dateSort = details.release_date || '2099-01-01';
+    const belongsTo = details.belongs_to_collection;
+    const collections = belongsTo ? [belongsTo.name, personName] : [personName];
+    toInsert.push({
+      collection: activeTabId,
+      item_key: key,
+      title,
+      season: 'Film',
+      theme: network,
+      display_date: displayDate,
+      date_sort: dateSort,
+      watched: false,
+      status: 'confirmed',
+      tmdb_collection_id: belongsTo ? belongsTo.id : null,
+      tmdb_collection_name: belongsTo ? belongsTo.name : null,
+      collections
+    });
+  }
+
+  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+
+  try {
+    const inserted = await sbFetch('POST', TABLE, toInsert);
+    if (inserted) tabData[activeTabId].rows.push(...inserted);
+    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    showSaved();
+    cancelTMDBPreview();
+    renderFilters();
+    renderTable();
+  } catch(e) {
+    if (e.message.includes('23505') || e.message.includes('duplicate key')) {
+      showError(`One or more of these movies is already on your list but wasn't detected in time — try clicking "+ start a person collection" again for a fresh check, or reload the page first.`);
+    } else {
+      showError(e.message);
+    }
+  }
+}
+
+// Refresh a person-linked custom collection (called from the Collections filter area)
+async function refreshPersonCollection(collectionName) {
+  try {
+    const rows = await sbFetch('GET', `custom_collections?name=eq.${encodeURIComponent(collectionName)}&select=*`, null);
+    const entry = (rows || [])[0];
+    if (!entry) {
+      showError(`Couldn't find a linked person for "${collectionName}" — it may be an older collection from before this feature existed.`);
+      return;
+    }
+    await pullPersonFilmography(entry.tmdb_person_id, entry.name, /*isNewCollection*/ false, entry.role || 'director');
+    document.getElementById('tmdbPreview')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch(e) {
+    showError(e.message);
+  }
+}
+
 async function addRefreshedSeasons() {
   const data = window.__refreshData || [];
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-show-idx]');
@@ -1711,6 +2718,7 @@ async function addRefreshedSeasons() {
 }
 
 // ─── Boot ────────────────────────────────────────────────────────────────────
+buildMediaSwitch();
 buildTabs();
 loadTab(activeTabId);
 </script>
