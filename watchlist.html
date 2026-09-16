@@ -185,6 +185,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .status-select.s-confirmed { background-color: var(--green-dim); color: var(--green); border-color: var(--green-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%233ecf8e' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-highpriority { background-color: var(--gold-bg); color: var(--gold); border-color: var(--gold-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e8b923' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-watching  { background-color: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%234f7ef8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-caughtup { background-color: var(--teal-bg); color: var(--teal); border-color: #0d3830; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%231abc9c' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-complete { background-color: var(--surface2); color: var(--text2); border-color: var(--border2); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%238b91a8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-pending   { background-color: var(--orange-bg); color: var(--orange); border-color: #4d2a10; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e67e22' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-maybe     { background-color: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23d4a843' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-skipped   { background-color: var(--red-bg); color: var(--red); border-color: #4d1520; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
@@ -253,6 +255,7 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .tmdb-result-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
 .tmdb-result-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; transition: border-color 0.15s; }
 .tmdb-result-item:hover { border-color: var(--accent); }
+.tmdb-result-item-selected { border-color: var(--accent); background: var(--accent-dim); }
 .tmdb-result-poster { width: 32px; height: 46px; object-fit: cover; border-radius: 3px; background: var(--border); flex-shrink: 0; }
 .tmdb-result-info { flex: 1; min-width: 0; }
 .tmdb-result-title { font-size: 13px; font-weight: 500; color: var(--text); }
@@ -260,7 +263,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .tmdb-type-tag { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; }
 .tmdb-type-tv { background: var(--blue-bg); color: var(--blue); }
 .tmdb-type-movie { background: var(--amber-bg); color: var(--amber); }
-.tmdb-preview { margin-top: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+.tmdb-preview { margin-top: 0; background: var(--surface2); border: 1px solid var(--accent); border-radius: var(--radius); padding: 12px; }
+#tmdbInlinePreview { margin: -2px 0 2px; padding-left: 8px; border-left: 2px solid var(--accent); }
 .tmdb-preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
 .tmdb-preview-title { font-size: 14px; font-weight: 600; color: var(--text); }
 .tmdb-specials-toggle { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -867,6 +871,17 @@ function badgeClass(theme) {
 function esc(t) {
   return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+const WATCHABLE_SOON_DAYS = 60;
+function hasWatchableSoonSeason(seasons) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() + WATCHABLE_SOON_DAYS);
+  const cutoffStr = cutoff.toISOString().substring(0,10);
+  return seasons.some(s => {
+    if (s.watched || s.status === 'skipped') return false;
+    if (/TBA/i.test(s.display_date)) return false;
+    return s.date_sort <= cutoffStr;
+  });
+}
 function parseDate(d) {
   const mo = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
   const m = d.match(/(\w+)\s+(\d+),?\s+(\d{4})/);
@@ -1063,6 +1078,8 @@ function renderFilters() {
         <option value="confirmed">On list only</option>
         <option value="highpriority">High Priority only</option>
         <option value="watching">Watching only</option>
+        <option value="caughtup">Caught Up only</option>
+        <option value="complete">Complete only</option>
         <option value="pending">Pending only</option>
         <option value="maybe">Maybe Later only</option>
         <option value="skipped">Skipped</option>
@@ -1140,8 +1157,16 @@ function renderTable() {
 
   let list = [...td.rows].sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
-  if (fStatus) list = list.filter(r => r.status === fStatus);
-  else list = list.filter(r => r.status !== 'skipped');
+  if (fStatus === 'caughtup') {
+    // "Caught Up" is a derived, show-level status — never stored on an individual
+    // row. At the row level we pass through the same rows as "Watching" and let
+    // the grouped renderer split Watching vs. Caught Up by derived aggStatus.
+    list = list.filter(r => r.status === 'watching');
+  } else if (fStatus) {
+    list = list.filter(r => r.status === fStatus);
+  } else {
+    list = list.filter(r => r.status !== 'skipped');
+  }
 
   if (fSearch) list = list.filter(r => r.title.toLowerCase().includes(fSearch));
   if (fTheme) list = list.filter(r => r.theme === fTheme);
@@ -1190,7 +1215,7 @@ function renderTable() {
   updateTableHeader(col);
 
   if (col.dynamic && !col.isMovieTab) {
-    renderGroupedTable(list, td);
+    renderGroupedTable(list, td, fStatus);
   } else if (col.isMovieTab) {
     renderMoviesTable(list, td);
   } else {
@@ -1411,17 +1436,26 @@ async function toggleWatchWith(rowId, tag, checked) {
 
 // ─── Grouped rendering (Other TV, True Crime/Docs) ────────────────────────────
 function statusOptionsHtml(status) {
+  // "Caught Up" is purely derived (see hasWatchableSoonSeason) — never a status the
+  // user sets directly. It only appears in this list when it's already the current
+  // value (so the dropdown displays it correctly), and it's disabled so re-selecting
+  // it can't happen — Supabase should never end up with a literal "caughtup" status.
+  const caughtUpOption = status === 'caughtup'
+    ? `<option value="caughtup" selected disabled>✓ Caught Up</option>`
+    : '';
   return `
     <option value="confirmed"${status==='confirmed'?' selected':''}>✓ On List</option>
     <option value="highpriority"${status==='highpriority'?' selected':''}>⭐ High Priority</option>
     <option value="watching"${status==='watching'?' selected':''}>▶ Watching</option>
+    ${caughtUpOption}
+    <option value="complete"${status==='complete'?' selected':''}>◆ Complete</option>
     <option value="pending"${status==='pending'?' selected':''}>⏳ Pending</option>
     <option value="maybe"${status==='maybe'?' selected':''}>? Maybe Later</option>
     <option value="skipped"${status==='skipped'?' selected':''}>✕ Skipped</option>
   `;
 }
 
-function renderGroupedTable(list, td) {
+function renderGroupedTable(list, td, fStatus) {
   // Which shows are visible is determined by the filtered `list`.
   // But once a show is visible, its season breakdown/progress/badges should reflect
   // ALL of that show's seasons in Supabase — not just the ones surviving the current filter —
@@ -1435,14 +1469,20 @@ function renderGroupedTable(list, td) {
     groups.get(r.title).push(r);
   });
 
-  // Status priority order for sorting: Watching > High Priority > On List > Pending > Maybe Later > Skipped
-  const statusOrder = ['watching','highpriority','confirmed','pending','maybe','skipped'];
+  // Status priority order for sorting: Watching > Caught Up > High Priority > On List > Complete > Pending > Maybe Later > Skipped
+  const statusOrder = ['watching','caughtup','highpriority','confirmed','complete','pending','maybe','skipped'];
 
   const groupList = [...groups.entries()].map(([title, seasons]) => {
     seasons.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     // aggregate status: earliest-priority status present among this show's seasons
     let aggStatus = 'confirmed';
     for (const s of statusOrder) { if (seasons.some(x => x.status === s)) { aggStatus = s; break; } }
+    // derived (not stored): a show sitting at "Watching" with nothing actually
+    // watchable soon displays as "Caught Up" instead — purely a display state,
+    // the underlying stored status remains "watching" in Supabase.
+    if (aggStatus === 'watching' && !hasWatchableSoonSeason(seasons)) {
+      aggStatus = 'caughtup';
+    }
     return { title, seasons, earliestDate: seasons[0].date_sort, aggStatus };
   });
   groupList.sort((a,b) => {
@@ -1451,8 +1491,17 @@ function renderGroupedTable(list, td) {
     return a.earliestDate.localeCompare(b.earliestDate);
   });
 
+  // "Watching" and "Caught Up" are split by the derived aggStatus — a group's real
+  // stored status stays "watching" in Supabase either way; only the filtered view differs.
+  let visibleGroupList = groupList;
+  if (fStatus === 'watching') {
+    visibleGroupList = groupList.filter(group => group.aggStatus === 'watching');
+  } else if (fStatus === 'caughtup') {
+    visibleGroupList = groupList.filter(group => group.aggStatus === 'caughtup');
+  }
+
   let html = '', cardHtml = '';
-  groupList.forEach(group => {
+  visibleGroupList.forEach(group => {
     const { title, seasons, aggStatus } = group;
     const isExpanded = expandedShows.has(title);
     const network = seasons[0].theme || 'Unknown';
@@ -1537,8 +1586,13 @@ function renderGroupedTable(list, td) {
     </div>`;
   });
 
-  document.getElementById('tbody').innerHTML = html;
-  document.getElementById('cardList').innerHTML = cardHtml;
+  const emptyMsg = fStatus === 'caughtup'
+    ? `Nothing caught up right now — shows land here once they're marked Watching with no new episodes due in the next 60 days.`
+    : fStatus === 'watching'
+      ? `Nothing watchable in the next 60 days — check "Caught Up" or "All (except Skipped)" to see everything marked Watching.`
+      : `No entries match your filters.`;
+  document.getElementById('tbody').innerHTML = html || `<tr class="empty-row"><td colspan="6">${emptyMsg}</td></tr>`;
+  document.getElementById('cardList').innerHTML = cardHtml || `<div class="empty-row" style="padding:2rem 0">${emptyMsg}</div>`;
 }
 
 function toggleShowExpand(title) {
@@ -1689,8 +1743,7 @@ async function addEntry() {
 async function searchTMDB() {
   const query = document.getElementById('tmdbQuery').value.trim();
   const resultsEl = document.getElementById('tmdbResults');
-  document.getElementById('tmdbPreview').innerHTML = '';
-  tmdbSelectedShow = null;
+  cancelTMDBPreview();
   if (!query) { resultsEl.innerHTML = ''; return; }
 
   resultsEl.innerHTML = `<div class="tmdb-loading">Searching…</div>`;
@@ -1708,7 +1761,7 @@ async function searchTMDB() {
       resultsEl.innerHTML = `<div class="tmdb-no-results">No results found for "${esc(query)}".</div>`;
       return;
     }
-    resultsEl.innerHTML = `<div class="tmdb-result-list">${results.map(r => {
+    resultsEl.innerHTML = `<div class="tmdb-result-list">${results.map((r, idx) => {
       const isMovie = r.mediaType === 'movie';
       const title = isMovie ? r.title : r.name;
       const dateStr = isMovie ? r.release_date : r.first_air_date;
@@ -1716,7 +1769,8 @@ async function searchTMDB() {
       const poster = r.poster_path ? `https://image.tmdb.org/t/p/w92${r.poster_path}` : '';
       const typeTag = isMovie ? '<span class="tmdb-type-tag tmdb-type-movie">Film</span>' : '<span class="tmdb-type-tag tmdb-type-tv">Series</span>';
       const titleEsc = esc(title).replace(/'/g,"\\'");
-      return `<div class="tmdb-result-item" onclick="selectTMDBShow(${r.id}, '${titleEsc}', '${r.mediaType}')">
+      const resultId = `tmdbResult_${idx}_${r.id}`;
+      return `<div class="tmdb-result-item" id="${resultId}" onclick="selectTMDBShow(${r.id}, '${titleEsc}', '${r.mediaType}', '${resultId}')">
         ${poster ? `<img class="tmdb-result-poster" src="${poster}" alt="">` : '<div class="tmdb-result-poster"></div>'}
         <div class="tmdb-result-info">
           <div class="tmdb-result-title">${esc(title)} ${typeTag}</div>
@@ -1729,23 +1783,44 @@ async function searchTMDB() {
   }
 }
 
-async function selectTMDBShow(tmdbId, name, mediaType) {
+async function selectTMDBShow(tmdbId, name, mediaType, resultId) {
   tmdbSelectedShow = { id: tmdbId, name, mediaType: mediaType || 'tv' };
   tmdbShowSpecials = false;
-  const previewEl = document.getElementById('tmdbPreview');
-  previewEl.innerHTML = `<div class="tmdb-loading">Loading details…</div>`;
+
+  // remove any previously-inserted inline preview (only one can be open at a time)
+  const oldPreview = document.getElementById('tmdbInlinePreview');
+  if (oldPreview) oldPreview.remove();
+
+  // insert a fresh preview container directly after the clicked result row
+  const resultRow = document.getElementById(resultId);
+  const previewContainer = document.createElement('div');
+  previewContainer.id = 'tmdbInlinePreview';
+  if (resultRow) {
+    resultRow.insertAdjacentElement('afterend', previewContainer);
+    resultRow.classList.add('tmdb-result-item-selected');
+  } else {
+    // fallback: no matching row found (e.g. called from elsewhere) — use the old fixed panel
+    const fallback = document.getElementById('tmdbPreview');
+    if (fallback) fallback.appendChild(previewContainer);
+  }
+
+  previewContainer.innerHTML = `<div class="tmdb-loading">Loading details…</div>`;
   try {
     const details = await tmdbFetch(`/${tmdbSelectedShow.mediaType}/${tmdbId}`);
     tmdbSelectedShow.details = details;
     renderTMDBPreview();
   } catch(e) {
-    previewEl.innerHTML = `<div class="tmdb-no-results">Failed to load details: ${esc(e.message)}</div>`;
+    previewContainer.innerHTML = `<div class="tmdb-no-results">Failed to load details: ${esc(e.message)}</div>`;
   }
 }
 
+function getTMDBPreviewContainer() {
+  return document.getElementById('tmdbInlinePreview') || document.getElementById('tmdbPreview');
+}
+
 function renderTMDBPreview() {
-  const previewEl = document.getElementById('tmdbPreview');
-  if (!tmdbSelectedShow || !tmdbSelectedShow.details) return;
+  const previewEl = getTMDBPreviewContainer();
+  if (!previewEl || !tmdbSelectedShow || !tmdbSelectedShow.details) return;
   const details = tmdbSelectedShow.details;
   const existingKeys = new Set((tabData[activeTabId]?.rows || []).map(r => r.item_key));
   const showKeyBase = tmdbSelectedShow.name.toLowerCase().trim();
@@ -1830,9 +1905,24 @@ function toggleTMDBSpecials() {
 
 function cancelTMDBPreview() {
   tmdbSelectedShow = null;
-  document.getElementById('tmdbPreview').innerHTML = '';
-  document.getElementById('tmdbResults').innerHTML = '';
-  document.getElementById('tmdbQuery').value = '';
+  const inlinePreview = document.getElementById('tmdbInlinePreview');
+  if (inlinePreview) inlinePreview.remove();
+  document.querySelectorAll('.tmdb-result-item-selected').forEach(el => el.classList.remove('tmdb-result-item-selected'));
+  // fallback panel (used only if no result row match was found) — clear it too, harmless if empty
+  const fallback = document.getElementById('tmdbPreview');
+  if (fallback) fallback.innerHTML = '';
+}
+
+// Full reset after a successful add: unlike cancelTMDBPreview (which intentionally
+// keeps the results list visible so the user can pick a different match), this
+// clears everything — preview, results list, and the search box — since the task
+// that produced those results is now done.
+function resetTMDBSearchUI() {
+  cancelTMDBPreview();
+  const resultsEl = document.getElementById('tmdbResults');
+  if (resultsEl) resultsEl.innerHTML = '';
+  const queryEl = document.getElementById('tmdbQuery');
+  if (queryEl) queryEl.value = '';
 }
 
 function formatDisplayDate(isoDate) {
@@ -1853,7 +1943,8 @@ async function addSelectedTMDBSeasons() {
   let network;
 
   if (isMovie) {
-    const cb = document.querySelector('#tmdbPreview input[type="checkbox"][data-season="film"]');
+    const previewContainer = getTMDBPreviewContainer();
+    const cb = previewContainer?.querySelector('input[type="checkbox"][data-season="film"]');
     if (!cb || !cb.checked || cb.disabled) { cancelTMDBPreview(); return; }
     // for the Movies tab, use genre as theme; for True Crime/Docs (movies mixed in there) fall back to production company
     const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
@@ -1882,7 +1973,8 @@ async function addSelectedTMDBSeasons() {
     });
   } else {
     network = (details.networks && details.networks[0]?.name) || 'Unknown';
-    const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-season]');
+    const previewContainer = getTMDBPreviewContainer();
+    const checkboxes = previewContainer ? previewContainer.querySelectorAll('input[type="checkbox"][data-season]') : [];
     const seasonsByNum = {};
     (details.seasons || []).forEach(s => seasonsByNum[s.season_number] = s);
 
@@ -1925,7 +2017,7 @@ async function addSelectedTMDBSeasons() {
     }
 
     showSaved();
-    cancelTMDBPreview();
+    resetTMDBSearchUI();
     renderFilters();
     renderTable();
   } catch(e) {
@@ -1937,6 +2029,7 @@ async function addSelectedTMDBSeasons() {
 // ─── Pull entire collection (available anytime from any movie row) ───────────
 async function openPullCollection(rowId, collectionId, collectionName) {
   // scroll the TMDB panel into view and show loading state
+  cancelTMDBPreview();
   const previewEl = document.getElementById('tmdbPreview');
   const resultsEl = document.getElementById('tmdbResults');
   if (!previewEl) return;
@@ -2027,7 +2120,7 @@ async function addPulledCollectionMovies() {
     if (inserted) tabData[activeTabId].rows.push(...inserted);
     tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     showSaved();
-    cancelTMDBPreview();
+    resetTMDBSearchUI();
     renderFilters();
     renderTable();
   } catch(e) {
@@ -2037,6 +2130,7 @@ async function addPulledCollectionMovies() {
 
 // ─── TMDB: Refresh existing shows ─────────────────────────────────────────────
 async function refreshShows() {
+  cancelTMDBPreview();
   const previewEl = document.getElementById('tmdbPreview');
   const resultsEl = document.getElementById('tmdbResults');
   resultsEl.innerHTML = '';
@@ -2100,6 +2194,7 @@ async function refreshShows() {
 
 // ─── Movies: Refresh tracked collections/franchises ───────────────────────────
 async function refreshCollections() {
+  cancelTMDBPreview();
   const previewEl = document.getElementById('tmdbPreview');
   const resultsEl = document.getElementById('tmdbResults');
   resultsEl.innerHTML = '';
@@ -2207,7 +2302,7 @@ async function addRefreshedCollectionMovies() {
     if (inserted) tabData[activeTabId].rows.push(...inserted);
     tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     showSaved();
-    cancelTMDBPreview();
+    resetTMDBSearchUI();
     renderFilters();
     renderTable();
   } catch(e) {
@@ -2223,6 +2318,7 @@ const UNIVERSE_LISTS = {
 async function pullUniverse(universeKey) {
   const universe = UNIVERSE_LISTS[universeKey];
   if (!universe) return;
+  cancelTMDBPreview();
   const resultsEl = document.getElementById('tmdbResults');
   const previewEl = document.getElementById('tmdbPreview');
   resultsEl.innerHTML = '';
@@ -2348,7 +2444,7 @@ async function addPulledUniverseMovies() {
     if (inserted) tabData[activeTabId].rows.push(...inserted);
     tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     showSaved();
-    cancelTMDBPreview();
+    resetTMDBSearchUI();
     renderFilters();
     renderTable();
   } catch(e) {
@@ -2456,6 +2552,7 @@ async function selectPersonForCollection(personId, personName) {
   document.getElementById('personMatchResults').innerHTML = '';
   document.getElementById('personCollectionPrompt').style.display = 'none';
   personCollectionPromptOpen = false;
+  cancelTMDBPreview();
 
   const previewEl = document.getElementById('tmdbPreview');
   previewEl.innerHTML = `<div class="tmdb-loading">Checking ${esc(personName)}'s credits…</div>`;
@@ -2503,7 +2600,7 @@ async function confirmPersonRole() {
 }
 
 async function pullPersonFilmography(personId, personName, isNewCollection, role, preloadedCredits) {
-
+  cancelTMDBPreview();
   const resultsEl = document.getElementById('tmdbResults');
   const previewEl = document.getElementById('tmdbPreview');
   resultsEl.innerHTML = '';
@@ -2643,7 +2740,7 @@ async function addPulledPersonMovies() {
     if (inserted) tabData[activeTabId].rows.push(...inserted);
     tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     showSaved();
-    cancelTMDBPreview();
+    resetTMDBSearchUI();
     renderFilters();
     renderTable();
   } catch(e) {
@@ -2709,7 +2806,7 @@ async function addRefreshedSeasons() {
     if (inserted) tabData[activeTabId].rows.push(...inserted);
     tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     showSaved();
-    cancelTMDBPreview();
+    resetTMDBSearchUI();
     renderFilters();
     renderTable();
   } catch(e) {
