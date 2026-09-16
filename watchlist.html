@@ -32,6 +32,10 @@
   --gold: #e8b923;
   --gold-bg: #332705;
   --gold-border: #6b4e0a;
+  --purple: #a855f7;
+  --purple-bg: #2a1145;
+  --teal: #14b8a6;
+  --teal-bg: #0a2e29;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --radius: 6px;
   --radius-lg: 10px;
@@ -68,6 +72,8 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .stat-label { font-size: 11px; color: var(--text2); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
 .progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 6px; width: 80px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
+.mini-progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 4px; width: 70px; overflow: hidden; }
+.mini-progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
 
 .filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
 .filter-label { font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 2px; }
@@ -101,12 +107,16 @@ thead th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 50
 
 .show-group-row { cursor: pointer; }
 .show-group-row:hover td { background: var(--surface); }
-.expand-chevron { display: inline-block; width: 14px; color: var(--text3); font-size: 11px; }
+.expand-chevron { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface2); border: 1px solid var(--border); color: var(--text2); font-size: 10px; flex-shrink: 0; transition: border-color 0.15s, color 0.15s; }
+.show-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.show-title-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.show-group-row:hover .expand-chevron, .card-top:hover .expand-chevron { border-color: var(--accent); color: var(--accent); }
 .sub-row td { background: var(--bg); }
+.sub-row td:first-child { border-left: 2px solid var(--accent-dim); }
 .sub-row .season-lbl { color: var(--text2); font-size: 13px; }
 
 .card-subseasons { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
-.card-subseason-row { display: flex; flex-direction: column; gap: 6px; }
+.card-subseason-row { display: flex; flex-direction: column; gap: 6px; border-left: 2px solid var(--accent-dim); padding-left: 10px; }
 .card-subseason-row .card-actions { display: flex; gap: 6px; align-items: center; }
 .card-subseason-row .status-select { flex: 1; }
 .card-subseason-row .watch-btn { flex: 1; text-align: center; }
@@ -115,7 +125,9 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .show-title { font-weight: 500; color: var(--text); }
 .season-lbl { color: var(--text2); font-size: 12px; }
 
-.badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; white-space: nowrap; border: 1px solid transparent; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; white-space: nowrap; border: 1px solid transparent; font-family: inherit; }
+.badge-clickable { cursor: pointer; transition: filter 0.15s, opacity 0.15s; }
+.badge-clickable:hover { filter: brightness(1.35); }
 
 /* ── Disney+ badges ── */
 .b-Marvel       { background: #2d1015; color: #c0392b; border-color: #4d1520; }
@@ -200,11 +212,16 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 
 /* ── Movie-specific: condensed single row, inline tags, "more" popover ── */
 .movie-row-condensed td { padding-top: 9px; padding-bottom: 9px; }
+.tags-cell { max-width: 160px; }
+.tags-cell .collection-tag, .tags-cell .ww-tag { margin: 2px 3px 2px 0; }
+.tags-empty { color: var(--text3); font-size: 12px; }
 .inline-tags { display: inline-flex; gap: 4px; margin-left: 8px; flex-wrap: wrap; vertical-align: middle; }
 .ww-tag { display: inline-block; padding: 1px 8px; border-radius: 20px; font-size: 10px; font-weight: 500; background: var(--purple-bg); color: var(--purple); border: 1px solid #3a1555; font-family: inherit; }
+.ww-tag::before { content: '👤 '; }
 .ww-tag-clickable { cursor: pointer; transition: background 0.15s, border-color 0.15s; }
 .ww-tag-clickable:hover { background: var(--purple); color: var(--bg); border-color: var(--purple); }
-.collection-tag { display: inline-block; padding: 1px 7px; border-radius: 20px; font-size: 10px; font-weight: 500; background: var(--teal-bg); color: var(--teal); border: 1px solid #0d3830; font-family: inherit; }
+.collection-tag { display: inline-block; padding: 1px 7px 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--teal-bg); color: var(--teal); border: 1px solid #0d3830; font-family: inherit; }
+.collection-tag::before { content: '🎬 '; }
 .collection-tag-clickable { cursor: pointer; transition: background 0.15s, border-color 0.15s; }
 .collection-tag-clickable:hover { background: var(--teal); color: var(--bg); border-color: var(--teal); }
 
@@ -824,7 +841,15 @@ const NETWORK_COLORS = {
   'Hulu': '#1ce783',
   'Paramount+': '#0064ff', 'Paramount Plus': '#0064ff',
   'BBC': '#c0392b', 'BBC One': '#c0392b', 'BBC Two': '#c0392b',
-  'A&E': '#5b8def', 'Investigation Discovery': '#5b8def', 'ID': '#5b8def'
+  'A&E': '#5b8def', 'Investigation Discovery': '#5b8def', 'ID': '#5b8def',
+  // Movie genres (TMDB) — deliberate colors so common ones don't look randomly hashed
+  'Action': '#f1c40f', 'Adventure': '#f39c12', 'Animation': '#e91e8c',
+  'Comedy': '#8bc34a', 'Crime': '#c0392b', 'Documentary': '#7f8c8d',
+  'Drama': '#e67e22', 'Family': '#27ae60', 'Fantasy': '#9b59b6',
+  'History': '#a0522d', 'Horror': '#c0392b', 'Music': '#e84393',
+  'Mystery': '#5b6ee1', 'Romance': '#ff6b9d', 'Science Fiction': '#1abc9c',
+  'TV Movie': '#8e8e93', 'Thriller': '#c0392b', 'War': '#7f5539',
+  'Western': '#a0522d'
 };
 function networkColor(name) {
   if (NETWORK_COLORS[name]) return NETWORK_COLORS[name];
@@ -870,6 +895,12 @@ function badgeClass(theme) {
 }
 function esc(t) {
   return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+// TMDB collection names always come back as "X Collection" (e.g. "The Avengers Collection").
+// Strip the trailing "Collection" for cleaner display everywhere a collection name is shown or stored.
+function cleanCollectionName(name) {
+  if (!name) return name;
+  return name.replace(/\s+Collection\s*$/i, '').trim();
 }
 const WATCHABLE_SOON_DAYS = 60;
 function hasWatchableSoonSeason(seasons) {
@@ -1036,7 +1067,7 @@ function renderFilters() {
   let watchWithFilterHtml = '';
   if (col.isMovieTab && td) {
     const collectionSet = new Set();
-    td.rows.forEach(r => (r.collections || []).forEach(c => collectionSet.add(c)));
+    td.rows.forEach(r => (r.collections || []).forEach(c => collectionSet.add(cleanCollectionName(c))));
     const collectionList = [...collectionSet].sort();
     if (collectionList.length > 0) {
       const collectionOpts = collectionList.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
@@ -1171,7 +1202,7 @@ function renderTable() {
   if (fSearch) list = list.filter(r => r.title.toLowerCase().includes(fSearch));
   if (fTheme) list = list.filter(r => r.theme === fTheme);
   if (fYear)  list = list.filter(r => r.date_sort.startsWith(fYear));
-  if (fCollection) list = list.filter(r => (r.collections || []).includes(fCollection));
+  if (fCollection) list = list.filter(r => (r.collections || []).some(c => cleanCollectionName(c) === fCollection));
   if (fWatchWith) list = list.filter(r => (r.watch_with || []).includes(fWatchWith));
 
   // statsList mirrors list's theme/year/status/search scope, but ignores the
@@ -1206,7 +1237,7 @@ function renderTable() {
   `;
 
   if (list.length === 0) {
-    const colCount = col.isMovieTab ? 7 : 6;
+    const colCount = col.isMovieTab ? 9 : 6;
     document.getElementById('tbody').innerHTML = `<tr class="empty-row"><td colspan="${colCount}">No entries match your filters.</td></tr>`;
     document.getElementById('cardList').innerHTML = '<div class="empty-row" style="padding:2rem 0">No entries match your filters.</div>';
     return;
@@ -1231,6 +1262,8 @@ function updateTableHeader(col) {
       <tr>
         <th>Title</th>
         <th>Genre</th>
+        <th>Collection</th>
+        <th>Watch With</th>
         <th>Release Date</th>
         <th>Status</th>
         <th>Watched</th>
@@ -1275,7 +1308,7 @@ function renderFlatTable(list, td) {
         <span class="season-lbl"> · ${esc(r.season)}</span>
         ${isNew?'<span class="new-tag">New</span>':''}
       </td>
-      <td><span class="badge ${bc}">${esc(r.theme)}</span></td>
+      <td><button class="badge ${bc} badge-clickable" onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this theme">${esc(r.theme)}</button></td>
       <td class="date-cell">${esc(r.display_date)}</td>
       <td>${statusCell}</td>
       <td>${!isSkipped
@@ -1295,7 +1328,7 @@ function renderFlatTable(list, td) {
         <button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>
       </div>
       <div class="card-meta">
-        <span class="badge ${bc}">${esc(r.theme)}</span>
+        <button class="badge ${bc} badge-clickable" onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this theme">${esc(r.theme)}</button>
         <span class="card-date">${esc(r.display_date)}</span>
       </div>
       <div class="card-actions">
@@ -1324,7 +1357,7 @@ function renderMoviesTable(list, td) {
   let html = '', cardHtml = '';
   list.forEach(r => {
     const isNew = td.newKeys.includes(r.item_key);
-    const bc = badgeClass(r.theme);
+    const genreBadgeStyle = networkBadgeStyle(r.theme);
     const isSkipped = r.status === 'skipped';
     const isMaybe   = r.status === 'maybe';
     const statusClass = `s-${r.status}`;
@@ -1333,13 +1366,14 @@ function renderMoviesTable(list, td) {
     const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
 
     const watchWith = r.watch_with || [];
-    const collections = r.collections || [];
-    const inlineTagsHtml = [
-      ...collections.map(c => `<button class="collection-tag collection-tag-clickable" onclick="event.stopPropagation(); toggleCollectionFilterFromTag('${esc(c).replace(/'/g,"\\'")}')" title="Filter by this collection">${esc(c)}</button>`),
-      ...watchWith.map(w => `<button class="ww-tag ww-tag-clickable" onclick="event.stopPropagation(); toggleWatchWithFilterFromTag('${esc(w).replace(/'/g,"\\'")}')" title="Filter by this person">${esc(w)}</button>`)
-    ].join('');
+    const collections = (r.collections || []).map(cleanCollectionName);
+    const collectionTagsHtml = collections.map(c => `<button class="collection-tag collection-tag-clickable" onclick="event.stopPropagation(); toggleCollectionFilterFromTag('${esc(c).replace(/'/g,"\\'")}')" title="Filter by this collection">${esc(c)}</button>`).join('');
+    const watchWithTagsHtml = watchWith.map(w => `<button class="ww-tag ww-tag-clickable" onclick="event.stopPropagation(); toggleWatchWithFilterFromTag('${esc(w).replace(/'/g,"\\'")}')" title="Filter by this person">${esc(w)}</button>`).join('');
+    // mobile card view keeps tags combined near the title — no column grid to align there anyway
+    const inlineTagsHtml = collectionTagsHtml + watchWithTagsHtml;
+    const cleanCollectionDisplayName = cleanCollectionName(r.tmdb_collection_name || '');
     const pullBtnHtml = r.tmdb_collection_id
-      ? `<button class="popover-action" onclick="openPullCollection('${r.id}', ${r.tmdb_collection_id}, '${esc(r.tmdb_collection_name||'').replace(/'/g,"\\'")}')">🔗 Pull rest of ${esc(r.tmdb_collection_name||'collection')}</button>`
+      ? `<button class="popover-action" onclick="openPullCollection('${r.id}', ${r.tmdb_collection_id}, '${esc(cleanCollectionDisplayName).replace(/'/g,"\\'")}')">🔗 Pull rest of ${esc(cleanCollectionDisplayName||'collection')}</button>`
       : '';
 
     const morePopover = `
@@ -1353,9 +1387,10 @@ function renderMoviesTable(list, td) {
       <td>
         <span class="show-title">${esc(r.title)}</span>
         ${isNew?'<span class="new-tag">New</span>':''}
-        ${inlineTagsHtml ? `<span class="inline-tags">${inlineTagsHtml}</span>` : ''}
       </td>
-      <td><span class="badge ${bc}">${esc(r.theme)}</span></td>
+      <td><button class="badge badge-clickable" ${genreBadgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this genre">${esc(r.theme)}</button></td>
+      <td class="tags-cell">${collectionTagsHtml || '<span class="tags-empty">—</span>'}</td>
+      <td class="tags-cell">${watchWithTagsHtml || '<span class="tags-empty">—</span>'}</td>
       <td class="date-cell">${esc(r.display_date)}</td>
       <td>${statusCell}</td>
       <td>${!isSkipped
@@ -1383,7 +1418,7 @@ function renderMoviesTable(list, td) {
         ${morePopover}
       </div>
       <div class="card-meta">
-        <span class="badge ${bc}">${esc(r.theme)}</span>
+        <button class="badge badge-clickable" ${genreBadgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this genre">${esc(r.theme)}</button>
         <span class="card-date">${esc(r.display_date)}</span>
       </div>
       <div class="card-actions">
@@ -1513,7 +1548,11 @@ function renderGroupedTable(list, td, fStatus) {
 
     const aggClass = `s-${aggStatus}`;
 
+    const progressPct = totalCount > 0 ? Math.round(watchedCount/totalCount*100) : 0;
     const progressLabel = totalCount > 0 ? `${watchedCount}/${totalCount} watched` : `${seasons.length} season${seasons.length===1?'':'s'}`;
+    const progressBarHtml = totalCount > 0
+      ? `<div class="mini-progress-track"><div class="mini-progress-fill" style="width:${progressPct}%"></div></div>`
+      : '';
     const titleEsc = esc(title).replace(/'/g,"\\'");
     const masterStatusCell = `<select class="status-select ${aggClass}" onclick="event.stopPropagation()" onchange="event.stopPropagation(); setShowStatus('${titleEsc}', this.value)">${statusOptionsHtml(aggStatus)}</select>`;
 
@@ -1541,29 +1580,34 @@ function renderGroupedTable(list, td, fStatus) {
 
     html += `<tr class="show-group-row" onclick="toggleShowExpand('${titleEsc}')">
       <td>
-        <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
-        <span class="show-title">${esc(title)}</span>
-        ${anyNew?'<span class="new-tag">New</span>':''}
+        <div class="show-title-row">
+          <div class="show-title-left">
+            <span class="show-title">${esc(title)}</span>
+            ${anyNew?'<span class="new-tag">New</span>':''}
+          </div>
+          <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
+        </div>
       </td>
-      <td><span class="badge" ${badgeStyle}>${esc(network)}</span></td>
+      <td><button class="badge badge-clickable" ${badgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(network).replace(/'/g,"\\'")}')" title="Filter by this network">${esc(network)}</button></td>
       <td class="date-cell">${esc(seasons[0].display_date)}</td>
       <td>${masterStatusCell}</td>
-      <td class="card-date">${progressLabel}</td>
-      <td></td>
+      <td class="card-date">${progressLabel}${progressBarHtml}</td>
+      <td><span class="confirmed-lbl">—</span></td>
     </tr>`;
     if (isExpanded) html += seasonRowsHtml;
 
     cardHtml += `<div class="item-card show-group-card">
       <div class="card-top" onclick="toggleShowExpand('${titleEsc}')" style="cursor:pointer">
         <div class="card-title-block">
-          <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
           <span class="card-title">${esc(title)}</span>
           ${anyNew?'<span class="new-tag">New</span>':''}
         </div>
+        <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
       </div>
       <div class="card-meta">
-        <span class="badge" ${badgeStyle}>${esc(network)}</span>
+        <button class="badge badge-clickable" ${badgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(network).replace(/'/g,"\\'")}')" title="Filter by this network">${esc(network)}</button>
         <span class="card-date">${esc(seasons[0].display_date)} · ${progressLabel}</span>
+        ${progressBarHtml}
       </div>
       <div class="card-actions" onclick="event.stopPropagation()">
         ${masterStatusCell}
@@ -1843,7 +1887,7 @@ function renderTMDBPreview() {
             <div class="tmdb-result-meta">${esc(network)}</div>
           </div>
         </div>
-        ${belongsTo ? `<div class="tmdb-collection-note">🔗 Part of <strong>${esc(belongsTo.name)}</strong> — you can pull the rest of this collection after adding.</div>` : ''}
+        ${belongsTo ? `<div class="tmdb-collection-note">🔗 Part of <strong>${esc(cleanCollectionName(belongsTo.name))}</strong> — you can pull the rest of this collection after adding.</div>` : ''}
         <div class="tmdb-season-row ${alreadyAdded?'already-added':''}">
           <input type="checkbox" ${alreadyAdded?'disabled':'checked'} data-season="film" id="szn_film">
           <span class="tmdb-season-name">Film</span>
@@ -1968,8 +2012,8 @@ async function addSelectedTMDBSeasons() {
       watched: false,
       status: 'confirmed',
       tmdb_collection_id: belongsTo ? belongsTo.id : null,
-      tmdb_collection_name: belongsTo ? belongsTo.name : null,
-      collections: belongsTo ? [belongsTo.name] : []
+      tmdb_collection_name: belongsTo ? cleanCollectionName(belongsTo.name) : null,
+      collections: belongsTo ? [cleanCollectionName(belongsTo.name)] : []
     });
   } else {
     network = (details.networks && details.networks[0]?.name) || 'Unknown';
@@ -2420,7 +2464,7 @@ async function addPulledUniverseMovies() {
     const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
     const dateSort = details.release_date || '2099-01-01';
     const belongsTo = details.belongs_to_collection;
-    const collections = belongsTo ? [belongsTo.name, universe?.label || universeKey] : [universe?.label || universeKey];
+    const collections = belongsTo ? [cleanCollectionName(belongsTo.name), universe?.label || universeKey] : [universe?.label || universeKey];
     toInsert.push({
       collection: activeTabId,
       item_key: key,
@@ -2432,7 +2476,7 @@ async function addPulledUniverseMovies() {
       watched: false,
       status: 'confirmed',
       tmdb_collection_id: belongsTo ? belongsTo.id : null,
-      tmdb_collection_name: belongsTo ? belongsTo.name : null,
+      tmdb_collection_name: belongsTo ? cleanCollectionName(belongsTo.name) : null,
       collections
     });
   }
@@ -2454,6 +2498,21 @@ async function addPulledUniverseMovies() {
 
 // ─── Person-based collections (director/actor filmographies) ─────────────────
 let personCollectionPromptOpen = false;
+
+function toggleThemeFilterFromTag(theme) {
+  const select = document.getElementById('fTheme');
+  if (!select) return;
+  const isAlreadySelected = select.value === theme;
+  select.value = isAlreadySelected ? '' : theme;
+  // if the filter row is collapsed (mobile), expand it so the active filter is visible
+  const filtersEl = document.getElementById('filtersRow');
+  if (filtersEl && filtersEl.classList.contains('collapsed')) {
+    filtersEl.classList.remove('collapsed');
+    const chevron = document.getElementById('filterToggleChevron');
+    if (chevron) chevron.textContent = '▴';
+  }
+  renderTable();
+}
 
 function toggleWatchWithFilterFromTag(watchWithName) {
   const select = document.getElementById('fWatchWith');
@@ -2716,7 +2775,7 @@ async function addPulledPersonMovies() {
     const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
     const dateSort = details.release_date || '2099-01-01';
     const belongsTo = details.belongs_to_collection;
-    const collections = belongsTo ? [belongsTo.name, personName] : [personName];
+    const collections = belongsTo ? [cleanCollectionName(belongsTo.name), personName] : [personName];
     toInsert.push({
       collection: activeTabId,
       item_key: key,
@@ -2728,7 +2787,7 @@ async function addPulledPersonMovies() {
       watched: false,
       status: 'confirmed',
       tmdb_collection_id: belongsTo ? belongsTo.id : null,
-      tmdb_collection_name: belongsTo ? belongsTo.name : null,
+      tmdb_collection_name: belongsTo ? cleanCollectionName(belongsTo.name) : null,
       collections
     });
   }
