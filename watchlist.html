@@ -40,6 +40,41 @@
   --radius: 6px;
   --radius-lg: 10px;
 }
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface2: #eef0f4;
+    --border: #dde1e8;
+    --border2: #c7cdd8;
+    --text: #1a1d26;
+    --text2: #5c6377;
+    --text3: #8a90a3;
+    --accent: #3763d8;
+    --accent-dim: #e4eaff;
+    --green: #1a9e6a;
+    --green-dim: #e3f8ee;
+    --green-border: #a3e2c6;
+    --red: #c0392b;
+    --red-bg: #fbe8e6;
+    --orange: #c86a10;
+    --orange-bg: #fdefdd;
+    --amber: #9c7a1f;
+    --amber-bg: #fbf3dc;
+    --amber-border: #e8d59a;
+    --blue: #3763d8;
+    --blue-bg: #e4eaff;
+    --blue-border: #b7c6f7;
+    --gold: #9c7a1f;
+    --gold-bg: #fbf3dc;
+    --gold-border: #e8d59a;
+    --purple: #8b2fd6;
+    --purple-bg: #f2e6fc;
+    --teal: #0f8a7a;
+    --teal-bg: #dff5f1;
+  }
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; min-height: 100vh; line-height: 1.5; }
 
@@ -94,6 +129,11 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 }
 .search-input:focus { border-color: var(--accent); width: 220px; }
 .search-input::placeholder { color: var(--text3); }
+@media (prefers-color-scheme: light) {
+  .search-input {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a90a3' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  }
+}
 select { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; color: var(--text); font-size: 13px; cursor: pointer; outline: none; }
 select:focus { border-color: var(--accent); }
 
@@ -128,6 +168,9 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; white-space: nowrap; border: 1px solid transparent; font-family: inherit; }
 .badge-clickable { cursor: pointer; transition: filter 0.15s, opacity 0.15s; }
 .badge-clickable:hover { filter: brightness(1.35); }
+@media (prefers-color-scheme: light) {
+  .badge-clickable:hover { filter: brightness(0.92) saturate(1.15); }
+}
 
 /* ── Disney+ badges ── */
 .b-Marvel       { background: #2d1015; color: #c0392b; border-color: #4d1520; }
@@ -169,6 +212,43 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .b-FriscoKing       { background: #2d0820; color: #e84393; border-color: #4d1035; }
 .b-Film             { background: #1a1c20; color: #8b91a8; border-color: #2a2c30; }
 
+@media (prefers-color-scheme: light) {
+  .b-Marvel { background: #f8e9e7; color: #a12d20; border-color: #e3b0ab; }
+  .b-StarWars { background: #e7f0f8; color: #1864a9; border-color: #abc8e3; }
+  .b-Fantasy { background: #f2eaf6; color: #723988; border-color: #d0b1dd; }
+  .b-SciFi { background: #e7f8f5; color: #14ae8f; border-color: #abe3d8; }
+  .b-Drama { background: #f8efe7; color: #b25c10; border-color: #e3c5ab; }
+  .b-Animation { background: #f8e7f0; color: #b50d68; border-color: #e3abc9; }
+  .b-Action { background: #f8f5e7; color: #bb9706; border-color: #e3d8ab; }
+  .b-Family { background: #e7f8ee; color: #20a157; border-color: #abe3c3; }
+  .b-Musical { background: #f8e7ef; color: #b0115e; border-color: #e3abc6; }
+  .b-Horror { background: #f8e9e7; color: #a12d20; border-color: #e3b0ab; }
+  .b-Documentary { background: #eff0f1; color: #5b6667; border-color: #c4caca; }
+  .b-Reality { background: #f8f2e7; color: #bd7605; border-color: #e3cdab; }
+  .b-Comedy { background: #f0f7e8; color: #65942e; border-color: #c9e3ab; }
+  .b-MainShow { background: #f8e9e7; color: #a12d20; border-color: #e3b0ab; }
+  .b-HappilyEverAfter { background: #f8efe7; color: #b25c10; border-color: #e3c5ab; }
+  .b-BeforeThe90Days { background: #f2eaf6; color: #723988; border-color: #d0b1dd; }
+  .b-TheOtherWay { background: #e7f0f8; color: #1864a9; border-color: #abc8e3; }
+  .b-Spinoff { background: #e7f8f5; color: #14ae8f; border-color: #abe3d8; }
+  .b-TellAll { background: #f8f5e7; color: #bb9706; border-color: #e3d8ab; }
+  .b-Yellowstone { background: #f8f3e7; color: #a17a21; border-color: #e3d2ab; }
+  .b-1883 { background: #f8ede7; color: #9a4d28; border-color: #e3bdab; }
+  .b-1923 { background: #f8f2e7; color: #bd7d05; border-color: #e3cfab; }
+  .b-6666 { background: #e7f8f1; color: #249e67; border-color: #abe3ca; }
+  .b-1944 { background: #f2eaf6; color: #723988; border-color: #d0b1dd; }
+  .b-DuttonRanch { background: #f8efe7; color: #b25c10; border-color: #e3c5ab; }
+  .b-Marshals { background: #e7f0f8; color: #1864a9; border-color: #abc8e3; }
+  .b-TheMadison { background: #f8e7f0; color: #b50d68; border-color: #e3abc9; }
+  .b-MayorofKingstown { background: #f8e9e7; color: #a12d20; border-color: #e3b0ab; }
+  .b-TulsaKing { background: #f8f5e7; color: #bb9706; border-color: #e3d8ab; }
+  .b-SpecialOpsLioness { background: #e7f8f5; color: #14ae8f; border-color: #abe3d8; }
+  .b-LawmenBassReeves { background: #f8f2e7; color: #bd7d05; border-color: #e3cfab; }
+  .b-Landman { background: #e7f0f8; color: #25649d; border-color: #abc8e3; }
+  .b-FriscoKing { background: #f8e7ef; color: #b0115e; border-color: #e3abc6; }
+  .b-Film { background: #eeeef2; color: #52586f; border-color: #bfc2cf; }
+}
+
 .date-cell { color: var(--text2); font-size: 12px; white-space: nowrap; }
 .watch-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 11px; cursor: pointer; font-size: 12px; color: var(--text2); transition: all 0.15s; white-space: nowrap; }
 .watch-btn:hover { border-color: var(--border2); color: var(--text); }
@@ -197,11 +277,24 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .status-select.s-confirmed { background-color: var(--green-dim); color: var(--green); border-color: var(--green-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%233ecf8e' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-highpriority { background-color: var(--gold-bg); color: var(--gold); border-color: var(--gold-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e8b923' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-watching  { background-color: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%234f7ef8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
-.status-select.s-caughtup { background-color: var(--teal-bg); color: var(--teal); border-color: #0d3830; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%231abc9c' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-caughtup { background-color: var(--teal-bg); color: var(--teal); border-color: var(--teal); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%231abc9c' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-complete { background-color: var(--surface2); color: var(--text2); border-color: var(--border2); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%238b91a8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
-.status-select.s-pending   { background-color: var(--orange-bg); color: var(--orange); border-color: #4d2a10; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e67e22' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-pending   { background-color: var(--orange-bg); color: var(--orange); border-color: var(--orange); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e67e22' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-maybe     { background-color: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23d4a843' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
-.status-select.s-skipped   { background-color: var(--red-bg); color: var(--red); border-color: #4d1520; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-skipped   { background-color: var(--red-bg); color: var(--red); border-color: var(--red); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+
+@media (prefers-color-scheme: light) {
+  /* Dropdown arrow SVGs are hardcoded data-URIs (can't use CSS variables inside them),
+     so light mode needs its own darker-tinted arrow colors matching the light palette above. */
+  .status-select.s-confirmed    { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%231a9e6a' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+  .status-select.s-highpriority { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%239c7a1f' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+  .status-select.s-watching     { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%233763d8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+  .status-select.s-caughtup     { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%230f8a7a' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+  .status-select.s-complete     { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%235c6377' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+  .status-select.s-pending      { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c86a10' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+  .status-select.s-maybe        { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%239c7a1f' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+  .status-select.s-skipped      { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+}
 
 .del-btn { background: none; border: none; cursor: pointer; color: var(--text3); padding: 2px 6px; border-radius: 4px; font-size: 16px; line-height: 1; transition: color 0.15s; }
 .del-btn:hover { color: var(--red); }
@@ -246,6 +339,9 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .btn:hover { background: var(--border); }
 .btn-accent { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
 .btn-accent:hover { background: #253a7a; }
+@media (prefers-color-scheme: light) {
+  .btn-accent:hover { background: #c9d6fc; }
+}
 
 .tmdb-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; margin-bottom: 16px; }
 .tmdb-search-row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -874,9 +970,28 @@ function hslToHex(h, s, l) {
   const toHex = v => Math.round((v+m)*255).toString(16).padStart(2,'0');
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
+function isLightMode() {
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+}
 function networkBadgeStyle(name) {
   const color = networkColor(name);
+  if (isLightMode()) {
+    // light mode: darken the text color for contrast on white, use a much lighter
+    // background tint (higher opacity of a pale mix) instead of the near-transparent
+    // dark-mode wash, which would be nearly invisible on a white page
+    const darkened = darkenHex(color, 0.35);
+    return `style="background:${color}1a; color:${darkened}; border-color:${color}66"`;
+  }
   return `style="background:${color}22; color:${color}; border-color:${color}55"`;
+}
+function darkenHex(hex, amount) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.round(r * (1 - amount));
+  g = Math.round(g * (1 - amount));
+  b = Math.round(b * (1 - amount));
+  const toHex = v => v.toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
 
