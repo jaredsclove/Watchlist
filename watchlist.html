@@ -86,6 +86,25 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 .save-status { font-size: 11px; color: var(--green); opacity: 0; transition: opacity 0.3s; }
 .save-status.visible { opacity: 1; }
+.backup-age { font-size: 11px; color: var(--text3); white-space: nowrap; }
+.backup-age.warn { color: var(--amber); }
+.backup-age.urgent { color: var(--orange); font-weight: 600; }
+
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto; }
+.modal-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+.modal-section { margin-bottom: 14px; }
+.modal-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+.modal-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.modal-row:last-child { border-bottom: none; }
+.modal-warning { background: var(--red-bg); border: 1px solid var(--red); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; color: var(--red); margin-bottom: 14px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.btn-danger { background: var(--red-bg); border: 1px solid var(--red); color: var(--red); border-radius: var(--radius); padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn-danger:hover { background: var(--red); color: #fff; }
+.btn-danger:disabled { opacity: 0.5; cursor: default; }
+.modal-progress { font-size: 13px; color: var(--text2); padding: 8px 0; }
+.modal-error { background: var(--red-bg); border: 1px solid var(--red); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; color: var(--red); white-space: pre-wrap; }
+.modal-success { background: var(--green-dim); border: 1px solid var(--green-border); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; color: var(--green); }
 
 /* ── Tabs ── */
 .media-switch { background: var(--bg); padding: 10px 24px 0; display: flex; gap: 8px; }
@@ -467,8 +486,16 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
     <div><div class="logo-text">Watchlist Tracker</div></div>
   </div>
   <div class="topbar-right">
+    <span class="backup-age" id="backupAgeIndicator"></span>
+    <button class="btn" id="backupBtn" onclick="handleBackupClick()">⬇ Backup</button>
+    <button class="btn" id="restoreBtn" onclick="handleRestoreClick()">⬆ Restore</button>
+    <input type="file" id="restoreFileInput" accept="application/json" style="display:none" onchange="handleRestoreFileSelected(event)">
     <span class="save-status" id="saveStatus">Saved ✓</span>
   </div>
+</div>
+
+<div id="restoreModalOverlay" class="modal-overlay" style="display:none">
+  <div class="modal-box" id="restoreModalBox"></div>
 </div>
 
 <div class="media-switch" id="mediaSwitch"></div>
@@ -529,6 +556,158 @@ async function sbFetch(method, path, body) {
   }
   const text = await res.text();
   return text ? JSON.parse(text) : null;
+}
+
+// ─── Backup / Restore: paginated fetch ────────────────────────────────────────
+// Fetches every row of a table via Range-header pagination, using the
+// Content-Range response header (e.g. "0-249/1284") to know the true total
+// row count rather than guessing from page size. Deterministic id.asc order
+// so paging and later verification are stable.
+const BACKUP_PAGE_SIZE = 500;
+async function fetchAllRows(table) {
+  const allRows = [];
+  let offset = 0;
+  let total = null;
+
+  while (total === null || offset < total) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*&order=id.asc`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Range-Unit': 'items',
+        'Range': `${offset}-${offset + BACKUP_PAGE_SIZE - 1}`,
+        'Prefer': 'count=exact'
+      }
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Failed fetching ${table} (offset ${offset}): ${res.status} ${err}`);
+    }
+    const page = await res.json();
+    allRows.push(...page);
+
+    const contentRange = res.headers.get('content-range'); // e.g. "0-249/1284" or "0-49/*"
+    if (contentRange) {
+      const totalPart = contentRange.split('/')[1];
+      if (totalPart && totalPart !== '*') total = parseInt(totalPart, 10);
+    }
+    if (page.length === 0) break; // safety valve against an infinite loop — no more rows to advance by
+    if (total === null) {
+      // no usable count returned — fall back to "stop when a page comes back short"
+      if (page.length < BACKUP_PAGE_SIZE) break;
+    }
+    // Advance by exactly how many rows this page actually contained, not the
+    // requested page size — a short/irregular page can never cause a gap or
+    // skip in subsequent requests.
+    offset += page.length;
+  }
+
+  // If Supabase reported an exact total via Content-Range, the fetched row
+  // count must match it exactly, or the backup is not provably complete.
+  if (total !== null && allRows.length !== total) {
+    throw new Error(`Incomplete fetch of ${table}: expected ${total} rows but retrieved ${allRows.length}. Aborting — this backup would not be complete.`);
+  }
+
+  return allRows;
+}
+
+// Compares every field present on `expected` (a backup row) against the
+// corresponding field on `restored` (the same row re-fetched after restore).
+// Uses exact value equality — no null/undefined normalization — per-field,
+// so key order in the two objects is irrelevant (we iterate expected's own
+// keys and look up the same key on restored, rather than comparing the
+// objects as a whole). Returns an array of field names that differ.
+function compareRowFields(expected, restored) {
+  const diffFields = [];
+  for (const key of Object.keys(expected)) {
+    const a = expected[key];
+    const b = restored[key];
+    // JSON.stringify on a single value (not a whole object) is safe here —
+    // it has no key-order ambiguity for primitives, and for arrays
+    // (watch_with, collections) it correctly catches real order/content
+    // differences, which are genuine data differences, not false positives.
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      diffFields.push(key);
+    }
+  }
+  return diffFields;
+}
+
+const BACKUP_TABLES = ['watchlist_items', 'othertv_shows', 'custom_collections'];
+const BACKUP_FORMAT = 'watchlist-tracker-backup';
+const BACKUP_FORMAT_VERSION = 1;
+const RESTORE_BATCH_SIZE = 200;
+
+// Fetches all rows from all three app tables and assembles the backup JSON object.
+// Does not write anything — pure read + build.
+async function buildBackupObject() {
+  const tables = {};
+  const rowCounts = {};
+  for (const table of BACKUP_TABLES) {
+    const rows = await fetchAllRows(table);
+    tables[table] = rows;
+    rowCounts[table] = rows.length;
+  }
+  return {
+    format: BACKUP_FORMAT,
+    formatVersion: BACKUP_FORMAT_VERSION,
+    exportedAt: new Date().toISOString(),
+    rowCounts,
+    tables
+  };
+}
+
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function timestampForFilename() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+
+// Deletes every row in a table. Supabase requires a filter on DELETE (no filter
+// = rejected), so we match "id is not null", which is true for every row since
+// id is NOT NULL on all three tables.
+async function deleteAllRows(table) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=not.is.null`, {
+    method: 'DELETE',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Prefer': 'return=minimal'
+    }
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Failed to clear ${table}: ${res.status} ${err}`);
+  }
+}
+
+// Inserts rows in fixed-size batches, preserving any fields present on each row
+// (including the original id, since all three tables use uuid PKs with no
+// auto-increment sequence to conflict with). Stops and throws immediately on
+// the first failed batch, naming the table and batch index.
+async function batchInsertRows(table, rows) {
+  for (let i = 0; i < rows.length; i += RESTORE_BATCH_SIZE) {
+    const batch = rows.slice(i, i + RESTORE_BATCH_SIZE);
+    const batchNum = Math.floor(i / RESTORE_BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(rows.length / RESTORE_BATCH_SIZE);
+    try {
+      await sbFetch('POST', table, batch);
+    } catch(e) {
+      throw new Error(`${table}: batch ${batchNum} of ${totalBatches} failed (rows ${i+1}-${i+batch.length}): ${e.message}`);
+    }
+  }
 }
 
 // ─── Collection definitions ───────────────────────────────────────────────────
@@ -1011,6 +1190,51 @@ function badgeClass(theme) {
 function esc(t) {
   return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ─── TMDB-first, item_key-fallback duplicate detection ────────────────────────
+// Given the set of rows already in a collection and the identity of a
+// candidate item, finds the matching existing row (or undefined if none).
+// Prefers matching by (media_type, tmdb_id[, season_number]) when the
+// candidate has a tmdb_id — this is exact and immune to title-string
+// collisions/variations. Falls back to the legacy item_key string match only
+// for rows that have NO tmdb_id of their own (manual entries, or legacy rows
+// not yet backfilled). Critically, a row that already has a DIFFERENT
+// non-null tmdb_id must never match via the item_key fallback merely because
+// the title/item_key text happens to coincide — that would incorrectly
+// conflate two distinct TMDB identities.
+// existingRows: array of row objects from Supabase (have .item_key, .media_type, .tmdb_id, .season_number)
+// candidate: { itemKey, mediaType, tmdbId, seasonNumber } — seasonNumber omitted/null for movies
+function findExistingRow(existingRows, candidate) {
+  if (candidate.tmdbId != null) {
+    const found = existingRows.find(r =>
+      r.tmdb_id === candidate.tmdbId &&
+      r.media_type === candidate.mediaType &&
+      (candidate.mediaType === 'movie' || r.season_number === candidate.seasonNumber)
+    );
+    if (found) return found;
+  }
+  return existingRows.find(r => r.tmdb_id == null && r.item_key === candidate.itemKey);
+}
+// Boolean convenience wrapper around findExistingRow, for call sites that
+// only need a yes/no answer (e.g. disabling an "already added" checkbox).
+function isAlreadyAdded(existingRows, candidate) {
+  return !!findExistingRow(existingRows, candidate);
+}
+
+// Detects a Postgres unique-constraint violation (duplicate key) from an
+// sbFetch error message. Used at every watchlist_items insert site so a race
+// (e.g. two tabs open, a rapid double-click, or a stale "already added"
+// check) surfaces as a friendly message instead of raw Postgres error text.
+function isDuplicateKeyError(e) {
+  return e && e.message && (e.message.includes('23505') || e.message.includes('duplicate key'));
+}
+// Standard friendly message for a duplicate-key error on a watchlist_items
+// insert. actionHint is a short phrase telling the user how to get a fresh
+// check (varies by flow, since the "try again" action differs per entry point).
+function duplicateInsertMessage(actionHint) {
+  return `One or more of these was already on your list but wasn't detected in time — ${actionHint}, or reload the page first.`;
+}
+
 // TMDB collection names always come back as "X Collection" (e.g. "The Avengers Collection").
 // Strip the trailing "Collection" for cleaner display everywhere a collection name is shown or stored.
 function cleanCollectionName(name) {
@@ -1094,11 +1318,15 @@ function switchTab(id) {
 
 // ─── Load tab data from Supabase ─────────────────────────────────────────────
 async function loadTab(collectionId) {
-  document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">Loading…</td></tr>`;
-  document.getElementById('cardList').innerHTML = `<div class="loading">Loading…</div>`;
-  document.getElementById('statsRow').innerHTML = '';
-  document.getElementById('filtersRow').innerHTML = '';
-  showError('');
+  // Only show the loading state if this is still the tab the user is looking at —
+  // if they've already switched tabs by the time this fires, don't touch the DOM.
+  if (activeTabId === collectionId) {
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">Loading…</td></tr>`;
+    document.getElementById('cardList').innerHTML = `<div class="loading">Loading…</div>`;
+    document.getElementById('statsRow').innerHTML = '';
+    document.getElementById('filtersRow').innerHTML = '';
+    showError('');
+  }
 
   try {
     const rows = await sbFetch('GET',
@@ -1146,7 +1374,12 @@ async function loadTab(collectionId) {
 
     rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
+    // Always cache the result, even if the user has navigated away — this keeps
+    // tabData correct and avoids redundant reloads when they switch back.
     tabData[collectionId] = { rows, loaded: true, newKeys };
+
+    // But only touch the visible DOM if this tab is still the one being viewed.
+    if (activeTabId !== collectionId) return;
 
     if (newKeys.length > 0) {
       document.getElementById('banner').innerHTML =
@@ -1156,6 +1389,7 @@ async function loadTab(collectionId) {
     renderFilters();
     renderTable();
   } catch(e) {
+    if (activeTabId !== collectionId) { console.error(e); return; }
     showError(e.message);
     document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">Failed to load. Check console for details.</td></tr>`;
     document.getElementById('cardList').innerHTML = `<div class="loading">Failed to load. Check console for details.</div>`;
@@ -1839,6 +2073,34 @@ async function delRow(id) {
   const td = tabData[activeTabId];
   const idx = td.rows.findIndex(r => r.id === id);
   if (idx === -1) return;
+  const row = td.rows[idx];
+
+  // If this row came from the tab's built-in default list, a hard delete would
+  // just get silently re-created the next time the tab loads (loadTab reseeds
+  // any default key missing from the database). So for defaults, "delete" instead
+  // sets status to 'skipped' — same reversible mechanism already used everywhere
+  // else in the app (hidden from the default view, visible under "Skipped", and
+  // restorable via the existing "↩ Keep" control). Non-default items (anything
+  // added manually or pulled from TMDB) have nothing to reseed from, so they keep
+  // the exact hard-delete behavior as before.
+  const col = COLLECTIONS.find(c => c.id === activeTabId);
+  const isDefaultItem = col && Array.isArray(col.defaults) && col.defaults.some(d => d.k === row.item_key);
+
+  if (isDefaultItem) {
+    const previousStatus = row.status;
+    row.status = 'skipped';
+    renderTable();
+    try {
+      await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { status: 'skipped' });
+      showSaved();
+    } catch(e) {
+      row.status = previousStatus;
+      renderTable();
+      showError(e.message);
+    }
+    return;
+  }
+
   const [removed] = td.rows.splice(idx, 1);
   renderTable();
   try {
@@ -1894,7 +2156,11 @@ async function addEntry() {
     toggleAdd();
     renderTable();
   } catch(e) {
-    showError(e.message);
+    if (isDuplicateKeyError(e)) {
+      showError('This title and season is already on your list.');
+    } else {
+      showError(e.message);
+    }
   }
 }
 
@@ -1981,7 +2247,7 @@ function renderTMDBPreview() {
   const previewEl = getTMDBPreviewContainer();
   if (!previewEl || !tmdbSelectedShow || !tmdbSelectedShow.details) return;
   const details = tmdbSelectedShow.details;
-  const existingKeys = new Set((tabData[activeTabId]?.rows || []).map(r => r.item_key));
+  const existingRows = tabData[activeTabId]?.rows || [];
   const showKeyBase = tmdbSelectedShow.name.toLowerCase().trim();
 
   if (tmdbSelectedShow.mediaType === 'movie') {
@@ -1990,7 +2256,7 @@ function renderTMDBPreview() {
       ? ((details.genres && details.genres[0]?.name) || 'Film')
       : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
     const key = `${showKeyBase}|film`;
-    const alreadyAdded = existingKeys.has(key);
+    const alreadyAdded = isAlreadyAdded(existingRows, { itemKey: key, mediaType: 'movie', tmdbId: tmdbSelectedShow.id });
     const date = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
     const runtime = details.runtime ? `${details.runtime} min` : '';
     const belongsTo = details.belongs_to_collection;
@@ -2026,7 +2292,7 @@ function renderTMDBPreview() {
   const rowsHtml = seasons.map(s => {
     const seasonLabel = s.season_number === 0 ? 'Specials' : `Season ${s.season_number}`;
     const key = `${showKeyBase}|${seasonLabel.toLowerCase()}`;
-    const alreadyAdded = existingKeys.has(key);
+    const alreadyAdded = isAlreadyAdded(existingRows, { itemKey: key, mediaType: 'tv', tmdbId: tmdbSelectedShow.id, seasonNumber: s.season_number });
     const date = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
     return `<div class="tmdb-season-row ${alreadyAdded?'already-added':''}">
       <input type="checkbox" ${alreadyAdded?'disabled':'checked'} data-season="${s.season_number}" id="szn_${s.season_number}">
@@ -2128,7 +2394,10 @@ async function addSelectedTMDBSeasons() {
       status: 'confirmed',
       tmdb_collection_id: belongsTo ? belongsTo.id : null,
       tmdb_collection_name: belongsTo ? cleanCollectionName(belongsTo.name) : null,
-      collections: belongsTo ? [cleanCollectionName(belongsTo.name)] : []
+      collections: belongsTo ? [cleanCollectionName(belongsTo.name)] : [],
+      media_type: 'movie',
+      tmdb_id: tmdbSelectedShow.id,
+      season_number: null
     });
   } else {
     network = (details.networks && details.networks[0]?.name) || 'Unknown';
@@ -2155,7 +2424,10 @@ async function addSelectedTMDBSeasons() {
         display_date: displayDate,
         date_sort: dateSort,
         watched: false,
-        status: 'confirmed'
+        status: 'confirmed',
+        media_type: 'tv',
+        tmdb_id: tmdbSelectedShow.id,
+        season_number: num
       });
     });
   }
@@ -2170,9 +2442,19 @@ async function addSelectedTMDBSeasons() {
     // track this show for future refresh lookups (TV shows only — a film has no future seasons)
     // scoped by collection so refresh on one tab doesn't pull in shows from another
     if (!isMovie) {
-      await sbFetch('POST', 'othertv_shows', [{
-        tmdb_id: tmdbSelectedShow.id, title: showName, network, collection: activeTabId
-      }]).catch(() => { /* ignore duplicate-key errors on the unique (collection, tmdb_id) */ });
+      try {
+        await sbFetch('POST', 'othertv_shows', [{
+          tmdb_id: tmdbSelectedShow.id, title: showName, network, collection: activeTabId
+        }]);
+      } catch(e) {
+        // Expected: this show is already tracked for this collection (unique constraint
+        // on collection+tmdb_id) — that's fine, nothing to do. Anything else is a real
+        // failure (e.g. network/Supabase issue) and should be surfaced, not hidden,
+        // since it means "Refresh shows" won't find this show later.
+        if (!(e.message.includes('23505') || e.message.includes('duplicate key'))) {
+          showError(`Added, but couldn't register this show for future refresh checks: ${e.message}`);
+        }
+      }
     }
 
     showSaved();
@@ -2180,7 +2462,11 @@ async function addSelectedTMDBSeasons() {
     renderFilters();
     renderTable();
   } catch(e) {
-    showError(e.message);
+    if (isDuplicateKeyError(e)) {
+      showError(duplicateInsertMessage('try searching again for a fresh check'));
+    } else {
+      showError(e.message);
+    }
   }
 }
 
@@ -2200,11 +2486,11 @@ async function openPullCollection(rowId, collectionId, collectionName) {
   try {
     const data = await tmdbFetch(`/collection/${collectionId}`);
     const movies = (data.parts || []).slice().sort((a,b) => (a.release_date||'9999').localeCompare(b.release_date||'9999'));
-    const existingKeys = new Set((tabData[activeTabId]?.rows || []).map(r => r.item_key));
+    const existingRows = tabData[activeTabId]?.rows || [];
 
     const rowsHtml = movies.map(m => {
       const key = `${m.title.toLowerCase().trim()}|film`;
-      const alreadyAdded = existingKeys.has(key);
+      const alreadyAdded = isAlreadyAdded(existingRows, { itemKey: key, mediaType: 'movie', tmdbId: m.id });
       const date = m.release_date ? formatDisplayDate(m.release_date) : 'TBA';
       return `<div class="tmdb-season-row ${alreadyAdded?'already-added':''}">
         <input type="checkbox" ${alreadyAdded?'disabled':'checked'} data-movie-id="${m.id}" id="pull_${m.id}">
@@ -2240,6 +2526,7 @@ async function addPulledCollectionMovies() {
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-movie-id]');
   const moviesById = {};
   data.movies.forEach(m => moviesById[m.id] = m);
+  const seenTmdbIds = new Set();
 
   const toInsert = [];
   for (const cb of checkboxes) {
@@ -2247,6 +2534,13 @@ async function addPulledCollectionMovies() {
     const movieId = parseInt(cb.dataset.movieId, 10);
     const summary = moviesById[movieId];
     if (!summary) continue;
+    // Dedupe by tmdbId, not by title/item_key — same defensive pattern as
+    // addPulledPersonMovies. This is an additional layer in front of the
+    // database's own uniqueness enforcement, not a replacement for it —
+    // it only prevents the same movie appearing twice within THIS pending
+    // batch before the insert call is made.
+    if (seenTmdbIds.has(movieId)) continue;
+    seenTmdbIds.add(movieId);
     // fetch full details for genre/runtime accuracy, same as a normal add
     let details;
     try { details = await tmdbFetch(`/movie/${movieId}`); } catch(e) { continue; }
@@ -2268,7 +2562,10 @@ async function addPulledCollectionMovies() {
       status: 'confirmed',
       tmdb_collection_id: data.collectionId,
       tmdb_collection_name: data.collectionName,
-      collections: [data.collectionName]
+      collections: [data.collectionName],
+      media_type: 'movie',
+      tmdb_id: movieId,
+      season_number: null
     });
   }
 
@@ -2283,7 +2580,11 @@ async function addPulledCollectionMovies() {
     renderFilters();
     renderTable();
   } catch(e) {
-    showError(e.message);
+    if (isDuplicateKeyError(e)) {
+      showError(duplicateInsertMessage('try "🔗 Pull rest of collection" again for a fresh check'));
+    } else {
+      showError(e.message);
+    }
   }
 }
 
@@ -2302,7 +2603,7 @@ async function refreshShows() {
       return;
     }
 
-    const existingKeys = new Set((tabData[activeTabId]?.rows || []).map(r => r.item_key));
+    const existingRows = tabData[activeTabId]?.rows || [];
     const newSeasonsByShow = [];
 
     for (const show of trackedShows) {
@@ -2314,7 +2615,7 @@ async function refreshShows() {
       const seasons = (details.seasons || []).filter(s => tmdbShowSpecials || s.season_number !== 0);
       const newOnes = seasons.filter(s => {
         const label = s.season_number === 0 ? 'specials' : `season ${s.season_number}`;
-        return !existingKeys.has(`${showKeyBase}|${label}`);
+        return !isAlreadyAdded(existingRows, { itemKey: `${showKeyBase}|${label}`, mediaType: 'tv', tmdbId: show.tmdb_id, seasonNumber: s.season_number });
       });
       if (newOnes.length > 0) {
         newSeasonsByShow.push({ show, details, newOnes });
@@ -2362,7 +2663,6 @@ async function refreshCollections() {
 
   const td = tabData[activeTabId];
   const rows = td?.rows || [];
-  const existingKeys = new Set(rows.map(r => r.item_key));
 
   // distinct collections already represented in this tab's movies
   const collectionsMap = new Map(); // id -> name
@@ -2381,7 +2681,7 @@ async function refreshCollections() {
       let data;
       try { data = await tmdbFetch(`/collection/${collectionId}`); } catch(e) { continue; }
       const movies = data.parts || [];
-      const newOnes = movies.filter(m => !existingKeys.has(`${m.title.toLowerCase().trim()}|film`));
+      const newOnes = movies.filter(m => !isAlreadyAdded(rows, { itemKey: `${m.title.toLowerCase().trim()}|film`, mediaType: 'movie', tmdbId: m.id }));
       if (newOnes.length > 0) {
         newByCollection.push({ collectionId, collectionName, newOnes });
       }
@@ -2450,7 +2750,10 @@ async function addRefreshedCollectionMovies() {
       status: 'confirmed',
       tmdb_collection_id: entry.collectionId,
       tmdb_collection_name: entry.collectionName,
-      collections: [entry.collectionName]
+      collections: [entry.collectionName],
+      media_type: 'movie',
+      tmdb_id: movieId,
+      season_number: null
     });
   }
 
@@ -2465,7 +2768,11 @@ async function addRefreshedCollectionMovies() {
     renderFilters();
     renderTable();
   } catch(e) {
-    showError(e.message);
+    if (isDuplicateKeyError(e)) {
+      showError(duplicateInsertMessage('try "↻ Refresh collections" again for a fresh check'));
+    } else {
+      showError(e.message);
+    }
   }
 }
 
@@ -2484,14 +2791,34 @@ async function pullUniverse(universeKey) {
   previewEl.innerHTML = `<div class="tmdb-loading">Looking up ${esc(universe.label)} titles…</div>`;
 
   const td = tabData[activeTabId];
-  const rowsByKey = new Map((td?.rows || []).map(r => [r.item_key, r]));
+  const existingRows = td?.rows || [];
   const found = [];
   const notFound = [];
   let backfilled = 0;
 
   for (const title of universe.titles) {
+    // Step 1: always resolve the real TMDB match first — never skip this based
+    // on a title-only guess, so we always know the real tmdb_id before deciding
+    // whether this is already on the list.
+    let match;
+    try {
+      const data = await tmdbFetch(`/search/movie?query=${encodeURIComponent(title)}`);
+      match = (data.results || []).find(m => m.title.toLowerCase() === title.toLowerCase()) || (data.results || [])[0];
+    } catch(e) {
+      match = null;
+    }
+    if (!match) {
+      notFound.push(title);
+      continue;
+    }
+
+    // Step 2: now check existing rows using TMDB-first identity, falling back
+    // to item_key only for rows that haven't been backfilled with a tmdb_id yet.
+    // Uses the same shared helper as every other TMDB-driven flow, so this
+    // logic can't drift out of sync with the canonical identity rules.
     const key = `${title.toLowerCase().trim()}|film`;
-    const existingRow = rowsByKey.get(key);
+    const existingRow = findExistingRow(existingRows, { itemKey: key, mediaType: 'movie', tmdbId: match.id });
+
     if (existingRow) {
       found.push({ title, alreadyAdded: true });
       // backfill the universe tag if this row predates the universe-pull feature
@@ -2504,18 +2831,8 @@ async function pullUniverse(universeKey) {
           backfilled++;
         } catch(e) { /* non-fatal — leave it as-is if the patch fails */ }
       }
-      continue;
-    }
-    try {
-      const data = await tmdbFetch(`/search/movie?query=${encodeURIComponent(title)}`);
-      const match = (data.results || []).find(m => m.title.toLowerCase() === title.toLowerCase()) || (data.results || [])[0];
-      if (match) {
-        found.push({ title, tmdbId: match.id, releaseDate: match.release_date, alreadyAdded: false });
-      } else {
-        notFound.push(title);
-      }
-    } catch(e) {
-      notFound.push(title);
+    } else {
+      found.push({ title, tmdbId: match.id, releaseDate: match.release_date, alreadyAdded: false });
     }
   }
 
@@ -2592,7 +2909,10 @@ async function addPulledUniverseMovies() {
       status: 'confirmed',
       tmdb_collection_id: belongsTo ? belongsTo.id : null,
       tmdb_collection_name: belongsTo ? cleanCollectionName(belongsTo.name) : null,
-      collections
+      collections,
+      media_type: 'movie',
+      tmdb_id: parseInt(tmdbId, 10),
+      season_number: null
     });
   }
 
@@ -2607,7 +2927,11 @@ async function addPulledUniverseMovies() {
     renderFilters();
     renderTable();
   } catch(e) {
-    showError(e.message);
+    if (isDuplicateKeyError(e)) {
+      showError(duplicateInsertMessage('try the universe pull again for a fresh check'));
+    } else {
+      showError(e.message);
+    }
   }
 }
 
@@ -2781,7 +3105,7 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
   previewEl.innerHTML = `<div class="tmdb-loading">Loading ${esc(personName)}'s filmography…</div>`;
 
   const td = tabData[activeTabId];
-  const rowsByKey = new Map((td?.rows || []).map(r => [r.item_key, r]));
+  const existingRows = td?.rows || [];
 
   try {
     const credits = preloadedCredits || await tmdbFetch(`/person/${personId}/movie_credits`);
@@ -2804,8 +3128,16 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
     if (isNewCollection) {
       // save the collection definition once (including the role filter), so a later refresh
       // knows who to re-check and applies the same director/actor filter consistently
-      await sbFetch('POST', 'custom_collections', [{ name: personName, tmdb_person_id: personId, role }])
-        .catch(() => { /* ignore if it already exists */ });
+      try {
+        await sbFetch('POST', 'custom_collections', [{ name: personName, tmdb_person_id: personId, role }]);
+      } catch(e) {
+        // Expected: this collection name already exists (unique constraint on name) —
+        // fine, nothing to do. Anything else is a real failure and should be surfaced,
+        // since it means the "↻ Refresh" link for this collection won't work later.
+        if (!(e.message.includes('23505') || e.message.includes('duplicate key'))) {
+          showError(`Movies added, but couldn't save this collection for future refresh checks: ${e.message}`);
+        }
+      }
     }
 
     let backfilled = 0;
@@ -2813,7 +3145,11 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
     for (const m of movies) {
       const title = m.title;
       const key = `${title.toLowerCase().trim()}|film`;
-      const existingRow = rowsByKey.get(key);
+      // TMDB-first: a genuine tmdb_id match on an existing movie row means this
+      // IS the same film, regardless of title text. Uses the same shared helper
+      // as every other TMDB-driven flow, so this can't drift out of sync with
+      // the canonical identity rules.
+      const existingRow = findExistingRow(existingRows, { itemKey: key, mediaType: 'movie', tmdbId: m.id });
       if (existingRow) {
         const currentCollections = existingRow.collections || [];
         if (!currentCollections.includes(personName)) {
@@ -2871,7 +3207,7 @@ async function addPulledPersonMovies() {
   if (!personName) return;
   const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
-  const seenKeys = new Set();
+  const seenTmdbIds = new Set();
   const toInsert = [];
 
   for (const cb of checkboxes) {
@@ -2879,9 +3215,12 @@ async function addPulledPersonMovies() {
     const tmdbId = cb.dataset.tmdbId;
     const title = cb.dataset.title;
     if (!tmdbId) continue;
+    // Dedupe by tmdbId, not by title/item_key — every selected checkbox here
+    // already carries a real TMDB movie ID, so two different movies that
+    // happen to share a title must never be conflated into one skipped entry.
+    if (seenTmdbIds.has(tmdbId)) continue; // guard against the exact same movie appearing twice in this batch
+    seenTmdbIds.add(tmdbId);
     const key = `${title.toLowerCase().trim()}|film`;
-    if (seenKeys.has(key)) continue; // guard against duplicate titles within this batch itself
-    seenKeys.add(key);
     let details;
     try { details = await tmdbFetch(`/movie/${tmdbId}`); } catch(e) { continue; }
     const network = isMoviesTab
@@ -2903,7 +3242,10 @@ async function addPulledPersonMovies() {
       status: 'confirmed',
       tmdb_collection_id: belongsTo ? belongsTo.id : null,
       tmdb_collection_name: belongsTo ? cleanCollectionName(belongsTo.name) : null,
-      collections
+      collections,
+      media_type: 'movie',
+      tmdb_id: parseInt(tmdbId, 10),
+      season_number: null
     });
   }
 
@@ -2969,7 +3311,10 @@ async function addRefreshedSeasons() {
       display_date: displayDate,
       date_sort: dateSort,
       watched: false,
-      status: 'confirmed'
+      status: 'confirmed',
+      media_type: 'tv',
+      tmdb_id: entry.show.tmdb_id,
+      season_number: num
     });
   });
 
@@ -2984,7 +3329,336 @@ async function addRefreshedSeasons() {
     renderFilters();
     renderTable();
   } catch(e) {
-    showError(e.message);
+    if (isDuplicateKeyError(e)) {
+      showError(duplicateInsertMessage('try "↻ Refresh shows" again for a fresh check'));
+    } else {
+      showError(e.message);
+    }
+  }
+}
+
+// ─── Backup button ──────────────────────────────────────────────────────────
+async function handleBackupClick() {
+  const btn = document.getElementById('backupBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Backing up…';
+  try {
+    const backup = await buildBackupObject();
+    downloadJSON(backup, `watchlist-backup-${timestampForFilename()}.json`);
+    recordBackupTimestamp();
+    showSaved();
+  } catch(e) {
+    showError(`Backup failed: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+
+// ─── Restore flow ───────────────────────────────────────────────────────────
+let pendingRestoreData = null; // validated backup object, set once file passes checks
+
+function handleRestoreClick() {
+  document.getElementById('restoreFileInput').click();
+}
+
+function validateBackupObject(obj) {
+  const errors = [];
+  if (!obj || typeof obj !== 'object') { errors.push('File does not contain a JSON object.'); return errors; }
+  if (obj.format !== BACKUP_FORMAT) errors.push(`Unrecognized backup format ("${obj.format}") — this doesn't look like a Watchlist Tracker backup file.`);
+  if (typeof obj.formatVersion !== 'number' || obj.formatVersion > BACKUP_FORMAT_VERSION) errors.push(`Unsupported backup format version (${obj.formatVersion}).`);
+  if (!obj.exportedAt || isNaN(Date.parse(obj.exportedAt))) errors.push('Missing or invalid export timestamp.');
+  if (!obj.tables || typeof obj.tables !== 'object') { errors.push('Missing "tables" section.'); return errors; }
+  for (const table of BACKUP_TABLES) {
+    if (!Array.isArray(obj.tables[table])) {
+      errors.push(`Missing or invalid data for table "${table}".`);
+      continue;
+    }
+    const declaredCount = obj.rowCounts?.[table];
+    if (typeof declaredCount === 'number' && declaredCount !== obj.tables[table].length) {
+      errors.push(`Row count mismatch for "${table}": file claims ${declaredCount} but contains ${obj.tables[table].length}.`);
+    }
+  }
+  // spot-check required fields on watchlist_items rows, the most important table
+  const items = obj.tables.watchlist_items || [];
+  const missingItemFields = items.filter(r => !r.id || !r.item_key || !r.collection);
+  if (missingItemFields.length > 0) errors.push(`${missingItemFields.length} row(s) in watchlist_items are missing required fields (id, item_key, or collection).`);
+
+  // othertv_shows: id, tmdb_id, title are NOT NULL with no default in the verified
+  // schema — required. network/collection are NOT NULL but have defaults, so they're
+  // not required here (an absent value would still restore safely).
+  const othertv = obj.tables.othertv_shows || [];
+  const missingOthertvFields = othertv.filter(r => r.id == null || r.tmdb_id == null || !r.title);
+  if (missingOthertvFields.length > 0) errors.push(`${missingOthertvFields.length} row(s) in othertv_shows are missing required fields (id, tmdb_id, or title).`);
+
+  // custom_collections: id, name, tmdb_person_id are NOT NULL with no default in the
+  // verified schema — required. role is nullable with a default, so it's optional.
+  const customCollections = obj.tables.custom_collections || [];
+  const missingCollectionFields = customCollections.filter(r => r.id == null || !r.name || r.tmdb_person_id == null);
+  if (missingCollectionFields.length > 0) errors.push(`${missingCollectionFields.length} row(s) in custom_collections are missing required fields (id, name, or tmdb_person_id).`);
+
+  return errors;
+}
+
+async function handleRestoreFileSelected(event) {
+  const file = event.target.files[0];
+  event.target.value = ''; // allow re-selecting the same file later
+  if (!file) return;
+
+  let parsed;
+  try {
+    const text = await file.text();
+    parsed = JSON.parse(text);
+  } catch(e) {
+    showRestoreModal(`<div class="modal-title">Invalid backup file</div>
+      <div class="modal-error">Couldn't parse this file as JSON: ${esc(e.message)}</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    return;
+  }
+
+  const errors = validateBackupObject(parsed);
+  if (errors.length > 0) {
+    showRestoreModal(`<div class="modal-title">This file can't be used for restore</div>
+      <div class="modal-error">${errors.map(esc).join('\n')}</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    return;
+  }
+
+  pendingRestoreData = parsed;
+  await renderRestorePreview(parsed);
+}
+
+async function renderRestorePreview(backup) {
+  showRestoreModal(`<div class="modal-title">Checking current data…</div><div class="modal-progress">Fetching current row counts for comparison…</div>`);
+
+  let currentCounts = {};
+  try {
+    for (const table of BACKUP_TABLES) {
+      const rows = await fetchAllRows(table);
+      currentCounts[table] = rows.length;
+    }
+  } catch(e) {
+    showRestoreModal(`<div class="modal-title">Couldn't check current data</div>
+      <div class="modal-error">${esc(e.message)}</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    return;
+  }
+
+  const backupDate = new Date(backup.exportedAt).toLocaleString();
+  const rows = BACKUP_TABLES.map(t => `
+    <div class="modal-row"><span>${esc(t)}</span><span>${currentCounts[t]} → ${backup.rowCounts[t] ?? backup.tables[t].length}</span></div>
+  `).join('');
+
+  showRestoreModal(`
+    <div class="modal-title">Restore from backup?</div>
+    <div class="modal-section">
+      <div class="modal-label">Backup created</div>
+      <div>${esc(backupDate)}</div>
+    </div>
+    <div class="modal-section">
+      <div class="modal-label">Rows: current → backup</div>
+      ${rows}
+    </div>
+    <div class="modal-warning">This will permanently replace all current data in these 3 tables with the contents of this backup. A safety backup of your current data will be downloaded automatically before anything is changed.</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeRestoreModal()">Cancel</button>
+      <button class="btn-danger" id="confirmRestoreBtn" onclick="executeRestore()">Restore database</button>
+    </div>
+  `);
+}
+
+function showRestoreModal(html) {
+  document.getElementById('restoreModalBox').innerHTML = html;
+  document.getElementById('restoreModalOverlay').style.display = 'flex';
+}
+function closeRestoreModal() {
+  document.getElementById('restoreModalOverlay').style.display = 'none';
+  document.getElementById('restoreModalBox').innerHTML = '';
+  pendingRestoreData = null;
+}
+
+async function executeRestore() {
+  const backup = pendingRestoreData;
+  if (!backup) { closeRestoreModal(); return; }
+
+  const confirmBtn = document.getElementById('confirmRestoreBtn');
+  if (confirmBtn) confirmBtn.disabled = true;
+
+  const setProgress = (msg) => {
+    showRestoreModal(`<div class="modal-title">Restoring…</div><div class="modal-progress">${esc(msg)}</div>`);
+  };
+
+  // ── Step 1: automatic safety backup of the CURRENT live data, before anything is touched ──
+  setProgress('Backing up your current data first (safety copy)…');
+  let preRestoreBackup;
+  try {
+    preRestoreBackup = await buildBackupObject();
+  } catch(e) {
+    showRestoreModal(`<div class="modal-title">Restore aborted</div>
+      <div class="modal-error">Couldn't create a safety backup of your current data, so nothing was changed:\n${esc(e.message)}</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    return;
+  }
+  const preRestoreFilename = `watchlist-pre-restore-${timestampForFilename()}.json`;
+  try {
+    downloadJSON(preRestoreBackup, preRestoreFilename);
+  } catch(e) {
+    showRestoreModal(`<div class="modal-title">Restore aborted</div>
+      <div class="modal-error">The safety backup couldn't be downloaded, so nothing was changed:\n${esc(e.message)}</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    return;
+  }
+
+  // ── Pause here: do not proceed to any destructive step until the user has
+  // explicitly confirmed they can see the safety backup file. pendingRestoreData
+  // (the validated backup to restore) is untouched and still available — we're
+  // only waiting on a click, not discarding any state.
+  showRestoreModal(`
+    <div class="modal-title">Safety backup downloaded</div>
+    <div class="modal-section">
+      <div class="modal-label">Filename</div>
+      <div style="font-family:monospace; font-size:13px; word-break:break-all;">${esc(preRestoreFilename)}</div>
+    </div>
+    <div class="modal-warning">Before continuing: please check your Downloads folder (or wherever your browser saves files) and confirm you can see this file. This is your only copy of your current data if anything goes wrong with the restore.</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeRestoreModal()">Cancel</button>
+      <button class="btn-danger" onclick="continueRestoreAfterSafetyConfirm('${esc(preRestoreFilename).replace(/'/g,"\\'")}')">I have the backup — continue restore</button>
+    </div>
+  `);
+}
+
+async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
+  const backup = pendingRestoreData;
+  if (!backup) { closeRestoreModal(); return; }
+
+  const setProgress = (msg) => {
+    showRestoreModal(`<div class="modal-title">Restoring…</div><div class="modal-progress">${esc(msg)}</div>`);
+  };
+
+  // ── Step 2: delete existing rows, then insert backup rows, table by table ──
+  const completedTables = [];
+  try {
+    for (const table of BACKUP_TABLES) {
+      setProgress(`Clearing ${table}…`);
+      await deleteAllRows(table);
+      const rowsToInsert = backup.tables[table];
+      if (rowsToInsert.length > 0) {
+        setProgress(`Restoring ${table} (${rowsToInsert.length} rows)…`);
+        await batchInsertRows(table, rowsToInsert);
+      }
+      completedTables.push(table);
+    }
+  } catch(e) {
+    showRestoreModal(`<div class="modal-title">Restore failed partway through</div>
+      <div class="modal-error">Completed: ${completedTables.length ? completedTables.join(', ') : 'none'}
+Failed: ${esc(e.message)}
+
+Your data is now in a MIXED state — do not treat this as complete. A safety backup of your data from before this restore was downloaded as:
+${esc(preRestoreFilename)}
+
+You can restore that file to return to your pre-restore state.</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    return;
+  }
+
+  // ── Step 3: re-fetch and verify against the backup before declaring success ──
+  setProgress('Verifying restored data…');
+  const verificationErrors = [];
+  try {
+    for (const table of BACKUP_TABLES) {
+      const restoredRows = await fetchAllRows(table);
+      const expectedRows = backup.tables[table];
+      if (restoredRows.length !== expectedRows.length) {
+        verificationErrors.push(`${table}: expected ${expectedRows.length} rows, found ${restoredRows.length}.`);
+        continue;
+      }
+      const restoredById = new Map(restoredRows.map(r => [r.id, r]));
+      const missingIds = expectedRows.filter(r => !restoredById.has(r.id));
+      if (missingIds.length > 0) {
+        verificationErrors.push(`${table}: ${missingIds.length} expected row(s) not found after restore.`);
+        continue;
+      }
+      // Every expected row exists by id — now compare every backed-up field
+      // value exactly, not just presence. Report per-row field mismatches,
+      // capped to the first 10 for readability, with a total count if more exist.
+      const rowMismatches = [];
+      for (const expectedRow of expectedRows) {
+        const restoredRow = restoredById.get(expectedRow.id);
+        const diffFields = compareRowFields(expectedRow, restoredRow);
+        if (diffFields.length > 0) {
+          rowMismatches.push({ id: expectedRow.id, fields: diffFields });
+        }
+      }
+      if (rowMismatches.length > 0) {
+        const shown = rowMismatches.slice(0, 10)
+          .map(m => `  • row ${m.id}: ${m.fields.join(', ')}`)
+          .join('\n');
+        const more = rowMismatches.length > 10 ? `\n  …and ${rowMismatches.length - 10} more row(s) with mismatches.` : '';
+        verificationErrors.push(`${table}: ${rowMismatches.length} row(s) have field values that don't match the backup:\n${shown}${more}`);
+      }
+    }
+  } catch(e) {
+    verificationErrors.push(`Couldn't complete verification: ${e.message}`);
+  }
+
+  if (verificationErrors.length > 0) {
+    showRestoreModal(`<div class="modal-title">Restore finished, but verification failed</div>
+      <div class="modal-error">The restore ran, but the data afterward didn't match the backup exactly:
+${verificationErrors.map(esc).join('\n')}
+
+A safety backup of your data from before this restore was downloaded as:
+${esc(preRestoreFilename)}</div>
+      <div class="modal-actions"><button class="btn" onclick="finishRestoreAndReload()">Close &amp; reload data</button></div>`);
+    return;
+  }
+
+  // ── Step 4: success — only reached if delete+insert+verify all passed for every table ──
+  showRestoreModal(`<div class="modal-title">Restore completed successfully</div>
+    <div class="modal-success">All ${BACKUP_TABLES.length} tables restored and verified against the backup.
+A safety backup of your data from before this restore was saved as:
+${esc(preRestoreFilename)}</div>
+    <div class="modal-actions"><button class="btn-accent btn" onclick="finishRestoreAndReload()">Close &amp; reload data</button></div>`);
+}
+
+// Clears all cached tab data and reloads the currently active tab from
+// Supabase, so the UI reflects the real post-restore database state rather
+// than stale in-memory data. Other tabs will refetch next time they're opened.
+function finishRestoreAndReload() {
+  closeRestoreModal();
+  tabData = {};
+  loadTab(activeTabId);
+}
+
+
+const LAST_BACKUP_KEY = 'watchlist_last_backup_at';
+
+function recordBackupTimestamp() {
+  localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
+  updateBackupAgeIndicator();
+}
+
+function updateBackupAgeIndicator() {
+  const el = document.getElementById('backupAgeIndicator');
+  if (!el) return;
+  const lastStr = localStorage.getItem(LAST_BACKUP_KEY);
+  if (!lastStr) {
+    el.textContent = 'No backup yet';
+    el.className = 'backup-age warn';
+    return;
+  }
+  const last = new Date(lastStr);
+  const days = Math.floor((Date.now() - last.getTime()) / (1000*60*60*24));
+  if (days < 14) {
+    el.textContent = days === 0 ? 'Backed up today' : `Backup: ${days}d ago`;
+    el.className = 'backup-age';
+  } else if (days < 30) {
+    el.textContent = `Backup: ${days}d ago`;
+    el.className = 'backup-age warn';
+  } else {
+    el.textContent = `Backup recommended (${days}d ago)`;
+    el.className = 'backup-age urgent';
   }
 }
 
@@ -2992,6 +3666,7 @@ async function addRefreshedSeasons() {
 buildMediaSwitch();
 buildTabs();
 loadTab(activeTabId);
+updateBackupAgeIndicator();
 </script>
 </body>
 </html>
