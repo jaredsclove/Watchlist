@@ -61,11 +61,9 @@
   </div>
 </div>
 
+<script src="config.js"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
-const SUPABASE_URL = 'https://elunjvvvrotapdtigomo.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_yLAuk8Z0Yg_fvwZ0DfypPw_U2_fYUi9';
-const TABLE = 'watchlist_items';
 
 async function sbFetch(method, path, body) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -91,7 +89,6 @@ async function sbFetch(method, path, body) {
 // Content-Range response header (e.g. "0-249/1284") to know the true total
 // row count rather than guessing from page size. Deterministic id.asc order
 // so paging and later verification are stable.
-const BACKUP_PAGE_SIZE = 500;
 async function fetchAllRows(table) {
   const allRows = [];
   let offset = 0;
@@ -161,9 +158,6 @@ function compareRowFields(expected, restored) {
   return diffFields;
 }
 
-const BACKUP_TABLES = ['watchlist_items', 'othertv_shows', 'custom_collections'];
-const BACKUP_FORMAT = 'watchlist-tracker-backup';
-const BACKUP_FORMAT_VERSION = 1;
 const RESTORE_BATCH_SIZE = 200;
 
 // Fetches all rows from all three app tables and assembles the backup JSON object.
@@ -239,382 +233,14 @@ async function batchInsertRows(table, rows) {
 }
 
 // ─── Collection definitions ───────────────────────────────────────────────────
-const COLLECTIONS = [
-  {
-    id: 'disney',
-    label: 'Disney+',
-    icon: '🎬',
-    mediaType: 'tv',
-    themes: ['Marvel','Star Wars','Fantasy','Sci-Fi','Action','Drama','Animation','Family','Musical','Horror','Documentary','Reality','Comedy'],
-    years: ['1984','1985','1986','2003','2005','2008','2009','2010','2011','2012','2013','2014','2015','2016','2017','2018','2019','2020','2021','2022','2023','2024','2025','2026','2027'],
-    defaults: [
-  {k:"the mandalorian|season 1",t:"The Mandalorian",s:"Season 1",th:"Star Wars",d:"Nov 12, 2019",ds:"2019-11-12"},
-  {k:"the clone wars|season 7",t:"The Clone Wars",s:"Season 7",th:"Star Wars",d:"Feb 21, 2020",ds:"2020-02-21"},
-  {k:"lego star wars holiday special|special",t:"LEGO Star Wars Holiday Special",s:"Special",th:"Star Wars",d:"Nov 17, 2020",ds:"2020-11-17"},
-  {k:"the mandalorian|season 2",t:"The Mandalorian",s:"Season 2",th:"Star Wars",d:"Oct 30, 2020",ds:"2020-10-30"},
-  {k:"star wars: the bad batch|season 1",t:"Star Wars: The Bad Batch",s:"Season 1",th:"Star Wars",d:"May 4, 2021",ds:"2021-05-04"},
-  {k:"star wars: visions|volume 1",t:"Star Wars: Visions",s:"Volume 1",th:"Star Wars",d:"Sep 22, 2021",ds:"2021-09-22"},
-  {k:"star wars: the book of boba fett|season 1",t:"Star Wars: The Book of Boba Fett",s:"Season 1",th:"Star Wars",d:"Dec 29, 2021",ds:"2021-12-29"},
-  {k:"lego star wars: terrifying tales|special",t:"LEGO Star Wars: Terrifying Tales",s:"Special",th:"Star Wars",d:"Oct 1, 2021",ds:"2021-10-01"},
-  {k:"star wars: obi-wan kenobi|season 1",t:"Star Wars: Obi-Wan Kenobi",s:"Season 1",th:"Star Wars",d:"May 27, 2022",ds:"2022-05-27"},
-  {k:"andor|season 1",t:"Andor",s:"Season 1",th:"Star Wars",d:"Sep 21, 2022",ds:"2022-09-21"},
-  {k:"star wars: tales of the jedi|season 1",t:"Star Wars: Tales of the Jedi",s:"Season 1",th:"Star Wars",d:"Oct 26, 2022",ds:"2022-10-26"},
-  {k:"lego star wars: summer vacation|special",t:"LEGO Star Wars: Summer Vacation",s:"Special",th:"Star Wars",d:"Aug 5, 2022",ds:"2022-08-05"},
-  {k:"star wars: the bad batch|season 2",t:"Star Wars: The Bad Batch",s:"Season 2",th:"Star Wars",d:"Jan 4, 2023",ds:"2023-01-04"},
-  {k:"the mandalorian|season 3",t:"The Mandalorian",s:"Season 3",th:"Star Wars",d:"Mar 1, 2023",ds:"2023-03-01"},
-  {k:"star wars: visions|volume 2",t:"Star Wars: Visions",s:"Volume 2",th:"Star Wars",d:"May 4, 2023",ds:"2023-05-04"},
-  {k:"star wars: young jedi adventures|season 1",t:"Star Wars: Young Jedi Adventures",s:"Season 1",th:"Star Wars",d:"May 4, 2023",ds:"2023-05-04"},
-  {k:"star wars: young jedi adventures|season 2",t:"Star Wars: Young Jedi Adventures",s:"Season 2",th:"Star Wars",d:"2025",ds:"2025-06-01"},
-  {k:"star wars: young jedi adventures|season 3",t:"Star Wars: Young Jedi Adventures",s:"Season 3",th:"Star Wars",d:"Dec 8, 2025",ds:"2025-12-08"},
-  {k:"ahsoka|season 1",t:"Ahsoka",s:"Season 1",th:"Star Wars",d:"Aug 22, 2023",ds:"2023-08-22"},
-  {k:"star wars: tales of the jedi|season 2",t:"Star Wars: Tales of the Jedi",s:"Season 2",th:"Star Wars",d:"Oct 26, 2023",ds:"2023-10-26"},
-  {k:"star wars: the bad batch|season 3",t:"Star Wars: The Bad Batch",s:"Season 3",th:"Star Wars",d:"Feb 21, 2024",ds:"2024-02-21"},
-  {k:"star wars: tales of the empire|season 1",t:"Star Wars: Tales of the Empire",s:"Season 1",th:"Star Wars",d:"May 4, 2024",ds:"2024-05-04"},
-  {k:"star wars: the acolyte|season 1",t:"Star Wars: The Acolyte",s:"Season 1",th:"Star Wars",d:"Jun 4, 2024",ds:"2024-06-04"},
-  {k:"star wars: skeleton crew|season 1",t:"Star Wars: Skeleton Crew",s:"Season 1",th:"Star Wars",d:"Nov 3, 2024",ds:"2024-11-03"},
-  {k:"andor|season 2",t:"Andor",s:"Season 2",th:"Star Wars",d:"Apr 22, 2025",ds:"2025-04-22"},
-  {k:"the mandalorian and grogu|film",t:"The Mandalorian & Grogu",s:"Film",th:"Star Wars",d:"Sep 2, 2026",ds:"2026-09-02"},
-  {k:"star wars: tales of the underworld|season 1",t:"Star Wars: Tales of the Underworld",s:"Season 1",th:"Star Wars",d:"May 4, 2025",ds:"2025-05-04"},
-  {k:"star wars: visions|volume 3",t:"Star Wars: Visions",s:"Volume 3",th:"Star Wars",d:"Oct 2025",ds:"2025-10-01"},
-  {k:"star wars: maul – shadow lord|season 1",t:"Star Wars: Maul – Shadow Lord",s:"Season 1",th:"Star Wars",d:"Apr 6, 2026",ds:"2026-04-06"},
-  {k:"lego star wars: the mandalorian|special",t:"LEGO Star Wars: The Mandalorian",s:"Special",th:"Star Wars",d:"Sep 2, 2026",ds:"2026-09-02"},
-  {k:"ahsoka|season 2",t:"Ahsoka",s:"Season 2",th:"Star Wars",d:"Jan 20, 2027",ds:"2027-01-20"},
-  {k:"star wars: visions presents: the ninth jedi|season 1",t:"Star Wars: Visions Presents: The Ninth Jedi",s:"Season 1",th:"Star Wars",d:"2026 (TBA)",ds:"2026-09-01"},
-  {k:"wandavision|season 1",t:"WandaVision",s:"Season 1",th:"Marvel",d:"Jan 15, 2021",ds:"2021-01-15"},
-  {k:"the falcon and the winter soldier|season 1",t:"The Falcon and the Winter Soldier",s:"Season 1",th:"Marvel",d:"Mar 19, 2021",ds:"2021-03-19"},
-  {k:"loki|season 1",t:"Loki",s:"Season 1",th:"Marvel",d:"Jun 9, 2021",ds:"2021-06-09"},
-  {k:"what if...?|season 1",t:"What If...?",s:"Season 1",th:"Marvel",d:"Aug 11, 2021",ds:"2021-08-11"},
-  {k:"hawkeye|season 1",t:"Hawkeye",s:"Season 1",th:"Marvel",d:"Nov 24, 2021",ds:"2021-11-24"},
-  {k:"moon knight|season 1",t:"Moon Knight",s:"Season 1",th:"Marvel",d:"Mar 30, 2022",ds:"2022-03-30"},
-  {k:"ms. marvel|season 1",t:"Ms. Marvel",s:"Season 1",th:"Marvel",d:"Jun 8, 2022",ds:"2022-06-08"},
-  {k:"i am groot|season 1",t:"I Am Groot",s:"Season 1",th:"Marvel",d:"Aug 10, 2022",ds:"2022-08-10"},
-  {k:"she-hulk: attorney at law|season 1",t:"She-Hulk: Attorney at Law",s:"Season 1",th:"Marvel",d:"Aug 17, 2022",ds:"2022-08-17"},
-  {k:"werewolf by night|special",t:"Werewolf by Night",s:"Special",th:"Marvel",d:"Oct 7, 2022",ds:"2022-10-07"},
-  {k:"guardians of the galaxy holiday special|special",t:"Guardians of the Galaxy Holiday Special",s:"Special",th:"Marvel",d:"Nov 25, 2022",ds:"2022-11-25"},
-  {k:"secret invasion|season 1",t:"Secret Invasion",s:"Season 1",th:"Marvel",d:"Jun 21, 2023",ds:"2023-06-21"},
-  {k:"loki|season 2",t:"Loki",s:"Season 2",th:"Marvel",d:"Oct 5, 2023",ds:"2023-10-05"},
-  {k:"i am groot|season 2",t:"I Am Groot",s:"Season 2",th:"Marvel",d:"Sep 6, 2023",ds:"2023-09-06"},
-  {k:"what if...?|season 2",t:"What If...?",s:"Season 2",th:"Marvel",d:"Dec 22, 2023",ds:"2023-12-22"},
-  {k:"echo|season 1",t:"Echo",s:"Season 1",th:"Marvel",d:"Jan 9, 2024",ds:"2024-01-09"},
-  {k:"x-men '97|season 1",t:"X-Men '97",s:"Season 1",th:"Marvel",d:"Mar 20, 2024",ds:"2024-03-20"},
-  {k:"agatha all along|season 1",t:"Agatha All Along",s:"Season 1",th:"Marvel",d:"Sep 18, 2024",ds:"2024-09-18"},
-  {k:"your friendly neighborhood spider-man|season 1",t:"Your Friendly Neighborhood Spider-Man",s:"Season 1",th:"Marvel",d:"Jan 29, 2025",ds:"2025-01-29"},
-  {k:"daredevil: born again|season 1",t:"Daredevil: Born Again",s:"Season 1",th:"Marvel",d:"Mar 4, 2025",ds:"2025-03-04"},
-  {k:"ironheart|season 1",t:"Ironheart",s:"Season 1",th:"Marvel",d:"Jun 24, 2025",ds:"2025-06-24"},
-  {k:"eyes of wakanda|season 1",t:"Eyes of Wakanda",s:"Season 1",th:"Marvel",d:"Aug 6, 2025",ds:"2025-08-06"},
-  {k:"marvel zombies|season 1",t:"Marvel Zombies",s:"Season 1",th:"Marvel",d:"Sep 24, 2025",ds:"2025-09-24"},
-  {k:"what if...?|season 3",t:"What If...?",s:"Season 3",th:"Marvel",d:"Dec 2025",ds:"2025-12-01"},
-  {k:"wonder man|season 1",t:"Wonder Man",s:"Season 1",th:"Marvel",d:"Jan 27, 2026",ds:"2026-01-27"},
-  {k:"daredevil: born again|season 2",t:"Daredevil: Born Again",s:"Season 2",th:"Marvel",d:"Mar 4, 2026",ds:"2026-03-04"},
-  {k:"the punisher: one last kill|special",t:"The Punisher: One Last Kill",s:"Special",th:"Marvel",d:"May 7, 2026",ds:"2026-05-07"},
-  {k:"x-men '97|season 2",t:"X-Men '97",s:"Season 2",th:"Marvel",d:"Jul 1, 2026",ds:"2026-07-01"},
-  {k:"visionquest|season 1",t:"VisionQuest",s:"Season 1",th:"Marvel",d:"Oct 14, 2026",ds:"2026-10-14"},
-  {k:"your friendly neighborhood spider-man|season 2",t:"Your Friendly Neighborhood Spider-Man",s:"Season 2",th:"Marvel",d:"Jan 2027",ds:"2027-01-15"},
-  {k:"wonder man|season 2",t:"Wonder Man",s:"Season 2",th:"Marvel",d:"TBA",ds:"2027-01-01"},
-  {k:"daredevil: born again|season 3",t:"Daredevil: Born Again",s:"Season 3",th:"Marvel",d:"2027",ds:"2027-03-01"},
-  {k:"marvel zombies|season 2",t:"Marvel Zombies",s:"Season 2",th:"Marvel",d:"TBA",ds:"2027-06-01"},
-  {k:"olaf's frozen adventure|special",t:"Olaf's Frozen Adventure",s:"Special",th:"Animation",d:"Nov 12, 2019",ds:"2019-11-12"},
-  {k:"forky asks a question|season 1",t:"Forky Asks a Question",s:"Season 1",th:"Animation",d:"Nov 12, 2019",ds:"2019-11-12"},
-  {k:"lamp life|special",t:"Lamp Life",s:"Special",th:"Animation",d:"Jan 10, 2020",ds:"2020-01-10"},
-  {k:"once upon a snowman|special",t:"Once Upon a Snowman",s:"Special",th:"Animation",d:"Oct 23, 2020",ds:"2020-10-23"},
-  {k:"myth: a frozen tale|special",t:"Myth: A Frozen Tale",s:"Special",th:"Animation",d:"Feb 26, 2021",ds:"2021-02-26"},
-  {k:"dug days|season 1",t:"Dug Days",s:"Season 1",th:"Animation",d:"Sep 1, 2021",ds:"2021-09-01"},
-  {k:"muppets haunted mansion|special",t:"Muppets Haunted Mansion",s:"Special",th:"Family",d:"Oct 8, 2021",ds:"2021-10-08"},
-  {k:"olaf presents|season 1",t:"Olaf Presents",s:"Season 1",th:"Animation",d:"Nov 12, 2021",ds:"2021-11-12"},
-  {k:"ciao alberto|special",t:"Ciao Alberto",s:"Special",th:"Animation",d:"Nov 12, 2021",ds:"2021-11-12"},
-  {k:"frozen fever|special",t:"Frozen Fever",s:"Special",th:"Animation",d:"Nov 12, 2021",ds:"2021-11-12"},
-  {k:"baymax!|season 1",t:"Baymax!",s:"Season 1",th:"Animation",d:"Jun 29, 2022",ds:"2022-06-29"},
-  {k:"cars on the road|season 1",t:"Cars on the Road",s:"Season 1",th:"Animation",d:"Sep 8, 2022",ds:"2022-09-08"},
-  {k:"the muppets mayhem|season 1",t:"The Muppets Mayhem",s:"Season 1",th:"Family",d:"May 10, 2023",ds:"2023-05-10"},
-  {k:"dream productions|season 1",t:"Dream Productions",s:"Season 1",th:"Animation",d:"Nov 22, 2024",ds:"2024-11-22"},
-  {k:"star wars: the clone wars (2008)|film",t:"Star Wars: The Clone Wars (2008)",s:"Film",th:"Star Wars",d:"Aug 15, 2008",ds:"2008-08-15"},
-  {k:"star wars: the clone wars (2008)|season 1",t:"Star Wars: The Clone Wars (2008)",s:"Season 1",th:"Star Wars",d:"Oct 3, 2008",ds:"2008-10-03"},
-  {k:"star wars: the clone wars (2008)|season 2",t:"Star Wars: The Clone Wars (2008)",s:"Season 2",th:"Star Wars",d:"Oct 2, 2009",ds:"2009-10-02"},
-  {k:"star wars: the clone wars (2008)|season 3",t:"Star Wars: The Clone Wars (2008)",s:"Season 3",th:"Star Wars",d:"Sep 17, 2010",ds:"2010-09-17"},
-  {k:"star wars: the clone wars (2008)|season 4",t:"Star Wars: The Clone Wars (2008)",s:"Season 4",th:"Star Wars",d:"Sep 16, 2011",ds:"2011-09-16"},
-  {k:"star wars: the clone wars (2008)|season 5",t:"Star Wars: The Clone Wars (2008)",s:"Season 5",th:"Star Wars",d:"Sep 29, 2012",ds:"2012-09-29"},
-  {k:"star wars: the clone wars (2008)|season 6",t:"Star Wars: The Clone Wars (2008)",s:"Season 6",th:"Star Wars",d:"Mar 7, 2014",ds:"2014-03-07"},
-  {k:"star wars rebels|season 1",t:"Star Wars Rebels",s:"Season 1",th:"Star Wars",d:"Oct 3, 2014",ds:"2014-10-03"},
-  {k:"star wars rebels|season 2",t:"Star Wars Rebels",s:"Season 2",th:"Star Wars",d:"Jun 20, 2015",ds:"2015-06-20"},
-  {k:"star wars rebels|season 3",t:"Star Wars Rebels",s:"Season 3",th:"Star Wars",d:"Sep 24, 2016",ds:"2016-09-24"},
-  {k:"star wars rebels|season 4",t:"Star Wars Rebels",s:"Season 4",th:"Star Wars",d:"Oct 16, 2017",ds:"2017-10-16"},
-  {k:"star wars resistance|season 1",t:"Star Wars Resistance",s:"Season 1",th:"Star Wars",d:"Oct 7, 2018",ds:"2018-10-07"},
-  {k:"star wars resistance|season 2",t:"Star Wars Resistance",s:"Season 2",th:"Star Wars",d:"Oct 6, 2019",ds:"2019-10-06"},
-  {k:"agents of s.h.i.e.l.d.|season 1",t:"Agents of S.H.I.E.L.D.",s:"Season 1",th:"Marvel",d:"Sep 24, 2013",ds:"2013-09-24"},
-  {k:"agents of s.h.i.e.l.d.|season 2",t:"Agents of S.H.I.E.L.D.",s:"Season 2",th:"Marvel",d:"Sep 23, 2014",ds:"2014-09-23"},
-  {k:"agent carter|season 1",t:"Agent Carter",s:"Season 1",th:"Marvel",d:"Jan 6, 2015",ds:"2015-01-06"},
-  {k:"daredevil (netflix)|season 1",t:"Daredevil (Netflix)",s:"Season 1",th:"Marvel",d:"Apr 10, 2015",ds:"2015-04-10"},
-  {k:"jessica jones|season 1",t:"Jessica Jones",s:"Season 1",th:"Marvel",d:"Nov 20, 2015",ds:"2015-11-20"},
-  {k:"agents of s.h.i.e.l.d.|season 3",t:"Agents of S.H.I.E.L.D.",s:"Season 3",th:"Marvel",d:"Sep 29, 2015",ds:"2015-09-29"},
-  {k:"agent carter|season 2",t:"Agent Carter",s:"Season 2",th:"Marvel",d:"Jan 19, 2016",ds:"2016-01-19"},
-  {k:"daredevil (netflix)|season 2",t:"Daredevil (Netflix)",s:"Season 2",th:"Marvel",d:"Mar 18, 2016",ds:"2016-03-18"},
-  {k:"agents of s.h.i.e.l.d.|season 4",t:"Agents of S.H.I.E.L.D.",s:"Season 4",th:"Marvel",d:"Sep 20, 2016",ds:"2016-09-20"},
-  {k:"luke cage|season 1",t:"Luke Cage",s:"Season 1",th:"Marvel",d:"Sep 30, 2016",ds:"2016-09-30"},
-  {k:"iron fist|season 1",t:"Iron Fist",s:"Season 1",th:"Marvel",d:"Mar 17, 2017",ds:"2017-03-17"},
-  {k:"the defenders|season 1",t:"The Defenders",s:"Season 1",th:"Marvel",d:"Aug 18, 2017",ds:"2017-08-18"},
-  {k:"the punisher (netflix)|season 1",t:"The Punisher (Netflix)",s:"Season 1",th:"Marvel",d:"Nov 17, 2017",ds:"2017-11-17"},
-  {k:"agents of s.h.i.e.l.d.|season 5",t:"Agents of S.H.I.E.L.D.",s:"Season 5",th:"Marvel",d:"Dec 1, 2017",ds:"2017-12-01"},
-  {k:"jessica jones|season 2",t:"Jessica Jones",s:"Season 2",th:"Marvel",d:"Mar 8, 2018",ds:"2018-03-08"},
-  {k:"luke cage|season 2",t:"Luke Cage",s:"Season 2",th:"Marvel",d:"Jun 22, 2018",ds:"2018-06-22"},
-  {k:"iron fist|season 2",t:"Iron Fist",s:"Season 2",th:"Marvel",d:"Sep 7, 2018",ds:"2018-09-07"},
-  {k:"daredevil (netflix)|season 3",t:"Daredevil (Netflix)",s:"Season 3",th:"Marvel",d:"Oct 19, 2018",ds:"2018-10-19"},
-  {k:"the punisher (netflix)|season 2",t:"The Punisher (Netflix)",s:"Season 2",th:"Marvel",d:"Jan 18, 2019",ds:"2019-01-18"},
-  {k:"jessica jones|season 3",t:"Jessica Jones",s:"Season 3",th:"Marvel",d:"Jun 14, 2019",ds:"2019-06-14"},
-  {k:"agents of s.h.i.e.l.d.|season 6",t:"Agents of S.H.I.E.L.D.",s:"Season 6",th:"Marvel",d:"May 10, 2019",ds:"2019-05-10"},
-  {k:"agents of s.h.i.e.l.d.|season 7",t:"Agents of S.H.I.E.L.D.",s:"Season 7",th:"Marvel",d:"May 27, 2020",ds:"2020-05-27"},
-  {k:"star wars: clone wars (2003)|volume 1",t:"Star Wars: Clone Wars (2003)",s:"Volume 1",th:"Star Wars",d:"Nov 7, 2003",ds:"2003-11-07",p:true},
-  {k:"star wars: clone wars (2003)|volume 2",t:"Star Wars: Clone Wars (2003)",s:"Volume 2",th:"Star Wars",d:"Mar 21, 2005",ds:"2005-03-21",p:true},
-  {k:"caravan of courage: an ewok adventure|film",t:"Caravan of Courage: An Ewok Adventure",s:"Film",th:"Star Wars",d:"Nov 25, 1984",ds:"1984-11-25",p:true},
-  {k:"ewoks: the battle for endor|film",t:"Ewoks: The Battle for Endor",s:"Film",th:"Star Wars",d:"Nov 24, 1985",ds:"1985-11-24",p:true},
-  {k:"star wars: droids|season 1",t:"Star Wars: Droids",s:"Season 1",th:"Star Wars",d:"Sep 7, 1985",ds:"1985-09-07",p:true},
-  {k:"star wars: ewoks|season 1",t:"Star Wars: Ewoks",s:"Season 1",th:"Star Wars",d:"Sep 7, 1985",ds:"1985-09-07",p:true},
-  {k:"star wars: ewoks|season 2",t:"Star Wars: Ewoks",s:"Season 2",th:"Star Wars",d:"Sep 13, 1986",ds:"1986-09-13",p:true},
-  {k:"marvel's inhumans|season 1",t:"Marvel's Inhumans",s:"Season 1",th:"Marvel",d:"Sep 29, 2017",ds:"2017-09-29",p:true},
-  {k:"marvel's runaways|season 1",t:"Marvel's Runaways",s:"Season 1",th:"Marvel",d:"Nov 21, 2017",ds:"2017-11-21",p:true},
-  {k:"marvel's runaways|season 2",t:"Marvel's Runaways",s:"Season 2",th:"Marvel",d:"Dec 21, 2018",ds:"2018-12-21",p:true},
-  {k:"marvel's cloak & dagger|season 1",t:"Marvel's Cloak & Dagger",s:"Season 1",th:"Marvel",d:"Jun 7, 2018",ds:"2018-06-07",p:true},
-  {k:"marvel's cloak & dagger|season 2",t:"Marvel's Cloak & Dagger",s:"Season 2",th:"Marvel",d:"Apr 4, 2019",ds:"2019-04-04",p:true},
-  {k:"marvel's runaways|season 3",t:"Marvel's Runaways",s:"Season 3",th:"Marvel",d:"Dec 13, 2019",ds:"2019-12-13",p:true},
-  {k:"helstrom|season 1",t:"Helstrom",s:"Season 1",th:"Marvel",d:"Oct 16, 2020",ds:"2020-10-16",p:true},
-  {k:"high school musical: the musical: the series|season 1",t:"High School Musical: The Musical: The Series",s:"Season 1",th:"Musical",d:"Nov 12, 2019",ds:"2019-11-12",p:true},
-  {k:"diary of a future president|season 1",t:"Diary of a Future President",s:"Season 1",th:"Drama",d:"Jan 17, 2020",ds:"2020-01-17",p:true},
-  {k:"muppets now|season 1",t:"Muppets Now",s:"Season 1",th:"Comedy",d:"Jul 31, 2020",ds:"2020-07-31",p:true},
-  {k:"the right stuff|season 1",t:"The Right Stuff",s:"Season 1",th:"Drama",d:"Oct 9, 2020",ds:"2020-10-09",p:true},
-  {k:"high school musical: the musical: the series|season 2",t:"High School Musical: The Musical: The Series",s:"Season 2",th:"Musical",d:"May 14, 2021",ds:"2021-05-14",p:true},
-  {k:"the mighty ducks: game changers|season 1",t:"The Mighty Ducks: Game Changers",s:"Season 1",th:"Family",d:"Mar 26, 2021",ds:"2021-03-26",p:true},
-  {k:"big shot|season 1",t:"Big Shot",s:"Season 1",th:"Drama",d:"Apr 16, 2021",ds:"2021-04-16",p:true},
-  {k:"monsters at work|season 1",t:"Monsters at Work",s:"Season 1",th:"Animation",d:"Jul 2, 2021",ds:"2021-07-02",p:true},
-  {k:"turner & hooch|season 1",t:"Turner & Hooch",s:"Season 1",th:"Comedy",d:"Jul 21, 2021",ds:"2021-07-21",p:true},
-  {k:"the mysterious benedict society|season 1",t:"The Mysterious Benedict Society",s:"Season 1",th:"Family",d:"Jun 25, 2021",ds:"2021-06-25",p:true},
-  {k:"doogie kamealoha, m.d.|season 1",t:"Doogie Kameāloha, M.D.",s:"Season 1",th:"Drama",d:"Sep 8, 2021",ds:"2021-09-08",p:true},
-  {k:"just beyond|season 1",t:"Just Beyond",s:"Season 1",th:"Horror",d:"Oct 13, 2021",ds:"2021-10-13",p:true},
-  {k:"diary of a future president|season 2",t:"Diary of a Future President",s:"Season 2",th:"Drama",d:"Aug 18, 2021",ds:"2021-08-18",p:true},
-  {k:"the proud family: louder and prouder|season 1",t:"The Proud Family: Louder and Prouder",s:"Season 1",th:"Animation",d:"Feb 23, 2022",ds:"2022-02-23",p:true},
-  {k:"the bear|season 1",t:"The Bear",s:"Season 1",th:"Drama",d:"Jun 23, 2022",ds:"2022-06-23",p:true},
-  {k:"the mighty ducks: game changers|season 2",t:"The Mighty Ducks: Game Changers",s:"Season 2",th:"Family",d:"Sep 28, 2022",ds:"2022-09-28",p:true},
-  {k:"big shot|season 2",t:"Big Shot",s:"Season 2",th:"Drama",d:"Oct 12, 2022",ds:"2022-10-12",p:true},
-  {k:"the mysterious benedict society|season 2",t:"The Mysterious Benedict Society",s:"Season 2",th:"Family",d:"Oct 26, 2022",ds:"2022-10-26",p:true},
-  {k:"national treasure: edge of history|season 1",t:"National Treasure: Edge of History",s:"Season 1",th:"Action",d:"Dec 14, 2022",ds:"2022-12-14",p:true},
-  {k:"willow|season 1",t:"Willow",s:"Season 1",th:"Fantasy",d:"Nov 30, 2022",ds:"2022-11-30",p:true},
-  {k:"limitless with chris hemsworth|season 1",t:"Limitless with Chris Hemsworth",s:"Season 1",th:"Documentary",d:"Nov 16, 2022",ds:"2022-11-16",p:true},
-  {k:"doogie kamealoha, m.d.|season 2",t:"Doogie Kameāloha, M.D.",s:"Season 2",th:"Drama",d:"Mar 31, 2023",ds:"2023-03-31",p:true},
-  {k:"high school musical: the musical: the series|season 3",t:"High School Musical: The Musical: The Series",s:"Season 3",th:"Musical",d:"Aug 10, 2022",ds:"2022-08-10",p:true},
-  {k:"the proud family: louder and prouder|season 2",t:"The Proud Family: Louder and Prouder",s:"Season 2",th:"Animation",d:"Sep 28, 2023",ds:"2023-09-28",p:true},
-  {k:"high school musical: the musical: the series|season 4",t:"High School Musical: The Musical: The Series",s:"Season 4",th:"Musical",d:"Aug 9, 2023",ds:"2023-08-09",p:true},
-  {k:"american born chinese|season 1",t:"American Born Chinese",s:"Season 1",th:"Fantasy",d:"May 24, 2023",ds:"2023-05-24",p:true},
-  {k:"culprits|season 1",t:"Culprits",s:"Season 1",th:"Action",d:"Nov 8, 2023",ds:"2023-11-08",p:true},
-  {k:"percy jackson and the olympians|season 1",t:"Percy Jackson and the Olympians",s:"Season 1",th:"Fantasy",d:"Dec 19, 2023",ds:"2023-12-19",p:true},
-  {k:"shogun|season 1",t:"Shōgun",s:"Season 1",th:"Drama",d:"Feb 27, 2024",ds:"2024-02-27",p:true},
-  {k:"renegade nell|season 1",t:"Renegade Nell",s:"Season 1",th:"Fantasy",d:"Mar 29, 2024",ds:"2024-03-29",p:true},
-  {k:"monsters at work|season 2",t:"Monsters at Work",s:"Season 2",th:"Animation",d:"Apr 3, 2024",ds:"2024-04-03",p:true},
-  {k:"doctor who|season 1",t:"Doctor Who",s:"Season 1",th:"Sci-Fi",d:"May 11, 2024",ds:"2024-05-11",p:true},
-  {k:"doctor odyssey|season 1",t:"Doctor Odyssey",s:"Season 1",th:"Drama",d:"Sep 26, 2024",ds:"2024-09-26",p:true},
-  {k:"say nothing|season 1",t:"Say Nothing",s:"Season 1",th:"Drama",d:"Nov 14, 2024",ds:"2024-11-14",p:true},
-  {k:"interior chinatown|season 1",t:"Interior Chinatown",s:"Season 1",th:"Drama",d:"Nov 19, 2024",ds:"2024-11-19",p:true},
-  {k:"win or lose|season 1",t:"Win or Lose",s:"Season 1",th:"Animation",d:"Feb 19, 2025",ds:"2025-02-19",p:true},
-  {k:"doctor who|season 2",t:"Doctor Who",s:"Season 2",th:"Sci-Fi",d:"Apr 12, 2025",ds:"2025-04-12",p:true},
-  {k:"alien: earth|season 1",t:"Alien: Earth",s:"Season 1",th:"Sci-Fi",d:"Aug 13, 2025",ds:"2025-08-13",p:true},
-  {k:"percy jackson and the olympians|season 2",t:"Percy Jackson and the Olympians",s:"Season 2",th:"Fantasy",d:"Jan 7, 2026",ds:"2026-01-07",p:true},
-  {k:"the testaments|season 1",t:"The Testaments",s:"Season 1",th:"Drama",d:"Apr 8, 2026",ds:"2026-04-08",p:true},
-  {k:"percy jackson and the olympians|season 3",t:"Percy Jackson and the Olympians",s:"Season 3",th:"Fantasy",d:"Late 2026",ds:"2026-11-01",p:true},
-  {k:"alien: earth|season 2",t:"Alien: Earth",s:"Season 2",th:"Sci-Fi",d:"TBA",ds:"2027-06-01",p:true},
-    ]
-  },
-  {
-    id: '90day',
-    label: '90 Day',
-    icon: '💍',
-    mediaType: 'tv',
-    themes: ['Main Show','Happily Ever After','Before the 90 Days','The Other Way','Spinoff','Tell All','Documentary'],
-    years: ['2014','2015','2016','2017','2018','2019','2020','2021','2022','2023','2024','2025','2026'],
-    defaults: [
-  {k:'90 day fiancé|season 1',t:'90 Day Fiancé',s:'Season 1',th:'Main Show',d:'Jan 12, 2014',ds:'2014-01-12'},
-  {k:'90 day fiancé|season 2',t:'90 Day Fiancé',s:'Season 2',th:'Main Show',d:'Oct 19, 2014',ds:'2014-10-19'},
-  {k:'90 day fiancé|season 3',t:'90 Day Fiancé',s:'Season 3',th:'Main Show',d:'Oct 11, 2015',ds:'2015-10-11'},
-  {k:'90 day fiancé|season 4',t:'90 Day Fiancé',s:'Season 4',th:'Main Show',d:'Sep 11, 2016',ds:'2016-09-11'},
-  {k:'90 day fiancé|season 5',t:'90 Day Fiancé',s:'Season 5',th:'Main Show',d:'Oct 8, 2017',ds:'2017-10-08'},
-  {k:'90 day fiancé|season 6',t:'90 Day Fiancé',s:'Season 6',th:'Main Show',d:'Oct 21, 2018',ds:'2018-10-21'},
-  {k:'90 day fiancé|season 7',t:'90 Day Fiancé',s:'Season 7',th:'Main Show',d:'Nov 3, 2019',ds:'2019-11-03'},
-  {k:'90 day fiancé|season 8',t:'90 Day Fiancé',s:'Season 8',th:'Main Show',d:'Dec 6, 2020',ds:'2020-12-06'},
-  {k:'90 day fiancé|season 9',t:'90 Day Fiancé',s:'Season 9',th:'Main Show',d:'Apr 17, 2022',ds:'2022-04-17'},
-  {k:'90 day fiancé|season 10',t:'90 Day Fiancé',s:'Season 10',th:'Main Show',d:'Oct 8, 2023',ds:'2023-10-08'},
-  {k:'90 day fiancé|season 11',t:'90 Day Fiancé',s:'Season 11',th:'Main Show',d:'Feb 16, 2025',ds:'2025-02-16'},
-  {k:'90 day fiancé|season 12',t:'90 Day Fiancé',s:'Season 12',th:'Main Show',d:'May 10, 2026',ds:'2026-05-10'},
-  {k:'90 day fiancé: happily ever after?|season 1',t:'90 Day Fiancé: Happily Ever After?',s:'Season 1',th:'Happily Ever After',d:'Sep 11, 2016',ds:'2016-09-11'},
-  {k:'90 day fiancé: happily ever after?|season 2',t:'90 Day Fiancé: Happily Ever After?',s:'Season 2',th:'Happily Ever After',d:'Jun 25, 2017',ds:'2017-06-25'},
-  {k:'90 day fiancé: happily ever after?|season 3',t:'90 Day Fiancé: Happily Ever After?',s:'Season 3',th:'Happily Ever After',d:'May 20, 2018',ds:'2018-05-20'},
-  {k:'90 day fiancé: happily ever after?|season 4',t:'90 Day Fiancé: Happily Ever After?',s:'Season 4',th:'Happily Ever After',d:'Apr 28, 2019',ds:'2019-04-28'},
-  {k:'90 day fiancé: happily ever after?|season 5',t:'90 Day Fiancé: Happily Ever After?',s:'Season 5',th:'Happily Ever After',d:'Jun 14, 2020',ds:'2020-06-14'},
-  {k:'90 day fiancé: happily ever after?|season 6',t:'90 Day Fiancé: Happily Ever After?',s:'Season 6',th:'Happily Ever After',d:'Apr 25, 2021',ds:'2021-04-25'},
-  {k:'90 day fiancé: happily ever after?|season 7',t:'90 Day Fiancé: Happily Ever After?',s:'Season 7',th:'Happily Ever After',d:'Aug 28, 2022',ds:'2022-08-28'},
-  {k:'90 day fiancé: happily ever after?|season 8',t:'90 Day Fiancé: Happily Ever After?',s:'Season 8',th:'Happily Ever After',d:'Mar 17, 2024',ds:'2024-03-17'},
-  {k:'90 day fiancé: happily ever after?|season 9',t:'90 Day Fiancé: Happily Ever After?',s:'Season 9',th:'Happily Ever After',d:'Jul 6, 2025',ds:'2025-07-06'},
-  {k:'90 day fiancé: happily ever after?|season 10',t:'90 Day Fiancé: Happily Ever After?',s:'Season 10',th:'Happily Ever After',d:'TBA 2026',ds:'2026-06-01'},
-  {k:'90 day fiancé: before the 90 days|season 1',t:'90 Day Fiancé: Before the 90 Days',s:'Season 1',th:'Before the 90 Days',d:'Aug 6, 2017',ds:'2017-08-06'},
-  {k:'90 day fiancé: before the 90 days|season 2',t:'90 Day Fiancé: Before the 90 Days',s:'Season 2',th:'Before the 90 Days',d:'Aug 5, 2018',ds:'2018-08-05'},
-  {k:'90 day fiancé: before the 90 days|season 3',t:'90 Day Fiancé: Before the 90 Days',s:'Season 3',th:'Before the 90 Days',d:'Aug 4, 2019',ds:'2019-08-04'},
-  {k:'90 day fiancé: before the 90 days|season 4',t:'90 Day Fiancé: Before the 90 Days',s:'Season 4',th:'Before the 90 Days',d:'Feb 23, 2020',ds:'2020-02-23'},
-  {k:'90 day fiancé: before the 90 days|season 5',t:'90 Day Fiancé: Before the 90 Days',s:'Season 5',th:'Before the 90 Days',d:'Dec 12, 2021',ds:'2021-12-12'},
-  {k:'90 day fiancé: before the 90 days|season 6',t:'90 Day Fiancé: Before the 90 Days',s:'Season 6',th:'Before the 90 Days',d:'Jun 4, 2023',ds:'2023-06-04'},
-  {k:'90 day fiancé: before the 90 days|season 7',t:'90 Day Fiancé: Before the 90 Days',s:'Season 7',th:'Before the 90 Days',d:'Sep 1, 2024',ds:'2024-09-01'},
-  {k:'90 day fiancé: before the 90 days|season 8',t:'90 Day Fiancé: Before the 90 Days',s:'Season 8',th:'Before the 90 Days',d:'Dec 7, 2025',ds:'2025-12-07'},
-  {k:'90 day fiancé: the other way|season 1',t:'90 Day Fiancé: The Other Way',s:'Season 1',th:'The Other Way',d:'Jun 3, 2019',ds:'2019-06-03'},
-  {k:'90 day fiancé: the other way|season 2',t:'90 Day Fiancé: The Other Way',s:'Season 2',th:'The Other Way',d:'Jun 8, 2020',ds:'2020-06-08'},
-  {k:'90 day fiancé: the other way|season 3',t:'90 Day Fiancé: The Other Way',s:'Season 3',th:'The Other Way',d:'Aug 29, 2021',ds:'2021-08-29'},
-  {k:'90 day fiancé: the other way|season 4',t:'90 Day Fiancé: The Other Way',s:'Season 4',th:'The Other Way',d:'Jan 29, 2023',ds:'2023-01-29'},
-  {k:'90 day fiancé: the other way|season 5',t:'90 Day Fiancé: The Other Way',s:'Season 5',th:'The Other Way',d:'Jul 10, 2023',ds:'2023-07-10'},
-  {k:'90 day fiancé: the other way|season 6',t:'90 Day Fiancé: The Other Way',s:'Season 6',th:'The Other Way',d:'Jul 1, 2024',ds:'2024-07-01'},
-  {k:'90 day fiancé: the other way|season 7',t:'90 Day Fiancé: The Other Way',s:'Season 7',th:'The Other Way',d:'Sep 8, 2025',ds:'2025-09-08'},
-  {k:'90 day fiancé: the other way|season 8',t:'90 Day Fiancé: The Other Way',s:'Season 8',th:'The Other Way',d:'Oct 8, 2026',ds:'2026-10-08'},
-  {k:'90 day fiancé: what now?|season 1',t:'90 Day Fiancé: What Now?',s:'Season 1',th:'Spinoff',d:'Jul 30, 2017',ds:'2017-07-30',p:true},
-  {k:'90 day fiancé: what now?|season 2',t:'90 Day Fiancé: What Now?',s:'Season 2',th:'Spinoff',d:'Jul 15, 2018',ds:'2018-07-15',p:true},
-  {k:'90 day fiancé: what now?|season 3',t:'90 Day Fiancé: What Now?',s:'Season 3',th:'Spinoff',d:'Apr 28, 2019',ds:'2019-04-28',p:true},
-  {k:'90 day fiancé: what now?|season 4',t:'90 Day Fiancé: What Now?',s:'Season 4',th:'Spinoff',d:'Apr 20, 2020',ds:'2020-04-20',p:true},
-  {k:'90 day fiancé: self-quarantined|season 1',t:'90 Day Fiancé: Self-Quarantined',s:'Season 1',th:'Spinoff',d:'Apr 20, 2020',ds:'2020-04-20',p:true},
-  {k:'the family chantel|season 1',t:'The Family Chantel',s:'Season 1',th:'Spinoff',d:'Jul 22, 2019',ds:'2019-07-22',p:true},
-  {k:'the family chantel|season 2',t:'The Family Chantel',s:'Season 2',th:'Spinoff',d:'Oct 12, 2020',ds:'2020-10-12',p:true},
-  {k:'the family chantel|season 3',t:'The Family Chantel',s:'Season 3',th:'Spinoff',d:'Oct 11, 2021',ds:'2021-10-11',p:true},
-  {k:'the family chantel|season 4',t:'The Family Chantel',s:'Season 4',th:'Spinoff',d:'Jun 6, 2022',ds:'2022-06-06',p:true},
-  {k:'darcey & stacey|season 1',t:'Darcey & Stacey',s:'Season 1',th:'Spinoff',d:'Aug 16, 2020',ds:'2020-08-16',p:true},
-  {k:'darcey & stacey|season 2',t:'Darcey & Stacey',s:'Season 2',th:'Spinoff',d:'Jul 19, 2021',ds:'2021-07-19',p:true},
-  {k:'darcey & stacey|season 3',t:'Darcey & Stacey',s:'Season 3',th:'Spinoff',d:'Jan 10, 2022',ds:'2022-01-10',p:true},
-  {k:'darcey & stacey|season 4',t:'Darcey & Stacey',s:'Season 4',th:'Spinoff',d:'Jan 23, 2023',ds:'2023-01-23',p:true},
-  {k:'90 day fiancé: love in paradise|season 1',t:'90 Day Fiancé: Love in Paradise',s:'Season 1',th:'Spinoff',d:'Jul 18, 2021',ds:'2021-07-18',p:true},
-  {k:'90 day fiancé: love in paradise|season 2',t:'90 Day Fiancé: Love in Paradise',s:'Season 2',th:'Spinoff',d:'Jun 10, 2022',ds:'2022-06-10',p:true},
-  {k:'90 day fiancé: love in paradise|season 3',t:'90 Day Fiancé: Love in Paradise',s:'Season 3',th:'Spinoff',d:'Jun 16, 2023',ds:'2023-06-16',p:true},
-  {k:'90 day fiancé: love in paradise|season 4',t:'90 Day Fiancé: Love in Paradise',s:'Season 4',th:'Spinoff',d:'Apr 15, 2024',ds:'2024-04-15',p:true},
-  {k:'90 day: the single life|season 1',t:'90 Day: The Single Life',s:'Season 1',th:'Spinoff',d:'Aug 9, 2021',ds:'2021-08-09',p:true},
-  {k:'90 day: the single life|season 2',t:'90 Day: The Single Life',s:'Season 2',th:'Spinoff',d:'Nov 12, 2021',ds:'2021-11-12',p:true},
-  {k:'90 day: the single life|season 3',t:'90 Day: The Single Life',s:'Season 3',th:'Spinoff',d:'Sep 12, 2022',ds:'2022-09-12',p:true},
-  {k:'90 day: the single life|season 4',t:'90 Day: The Single Life',s:'Season 4',th:'Spinoff',d:'Jan 1, 2024',ds:'2024-01-01',p:true},
-  {k:'90 day: the single life|season 5',t:'90 Day: The Single Life',s:'Season 5',th:'Spinoff',d:'Feb 9, 2026',ds:'2026-02-09',p:true},
-  {k:'90 day: the last resort|season 1',t:'90 Day: The Last Resort',s:'Season 1',th:'Spinoff',d:'Aug 28, 2023',ds:'2023-08-28',p:true},
-  {k:'90 day: the last resort|season 2',t:'90 Day: The Last Resort',s:'Season 2',th:'Spinoff',d:'Dec 2, 2024',ds:'2024-12-02',p:true},
-  {k:'90 day: the last resort|season 3',t:'90 Day: The Last Resort',s:'Season 3',th:'Spinoff',d:'TBA 2026',ds:'2026-06-01',p:true},
-  {k:'90 day: hunt for love|season 1',t:'90 Day: Hunt for Love',s:'Season 1',th:'Spinoff',d:'May 26, 2025',ds:'2025-05-26',p:true},
-  {k:'90 day: hunt for love|season 2',t:'90 Day: Hunt for Love',s:'Season 2',th:'Spinoff',d:'TBA 2026',ds:'2026-06-01',p:true},
-  {k:'90 day fiancé uk|season 1',t:'90 Day Fiancé UK',s:'Season 1',th:'Spinoff',d:'Jul 24, 2022',ds:'2022-07-24',p:true},
-  {k:'90 day fiancé uk|season 2',t:'90 Day Fiancé UK',s:'Season 2',th:'Spinoff',d:'Jul 16, 2023',ds:'2023-07-16',p:true},
-  {k:'90 day fiancé uk|season 3',t:'90 Day Fiancé UK',s:'Season 3',th:'Spinoff',d:'May 27, 2024',ds:'2024-05-27',p:true},
-  {k:'90 day fiancé uk|season 4',t:'90 Day Fiancé UK',s:'Season 4',th:'Spinoff',d:'Jul 13, 2025',ds:'2025-07-13',p:true},
-  {k:'90 day fiancé: bares all|season 1',t:'90 Day Fiancé: Bares All',s:'Season 1',th:'Documentary',d:'Jan 1, 2021',ds:'2021-01-01',p:true},
-  {k:'90 day fiancé: bares all|season 2',t:'90 Day Fiancé: Bares All',s:'Season 2',th:'Documentary',d:'Sep 12, 2021',ds:'2021-09-12',p:true},
-  {k:'90 day fiancé: foody call|season 1',t:'90 Day Fiancé: Foody Call',s:'Season 1',th:'Documentary',d:'May 29, 2021',ds:'2021-05-29',p:true},
-    ]
-  },
-  {
-    id: 'sheridan',
-    label: 'Sheridan',
-    icon: '🤠',
-    mediaType: 'tv',
-    themes: ['Yellowstone','1883','1923','6666','1944','Dutton Ranch','Marshals','The Madison','Mayor of Kingstown','Tulsa King','Special Ops Lioness','Lawmen Bass Reeves','Landman','Frisco King','Film'],
-    years: ['2015','2016','2017','2018','2019','2020','2021','2022','2023','2024','2025','2026','2027'],
-    defaults: [
-  {k:"sicario|film",t:"Sicario",s:"Film",th:"Film",d:"Sep 18, 2015",ds:"2015-09-18"},
-  {k:"hell or high water|film",t:"Hell or High Water",s:"Film",th:"Film",d:"Aug 12, 2016",ds:"2016-08-12"},
-  {k:"wind river|film",t:"Wind River",s:"Film",th:"Film",d:"Aug 4, 2017",ds:"2017-08-04"},
-  {k:"yellowstone|season 1",t:"Yellowstone",s:"Season 1",th:"Yellowstone",d:"Jun 20, 2018",ds:"2018-06-20"},
-  {k:"sicario: day of the soldado|film",t:"Sicario: Day of the Soldado",s:"Film",th:"Film",d:"Jun 29, 2018",ds:"2018-06-29"},
-  {k:"yellowstone|season 2",t:"Yellowstone",s:"Season 2",th:"Yellowstone",d:"Jun 19, 2019",ds:"2019-06-19"},
-  {k:"yellowstone|season 3",t:"Yellowstone",s:"Season 3",th:"Yellowstone",d:"Jun 21, 2020",ds:"2020-06-21"},
-  {k:"without remorse|film",t:"Without Remorse",s:"Film",th:"Film",d:"Apr 30, 2021",ds:"2021-04-30"},
-  {k:"those who wish me dead|film",t:"Those Who Wish Me Dead",s:"Film",th:"Film",d:"May 14, 2021",ds:"2021-05-14"},
-  {k:"yellowstone|season 4",t:"Yellowstone",s:"Season 4",th:"Yellowstone",d:"Nov 7, 2021",ds:"2021-11-07"},
-  {k:"mayor of kingstown|season 1",t:"Mayor of Kingstown",s:"Season 1",th:"Mayor of Kingstown",d:"Nov 14, 2021",ds:"2021-11-14"},
-  {k:"1883|season 1",t:"1883",s:"Season 1",th:"1883",d:"Dec 19, 2021",ds:"2021-12-19"},
-  {k:"yellowstone|season 5 (part 1)",t:"Yellowstone",s:"Season 5 (Part 1)",th:"Yellowstone",d:"Nov 13, 2022",ds:"2022-11-13"},
-  {k:"tulsa king|season 1",t:"Tulsa King",s:"Season 1",th:"Tulsa King",d:"Nov 13, 2022",ds:"2022-11-13"},
-  {k:"1923|season 1",t:"1923",s:"Season 1",th:"1923",d:"Dec 18, 2022",ds:"2022-12-18"},
-  {k:"mayor of kingstown|season 2",t:"Mayor of Kingstown",s:"Season 2",th:"Mayor of Kingstown",d:"Jan 15, 2023",ds:"2023-01-15"},
-  {k:"special ops: lioness|season 1",t:"Special Ops: Lioness",s:"Season 1",th:"Special Ops Lioness",d:"Jul 23, 2023",ds:"2023-07-23"},
-  {k:"lawmen: bass reeves|season 1",t:"Lawmen: Bass Reeves",s:"Season 1",th:"Lawmen Bass Reeves",d:"Nov 5, 2023",ds:"2023-11-05"},
-  {k:"mayor of kingstown|season 3",t:"Mayor of Kingstown",s:"Season 3",th:"Mayor of Kingstown",d:"Jun 2, 2024",ds:"2024-06-02"},
-  {k:"tulsa king|season 2",t:"Tulsa King",s:"Season 2",th:"Tulsa King",d:"Sep 15, 2024",ds:"2024-09-15"},
-  {k:"special ops: lioness|season 2",t:"Special Ops: Lioness",s:"Season 2",th:"Special Ops Lioness",d:"Oct 27, 2024",ds:"2024-10-27"},
-  {k:"yellowstone|season 5 (part 2)",t:"Yellowstone",s:"Season 5 (Part 2)",th:"Yellowstone",d:"Nov 10, 2024",ds:"2024-11-10"},
-  {k:"landman|season 1",t:"Landman",s:"Season 1",th:"Landman",d:"Nov 17, 2024",ds:"2024-11-17"},
-  {k:"1923|season 2",t:"1923",s:"Season 2",th:"1923",d:"Feb 23, 2025",ds:"2025-02-23"},
-  {k:"tulsa king|season 3",t:"Tulsa King",s:"Season 3",th:"Tulsa King",d:"Sep 21, 2025",ds:"2025-09-21"},
-  {k:"mayor of kingstown|season 4",t:"Mayor of Kingstown",s:"Season 4",th:"Mayor of Kingstown",d:"Oct 26, 2025",ds:"2025-10-26"},
-  {k:"landman|season 2",t:"Landman",s:"Season 2",th:"Landman",d:"Dec 2025",ds:"2025-12-01"},
-  {k:"marshals|season 1",t:"Marshals",s:"Season 1",th:"Marshals",d:"Mar 1, 2026",ds:"2026-03-01"},
-  {k:"the madison|season 1",t:"The Madison",s:"Season 1",th:"The Madison",d:"Mar 14, 2026",ds:"2026-03-14"},
-  {k:"dutton ranch|season 1",t:"Dutton Ranch",s:"Season 1",th:"Dutton Ranch",d:"May 15, 2026",ds:"2026-05-15"},
-  {k:"special ops: lioness|season 3",t:"Special Ops: Lioness",s:"Season 3",th:"Special Ops Lioness",d:"Aug 2, 2026",ds:"2026-08-02"},
-  {k:"tulsa king|season 4",t:"Tulsa King",s:"Season 4",th:"Tulsa King",d:"Late 2026",ds:"2026-09-01"},
-  {k:"mayor of kingstown|season 5",t:"Mayor of Kingstown",s:"Season 5 (Final)",th:"Mayor of Kingstown",d:"Late 2026",ds:"2026-11-01"},
-  {k:"landman|season 3",t:"Landman",s:"Season 3",th:"Landman",d:"Early 2027",ds:"2027-01-01",p:true},
-  {k:"dutton ranch|season 2",t:"Dutton Ranch",s:"Season 2",th:"Dutton Ranch",d:"TBA (announced)",ds:"2027-05-01",p:true},
-  {k:"marshals|season 2",t:"Marshals",s:"Season 2",th:"Marshals",d:"TBA (announced)",ds:"2027-03-01",p:true},
-  {k:"f.a.s.t.|film",t:"F.A.S.T.",s:"Film",th:"Film",d:"Apr 23, 2027",ds:"2027-04-23"},
-  {k:"the madison|season 2",t:"The Madison",s:"Season 2",th:"The Madison",d:"TBA (announced)",ds:"2027-03-01",p:true},
-  {k:"6666|season 1",t:"6666",s:"Season 1",th:"6666",d:"TBA (in development)",ds:"2027-06-01",p:true},
-  {k:"1944|season 1",t:"1944",s:"Season 1",th:"1944",d:"TBA (in development)",ds:"2027-06-01",p:true},
-  {k:"frisco king|season 1",t:"Frisco King",s:"Season 1",th:"Frisco King",d:"TBA (expected 2027)",ds:"2027-06-01",p:true},
-    ]
-  },
-  {
-    id: 'othertv',
-    label: 'Other TV',
-    icon: '📡',
-    mediaType: 'tv',
-    dynamic: true,
-    themes: [],
-    years: [],
-    defaults: []
-  },
-  {
-    id: 'truecrime',
-    label: 'True Crime / Docs',
-    icon: '🔎',
-    mediaType: 'tv',
-    dynamic: true,
-    themes: [],
-    years: [],
-    defaults: []
-  },
-  {
-    id: 'movies',
-    label: 'Movies',
-    icon: '🎞️',
-    mediaType: 'movie',
-    dynamic: true,
-    isMovieTab: true,
-    themes: [],
-    years: [],
-    defaults: []
-  }
-];
 
-const WATCH_WITH_OPTIONS = ['Alone', 'Suzanne', 'Rina', 'Whole Family'];
 
 // ─── Curated universe lists ────────────────────────────────────────────────────
 // Hand-maintained since there's no single TMDB field for "is this part of the MCU".
 // To refresh: ask Claude to check for newly announced/released MCU films and update this list.
-const MCU_MOVIES = [
-  // Phase 1
-  'Iron Man', 'The Incredible Hulk', 'Iron Man 2', 'Thor', 'Captain America: The First Avenger', 'The Avengers',
-  // Phase 2
-  'Iron Man 3', 'Thor: The Dark World', 'Captain America: The Winter Soldier', 'Guardians of the Galaxy',
-  'Avengers: Age of Ultron', 'Ant-Man',
-  // Phase 3
-  'Captain America: Civil War', 'Doctor Strange', 'Guardians of the Galaxy Vol. 2', 'Spider-Man: Homecoming',
-  'Thor: Ragnarok', 'Black Panther', 'Avengers: Infinity War', 'Ant-Man and the Wasp', 'Captain Marvel',
-  'Avengers: Endgame', 'Spider-Man: Far From Home',
-  // Phase 4
-  'Black Widow', 'Shang-Chi and the Legend of the Ten Rings', 'Eternals', 'Spider-Man: No Way Home',
-  'Doctor Strange in the Multiverse of Madness', 'Thor: Love and Thunder', 'Black Panther: Wakanda Forever',
-  // Phase 5
-  'Ant-Man and the Wasp: Quantumania', 'Guardians of the Galaxy Vol. 3', 'The Marvels',
-  'Captain America: Brave New World', 'Thunderbolts*',
-  // Phase 6
-  'The Fantastic Four: First Steps', 'Spider-Man: Brand New Day', 'Avengers: Doomsday', 'Avengers: Secret Wars'
-];
 
 
 // ─── TMDB config ──────────────────────────────────────────────────────────────
-const TMDB_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIyOTJhYjcyNDU0ZDFjYzJhZmExNjhiZjBhZTkxZWIxZCIsIm5iZiI6MTc4NTE2NTk4OS45MTEsInN1YiI6IjZhNjc3OGE1ZmNhODlhNWUxOTk4MDNiZCIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.IlLvRk2FD-eY2I5SKGzLDAqMrBRhh58Zxz_zx62YzRE';
-const TMDB_BASE = 'https://api.themoviedb.org/3';
 
 async function tmdbFetch(path) {
   const res = await fetch(`${TMDB_BASE}${path}`, {
@@ -628,32 +254,6 @@ async function tmdbFetch(path) {
 }
 
 // Hardcoded network colors; unknown networks fall back to a hashed color.
-const NETWORK_COLORS = {
-  'HBO': '#8b5cf6', 'HBO Max': '#8b5cf6', 'Max': '#8b5cf6',
-  'Netflix': '#e50914',
-  'AMC': '#c8a951', 'AMC+': '#c8a951',
-  'FX': '#1a73e8', 'FX on Hulu': '#1a73e8',
-  'Apple TV+': '#8e8e93',
-  'Showtime': '#e63946',
-  'NBC': '#f4a261',
-  'ABC': '#2a9d8f',
-  'CBS': '#457b9d',
-  'Amazon': '#00a8e1', 'Prime Video': '#00a8e1',
-  'Disney+': '#1a6ef5', 'Disney Plus': '#1a6ef5',
-  'Peacock': '#f7c59f',
-  'Hulu': '#1ce783',
-  'Paramount+': '#0064ff', 'Paramount Plus': '#0064ff',
-  'BBC': '#c0392b', 'BBC One': '#c0392b', 'BBC Two': '#c0392b',
-  'A&E': '#5b8def', 'Investigation Discovery': '#5b8def', 'ID': '#5b8def',
-  // Movie genres (TMDB) — deliberate colors so common ones don't look randomly hashed
-  'Action': '#f1c40f', 'Adventure': '#f39c12', 'Animation': '#e91e8c',
-  'Comedy': '#8bc34a', 'Crime': '#c0392b', 'Documentary': '#7f8c8d',
-  'Drama': '#e67e22', 'Family': '#27ae60', 'Fantasy': '#9b59b6',
-  'History': '#a0522d', 'Horror': '#c0392b', 'Music': '#e84393',
-  'Mystery': '#5b6ee1', 'Romance': '#ff6b9d', 'Science Fiction': '#1abc9c',
-  'TV Movie': '#8e8e93', 'Thriller': '#c0392b', 'War': '#7f5539',
-  'Western': '#a0522d'
-};
 function networkColor(name) {
   if (NETWORK_COLORS[name]) return NETWORK_COLORS[name];
   // simple deterministic hash -> hex color (must be hex, not hsl, so alpha-suffix works in networkBadgeStyle)
@@ -769,7 +369,6 @@ function cleanCollectionName(name) {
   if (!name) return name;
   return name.replace(/\s+Collection\s*$/i, '').trim();
 }
-const WATCHABLE_SOON_DAYS = 60;
 function hasWatchableSoonSeason(seasons) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() + WATCHABLE_SOON_DAYS);
@@ -2305,9 +1904,6 @@ async function addRefreshedCollectionMovies() {
 }
 
 // ─── Curated universe pull (MCU, and any future hand-maintained universes) ────
-const UNIVERSE_LISTS = {
-  mcu: { label: 'MCU', titles: MCU_MOVIES }
-};
 
 async function pullUniverse(universeKey) {
   const universe = UNIVERSE_LISTS[universeKey];
@@ -3160,7 +2756,6 @@ function finishRestoreAndReload() {
 }
 
 
-const LAST_BACKUP_KEY = 'watchlist_last_backup_at';
 
 function recordBackupTimestamp() {
   localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
