@@ -399,25 +399,6 @@ document.addEventListener('click', function(e) {
   document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
 });
 
-async function toggleWatchWith(rowId, tag, checked) {
-  const td = tabData[activeTabId];
-  const row = td.rows.find(r => r.id === rowId);
-  if (!row) return;
-  const current = new Set(row.watch_with || []);
-  if (checked) current.add(tag); else current.delete(tag);
-  const updated = [...current];
-  const previous = row.watch_with || [];
-  row.watch_with = updated;
-  try {
-    await sbFetch('PATCH', `${TABLE}?id=eq.${rowId}`, { watch_with: updated });
-    showSaved();
-    renderTable();
-  } catch(e) {
-    row.watch_with = previous;
-    renderTable();
-    showError(e.message);
-  }
-}
 
 // ─── Grouped rendering (Other TV, True Crime/Docs) ────────────────────────────
 function statusOptionsHtml(status) {
