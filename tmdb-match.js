@@ -203,7 +203,7 @@ function renderTmdbMatchConfirm() {
       ${addedTag ? line('Tag added', '—', addedTag) : ''}
       <div class="tmdb-refresh-summary">Kept as is: watched, status, watch with${row.collections?.length ? ', existing tags' : ''}.</div>`;
   }
-  html += `<div class="tmdb-preview-actions">
+  html += `<div class="tmdb-preview-actions" style="flex-wrap:wrap">
       <button class="btn btn-accent" onclick="confirmTmdbMatch()" ${patch ? '' : 'disabled'}>Confirm match</button>
       <button class="btn" onclick="searchTmdbMatch()">Back to results</button>
       <button class="btn" onclick="cancelTmdbMatch()">Cancel</button>
