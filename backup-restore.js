@@ -91,35 +91,150 @@ function validateBackupObject(obj) {
   if (typeof obj.formatVersion !== 'number' || obj.formatVersion > BACKUP_FORMAT_VERSION) errors.push(`Unsupported backup format version (${obj.formatVersion}).`);
   if (!obj.exportedAt || isNaN(Date.parse(obj.exportedAt))) errors.push('Missing or invalid export timestamp.');
   if (!obj.tables || typeof obj.tables !== 'object') { errors.push('Missing "tables" section.'); return errors; }
+  const hasRowCounts = obj.rowCounts && typeof obj.rowCounts === 'object' && !Array.isArray(obj.rowCounts);
+  if (!hasRowCounts) errors.push('Missing "rowCounts" section, so the file can\'t be checked for completeness.');
   for (const table of BACKUP_TABLES) {
     if (!Array.isArray(obj.tables[table])) {
       errors.push(`Missing or invalid data for table "${table}".`);
       continue;
     }
-    const declaredCount = obj.rowCounts?.[table];
-    if (typeof declaredCount === 'number' && declaredCount !== obj.tables[table].length) {
+    if (!hasRowCounts) continue;
+    const declaredCount = obj.rowCounts[table];
+    if (!Number.isInteger(declaredCount) || declaredCount < 0) {
+      errors.push(`Row count for "${table}" is missing or not a whole number.`);
+    } else if (declaredCount !== obj.tables[table].length) {
       errors.push(`Row count mismatch for "${table}": file claims ${declaredCount} but contains ${obj.tables[table].length}.`);
     }
   }
-  // spot-check required fields on watchlist_items rows, the most important table
-  const items = obj.tables.watchlist_items || [];
-  const missingItemFields = items.filter(r => !r.id || !r.item_key || !r.collection);
-  if (missingItemFields.length > 0) errors.push(`${missingItemFields.length} row(s) in watchlist_items are missing required fields (id, item_key, or collection).`);
+  if (errors.length > 0) return errors;
 
-  // othertv_shows: id, tmdb_id, title are NOT NULL with no default in the verified
-  // schema — required. network/collection are NOT NULL but have defaults, so they're
-  // not required here (an absent value would still restore safely).
-  const othertv = obj.tables.othertv_shows || [];
-  const missingOthertvFields = othertv.filter(r => r.id == null || r.tmdb_id == null || !r.title);
-  if (missingOthertvFields.length > 0) errors.push(`${missingOthertvFields.length} row(s) in othertv_shows are missing required fields (id, tmdb_id, or title).`);
+  // A backup made before the TMDB identity migration has no identity columns at all.
+  // Restoring it would silently turn every identified show and movie back into a
+  // legacy row, so it is refused outright rather than reported column by column.
+  const items = obj.tables.watchlist_items;
+  if (items.length > 0 && items.every(r => r && typeof r === 'object' && !('media_type' in r) && !('tmdb_id' in r) && !('season_number' in r))) {
+    errors.push('This backup predates the TMDB identity migration: its watchlist_items rows have no media_type, tmdb_id or season_number. Restoring it would discard the TMDB identity of every show and movie, so it can\'t be used.');
+    return errors;
+  }
+  return errors.concat(validateBackupRows(obj.tables));
+}
 
-  // custom_collections: id, name, tmdb_person_id are NOT NULL with no default in the
-  // verified schema — required. role is nullable with a default, so it's optional.
-  const customCollections = obj.tables.custom_collections || [];
-  const missingCollectionFields = customCollections.filter(r => r.id == null || !r.name || r.tmdb_person_id == null);
-  if (missingCollectionFields.length > 0) errors.push(`${missingCollectionFields.length} row(s) in custom_collections are missing required fields (id, name, or tmdb_person_id).`);
+// Every column of the three tables, as the live schema defines them. A backup row
+// must carry exactly these keys (key presence), and each value must fit the column
+// type; a trailing "?" marks columns the database allows to be NULL. If the schema
+// gains a column, add it here, or backups that include it will be refused.
+const RESTORE_COLUMNS = {
+  watchlist_items: {
+    id: 'uuid', collection: 'text', item_key: 'text', title: 'text', season: 'text', theme: 'text',
+    display_date: 'text', date_sort: 'date', watched: 'bool', status: 'text', created_at: 'timestamp',
+    watch_with: 'text[]?', collections: 'text[]?', tmdb_collection_id: 'int?', tmdb_collection_name: 'text?',
+    media_type: 'text?', tmdb_id: 'int?', season_number: 'int?'
+  },
+  othertv_shows: { id: 'uuid', tmdb_id: 'int', title: 'text', network: 'text', created_at: 'timestamp', collection: 'text' },
+  custom_collections: { id: 'uuid', name: 'text', tmdb_person_id: 'int', created_at: 'timestamp', role: 'text?' }
+};
 
+// Returns why a value doesn't fit a RESTORE_COLUMNS type, or null if it does.
+function restoreValueProblem(type, v) {
+  const nullable = type.endsWith('?');
+  const base = nullable ? type.slice(0, -1) : type;
+  if (v === null) return nullable ? null : 'is null but the column can\'t be';
+  switch (base) {
+    case 'uuid': return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? null : 'is not a uuid';
+    case 'text': return typeof v === 'string' ? null : 'is not text';
+    case 'date': return typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v) ? null : 'is not a YYYY-MM-DD date';
+    case 'timestamp': return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) && !isNaN(Date.parse(v)) ? null : 'is not a timestamp';
+    case 'bool': return typeof v === 'boolean' ? null : 'is not true/false';
+    case 'int': return Number.isInteger(v) && v >= -2147483648 && v <= 2147483647 ? null : 'is not a whole number';
+    case 'text[]': return Array.isArray(v) && v.every(x => typeof x === 'string') ? null : 'is not a list of text';
+  }
+  return 'has an unknown type';
+}
+
+// Row-level checks that mirror the database: exact columns, value types, the
+// identity-shape CHECK, and every primary/unique key. Anything reported here would
+// otherwise fail only after the tables had already been cleared.
+function validateBackupRows(tables) {
+  const errors = [];
+  const report = (label, problems) => {
+    if (problems.length === 0) return;
+    const more = problems.length > 5 ? ` …and ${problems.length - 5} more` : '';
+    errors.push(`${label}: ${problems.slice(0, 5).join('; ')}${more}`);
+  };
+  const rowLabel = (r, i) => `row ${i + 1}${r && typeof r.id === 'string' ? ` (id ${r.id})` : ''}`;
+  const findDuplicates = (rows, keyOf, describe) => {
+    const seen = new Map();
+    const dups = [];
+    rows.forEach((r, i) => {
+      const key = keyOf(r);
+      if (key === null) return;
+      if (seen.has(key)) dups.push(`${describe(r)} on ${rowLabel(rows[seen.get(key)], seen.get(key))} and ${rowLabel(r, i)}`);
+      else seen.set(key, i);
+    });
+    return dups;
+  };
+
+  for (const table of BACKUP_TABLES) {
+    const spec = RESTORE_COLUMNS[table];
+    const rows = tables[table];
+    const columnProblems = [], typeProblems = [];
+    rows.forEach((r, i) => {
+      if (!r || typeof r !== 'object' || Array.isArray(r)) { columnProblems.push(`${rowLabel(r, i)} is not an object`); return; }
+      const unknown = Object.keys(r).filter(k => !(k in spec));
+      const missing = Object.keys(spec).filter(k => !(k in r));
+      if (unknown.length) columnProblems.push(`${rowLabel(r, i)} has unknown column(s) ${unknown.join(', ')}`);
+      if (missing.length) columnProblems.push(`${rowLabel(r, i)} is missing column(s) ${missing.join(', ')}`);
+      for (const [col, type] of Object.entries(spec)) {
+        if (!(col in r)) continue;
+        const problem = restoreValueProblem(type, r[col]);
+        if (problem) typeProblems.push(`${rowLabel(r, i)} ${col} ${problem}`);
+      }
+    });
+    report(`${table} columns`, columnProblems);
+    report(`${table} values`, typeProblems);
+    report(`${table} duplicate id`, findDuplicates(rows, r => r && typeof r.id === 'string' ? r.id.toLowerCase() : null, () => 'same id'));
+  }
+
+  const items = tables.watchlist_items.filter(r => r && typeof r === 'object');
+  const shapeProblems = [];
+  items.forEach((r, i) => {
+    const m = r.media_type, id = r.tmdb_id, s = r.season_number;
+    const ok = (m === null && id === null && s === null)
+      || (m === 'tv' && id != null && s != null)
+      || (m === 'movie' && id != null && s === null);
+    if (!ok) shapeProblems.push(`${rowLabel(r, i)} has media_type ${JSON.stringify(m)}, tmdb_id ${JSON.stringify(id)}, season_number ${JSON.stringify(s)}`);
+  });
+  report('watchlist_items identity shape (must be movie, TV season, or legacy with all three empty)', shapeProblems);
+  report('watchlist_items duplicate movie identity', findDuplicates(items,
+    r => r.media_type === 'movie' && r.tmdb_id != null ? JSON.stringify([r.collection, r.tmdb_id]) : null,
+    r => `(collection "${r.collection}", tmdb_id ${r.tmdb_id})`));
+  report('watchlist_items duplicate TV identity', findDuplicates(items,
+    r => r.media_type === 'tv' && r.tmdb_id != null && r.season_number != null ? JSON.stringify([r.collection, r.tmdb_id, r.season_number]) : null,
+    r => `(collection "${r.collection}", tmdb_id ${r.tmdb_id}, season ${r.season_number})`));
+  report('watchlist_items duplicate legacy entry', findDuplicates(items,
+    r => r.tmdb_id === null ? JSON.stringify([r.collection, r.item_key]) : null,
+    r => `(collection "${r.collection}", item_key "${r.item_key}")`));
+  report('othertv_shows duplicate tracked show', findDuplicates(tables.othertv_shows.filter(r => r && typeof r === 'object'),
+    r => JSON.stringify([r.collection, r.tmdb_id]), r => `(collection "${r.collection}", tmdb_id ${r.tmdb_id})`));
+  report('custom_collections duplicate name', findDuplicates(tables.custom_collections.filter(r => r && typeof r === 'object'),
+    r => typeof r.name === 'string' ? r.name : null, r => `"${r.name}"`));
   return errors;
+}
+
+// Compares the backup with the data currently in the database. Refuses a restore that
+// would strip TMDB identity: rows identified now that come back unidentified, or a
+// backup with no identified rows at all while the database has some.
+function identityLossErrors(currentItems, backupItems) {
+  const currentIdentified = currentItems.filter(r => r.tmdb_id != null);
+  if (currentIdentified.length === 0) return [];
+  const backupById = new Map(backupItems.map(r => [r.id, r]));
+  const lost = currentIdentified.filter(r => backupById.has(r.id) && backupById.get(r.id).tmdb_id == null);
+  const backupIdentified = backupItems.filter(r => r.tmdb_id != null).length;
+  if (lost.length === 0 && backupIdentified > 0) return [];
+  const examples = lost.slice(0, 3).map(r => `"${r.title} ${r.season}"`).join(', ');
+  return [`This backup would discard TMDB identity: ${currentIdentified.length} row(s) are identified now, the backup has ${backupIdentified}` +
+    (lost.length ? `, and ${lost.length} existing row(s) would lose their identity (e.g. ${examples})` : '') +
+    '. It probably predates the TMDB identity migration, so it can\'t be used.'];
 }
 
 async function handleRestoreFileSelected(event) {
@@ -154,15 +269,26 @@ async function renderRestorePreview(backup) {
   showRestoreModal(`<div class="modal-title">Checking current data…</div><div class="modal-progress">Fetching current row counts for comparison…</div>`);
 
   let currentCounts = {};
+  let currentItems = [];
   try {
     for (const table of BACKUP_TABLES) {
       const rows = await fetchAllRows(table);
       currentCounts[table] = rows.length;
+      if (table === 'watchlist_items') currentItems = rows;
     }
   } catch(e) {
     showRestoreModal(`<div class="modal-title">Couldn't check current data</div>
       <div class="modal-error">${esc(e.message)}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    return;
+  }
+
+  const lossErrors = identityLossErrors(currentItems, backup.tables.watchlist_items);
+  if (lossErrors.length > 0) {
+    showRestoreModal(`<div class="modal-title">This file can't be used for restore</div>
+      <div class="modal-error">${lossErrors.map(esc).join('\n')}</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    pendingRestoreData = null;
     return;
   }
 
@@ -218,6 +344,22 @@ async function executeRestore() {
   } catch(e) {
     showRestoreModal(`<div class="modal-title">Restore aborted</div>
       <div class="modal-error">Couldn't create a safety backup of your current data, so nothing was changed:\n${esc(e.message)}</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    return;
+  }
+  // The safety copy must itself be a restorable backup, and the backup being restored
+  // must not strip identity from the data as it stands right now.
+  const safetyErrors = validateBackupObject(preRestoreBackup);
+  if (safetyErrors.length > 0) {
+    showRestoreModal(`<div class="modal-title">Restore aborted</div>
+      <div class="modal-error">The safety backup of your current data didn't pass validation, so nothing was changed:\n${safetyErrors.map(esc).join('\n')}</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    return;
+  }
+  const lossErrors = identityLossErrors(preRestoreBackup.tables.watchlist_items, backup.tables.watchlist_items);
+  if (lossErrors.length > 0) {
+    showRestoreModal(`<div class="modal-title">Restore aborted</div>
+      <div class="modal-error">Nothing was changed:\n${lossErrors.map(esc).join('\n')}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
     return;
   }
