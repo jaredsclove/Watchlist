@@ -137,6 +137,14 @@ async function addEntry() {
   const date   = document.getElementById('nDate').value.trim();
   if (!title || !date) { alert('Please fill in title and premiere date.'); return; }
   const key = title.toLowerCase().trim() + '|' + season.toLowerCase().trim();
+  // Client-side duplicate check against every loaded row in this collection
+  // (legacy or TMDB-identified). Keeps manual-add behavior independent of the
+  // database's (collection, item_key) uniqueness, which will later apply only
+  // to rows with tmdb_id IS NULL.
+  if ((tabData[activeTabId]?.rows || []).some(r => r.item_key === key)) {
+    showError('This title and season is already on your list.');
+    return;
+  }
   const ds  = parseDate(date);
   const newRow = {
     collection: activeTabId,
