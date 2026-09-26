@@ -180,7 +180,7 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
       const alt = isSameTitleAlt(m);
       const year = m.releaseDate ? m.releaseDate.slice(0, 4) : 'year unknown';
       return `<div class="tmdb-season-row ${m.alreadyAdded?'already-added':''}">
-        <input type="checkbox" ${m.alreadyAdded?'disabled':(alt?'':'checked')} data-tmdb-id="${m.tmdbId||''}" data-title="${esc(m.title).replace(/'/g,"\\'")}" id="pc_${m.tmdbId||m.title.replace(/\W/g,'')}">
+        <input type="checkbox" ${m.alreadyAdded?'disabled':(alt?'':'checked')} data-tmdb-id="${m.tmdbId||''}" data-title="${esc(m.title)}" id="pc_${m.tmdbId||m.title.replace(/\W/g,'')}">
         <span class="tmdb-season-name">${esc(m.title)}${alt ? ` <strong>(${esc(year)})</strong>` : ''}</span>
         <span class="tmdb-season-meta">${esc(date)}</span>
         ${m.alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}

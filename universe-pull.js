@@ -73,7 +73,7 @@ async function pullUniverse(universeKey) {
   const rowsHtml = found.map(m => {
     const date = m.releaseDate ? formatDisplayDate(m.releaseDate) : 'TBA';
     return `<div class="tmdb-season-row ${m.alreadyAdded?'already-added':''}">
-      <input type="checkbox" ${m.alreadyAdded?'disabled':'checked'} data-tmdb-id="${m.tmdbId||''}" data-title="${esc(m.title).replace(/'/g,"\\'")}" id="uni_${m.tmdbId||m.title.replace(/\W/g,'')}">
+      <input type="checkbox" ${m.alreadyAdded?'disabled':'checked'} data-tmdb-id="${m.tmdbId||''}" data-title="${esc(m.title)}" id="uni_${m.tmdbId||m.title.replace(/\W/g,'')}">
       <span class="tmdb-season-name">${esc(m.title)}</span>
       <span class="tmdb-season-meta">${esc(date)}</span>
       ${m.alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}
