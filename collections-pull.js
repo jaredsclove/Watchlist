@@ -243,8 +243,16 @@ function updateCollectionRefreshLink() {
   const linkSpan = document.getElementById('collectionRefreshLink');
   if (!select || !linkSpan) return;
   const selected = select.value;
-  if (!selected || selected === UNIVERSE_LISTS.mcu?.label) {
-    // MCU refreshes via its own "pull entire MCU" link, not this one — hide here
+  // Only person collections (rows in custom_collections, the table
+  // refreshPersonCollection() looks up) can be refreshed. Franchise and universe
+  // tags (e.g. "Toy Story", "MCU") are never in that table, so they get no link.
+  if (selected && personCollectionNames === null) {
+    personCollectionNames = sbFetch('GET', 'custom_collections?select=name', null).then(
+      rows => { personCollectionNames = new Set((rows || []).map(r => r.name)); updateCollectionRefreshLink(); },
+      () => { personCollectionNames = null; }
+    );
+  }
+  if (!selected || !(personCollectionNames instanceof Set) || !personCollectionNames.has(selected)) {
     linkSpan.innerHTML = '';
     return;
   }

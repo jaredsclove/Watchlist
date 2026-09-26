@@ -130,6 +130,7 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
       // knows who to re-check and applies the same director/actor filter consistently
       try {
         await sbFetch('POST', 'custom_collections', [{ name: personName, tmdb_person_id: personId, role }]);
+        if (personCollectionNames instanceof Set) personCollectionNames.add(personName); // new collection gets its Refresh link
       } catch(e) {
         // Expected: this collection name already exists (unique constraint on name) —
         // fine, nothing to do. Anything else is a real failure and should be surfaced,
