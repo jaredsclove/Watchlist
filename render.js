@@ -375,7 +375,7 @@ function renderMoviesTable(list, td) {
         : `<span class="confirmed-lbl">—</span>`
       }</td>
       <td class="more-cell">
-        <button class="more-btn" onclick="toggleMorePopover('${r.id}')" title="Watch with / collection">⋯</button>
+        <button class="more-btn" onclick="toggleMorePopover('${r.id}', this)" title="Watch with / collection">⋯</button>
         ${morePopover}
       </td>
       <td><button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button></td>
@@ -389,7 +389,7 @@ function renderMoviesTable(list, td) {
           ${inlineTagsHtml ? `<div class="inline-tags">${inlineTagsHtml}</div>` : ''}
         </div>
         <div class="card-row-actions">
-          <button class="more-btn" onclick="toggleMorePopover('${r.id}')" title="Watch with / collection">⋯</button>
+          <button class="more-btn" onclick="toggleMorePopover('${r.id}', this)" title="Watch with / collection">⋯</button>
           <button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>
         </div>
         ${morePopover}
@@ -411,8 +411,11 @@ function renderMoviesTable(list, td) {
   document.getElementById('cardList').innerHTML = cardHtml;
 }
 
-function toggleMorePopover(rowId) {
-  const el = document.getElementById(`more-popover-${rowId}`);
+function toggleMorePopover(rowId, btn) {
+  // Each movie row renders this popover twice (desktop table cell and mobile card),
+  // so open the copy next to the tapped button rather than the first one by id.
+  const container = btn && btn.closest('.more-cell, .card-top');
+  const el = container ? container.querySelector('.more-popover') : document.getElementById(`more-popover-${rowId}`);
   if (!el) return;
   const isOpen = el.style.display !== 'none';
   // close any other open popovers first
