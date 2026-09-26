@@ -3,6 +3,19 @@ function renderFilters() {
   const col = COLLECTIONS.find(c => c.id === activeTabId);
   const td = tabData[activeTabId];
 
+  // Re-rendering the same tab (e.g. after an add or a tag backfill) keeps the
+  // user's filter/search selections; a different tab starts from the defaults.
+  const filtersRowEl = document.getElementById('filtersRow');
+  const keepState = filtersRowEl.dataset.tab === activeTabId;
+  const savedValues = {};
+  if (keepState) {
+    ['fSearch', 'fTheme', 'fYear', 'fCollection', 'fWatchWith', 'fWatch', 'fStatus', 'tmdbQuery'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) savedValues[id] = el.value;
+    });
+  }
+  const wasCollapsed = filtersRowEl.classList.contains('collapsed');
+
   let themeList = col.themes;
   let yearList  = col.years;
   if (col.dynamic && td) {
@@ -68,6 +81,7 @@ function renderFilters() {
       <button class="btn" onclick="toggleAdd()" id="addToggleBtn">+ Add entry</button>
     </div>
   `;
+  filtersRowEl.dataset.tab = activeTabId;
   // start collapsed on mobile widths
   if (window.innerWidth <= 700) {
     document.getElementById('filtersRow').classList.add('collapsed');
@@ -119,6 +133,19 @@ function renderFilters() {
   } else {
     tmdbPanel.style.display = 'none';
     tmdbPanel.innerHTML = '';
+  }
+
+  if (keepState) {
+    for (const [id, value] of Object.entries(savedValues)) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      // A select whose saved option no longer exists keeps its rendered default.
+      if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === value)) continue;
+      el.value = value;
+    }
+    // keep the mobile expand/collapse state the user chose
+    if (filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
+    updateCollectionRefreshLink();
   }
 }
 
