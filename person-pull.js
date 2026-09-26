@@ -194,7 +194,11 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
 
     window.__personPullName = personName;
 
-    previewEl.innerHTML = `
+    // Re-render before writing the preview: renderFilters() rebuilds the whole
+    // TMDB panel (including #tmdbPreview), so running it afterwards wiped the list.
+    if (backfilled > 0) { showSaved(); renderFilters(); renderTable(); }
+    const previewTarget = document.getElementById('tmdbPreview');
+    previewTarget.innerHTML = `
       <div class="tmdb-preview">
         <div class="tmdb-preview-header">
           <div class="tmdb-preview-title">${esc(personName)}</div>
@@ -208,7 +212,6 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
         </div>
       </div>
     `;
-    if (backfilled > 0) { showSaved(); renderFilters(); renderTable(); }
   } catch(e) {
     previewEl.innerHTML = `<div class="tmdb-no-results">Failed to load filmography: ${esc(e.message)}</div>`;
   }
