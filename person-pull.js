@@ -225,6 +225,8 @@ async function addPulledPersonMovies() {
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
   const seenTmdbIds = new Set();
   const toInsert = [];
+  const failedTitles = [];
+  let selected = 0;
 
   for (const cb of checkboxes) {
     if (!cb.checked || cb.disabled) continue;
@@ -236,9 +238,10 @@ async function addPulledPersonMovies() {
     // happen to share a title must never be conflated into one skipped entry.
     if (seenTmdbIds.has(tmdbId)) continue; // guard against the exact same movie appearing twice in this batch
     seenTmdbIds.add(tmdbId);
+    selected++;
     const key = `${title.toLowerCase().trim()}|film`;
     let details;
-    try { details = await tmdbFetch(`/movie/${tmdbId}`); } catch(e) { continue; }
+    try { details = await tmdbFetch(`/movie/${tmdbId}`); } catch(e) { failedTitles.push(title); continue; }
     const network = isMoviesTab
       ? ((details.genres && details.genres[0]?.name) || 'Film')
       : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
@@ -265,7 +268,12 @@ async function addPulledPersonMovies() {
     });
   }
 
-  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+  const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
+  if (toInsert.length === 0) {
+    // keep the preview open when every lookup failed, so the user can retry
+    if (failureNote) showError(failureNote); else cancelTMDBPreview();
+    return;
+  }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
@@ -275,6 +283,7 @@ async function addPulledPersonMovies() {
     resetTMDBSearchUI();
     renderFilters();
     renderTable();
+    if (failureNote) showError(failureNote);
   } catch(e) {
     if (e.message.includes('23505') || e.message.includes('duplicate key')) {
       showError(`One or more of these movies is already on your list but wasn't detected in time — try clicking "+ start a person collection" again for a fresh check, or reload the page first.`);

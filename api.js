@@ -108,6 +108,10 @@ async function tmdbFetch(path) {
       'Content-Type': 'application/json'
     }
   });
-  if (!res.ok) throw new Error(`TMDB error ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`TMDB error ${res.status}`);
+    err.status = res.status; // lets callers tell a genuine 404 "not found" from a failed request
+    throw err;
+  }
   return res.json();
 }

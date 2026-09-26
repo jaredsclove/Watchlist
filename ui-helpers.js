@@ -81,6 +81,36 @@ function showError(msg) {
     ? `<div class="error-banner">⚠️ ${esc(msg)}</div>` : '';
 }
 
+// ─── TMDB lookup failures ─────────────────────────────────────────────────────
+// Refresh and pull flows look items up on TMDB one at a time. Callers collect the
+// names whose lookup failed, so an outage is never reported as "nothing new" and a
+// partial add is never reported as a plain success.
+function tmdbNameList(names) {
+  return names.length <= 5 ? names.join(', ') : `${names.slice(0, 5).join(', ')} and ${names.length - 5} more`;
+}
+
+// For a preview built from `attempted` lookups: null if none failed, otherwise
+// { total, message } — total means nothing could be checked at all.
+function tmdbLookupFailureNote(attempted, failedNames, noun) {
+  const failed = failedNames.length;
+  if (failed === 0) return null;
+  if (failed >= attempted) {
+    return { total: true, message: `Couldn't check TMDB right now. ${failed} of ${attempted} ${noun} lookup${attempted === 1 ? '' : 's'} failed. Nothing was changed.` };
+  }
+  return { total: false, message: `Checked ${attempted - failed} of ${attempted} ${noun}s. ${failed} TMDB lookup${failed === 1 ? '' : 's'} failed (${tmdbNameList(failedNames)}), so this result may be incomplete.` };
+}
+
+// For adding `selected` items whose TMDB details are fetched one by one: null if
+// none failed, otherwise the message to show.
+function tmdbAddFailureNote(selected, failedNames, noun) {
+  const failed = failedNames.length;
+  if (failed === 0) return null;
+  if (failed >= selected) {
+    return `Couldn't load TMDB details for ${selected === 1 ? `the selected ${noun}` : `any of the ${selected} selected ${noun}s`}, so nothing was added. Try again in a moment.`;
+  }
+  return `Added ${selected - failed} of ${selected} selected ${noun}s. Couldn't load TMDB details for ${tmdbNameList(failedNames)}, so ${failed === 1 ? 'it was' : 'they were'} not added.`;
+}
+
 function formatDisplayDate(isoDate) {
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const [y,m,d] = isoDate.split('-').map(Number);

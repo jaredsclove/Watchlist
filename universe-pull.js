@@ -12,6 +12,7 @@ async function pullUniverse(universeKey) {
   const found = [];
   const notFound = [];
   const ambiguous = []; // { title, candidates } — more than one TMDB film has this exact title
+  const failed = []; // titles whose TMDB request failed — unknown, not "not found"
   let backfilled = 0;
 
   for (const entry of universe.titles) {
@@ -24,13 +25,18 @@ async function pullUniverse(universeKey) {
     const configuredId = typeof entry === 'object' && entry.id ? entry.id : null;
     let match = null;
     if (configuredId) {
-      try { match = await tmdbFetch(`/movie/${configuredId}`); } catch(e) { match = null; }
+      try { match = await tmdbFetch(`/movie/${configuredId}`); }
+      catch(e) {
+        // a 404 is TMDB answering that the id doesn't exist; anything else is a failed check
+        if (e.status !== 404) { failed.push(title); continue; }
+        match = null;
+      }
     } else {
       let results = [];
       try {
         const data = await tmdbFetch(`/search/movie?query=${encodeURIComponent(title)}`);
         results = data.results || [];
-      } catch(e) { results = []; }
+      } catch(e) { failed.push(title); continue; }
       const picked = pickTmdbMovieCandidate(results, title, typeof entry === 'object' ? entry.y : null);
       if (picked.ambiguous) {
         // Never auto-select, insert or tag here — the user picks explicitly below.
@@ -67,6 +73,13 @@ async function pullUniverse(universeKey) {
       found.push({ title, tmdbId: match.id, releaseDate: match.release_date, alreadyAdded: false });
     }
   }
+
+  const lookupNote = tmdbLookupFailureNote(universe.titles.length, failed, 'title');
+  if (lookupNote?.total) {
+    previewEl.innerHTML = `<div class="tmdb-no-results">${esc(lookupNote.message)}</div>`;
+    return;
+  }
+  const warningHtml = lookupNote ? `<div class="tmdb-refresh-summary">⚠️ ${esc(lookupNote.message)}</div>` : '';
 
   found.sort((a,b) => (a.releaseDate||'9999').localeCompare(b.releaseDate||'9999'));
 
@@ -114,6 +127,7 @@ async function pullUniverse(universeKey) {
         <div class="tmdb-preview-title">${esc(universe.label)}</div>
         <div class="tmdb-result-meta">${found.filter(f=>!f.alreadyAdded).length} new, ${found.filter(f=>f.alreadyAdded).length} already on your list${ambiguous.length ? `, ${ambiguous.length} need${ambiguous.length===1?'s':''} your choice` : ''}</div>
       </div>
+      ${warningHtml}
       ${backfillHtml}
       ${rowsHtml || (ambiguous.length ? '' : '<div class="tmdb-no-results">Nothing found.</div>')}
       ${ambiguousHtml}
@@ -133,14 +147,17 @@ async function addPulledUniverseMovies() {
   const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
   const toInsert = [];
+  const failedTitles = [];
+  let selected = 0;
 
   for (const cb of checkboxes) {
     if (!cb.checked || cb.disabled) continue;
     const tmdbId = cb.dataset.tmdbId;
     const title = cb.dataset.title;
     if (!tmdbId) continue;
+    selected++;
     let details;
-    try { details = await tmdbFetch(`/movie/${tmdbId}`); } catch(e) { continue; }
+    try { details = await tmdbFetch(`/movie/${tmdbId}`); } catch(e) { failedTitles.push(title); continue; }
     const network = isMoviesTab
       ? ((details.genres && details.genres[0]?.name) || 'Film')
       : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
@@ -168,7 +185,12 @@ async function addPulledUniverseMovies() {
     });
   }
 
-  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+  const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
+  if (toInsert.length === 0) {
+    // keep the preview open when every lookup failed, so the user can retry
+    if (failureNote) showError(failureNote); else cancelTMDBPreview();
+    return;
+  }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
@@ -178,6 +200,7 @@ async function addPulledUniverseMovies() {
     resetTMDBSearchUI();
     renderFilters();
     renderTable();
+    if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {
       showError(duplicateInsertMessage('try the universe pull again for a fresh check'));

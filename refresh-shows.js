@@ -26,12 +26,13 @@ async function refreshShows() {
     const existingRows = tabData[activeTabId]?.rows || [];
     const newSeasonsByShow = [];
     const dateUpdates = [];
+    const failedShows = [];
 
     for (const show of trackedShows) {
       let details;
       try {
         details = await tmdbFetch(`/tv/${show.tmdb_id}`);
-      } catch(e) { continue; }
+      } catch(e) { failedShows.push(show.title); continue; }
       const showKeyBase = show.title.toLowerCase().trim();
       const seasons = (details.seasons || []).filter(s => tmdbShowSpecials || s.season_number !== 0);
       const newOnes = [];
@@ -48,12 +49,21 @@ async function refreshShows() {
       }
     }
 
+    const lookupNote = tmdbLookupFailureNote(trackedShows.length, failedShows, 'show');
+    if (lookupNote?.total) {
+      previewEl.innerHTML = `<div class="tmdb-no-results">${esc(lookupNote.message)}</div>`;
+      return;
+    }
+    const warningHtml = lookupNote ? `<div class="tmdb-refresh-summary">⚠️ ${esc(lookupNote.message)}</div>` : '';
+
     if (newSeasonsByShow.length === 0 && dateUpdates.length === 0) {
-      previewEl.innerHTML = `<div class="tmdb-refresh-summary">✓ Everything's up to date — no new seasons or newly confirmed dates found across ${trackedShows.length} tracked show${trackedShows.length===1?'':'s'}.</div>`;
+      previewEl.innerHTML = lookupNote
+        ? `${warningHtml}<div class="tmdb-refresh-summary">No new seasons or newly confirmed dates among the shows that were checked.</div>`
+        : `<div class="tmdb-refresh-summary">✓ Everything's up to date — no new seasons or newly confirmed dates found across ${trackedShows.length} tracked show${trackedShows.length===1?'':'s'}.</div>`;
       return;
     }
 
-    let html = `<div class="tmdb-preview">`;
+    let html = `<div class="tmdb-preview">${warningHtml}`;
     if (newSeasonsByShow.length > 0) {
       html += `<div class="tmdb-preview-title">New seasons found</div>`;
       newSeasonsByShow.forEach(({show, newOnes}, idx) => {

@@ -56,6 +56,8 @@ async function addPulledCollectionMovies() {
   const seenTmdbIds = new Set();
 
   const toInsert = [];
+  const failedTitles = [];
+  let selected = 0;
   for (const cb of checkboxes) {
     if (!cb.checked || cb.disabled) continue;
     const movieId = parseInt(cb.dataset.movieId, 10);
@@ -68,9 +70,10 @@ async function addPulledCollectionMovies() {
     // batch before the insert call is made.
     if (seenTmdbIds.has(movieId)) continue;
     seenTmdbIds.add(movieId);
+    selected++;
     // fetch full details for genre/runtime accuracy, same as a normal add
     let details;
-    try { details = await tmdbFetch(`/movie/${movieId}`); } catch(e) { continue; }
+    try { details = await tmdbFetch(`/movie/${movieId}`); } catch(e) { failedTitles.push(summary.title); continue; }
     const network = isMoviesTab
       ? ((details.genres && details.genres[0]?.name) || 'Film')
       : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
@@ -96,7 +99,12 @@ async function addPulledCollectionMovies() {
     });
   }
 
-  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+  const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
+  if (toInsert.length === 0) {
+    // keep the preview open when every lookup failed, so the user can retry
+    if (failureNote) showError(failureNote); else cancelTMDBPreview();
+    return;
+  }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
@@ -106,6 +114,7 @@ async function addPulledCollectionMovies() {
     resetTMDBSearchUI();
     renderFilters();
     renderTable();
+    if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {
       showError(duplicateInsertMessage('try "🔗 Pull rest of collection" again for a fresh check'));
@@ -139,9 +148,10 @@ async function refreshCollections() {
 
   try {
     const newByCollection = [];
+    const failedCollections = [];
     for (const [collectionId, collectionName] of collectionsMap.entries()) {
       let data;
-      try { data = await tmdbFetch(`/collection/${collectionId}`); } catch(e) { continue; }
+      try { data = await tmdbFetch(`/collection/${collectionId}`); } catch(e) { failedCollections.push(cleanCollectionName(collectionName)); continue; }
       const movies = data.parts || [];
       const newOnes = movies.filter(m => !isAlreadyAdded(rows, { itemKey: `${m.title.toLowerCase().trim()}|film`, mediaType: 'movie', tmdbId: m.id }));
       if (newOnes.length > 0) {
@@ -149,12 +159,21 @@ async function refreshCollections() {
       }
     }
 
+    const lookupNote = tmdbLookupFailureNote(collectionsMap.size, failedCollections, 'collection');
+    if (lookupNote?.total) {
+      previewEl.innerHTML = `<div class="tmdb-no-results">${esc(lookupNote.message)}</div>`;
+      return;
+    }
+    const warningHtml = lookupNote ? `<div class="tmdb-refresh-summary">⚠️ ${esc(lookupNote.message)}</div>` : '';
+
     if (newByCollection.length === 0) {
-      previewEl.innerHTML = `<div class="tmdb-refresh-summary">✓ Everything's up to date — no new movies found across ${collectionsMap.size} tracked collection${collectionsMap.size===1?'':'s'}.</div>`;
+      previewEl.innerHTML = lookupNote
+        ? `${warningHtml}<div class="tmdb-refresh-summary">No new movies in the collections that were checked.</div>`
+        : `<div class="tmdb-refresh-summary">✓ Everything's up to date — no new movies found across ${collectionsMap.size} tracked collection${collectionsMap.size===1?'':'s'}.</div>`;
       return;
     }
 
-    let html = `<div class="tmdb-preview"><div class="tmdb-preview-title">New movies found</div>`;
+    let html = `<div class="tmdb-preview">${warningHtml}<div class="tmdb-preview-title">New movies found</div>`;
     newByCollection.forEach(({collectionName, newOnes}, idx) => {
       html += `<div style="margin-top:10px"><div class="tmdb-result-title">${esc(collectionName)}</div>`;
       newOnes.forEach(m => {
@@ -183,6 +202,8 @@ async function addRefreshedCollectionMovies() {
   const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-collection-idx]');
   const toInsert = [];
+  const failedTitles = [];
+  let selected = 0;
 
   for (const cb of checkboxes) {
     if (!cb.checked) continue;
@@ -192,8 +213,9 @@ async function addRefreshedCollectionMovies() {
     if (!entry) continue;
     const summary = entry.newOnes.find(m => m.id === movieId);
     if (!summary) continue;
+    selected++;
     let details;
-    try { details = await tmdbFetch(`/movie/${movieId}`); } catch(e) { continue; }
+    try { details = await tmdbFetch(`/movie/${movieId}`); } catch(e) { failedTitles.push(summary.title); continue; }
     const network = isMoviesTab
       ? ((details.genres && details.genres[0]?.name) || 'Film')
       : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
@@ -219,7 +241,12 @@ async function addRefreshedCollectionMovies() {
     });
   }
 
-  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
+  const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
+  if (toInsert.length === 0) {
+    // keep the preview open when every lookup failed, so the user can retry
+    if (failureNote) showError(failureNote); else cancelTMDBPreview();
+    return;
+  }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
@@ -229,6 +256,7 @@ async function addRefreshedCollectionMovies() {
     resetTMDBSearchUI();
     renderFilters();
     renderTable();
+    if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {
       showError(duplicateInsertMessage('try "↻ Refresh collections" again for a fresh check'));
