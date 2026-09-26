@@ -72,7 +72,8 @@ function duplicateInsertMessage(actionHint) {
 }
 
 // TMDB collection names always come back as "X Collection" (e.g. "The Avengers Collection").
-// Strip the trailing "Collection" for cleaner display everywhere a collection name is shown or stored.
+// Strip the trailing "Collection" for display only. Stored values (tmdb_collection_name and the
+// franchise entry in collections[]) keep TMDB's full name, e.g. "Toy Story Collection".
 function cleanCollectionName(name) {
   if (!name) return name;
   return name.replace(/\s+Collection\s*$/i, '').trim();

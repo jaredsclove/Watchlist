@@ -215,8 +215,8 @@ async function addSelectedTMDBSeasons() {
       watched: false,
       status: 'confirmed',
       tmdb_collection_id: belongsTo ? belongsTo.id : null,
-      tmdb_collection_name: belongsTo ? cleanCollectionName(belongsTo.name) : null,
-      collections: belongsTo ? [cleanCollectionName(belongsTo.name)] : [],
+      tmdb_collection_name: belongsTo ? belongsTo.name : null,
+      collections: belongsTo ? [belongsTo.name] : [],
       media_type: 'movie',
       tmdb_id: tmdbSelectedShow.id,
       season_number: null

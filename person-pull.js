@@ -241,7 +241,7 @@ async function addPulledPersonMovies() {
     const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
     const dateSort = details.release_date || '2099-01-01';
     const belongsTo = details.belongs_to_collection;
-    const collections = belongsTo ? [cleanCollectionName(belongsTo.name), personName] : [personName];
+    const collections = belongsTo ? [belongsTo.name, personName] : [personName];
     toInsert.push({
       collection: activeTabId,
       item_key: key,
@@ -253,7 +253,7 @@ async function addPulledPersonMovies() {
       watched: false,
       status: 'confirmed',
       tmdb_collection_id: belongsTo ? belongsTo.id : null,
-      tmdb_collection_name: belongsTo ? cleanCollectionName(belongsTo.name) : null,
+      tmdb_collection_name: belongsTo ? belongsTo.name : null,
       collections,
       media_type: 'movie',
       tmdb_id: parseInt(tmdbId, 10),

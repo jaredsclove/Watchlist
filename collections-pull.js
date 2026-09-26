@@ -26,7 +26,8 @@ async function openPullCollection(rowId, collectionId, collectionName) {
       </div>`;
     }).join('');
 
-    window.__pullCollectionData = { collectionId, collectionName, movies };
+    // collectionName (cleaned) is for display; store TMDB's own collection name
+    window.__pullCollectionData = { collectionId, collectionName, tmdbCollectionName: data.name || collectionName, movies };
 
     previewEl.innerHTML = `
       <div class="tmdb-preview">
@@ -87,8 +88,8 @@ async function addPulledCollectionMovies() {
       watched: false,
       status: 'confirmed',
       tmdb_collection_id: data.collectionId,
-      tmdb_collection_name: data.collectionName,
-      collections: [data.collectionName],
+      tmdb_collection_name: data.tmdbCollectionName,
+      collections: [data.tmdbCollectionName],
       media_type: 'movie',
       tmdb_id: movieId,
       season_number: null
@@ -144,7 +145,7 @@ async function refreshCollections() {
       const movies = data.parts || [];
       const newOnes = movies.filter(m => !isAlreadyAdded(rows, { itemKey: `${m.title.toLowerCase().trim()}|film`, mediaType: 'movie', tmdbId: m.id }));
       if (newOnes.length > 0) {
-        newByCollection.push({ collectionId, collectionName, newOnes });
+        newByCollection.push({ collectionId, collectionName: data.name || collectionName, newOnes });
       }
     }
 
