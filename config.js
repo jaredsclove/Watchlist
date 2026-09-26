@@ -338,6 +338,7 @@ const COLLECTIONS = [
     icon: '🔎',
     mediaType: 'tv',
     dynamic: true,
+    mixedMedia: true, // holds both series and films; TMDB search shows both kinds
     themes: [],
     years: [],
     defaults: []

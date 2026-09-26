@@ -1,3 +1,23 @@
+const TMDB_SEARCH_LIMIT = 6;
+
+// Which kind of search hits a tab is for: 'movie' (Movies), 'mixed' (a tab that
+// deliberately holds both series and films, e.g. True Crime / Docs) or 'tv'.
+function tmdbSearchModeFor(col) {
+  if (col?.isMovieTab) return 'movie';
+  if (col?.mixedMedia) return 'mixed';
+  return 'tv';
+}
+
+// Picks the search hits to show. 'movie' and 'tv' list the tab's own type first and
+// use any room left for the other type, so the other type can't crowd it out;
+// 'mixed' keeps the original split of up to 4 series then up to 4 films. Each type
+// stays in TMDB's relevance order, and the list is capped at TMDB_SEARCH_LIMIT.
+function selectTmdbSearchResults(tvResults, movieResults, mode) {
+  if (mode === 'mixed') return [...tvResults.slice(0, 4), ...movieResults.slice(0, 4)].slice(0, TMDB_SEARCH_LIMIT);
+  const [primary, secondary] = mode === 'movie' ? [movieResults, tvResults] : [tvResults, movieResults];
+  return [...primary, ...secondary].slice(0, TMDB_SEARCH_LIMIT);
+}
+
 async function searchTMDB() {
   const query = document.getElementById('tmdbQuery').value.trim();
   const resultsEl = document.getElementById('tmdbResults');
@@ -12,8 +32,8 @@ async function searchTMDB() {
     ]);
     const tvResults = (tvData.results || []).map(r => ({ ...r, mediaType: 'tv' }));
     const movieResults = (movieData.results || []).map(r => ({ ...r, mediaType: 'movie' }));
-    // interleave-ish: keep TV first (most searches on these two tabs are series), then movies, cap combined at 6
-    const results = [...tvResults.slice(0,4), ...movieResults.slice(0,4)].slice(0, 6);
+    const mode = tmdbSearchModeFor(COLLECTIONS.find(c => c.id === activeTabId));
+    const results = selectTmdbSearchResults(tvResults, movieResults, mode);
 
     if (results.length === 0) {
       resultsEl.innerHTML = `<div class="tmdb-no-results">No results found for "${esc(query)}".</div>`;
