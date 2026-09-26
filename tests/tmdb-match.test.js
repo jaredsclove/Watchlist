@@ -37,6 +37,7 @@ function makeEnv({ rows = [], tab = 'movies', tmdb = () => ({}), db = {} } = {})
     tmdbFetch: async p => tmdb(p),
     sbFetch: async (method, p, body) => {
       if (method === 'GET') {
+        if (p.startsWith('othertv_shows')) return db.tracked || [];
         if (/id=eq\./.test(p) && !/collection=/.test(p)) { const id = p.match(/id=eq\.([^&]+)/)[1]; return (db.afterPatch || rows).filter(r => r.id === id).map(r => ({ ...r })); }
         if (/tmdb_id=is\.null&item_key=eq\./.test(p)) return db.sameKey || [];
         return db.sameIdentity || [];
@@ -217,16 +218,34 @@ test('confirm movie: guarded PATCH of exactly the patch, row updated in place, S
   assert.deepStrictEqual(copy(row.watch_with), ['Suzanne']);
   assert.strictEqual(env.log.saved, 1);
 });
-test('confirm TV season: PATCH then the show is registered for Refresh shows (duplicate registration ignored)', async () => {
+async function matchSiloS1(db) {
   const row = manual({ collection: 'othertv' });
-  const env = makeEnv({ tab: 'othertv', rows: [row], tmdb: searchStub, db: { fail: (m, p) => (m === 'POST' && p === 'othertv_shows') ? dup() : null } });
+  const env = makeEnv({ tab: 'othertv', rows: [row], tmdb: searchStub, db });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.mediaType === 'tv'));
   env.ctx.chooseTmdbMatchSeason(1);
   await env.ctx.confirmTmdbMatch();
-  assert.deepStrictEqual(env.log.writes.map(w => `${w.method} ${w.path.split('?')[0]}`), ['PATCH watchlist_items', 'POST othertv_shows']);
+  return { row, env, writes: env.log.writes.map(w => `${w.method} ${w.path.split('?')[0]}`) };
+}
+test('confirm TV season, show already tracked here → PATCH only, 0 tracking inserts, no error', async () => {
+  const { row, env, writes } = await matchSiloS1({ tracked: [{ id: 't1' }] });
+  assert.deepStrictEqual(writes, ['PATCH watchlist_items']);
   assert.deepStrictEqual([row.tmdb_id, row.season_number, row.season, row.title], [125988, 1, 'Season 1', 'Silo']);
   assert.strictEqual(env.banner(), '');
+  assert.strictEqual(env.log.saved, 1);
+});
+test('confirm TV season, show not tracked → exactly 1 tracking insert with the canonical values', async () => {
+  const { env, writes } = await matchSiloS1({ tracked: [] });
+  assert.deepStrictEqual(writes, ['PATCH watchlist_items', 'POST othertv_shows']);
+  assert.deepStrictEqual(env.log.writes[1].body, [{ tmdb_id: 125988, title: 'Silo', network: 'Apple TV', collection: 'othertv' }]);
+  assert.strictEqual(env.banner(), '');
+});
+test('confirm TV season, race: not tracked when checked but the insert hits 23505 → still harmless, no error', async () => {
+  const { row, env, writes } = await matchSiloS1({ tracked: [], fail: (m, p) => (m === 'POST' && p === 'othertv_shows') ? dup() : null });
+  assert.deepStrictEqual(writes, ['PATCH watchlist_items', 'POST othertv_shows']);
+  assert.strictEqual(row.tmdb_id, 125988);
+  assert.strictEqual(env.banner(), '');
+  assert.strictEqual(env.log.saved, 1);
 });
 test('6b. confirm when the database already has the target identity → no write, clear message', async () => {
   const row = manual();

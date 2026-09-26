@@ -247,10 +247,14 @@ async function confirmTmdbMatch() {
     return;
   }
 
-  // A matched series is tracked for "Refresh shows", like one added from TMDB.
+  // A matched series is tracked for "Refresh shows", like one added from TMDB. Skip the
+  // insert when it's already tracked here; the unique key still covers a race.
   if (patch.media_type === 'tv') {
     try {
-      await sbFetch('POST', 'othertv_shows', [{ tmdb_id: patch.tmdb_id, title: patch.title, network: patch.theme, collection: row.collection }]);
+      const tracked = await sbFetch('GET', `othertv_shows?collection=eq.${encodeURIComponent(row.collection)}&tmdb_id=eq.${patch.tmdb_id}&select=id`, null);
+      if (!tracked || tracked.length === 0) {
+        await sbFetch('POST', 'othertv_shows', [{ tmdb_id: patch.tmdb_id, title: patch.title, network: patch.theme, collection: row.collection }]);
+      }
     } catch(e) {
       if (!isDuplicateKeyError(e)) showError(`Matched, but couldn't register this show for future refresh checks: ${e.message}`);
     }
