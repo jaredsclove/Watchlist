@@ -358,6 +358,7 @@ function renderMoviesTable(list, td) {
         <div class="popover-section-label">Watch with</div>
         <div class="ww-options-grid">${watchWithPickerHtml(r.id, watchWith)}</div>
         ${pullBtnHtml ? `<div class="popover-section-label" style="margin-top:8px">Collection</div>${pullBtnHtml}` : ''}
+        ${isTmdbMatchEligible(r) ? `<div class="popover-section-label" style="margin-top:8px">TMDB</div><button class="popover-action" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}
       </div>`;
 
     html += `<tr class="${rowClass} movie-row-condensed">
@@ -528,7 +529,7 @@ function renderGroupedTable(list, td, fStatus) {
           <span class="season-lbl">${esc(r.season)}</span>
           ${td.newKeys.includes(r.item_key)?'<span class="new-tag">New</span>':''}
         </td>
-        <td></td>
+        <td>${isTmdbMatchEligible(r) ? `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</td>
         <td class="date-cell">${esc(r.display_date)}</td>
         <td>${statusCell}</td>
         <td>${!isSkipped
@@ -577,7 +578,7 @@ function renderGroupedTable(list, td, fStatus) {
         const isSkipped = r.status === 'skipped';
         const statusClass = `s-${r.status}`;
         return `<div class="card-subseason-row">
-          <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}</span>
+          <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}${isTmdbMatchEligible(r) ? ` <button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</span>
           <div class="card-actions">
             <select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>
             ${!isSkipped
