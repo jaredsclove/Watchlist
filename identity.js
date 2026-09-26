@@ -28,6 +28,35 @@ function isAlreadyAdded(existingRows, candidate) {
   return !!findExistingRow(existingRows, candidate);
 }
 
+// Conservative title normalization for automated TMDB matching: case, Unicode
+// form, curly quotes and whitespace only. Deliberately does NOT equate "4" with
+// "Four", drop a leading "The", or strip punctuation, so near-miss titles never
+// count as the same work.
+function normalizeTmdbTitle(s) {
+  return String(s || '').normalize('NFKC').toLowerCase()
+    .replace(/[\u2018\u2019\u02bc]/g, "'").replace(/[\u201c\u201d]/g, '"')
+    .replace(/\s+/g, ' ').trim();
+}
+// Picks a TMDB /search/movie result for an AUTOMATED lookup (no human choosing).
+// Only an exact normalized match on title or original_title counts, optionally
+// narrowed to expectedYear (release year). Returns:
+//   { match: result }      exactly one candidate remains
+//   { ambiguous: [...] }   more than one remains; a human must choose
+//   { none: true }         nothing matches
+// Never falls back to the first result, and never uses popularity or vote count
+// to choose between legitimate same-title films.
+function pickTmdbMovieCandidate(results, title, expectedYear) {
+  const want = normalizeTmdbTitle(title);
+  let candidates = (results || []).filter(m =>
+    normalizeTmdbTitle(m.title) === want || normalizeTmdbTitle(m.original_title) === want);
+  if (expectedYear != null && expectedYear !== '') {
+    candidates = candidates.filter(m => (m.release_date || '').slice(0, 4) === String(expectedYear));
+  }
+  if (candidates.length === 1) return { match: candidates[0] };
+  if (candidates.length > 1) return { ambiguous: candidates };
+  return { none: true };
+}
+
 // Detects a Postgres unique-constraint violation (duplicate key) from an
 // sbFetch error message. Used at every watchlist_items insert site so a race
 // (e.g. two tabs open, a rapid double-click, or a stale "already added"

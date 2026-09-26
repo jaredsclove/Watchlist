@@ -166,13 +166,25 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
       }
     }
 
+    // Two or more credits with the same title (e.g. a short and the feature it
+    // became) are different TMDB films. Show their years prominently and leave
+    // them all unchecked so the user picks explicitly; unique titles keep the
+    // default-checked behavior.
+    const titleCounts = {};
+    found.forEach(m => { const k = normalizeTmdbTitle(m.title); titleCounts[k] = (titleCounts[k] || 0) + 1; });
+    const isSameTitleAlt = m => titleCounts[normalizeTmdbTitle(m.title)] > 1;
+    const sameTitleCount = found.filter(isSameTitleAlt).length;
+
     const rowsHtml = found.map(m => {
       const date = m.releaseDate ? formatDisplayDate(m.releaseDate) : 'TBA';
+      const alt = isSameTitleAlt(m);
+      const year = m.releaseDate ? m.releaseDate.slice(0, 4) : 'year unknown';
       return `<div class="tmdb-season-row ${m.alreadyAdded?'already-added':''}">
-        <input type="checkbox" ${m.alreadyAdded?'disabled':'checked'} data-tmdb-id="${m.tmdbId||''}" data-title="${esc(m.title).replace(/'/g,"\\'")}" id="pc_${m.tmdbId||m.title.replace(/\W/g,'')}">
-        <span class="tmdb-season-name">${esc(m.title)}</span>
+        <input type="checkbox" ${m.alreadyAdded?'disabled':(alt?'':'checked')} data-tmdb-id="${m.tmdbId||''}" data-title="${esc(m.title).replace(/'/g,"\\'")}" id="pc_${m.tmdbId||m.title.replace(/\W/g,'')}">
+        <span class="tmdb-season-name">${esc(m.title)}${alt ? ` <strong>(${esc(year)})</strong>` : ''}</span>
         <span class="tmdb-season-meta">${esc(date)}</span>
         ${m.alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}
+        ${alt ? '<span class="tmdb-already-tag">Same title as another credit — check the year</span>' : ''}
       </div>`;
     }).join('');
 
@@ -186,7 +198,7 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
       <div class="tmdb-preview">
         <div class="tmdb-preview-header">
           <div class="tmdb-preview-title">${esc(personName)}</div>
-          <div class="tmdb-result-meta">${found.filter(f=>!f.alreadyAdded).length} new, ${found.filter(f=>f.alreadyAdded).length} already on your list — everything's checked, deselect anything you don't want</div>
+          <div class="tmdb-result-meta">${found.filter(f=>!f.alreadyAdded).length} new, ${found.filter(f=>f.alreadyAdded).length} already on your list — everything's checked, deselect anything you don't want${sameTitleCount ? ` (${sameTitleCount} same-title credits are left unchecked for you to choose)` : ''}</div>
         </div>
         ${backfillHtml}
         ${rowsHtml || '<div class="tmdb-no-results">No film credits found.</div>'}

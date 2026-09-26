@@ -11,18 +11,33 @@ async function pullUniverse(universeKey) {
   const existingRows = td?.rows || [];
   const found = [];
   const notFound = [];
+  const ambiguous = []; // { title, candidates } — more than one TMDB film has this exact title
   let backfilled = 0;
 
-  for (const title of universe.titles) {
-    // Step 1: always resolve the real TMDB match first — never skip this based
-    // on a title-only guess, so we always know the real tmdb_id before deciding
-    // whether this is already on the list.
-    let match;
-    try {
-      const data = await tmdbFetch(`/search/movie?query=${encodeURIComponent(title)}`);
-      match = (data.results || []).find(m => m.title.toLowerCase() === title.toLowerCase()) || (data.results || [])[0];
-    } catch(e) {
-      match = null;
+  for (const entry of universe.titles) {
+    // Step 1: resolve the real TMDB film before deciding anything. An entry with
+    // a configured id ({ t, id }) is fetched directly by that id — no title
+    // search. A plain-string (or { t, y }) entry is searched, but only an
+    // unambiguous exact-title result is accepted (pickTmdbMovieCandidate); there
+    // is no first-result fallback.
+    const title = typeof entry === 'string' ? entry : entry.t;
+    const configuredId = typeof entry === 'object' && entry.id ? entry.id : null;
+    let match = null;
+    if (configuredId) {
+      try { match = await tmdbFetch(`/movie/${configuredId}`); } catch(e) { match = null; }
+    } else {
+      let results = [];
+      try {
+        const data = await tmdbFetch(`/search/movie?query=${encodeURIComponent(title)}`);
+        results = data.results || [];
+      } catch(e) { results = []; }
+      const picked = pickTmdbMovieCandidate(results, title, typeof entry === 'object' ? entry.y : null);
+      if (picked.ambiguous) {
+        // Never auto-select, insert or tag here — the user picks explicitly below.
+        ambiguous.push({ title, candidates: picked.ambiguous });
+        continue;
+      }
+      match = picked.match || null;
     }
     if (!match) {
       notFound.push(title);
@@ -65,6 +80,25 @@ async function pullUniverse(universeKey) {
     </div>`;
   }).join('');
 
+  // Ambiguous titles: list every same-title candidate with its release year,
+  // unchecked, so nothing is chosen unless the user ticks it. Candidates already
+  // on the list (by TMDB id) are shown disabled. No tag backfill happens here.
+  const ambiguousHtml = ambiguous.length
+    ? `<div class="tmdb-refresh-summary">Needs your choice — more than one TMDB film is titled exactly like these. Tick the one you mean, if any.</div>` +
+      ambiguous.map(a => a.candidates
+        .slice().sort((x, y) => (x.release_date || '9999').localeCompare(y.release_date || '9999'))
+        .map(c => {
+          const onList = !!findExistingRow(existingRows, { itemKey: null, mediaType: 'movie', tmdbId: c.id });
+          const year = c.release_date ? c.release_date.slice(0, 4) : 'year unknown';
+          return `<div class="tmdb-season-row ${onList ? 'already-added' : ''}">
+            <input type="checkbox" ${onList ? 'disabled' : ''} data-tmdb-id="${c.id}" data-title="${esc(a.title)}" id="uni_${c.id}">
+            <span class="tmdb-season-name">${esc(c.title)} (${esc(year)})</span>
+            <span class="tmdb-season-meta">${c.release_date ? esc(formatDisplayDate(c.release_date)) : 'TBA'} · TMDB ${c.id}</span>
+            ${onList ? '<span class="tmdb-already-tag">Already added</span>' : ''}
+          </div>`;
+        }).join('')).join('')
+    : '';
+
   const notFoundHtml = notFound.length
     ? `<div class="tmdb-refresh-summary">Couldn't find on TMDB: ${notFound.map(esc).join(', ')}</div>`
     : '';
@@ -78,10 +112,11 @@ async function pullUniverse(universeKey) {
     <div class="tmdb-preview">
       <div class="tmdb-preview-header">
         <div class="tmdb-preview-title">${esc(universe.label)}</div>
-        <div class="tmdb-result-meta">${found.filter(f=>!f.alreadyAdded).length} new, ${found.filter(f=>f.alreadyAdded).length} already on your list</div>
+        <div class="tmdb-result-meta">${found.filter(f=>!f.alreadyAdded).length} new, ${found.filter(f=>f.alreadyAdded).length} already on your list${ambiguous.length ? `, ${ambiguous.length} need${ambiguous.length===1?'s':''} your choice` : ''}</div>
       </div>
       ${backfillHtml}
-      ${rowsHtml || '<div class="tmdb-no-results">Nothing found.</div>'}
+      ${rowsHtml || (ambiguous.length ? '' : '<div class="tmdb-no-results">Nothing found.</div>')}
+      ${ambiguousHtml}
       ${notFoundHtml}
       <div class="tmdb-preview-actions">
         <button class="btn btn-accent" onclick="addPulledUniverseMovies()">Add selected</button>

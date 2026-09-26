@@ -357,24 +357,36 @@ const COLLECTIONS = [
 
 const WATCH_WITH_OPTIONS = ['Alone', 'Suzanne', 'Rina', 'Whole Family'];
 
+// Each entry carries its verified TMDB movie id, so pullUniverse() fetches the
+// exact film instead of guessing from a title search. A plain-string entry
+// (title only) is still accepted, but it only resolves when the search result
+// is unambiguous — see pickTmdbMovieCandidate() in identity.js.
 const MCU_MOVIES = [
   // Phase 1
-  'Iron Man', 'The Incredible Hulk', 'Iron Man 2', 'Thor', 'Captain America: The First Avenger', 'The Avengers',
+  { t: 'Iron Man', id: 1726 }, { t: 'The Incredible Hulk', id: 1724 }, { t: 'Iron Man 2', id: 10138 },
+  { t: 'Thor', id: 10195 }, { t: 'Captain America: The First Avenger', id: 1771 }, { t: 'The Avengers', id: 24428 },
   // Phase 2
-  'Iron Man 3', 'Thor: The Dark World', 'Captain America: The Winter Soldier', 'Guardians of the Galaxy',
-  'Avengers: Age of Ultron', 'Ant-Man',
+  { t: 'Iron Man 3', id: 68721 }, { t: 'Thor: The Dark World', id: 76338 },
+  { t: 'Captain America: The Winter Soldier', id: 100402 }, { t: 'Guardians of the Galaxy', id: 118340 },
+  { t: 'Avengers: Age of Ultron', id: 99861 }, { t: 'Ant-Man', id: 102899 },
   // Phase 3
-  'Captain America: Civil War', 'Doctor Strange', 'Guardians of the Galaxy Vol. 2', 'Spider-Man: Homecoming',
-  'Thor: Ragnarok', 'Black Panther', 'Avengers: Infinity War', 'Ant-Man and the Wasp', 'Captain Marvel',
-  'Avengers: Endgame', 'Spider-Man: Far From Home',
+  { t: 'Captain America: Civil War', id: 271110 }, { t: 'Doctor Strange', id: 284052 },
+  { t: 'Guardians of the Galaxy Vol. 2', id: 283995 }, { t: 'Spider-Man: Homecoming', id: 315635 },
+  { t: 'Thor: Ragnarok', id: 284053 }, { t: 'Black Panther', id: 284054 }, { t: 'Avengers: Infinity War', id: 299536 },
+  { t: 'Ant-Man and the Wasp', id: 363088 }, { t: 'Captain Marvel', id: 299537 }, { t: 'Avengers: Endgame', id: 299534 },
+  { t: 'Spider-Man: Far From Home', id: 429617 },
   // Phase 4
-  'Black Widow', 'Shang-Chi and the Legend of the Ten Rings', 'Eternals', 'Spider-Man: No Way Home',
-  'Doctor Strange in the Multiverse of Madness', 'Thor: Love and Thunder', 'Black Panther: Wakanda Forever',
+  { t: 'Black Widow', id: 497698 }, { t: 'Shang-Chi and the Legend of the Ten Rings', id: 566525 },
+  { t: 'Eternals', id: 524434 }, { t: 'Spider-Man: No Way Home', id: 634649 },
+  { t: 'Doctor Strange in the Multiverse of Madness', id: 453395 }, { t: 'Thor: Love and Thunder', id: 616037 },
+  { t: 'Black Panther: Wakanda Forever', id: 505642 },
   // Phase 5
-  'Ant-Man and the Wasp: Quantumania', 'Guardians of the Galaxy Vol. 3', 'The Marvels',
-  'Captain America: Brave New World', 'Thunderbolts*',
+  { t: 'Ant-Man and the Wasp: Quantumania', id: 640146 }, { t: 'Guardians of the Galaxy Vol. 3', id: 447365 },
+  { t: 'The Marvels', id: 609681 }, { t: 'Captain America: Brave New World', id: 822119 },
+  { t: 'Thunderbolts*', id: 986056 },
   // Phase 6
-  'The Fantastic Four: First Steps', 'Spider-Man: Brand New Day', 'Avengers: Doomsday', 'Avengers: Secret Wars'
+  { t: 'The Fantastic Four: First Steps', id: 617126 }, { t: 'Spider-Man: Brand New Day', id: 969681 },
+  { t: 'Avengers: Doomsday', id: 1003596 }, { t: 'Avengers: Secret Wars', id: 1003598 }
 ];
 
 const TMDB_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIyOTJhYjcyNDU0ZDFjYzJhZmExNjhiZjBhZTkxZWIxZCIsIm5iZiI6MTc4NTE2NTk4OS45MTEsInN1YiI6IjZhNjc3OGE1ZmNhODlhNWUxOTk4MDNiZCIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.IlLvRk2FD-eY2I5SKGzLDAqMrBRhh58Zxz_zx62YzRE';
