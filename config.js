@@ -46,6 +46,7 @@ const COLLECTIONS = [
   {k:"star wars: tales of the underworld|season 1",t:"Star Wars: Tales of the Underworld",s:"Season 1",th:"Star Wars",d:"May 4, 2025",ds:"2025-05-04"},
   {k:"star wars: visions|volume 3",t:"Star Wars: Visions",s:"Volume 3",th:"Star Wars",d:"Oct 29, 2025",ds:"2025-10-29"},
   {k:"star wars: maul – shadow lord|season 1",t:"Star Wars: Maul – Shadow Lord",s:"Season 1",th:"Star Wars",d:"Apr 6, 2026",ds:"2026-04-06"},
+  {k:"star wars: maul – shadow lord|season 2",t:"Star Wars: Maul – Shadow Lord",s:"Season 2",th:"Star Wars",d:"TBA 2027",ds:"2027-01-01"},
   {k:"lego star wars: the mandalorian|special",t:"LEGO Star Wars: The Mandalorian",s:"Special",th:"Star Wars",d:"Sep 2, 2026",ds:"2026-09-02"},
   {k:"ahsoka|season 2",t:"Ahsoka",s:"Season 2",th:"Star Wars",d:"Jan 20, 2027",ds:"2027-01-20"},
   {k:"star wars: visions presents: the ninth jedi|season 1",t:"Star Wars: Visions Presents: The Ninth Jedi",s:"Season 1",th:"Star Wars",d:"Aug 5, 2026",ds:"2026-08-05"},
