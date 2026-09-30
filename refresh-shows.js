@@ -102,6 +102,10 @@ async function refreshShows() {
 }
 
 async function addRefreshedSeasons() {
+  // The tab this preview belongs to, captured before any await: the user may
+  // switch tabs or views while the writes are in flight.
+  const collectionId = activeTabId;
+  if (!collectionId) return;
   const data = window.__refreshData || [];
   const dateUpdates = window.__refreshDateUpdates || [];
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-show-idx]');
@@ -122,7 +126,7 @@ async function addRefreshedSeasons() {
     const displayDate = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
     const dateSort = s.air_date || '2099-01-01';
     toInsert.push({
-      collection: activeTabId,
+      collection: collectionId,
       item_key: key,
       title: entry.show.title,
       season: seasonLabel,
@@ -149,7 +153,7 @@ async function addRefreshedSeasons() {
   try {
     if (toInsert.length > 0) {
       const inserted = await sbFetch('POST', TABLE, toInsert);
-      if (inserted) tabData[activeTabId].rows.push(...inserted);
+      if (inserted) tabData[collectionId]?.rows.push(...inserted);
       changed = true;
     }
     // Only the two date fields change. The filter re-checks identity and that
@@ -164,15 +168,17 @@ async function addRefreshedSeasons() {
       row.date_sort = update.date_sort;
       changed = true;
     }
-    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     showSaved();
-    resetTMDBSearchUI();
-    renderFilters();
-    renderTable();
+    if (activeTabId === collectionId) {
+      resetTMDBSearchUI();
+      renderFilters();
+      renderTable();
+    }
   } catch(e) {
     if (changed) {
-      tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
-      renderTable();
+      tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+      if (activeTabId === collectionId) renderTable();
     }
     if (isDuplicateKeyError(e)) {
       showError(duplicateInsertMessage('try "↻ Refresh shows" again for a fresh check'));

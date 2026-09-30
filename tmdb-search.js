@@ -201,6 +201,11 @@ function resetTMDBSearchUI() {
 
 async function addSelectedTMDBSeasons() {
   if (!tmdbSelectedShow || !tmdbSelectedShow.details) return;
+  // Captured before any await: switching tabs or views clears tmdbSelectedShow
+  // and changes activeTabId while the writes are in flight.
+  const collectionId = activeTabId;
+  if (!collectionId) return;
+  const showId = tmdbSelectedShow.id;
   const details = tmdbSelectedShow.details;
   const showName = tmdbSelectedShow.name;
   const showKeyBase = showName.toLowerCase().trim();
@@ -214,7 +219,7 @@ async function addSelectedTMDBSeasons() {
     const cb = previewContainer?.querySelector('input[type="checkbox"][data-season="film"]');
     if (!cb || !cb.checked || cb.disabled) { cancelTMDBPreview(); return; }
     // for the Movies tab, use genre as theme; for True Crime/Docs (movies mixed in there) fall back to production company
-    const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+    const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
     if (isMoviesTab) {
       network = (details.genres && details.genres[0]?.name) || 'Film';
     } else {
@@ -225,7 +230,7 @@ async function addSelectedTMDBSeasons() {
     const dateSort = details.release_date || '2099-01-01';
     const belongsTo = details.belongs_to_collection;
     toInsert.push({
-      collection: activeTabId,
+      collection: collectionId,
       item_key: key,
       title: showName,
       season: 'Film',
@@ -238,7 +243,7 @@ async function addSelectedTMDBSeasons() {
       tmdb_collection_name: belongsTo ? belongsTo.name : null,
       collections: belongsTo ? [belongsTo.name] : [],
       media_type: 'movie',
-      tmdb_id: tmdbSelectedShow.id,
+      tmdb_id: showId,
       season_number: null
     });
   } else {
@@ -258,7 +263,7 @@ async function addSelectedTMDBSeasons() {
       const displayDate = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
       const dateSort = s.air_date || '2099-01-01';
       toInsert.push({
-        collection: activeTabId,
+        collection: collectionId,
         item_key: key,
         title: showName,
         season: seasonLabel,
@@ -268,7 +273,7 @@ async function addSelectedTMDBSeasons() {
         watched: false,
         status: 'confirmed',
         media_type: 'tv',
-        tmdb_id: tmdbSelectedShow.id,
+        tmdb_id: showId,
         season_number: num
       });
     });
@@ -278,15 +283,15 @@ async function addSelectedTMDBSeasons() {
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
-    if (inserted) tabData[activeTabId].rows.push(...inserted);
-    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    if (inserted) tabData[collectionId]?.rows.push(...inserted);
+    tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
     // track this show for future refresh lookups (TV shows only — a film has no future seasons)
     // scoped by collection so refresh on one tab doesn't pull in shows from another
     if (!isMovie) {
       try {
         await sbFetch('POST', 'othertv_shows', [{
-          tmdb_id: tmdbSelectedShow.id, title: showName, network, collection: activeTabId
+          tmdb_id: showId, title: showName, network, collection: collectionId
         }]);
       } catch(e) {
         // Expected: this show is already tracked for this collection (unique constraint
@@ -300,9 +305,11 @@ async function addSelectedTMDBSeasons() {
     }
 
     showSaved();
-    resetTMDBSearchUI();
-    renderFilters();
-    renderTable();
+    if (activeTabId === collectionId) {
+      resetTMDBSearchUI();
+      renderFilters();
+      renderTable();
+    }
   } catch(e) {
     if (isDuplicateKeyError(e)) {
       showError(duplicateInsertMessage('try searching again for a fresh check'));

@@ -144,7 +144,11 @@ async function pullUniverse(universeKey) {
 async function addPulledUniverseMovies() {
   const universeKey = window.__universePullKey;
   const universe = UNIVERSE_LISTS[universeKey];
-  const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+  // The tab this preview belongs to, captured before any await: the TMDB lookups
+  // below take a while, and the user may switch tabs or views meanwhile.
+  const collectionId = activeTabId;
+  if (!collectionId) return;
+  const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
   const toInsert = [];
   const failedTitles = [];
@@ -167,7 +171,7 @@ async function addPulledUniverseMovies() {
     const belongsTo = details.belongs_to_collection;
     const collections = belongsTo ? [belongsTo.name, universe?.label || universeKey] : [universe?.label || universeKey];
     toInsert.push({
-      collection: activeTabId,
+      collection: collectionId,
       item_key: key,
       title,
       season: 'Film',
@@ -188,18 +192,20 @@ async function addPulledUniverseMovies() {
   const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
   if (toInsert.length === 0) {
     // keep the preview open when every lookup failed, so the user can retry
-    if (failureNote) showError(failureNote); else cancelTMDBPreview();
+    if (failureNote) showError(failureNote); else if (activeTabId === collectionId) cancelTMDBPreview();
     return;
   }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
-    if (inserted) tabData[activeTabId].rows.push(...inserted);
-    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    if (inserted) tabData[collectionId]?.rows.push(...inserted);
+    tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     showSaved();
-    resetTMDBSearchUI();
-    renderFilters();
-    renderTable();
+    if (activeTabId === collectionId) {
+      resetTMDBSearchUI();
+      renderFilters();
+      renderTable();
+    }
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {

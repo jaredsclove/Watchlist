@@ -259,9 +259,12 @@ async function confirmTmdbMatch() {
       if (!isDuplicateKeyError(e)) showError(`Matched, but couldn't register this show for future refresh checks: ${e.message}`);
     }
   }
-  window.__tmdbMatch = null;
-  tabData[activeTabId].rows.sort((a, b) => a.date_sort.localeCompare(b.date_sort));
+  // row.collection is where the row lives; the user may have switched tabs or
+  // views while the checks and writes above were in flight.
+  if (window.__tmdbMatch === m) window.__tmdbMatch = null;
+  tabData[row.collection]?.rows.sort((a, b) => a.date_sort.localeCompare(b.date_sort));
   showSaved();
+  if (activeTabId !== row.collection) return;
   cancelTMDBPreview();
   renderFilters();
   renderTable();

@@ -98,6 +98,10 @@ async function confirmPersonRole() {
 }
 
 async function pullPersonFilmography(personId, personName, isNewCollection, role, preloadedCredits) {
+  // The tab this pull runs for, captured before any await (the user may switch
+  // tabs or views while TMDB and the tag backfills are in flight).
+  const collectionId = activeTabId;
+  if (!collectionId) return;
   cancelTMDBPreview();
   const resultsEl = document.getElementById('tmdbResults');
   const previewEl = document.getElementById('tmdbPreview');
@@ -195,10 +199,15 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
 
     window.__personPullName = personName;
 
+    if (backfilled > 0) showSaved();
+    // Switched away meanwhile: the tag backfills above are saved, but this tab's
+    // panel is gone, so don't redraw another view or write the preview into it.
+    if (activeTabId !== collectionId) return;
     // Re-render before writing the preview: renderFilters() rebuilds the whole
     // TMDB panel (including #tmdbPreview), so running it afterwards wiped the list.
-    if (backfilled > 0) { showSaved(); renderFilters(); renderTable(); }
+    if (backfilled > 0) { renderFilters(); renderTable(); }
     const previewTarget = document.getElementById('tmdbPreview');
+    if (!previewTarget) return;
     previewTarget.innerHTML = `
       <div class="tmdb-preview">
         <div class="tmdb-preview-header">
@@ -221,7 +230,11 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
 async function addPulledPersonMovies() {
   const personName = window.__personPullName;
   if (!personName) return;
-  const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+  // The tab this preview belongs to, captured before any await: the TMDB lookups
+  // below take a while, and the user may switch tabs or views meanwhile.
+  const collectionId = activeTabId;
+  if (!collectionId) return;
+  const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
   const seenTmdbIds = new Set();
   const toInsert = [];
@@ -250,7 +263,7 @@ async function addPulledPersonMovies() {
     const belongsTo = details.belongs_to_collection;
     const collections = belongsTo ? [belongsTo.name, personName] : [personName];
     toInsert.push({
-      collection: activeTabId,
+      collection: collectionId,
       item_key: key,
       title,
       season: 'Film',
@@ -271,18 +284,20 @@ async function addPulledPersonMovies() {
   const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
   if (toInsert.length === 0) {
     // keep the preview open when every lookup failed, so the user can retry
-    if (failureNote) showError(failureNote); else cancelTMDBPreview();
+    if (failureNote) showError(failureNote); else if (activeTabId === collectionId) cancelTMDBPreview();
     return;
   }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
-    if (inserted) tabData[activeTabId].rows.push(...inserted);
-    tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    if (inserted) tabData[collectionId]?.rows.push(...inserted);
+    tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     showSaved();
-    resetTMDBSearchUI();
-    renderFilters();
-    renderTable();
+    if (activeTabId === collectionId) {
+      resetTMDBSearchUI();
+      renderFilters();
+      renderTable();
+    }
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (e.message.includes('23505') || e.message.includes('duplicate key')) {

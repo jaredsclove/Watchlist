@@ -131,6 +131,10 @@ function toggleFilters() {
 }
 
 async function addEntry() {
+  // The tab this entry is for, captured before the await below: the user may
+  // switch tabs or views while the insert is in flight.
+  const collectionId = activeTabId;
+  if (!collectionId) return;
   const title  = document.getElementById('nTitle').value.trim();
   const season = document.getElementById('nSeason').value.trim() || 'Season 1';
   const theme  = document.getElementById('nTheme').value;
@@ -141,13 +145,13 @@ async function addEntry() {
   // (legacy or TMDB-identified). Keeps manual-add behavior independent of the
   // database's (collection, item_key) uniqueness, which will later apply only
   // to rows with tmdb_id IS NULL.
-  if ((tabData[activeTabId]?.rows || []).some(r => r.item_key === key)) {
+  if ((tabData[collectionId]?.rows || []).some(r => r.item_key === key)) {
     showError('This title and season is already on your list.');
     return;
   }
   const ds  = parseDate(date);
   const newRow = {
-    collection: activeTabId,
+    collection: collectionId,
     item_key: key,
     title, season, theme,
     display_date: date,
@@ -157,11 +161,13 @@ async function addEntry() {
   };
   try {
     const inserted = await sbFetch('POST', TABLE, [newRow]);
-    if (inserted && inserted[0]) {
-      tabData[activeTabId].rows.push(inserted[0]);
-      tabData[activeTabId].rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    const td = tabData[collectionId];
+    if (inserted && inserted[0] && td) {
+      td.rows.push(inserted[0]);
+      td.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
     }
     showSaved();
+    if (activeTabId !== collectionId) return;
     document.getElementById('nTitle').value = '';
     document.getElementById('nDate').value = '';
     document.getElementById('nSeason').value = 'Season 1';
