@@ -21,14 +21,16 @@ async function sbFetch(method, path, body) {
 // Fetches every row of a table via Range-header pagination, using the
 // Content-Range response header (e.g. "0-249/1284") to know the true total
 // row count rather than guessing from page size. Deterministic id.asc order
-// so paging and later verification are stable.
-async function fetchAllRows(table) {
+// so paging and later verification are stable. `filter` (optional) is a
+// PostgREST filter such as "collection=in.(...)"; the exact-count check then
+// applies to the filtered rows. Backup calls this without one.
+async function fetchAllRows(table, filter) {
   const allRows = [];
   let offset = 0;
   let total = null;
 
   while (total === null || offset < total) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*&order=id.asc`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*${filter ? `&${filter}` : ''}&order=id.asc`, {
       headers: {
         'apikey': SUPABASE_KEY,
         'Authorization': `Bearer ${SUPABASE_KEY}`,
