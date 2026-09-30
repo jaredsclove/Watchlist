@@ -23,15 +23,32 @@ async function setShowStatus(title, status) {
 
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
+// The rows the visible controls came from: the open derived view's cross-TV rows,
+// or the active collection tab's rows. Row actions PATCH by the row's real id
+// either way.
+function actionRows() {
+  if (activeViewId) return derivedData?.rows || [];
+  return tabData[activeTabId]?.rows || [];
+}
+
+// After a successful PATCH, copy the saved fields onto every other in-memory copy
+// of that row (the derived view's rows and any loaded tab), so the source tab's
+// cache stays correct without a refetch or a re-seed.
+function mirrorRowUpdate(id, fields) {
+  const lists = Object.values(tabData).map(td => td?.rows || []);
+  if (derivedData?.rows) lists.push(derivedData.rows);
+  lists.forEach(rows => rows.forEach(r => { if (r.id === id) Object.assign(r, fields); }));
+}
+
 async function toggleWatch(id) {
-  const td = tabData[activeTabId];
-  const row = td.rows.find(r => r.id === id);
+  const row = actionRows().find(r => r.id === id);
   if (!row) return;
   const newVal = !row.watched;
   row.watched = newVal;
   renderTable();
   try {
     await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { watched: newVal });
+    mirrorRowUpdate(id, { watched: newVal });
     showSaved();
   } catch(e) {
     row.watched = !newVal;
@@ -41,8 +58,7 @@ async function toggleWatch(id) {
 }
 
 async function setStatus(id, status, selectEl) {
-  const td = tabData[activeTabId];
-  const row = td.rows.find(r => r.id === id);
+  const row = actionRows().find(r => r.id === id);
   if (!row) return;
   const old = row.status;
   row.status = status;
@@ -62,6 +78,7 @@ async function setStatus(id, status, selectEl) {
   }
   try {
     await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { status });
+    mirrorRowUpdate(id, { status });
     showSaved();
     // full re-render to update watch button availability and stats
     renderTable();
@@ -75,6 +92,7 @@ async function setStatus(id, status, selectEl) {
 async function delRow(id) {
   if (!confirm('Remove this entry?')) return;
   const td = tabData[activeTabId];
+  if (!td) return; // collection tabs only; derived views have no delete control
   const idx = td.rows.findIndex(r => r.id === id);
   if (idx === -1) return;
   const row = td.rows[idx];
@@ -87,7 +105,7 @@ async function delRow(id) {
   // restorable via the existing "↩ Keep" control). Non-default items (anything
   // added manually or pulled from TMDB) have nothing to reseed from, so they keep
   // the exact hard-delete behavior as before.
-  const col = COLLECTIONS.find(c => c.id === activeTabId);
+  const col = COLLECTIONS.find(c => c.id === row.collection);
   const isDefaultItem = col && Array.isArray(col.defaults) && col.defaults.some(d => d.k === row.item_key);
 
   if (isDefaultItem) {
@@ -183,8 +201,7 @@ async function addEntry() {
 }
 
 async function toggleWatchWith(rowId, tag, checked) {
-  const td = tabData[activeTabId];
-  const row = td.rows.find(r => r.id === rowId);
+  const row = actionRows().find(r => r.id === rowId);
   if (!row) return;
   const current = new Set(row.watch_with || []);
   if (checked) current.add(tag); else current.delete(tag);
@@ -193,6 +210,7 @@ async function toggleWatchWith(rowId, tag, checked) {
   row.watch_with = updated;
   try {
     await sbFetch('PATCH', `${TABLE}?id=eq.${rowId}`, { watch_with: updated });
+    mirrorRowUpdate(rowId, { watch_with: updated });
     showSaved();
     renderTable();
   } catch(e) {

@@ -432,6 +432,18 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .card-del-btn { background: none; border: none; cursor: pointer; color: var(--text3); padding: 4px 8px; font-size: 18px; line-height: 1; flex-shrink: 0; }
 .card-del-btn:hover { color: var(--red); }
 
+/* ── Derived TV views (Currently Watching, Coming Soon) ── */
+.tab-sep { width: 1px; background: var(--border); margin: 8px 6px; flex-shrink: 0; }
+.source-badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--text2); background: var(--surface2); border: 1px solid var(--border); white-space: nowrap; margin-right: 4px; }
+.upcoming-tag, .today-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; }
+.upcoming-tag { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
+.today-tag { background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); }
+.not-aired-lbl { font-size: 11px; color: var(--text3); white-space: nowrap; }
+.derived-section-row td { cursor: pointer; background: var(--surface); padding: 7px 12px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.derived-section-card { cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; padding: 12px 4px 4px; }
+.derived-section-row:hover .expand-chevron, .derived-section-card:hover .expand-chevron { border-color: var(--accent); color: var(--accent); }
+.section-count { color: var(--text3); }
+
 /* ── Filter toggle (mobile) ── */
 .filter-toggle-btn { display: none; }
 .filters-inner { display: contents; }

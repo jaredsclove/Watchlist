@@ -484,13 +484,14 @@ ${esc(preRestoreFilename)}</div>
     <div class="modal-actions"><button class="btn-accent btn" onclick="finishRestoreAndReload()">Close &amp; reload data</button></div>`);
 }
 
-// Clears all cached tab data and reloads the currently active tab from
-// Supabase, so the UI reflects the real post-restore database state rather
-// than stale in-memory data. Other tabs will refetch next time they're opened.
+// Clears all cached tab data and reloads the currently active tab (or derived
+// view) from Supabase, so the UI reflects the real post-restore database state
+// rather than stale in-memory data. Other tabs will refetch next time they're opened.
 function finishRestoreAndReload() {
   closeRestoreModal();
   tabData = {};
-  loadTab(activeTabId);
+  if (activeViewId) loadDerivedView();
+  else loadTab(activeTabId);
 }
 
 

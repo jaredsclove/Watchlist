@@ -1,5 +1,6 @@
 // ─── Filters ──────────────────────────────────────────────────────────────────
 function renderFilters() {
+  if (activeViewId) { renderDerivedFilters(); return; }
   const col = COLLECTIONS.find(c => c.id === activeTabId);
   const td = tabData[activeTabId];
 
@@ -151,6 +152,7 @@ function renderFilters() {
 
 // ─── Render table ─────────────────────────────────────────────────────────────
 function renderTable() {
+  if (activeViewId) { renderDerivedTable(); return; }
   const td = tabData[activeTabId];
   if (!td) return;
   const col = COLLECTIONS.find(c => c.id === activeTabId);
@@ -213,14 +215,14 @@ function renderTable() {
     ${maybe>0?`<div class="stat"><div class="stat-num">${maybe}</div><div class="stat-label">Maybe Later</div></div>`:''}
   `;
 
+  updateTableHeader(col);
+
   if (list.length === 0) {
     const colCount = col.isMovieTab ? 9 : 6;
     document.getElementById('tbody').innerHTML = `<tr class="empty-row"><td colspan="${colCount}">No entries match your filters.</td></tr>`;
     document.getElementById('cardList').innerHTML = '<div class="empty-row" style="padding:2rem 0">No entries match your filters.</div>';
     return;
   }
-
-  updateTableHeader(col);
 
   if (col.dynamic && !col.isMovieTab) {
     renderGroupedTable(list, td, fStatus);
@@ -452,6 +454,52 @@ function statusOptionsHtml(status) {
   `;
 }
 
+// The watch control for one season row. Derived views pass requireReleased, which
+// replaces "Mark watched" with a note until the season has aired (a row already
+// marked watched keeps its toggle so it can be undone). Collection tabs keep a
+// watch button on every row that isn't skipped. compact is the mobile label.
+function seasonWatchControlHtml(r, opts, compact) {
+  if (r.status === 'skipped') return compact ? '' : `<span class="confirmed-lbl">—</span>`;
+  if (opts.requireReleased && !r.watched && !isReleasedRow(r, opts.today)) {
+    return `<span class="not-aired-lbl">Not aired yet</span>`;
+  }
+  const label = r.watched ? (compact ? '✓' : '✓ Watched') : 'Mark watched';
+  return `<button class="watch-btn${r.watched?' watched':''}" onclick="${opts.stopPropagation ? 'event.stopPropagation(); ' : ''}toggleWatch('${r.id}')">${label}</button>`;
+}
+
+// One season of a grouped show: a desktop sub-row and a mobile card row.
+// opts: { isNew, showMatch, showDelete, requireReleased, today }
+function seasonSubRowHtml(r, opts) {
+  const isSkipped = r.status === 'skipped';
+  const isMaybe   = r.status === 'maybe';
+  const statusClass = `s-${r.status}`;
+  const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>`;
+  const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
+  return `<tr class="${rowClass} sub-row">
+        <td style="padding-left:28px">
+          <span class="season-lbl">${esc(r.season)}</span>
+          ${opts.isNew?'<span class="new-tag">New</span>':''}
+        </td>
+        <td>${opts.showMatch ? `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</td>
+        <td class="date-cell">${esc(r.display_date)}</td>
+        <td>${statusCell}</td>
+        <td>${seasonWatchControlHtml(r, opts, false)}</td>
+        <td>${opts.showDelete ? `<button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>` : ''}</td>
+      </tr>`;
+}
+
+function seasonSubCardHtml(r, opts) {
+  const statusClass = `s-${r.status}`;
+  return `<div class="card-subseason-row">
+          <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}${opts.showMatch ? ` <button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</span>
+          <div class="card-actions">
+            <select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>
+            ${seasonWatchControlHtml(r, opts, true)}
+            ${opts.showDelete ? `<button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>` : ''}
+          </div>
+        </div>`;
+}
+
 function renderGroupedTable(list, td, fStatus) {
   // Which shows are visible is determined by the filtered `list`.
   // But once a show is visible, its season breakdown/progress/badges should reflect
@@ -518,27 +566,8 @@ function renderGroupedTable(list, td, fStatus) {
     const titleEsc = esc(title).replace(/'/g,"\\'");
     const masterStatusCell = `<select class="status-select ${aggClass}" onclick="event.stopPropagation()" onchange="event.stopPropagation(); setShowStatus('${titleEsc}', this.value)">${statusOptionsHtml(aggStatus)}</select>`;
 
-    const seasonRowsHtml = seasons.map(r => {
-      const isSkipped = r.status === 'skipped';
-      const isMaybe   = r.status === 'maybe';
-      const statusClass = `s-${r.status}`;
-      const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>`;
-      const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
-      return `<tr class="${rowClass} sub-row">
-        <td style="padding-left:28px">
-          <span class="season-lbl">${esc(r.season)}</span>
-          ${td.newKeys.includes(r.item_key)?'<span class="new-tag">New</span>':''}
-        </td>
-        <td>${isTmdbMatchEligible(r) ? `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</td>
-        <td class="date-cell">${esc(r.display_date)}</td>
-        <td>${statusCell}</td>
-        <td>${!isSkipped
-          ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓ Watched':'Mark watched'}</button>`
-          : `<span class="confirmed-lbl">—</span>`
-        }</td>
-        <td><button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button></td>
-      </tr>`;
-    }).join('');
+    const seasonOpts = r => ({ isNew: td.newKeys.includes(r.item_key), showMatch: isTmdbMatchEligible(r), showDelete: true });
+    const seasonRowsHtml = seasons.map(r => seasonSubRowHtml(r, seasonOpts(r))).join('');
 
     html += `<tr class="show-group-row" onclick="toggleShowExpand('${titleEsc}')">
       <td>
@@ -574,21 +603,7 @@ function renderGroupedTable(list, td, fStatus) {
       <div class="card-actions" onclick="event.stopPropagation()">
         ${masterStatusCell}
       </div>
-      ${isExpanded ? `<div class="card-subseasons">${seasons.map(r => {
-        const isSkipped = r.status === 'skipped';
-        const statusClass = `s-${r.status}`;
-        return `<div class="card-subseason-row">
-          <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}${isTmdbMatchEligible(r) ? ` <button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</span>
-          <div class="card-actions">
-            <select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>
-            ${!isSkipped
-              ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓':'Mark watched'}</button>`
-              : ''
-            }
-            <button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>
-          </div>
-        </div>`;
-      }).join('')}</div>` : ''}
+      ${isExpanded ? `<div class="card-subseasons">${seasons.map(r => seasonSubCardHtml(r, seasonOpts(r))).join('')}</div>` : ''}
     </div>`;
   });
 

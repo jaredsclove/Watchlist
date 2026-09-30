@@ -1,9 +1,15 @@
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 function buildTabs() {
   const bar = document.getElementById('tabBar');
+  // Derived views (Currently Watching, Coming Soon) come first; they aren't collections.
+  const viewTabs = DERIVED_VIEWS.filter(v => v.mediaType === activeMediaType).map(v =>
+    `<div class="tab${v.id===activeViewId?' active':''}" onclick="switchView('${v.id}')">
+      <span class="tab-icon">${v.icon}</span>${esc(v.label)}
+    </div>`
+  ).join('');
   const visibleCollections = COLLECTIONS.filter(c => c.mediaType === activeMediaType);
-  bar.innerHTML = visibleCollections.map(c =>
-    `<div class="tab${c.id===activeTabId?' active':''}" onclick="switchTab('${c.id}')">
+  bar.innerHTML = viewTabs + (viewTabs ? '<div class="tab-sep"></div>' : '') + visibleCollections.map(c =>
+    `<div class="tab${!activeViewId && c.id===activeTabId?' active':''}" onclick="switchTab('${c.id}')">
       <span class="tab-icon">${c.icon}</span>${esc(c.label)}
     </div>`
   ).join('');
@@ -21,14 +27,19 @@ function buildMediaSwitch() {
 function switchMediaType(type) {
   if (type === activeMediaType) return;
   activeMediaType = type;
+  // TV always lands on its first derived view (Currently Watching).
+  const firstView = DERIVED_VIEWS.find(v => v.mediaType === type);
   const firstInMode = COLLECTIONS.find(c => c.mediaType === type);
-  if (firstInMode) {
+  if (firstView) {
+    switchView(firstView.id);
+  } else if (firstInMode) {
     switchTab(firstInMode.id);
   }
   buildMediaSwitch();
 }
 
 function switchTab(id) {
+  activeViewId = null;
   activeTabId = id;
   addOpen = false;
   tmdbSelectedShow = null;
@@ -43,6 +54,26 @@ function switchTab(id) {
     renderFilters();
     renderTable();
   }
+}
+
+// Opens a derived view. activeTabId becomes null, so no collection is active:
+// anything that would write `collection: activeTabId` is refused by the DB's
+// NOT NULL, and a late loadTab() never paints over the view.
+function switchView(id) {
+  activeViewId = id;
+  activeTabId = null;
+  addOpen = false;
+  tmdbSelectedShow = null;
+  expandedShows = new Set();
+  derivedSectionOpen = { uptodate: false, tba: false };
+  derivedData = null;
+  document.getElementById('addForm').style.display = 'none';
+  document.getElementById('banner').innerHTML = '';
+  const tmdbPanel = document.getElementById('tmdbPanel');
+  tmdbPanel.style.display = 'none';
+  tmdbPanel.innerHTML = '';
+  buildTabs();
+  loadDerivedView();
 }
 
 // ─── Load tab data from Supabase ─────────────────────────────────────────────

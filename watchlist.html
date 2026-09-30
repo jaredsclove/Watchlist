@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20260929-derived1">
 </head>
 <body>
 
@@ -61,20 +61,25 @@
   </div>
 </div>
 
+<!-- Cache-busting: GitHub Pages caches files for 10 minutes. A ?v= token makes this
+     page fetch fresh copies of files that must match it. When a deployment changes
+     one of these files in a way the page depends on, bump its token. config.js is
+     deliberately unversioned (the catalog-refresh workflow reloads it by plain URL). -->
 <script src="config.js"></script>
 <script src="identity.js"></script>
-<script src="api.js"></script>
+<script src="api.js?v=20260929-derived1"></script>
 <script src="ui-helpers.js"></script>
-<script src="backup-restore.js"></script>
-<script src="tabs.js"></script>
-<script src="render.js"></script>
-<script src="row-actions.js"></script>
-<script src="tmdb-search.js"></script>
-<script src="collections-pull.js"></script>
-<script src="universe-pull.js"></script>
-<script src="person-pull.js"></script>
-<script src="refresh-shows.js"></script>
-<script src="tmdb-match.js"></script>
+<script src="backup-restore.js?v=20260929-derived1"></script>
+<script src="tabs.js?v=20260929-derived1"></script>
+<script src="render.js?v=20260929-derived1"></script>
+<script src="row-actions.js?v=20260929-derived1"></script>
+<script src="tmdb-search.js?v=20260929-derived1"></script>
+<script src="collections-pull.js?v=20260929-derived1"></script>
+<script src="universe-pull.js?v=20260929-derived1"></script>
+<script src="person-pull.js?v=20260929-derived1"></script>
+<script src="refresh-shows.js?v=20260929-derived1"></script>
+<script src="tmdb-match.js?v=20260929-derived1"></script>
+<script src="derived-views.js?v=20260929-derived1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -97,8 +102,12 @@
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let activeMediaType = 'tv'; // 'tv' | 'movie' — controls which tabs are visible
-let activeTabId = COLLECTIONS.find(c => c.mediaType === 'tv').id;
+let activeViewId = 'watching'; // open derived view (see DERIVED_VIEWS), or null when a collection tab is open
+let activeTabId = null; // open collection id; null while a derived view is open
 let tabData = {}; // { [collectionId]: { rows: [], loaded: false, newKeys: [] } }
+let derivedData = null; // { rows, loaded } — cross-TV rows for the derived views, kept apart from tabData
+let derivedLoadSeq = 0; // lets a late derived-view load see that it's been superseded
+let derivedSectionOpen = { uptodate: false, tba: false }; // collapsible sections in the derived views
 let addOpen = false;
 let tmdbSelectedShow = null; // { id, name } — currently previewed TMDB show
 let tmdbShowSpecials = false;
@@ -161,7 +170,7 @@ let pendingRestoreData = null; // validated backup object, set once file passes 
 // ─── Boot ────────────────────────────────────────────────────────────────────
 buildMediaSwitch();
 buildTabs();
-loadTab(activeTabId);
+switchView(activeViewId);
 updateBackupAgeIndicator();
 </script>
 </body>
