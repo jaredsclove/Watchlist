@@ -64,10 +64,10 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 
 - **Working copy:** the local Git checkout of this repo. **Never work from loose copies outside the checkout** (such as files in a downloads folder).
 - **Branch:** `main` is the source of truth. The deployed Pages site must match it byte-for-byte.
-- **Current HEAD:** the documentation commit **"Update handoff for the Up to date default"**, the commit that last updated this file. Its parent is `e003694`. (A file can't contain its own commit hash; run `git log -1` to see it.)
-  - The **last app-code commit** is `e003694`, "Open Currently Watching with Up to date expanded". Everything that runs in the app is identical to `e003694`.
+- **Current HEAD:** the documentation commit **"Update handoff for Up to date status and next season"**, the commit that last updated this file. Its parent is `1486404`. (A file can't contain its own commit hash; run `git log -1` to see it.)
+  - The **last app-code commit** is `1486404`, "Show Up to date status and the next stored season on Up to date cards". Everything that runs in the app is identical to `1486404`.
   - The working tree is clean.
-  - After pushing, confirm all 17 app files are byte-identical on GitHub Pages (§11 rule 10). They were last verified at `789d4f5` on 2026-09-30; `e003694` changed `tabs.js`, `derived-views.js` and `watchlist.html`.
+  - After pushing, confirm all 17 app files are byte-identical on GitHub Pages (§11 rule 10). They were last verified at `e003694` on 2026-10-02; `1486404` changed `derived-views.js`, `styles.css` and `watchlist.html`.
 - **Tracked files:** 31 (30 before this handoff was added at `6dfa0cd`).
   - 17 app files: 16 JS/CSS + `watchlist.html`.
   - 1 doc: `docs/HANDOFF.md` (this file).
@@ -104,9 +104,11 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 | `789d4f5` | Add offline tests for derived views, navigation and async guards |
 | `6dfa0cd` | Add canonical Watchlist project handoff |
 | `e003694` | Open Currently Watching with Up to date expanded |
-| *(this commit)* | Update handoff for the Up to date default |
+| `bd4c068` | Update handoff for the Up to date default |
+| `1486404` | Show Up to date status and the next stored season on Up to date cards |
+| *(this commit)* | Update handoff for Up to date status and next season |
 
-The five commits `a13c1fb`…`e2c1c16` are catalog refreshes made with the `/refresh-catalogs` skill. `8e92095`…`789d4f5` are the derived-views feature. `6dfa0cd` added this handoff (docs only). `e003694` makes Up to date start expanded. The final commit updates this handoff (docs only).
+The five commits `a13c1fb`…`e2c1c16` are catalog refreshes made with the `/refresh-catalogs` skill. `8e92095`…`789d4f5` are the derived-views feature. `6dfa0cd` added this handoff (docs only). `e003694` makes Up to date start expanded, and `1486404` adds its status label and next-season text; `bd4c068` and the final commit update this handoff (docs only).
 
 **Script load order** (in `watchlist.html`; the order matters):
 
@@ -119,7 +121,7 @@ The inline script owns the mutable state and the boot sequence:
 That opens **TV → Currently Watching**. The boot makes only paginated GETs; it doesn't call `loadTab()`.
 
 **Cache-busting token (manual; no build system):**
-- `watchlist.html` requests 12 JS files and `styles.css` with `?v=20261002-uptodate1` (it was `?v=20260929-derived1` until `e003694`): `api.js`, `backup-restore.js`, `tabs.js`, `render.js`, `row-actions.js`, `tmdb-search.js`, `collections-pull.js`, `universe-pull.js`, `person-pull.js`, `refresh-shows.js`, `tmdb-match.js`, `derived-views.js`.
+- `watchlist.html` requests 12 JS files and `styles.css` with `?v=20261003-uptodate2` (earlier tokens: `?v=20260929-derived1`, then `?v=20261002-uptodate1` at `e003694`): `api.js`, `backup-restore.js`, `tabs.js`, `render.js`, `row-actions.js`, `tmdb-search.js`, `collections-pull.js`, `universe-pull.js`, `person-pull.js`, `refresh-shows.js`, `tmdb-match.js`, `derived-views.js`.
 - **Rule: when a deployment changes any versioned JS/CSS file, bump the token in `watchlist.html`** (for example `?v=20261015-x1`). This makes a new page load fresh copies instead of stale cached JS that doesn't match it. GitHub Pages caches files for 10 minutes.
 - **`config.js`, `identity.js` and `ui-helpers.js` are deliberately unversioned.** The `/refresh-catalogs` workflow refreshes `config.js` by its plain URL (`fetch('config.js', {cache:'reload'})`), which only works while the page loads it without a token. If a future change to `identity.js` or `ui-helpers.js` must ship together with the page, add a token to that file then. Keep `config.js` unversioned unless the refresh workflow is updated too.
 - An old cached page may keep running the old app for up to about 10 minutes after a deploy. That's accepted; the token guarantees that a **new** page never loads stale JS.
@@ -135,7 +137,7 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
 | File | Lines | Owns |
 |---|---:|---|
 | `watchlist.html` | 177 | Markup, **all mutable page state** (`let` vars, §4), script tags (with the `?v=` cache token, §2), boot. Has some harmless orphaned comment headers left over from the modular split. |
-| `styles.css` | 483 | All CSS, including the derived-view styles (source badge, Upcoming/Today tags, "Not aired yet", collapsible section rows, tab separator). Mobile rules apply below 700px: the desktop `<table id="desktopTable">` is hidden and `#cardList` cards are shown instead. |
+| `styles.css` | 485 | All CSS, including the derived-view styles (source badge, Upcoming/Today tags, "Not aired yet", the non-clickable "Up to date" status label, collapsible section rows, tab separator). Mobile rules apply below 700px: the desktop `<table id="desktopTable">` is hidden and `#cardList` cards are shown instead. |
 | `config.js` | 442 | Constants: Supabase URL/key, `TABLE`, backup constants (`BACKUP_TABLES`, `BACKUP_FORMAT`, `BACKUP_FORMAT_VERSION`, `BACKUP_PAGE_SIZE`), `COLLECTIONS` + `DEFAULTS` (`truecrime` has `mixedMedia: true`), `WATCH_WITH_OPTIONS` (the household's fixed watch-with tags), `MCU_MOVIES` (39 `{t, id}` entries), `TMDB_TOKEN`/`TMDB_BASE`, `NETWORK_COLORS`, `WATCHABLE_SOON_DAYS` (60), `UNIVERSE_LISTS` (`mcu`), `LAST_BACKUP_KEY`. **Unchanged by the derived views and deliberately unversioned** (§2). |
 | `identity.js` | 80 | `findExistingRow`, `isAlreadyAdded`, `normalizeTmdbTitle`, `pickTmdbMovieCandidate` (automated flows only), `isDuplicateKeyError`, `duplicateInsertMessage`, `cleanCollectionName` (display only). |
 | `api.js` | 119 | `sbFetch`; `fetchAllRows(table, filter?)` (paginated, exact-count verified; the optional PostgREST filter is used by the derived views, and backup/restore call it without one); `deleteAllRows`, `batchInsertRows`, `tmdbFetch`. A failed `tmdbFetch` throws `TMDB error <status>` with **`err.status` attached**. |
@@ -150,7 +152,7 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
 | `person-pull.js` | 324 | Person search/select/role, `pullPersonFilmography` (same-title handling, tag backfill; captures the collection and won't redraw or write a preview into another tab or view), `addPulledPersonMovies`, `refreshPersonCollection`. |
 | `refresh-shows.js` | 189 | `tmdbSeasonDateUpdate`, `refreshShows` (new seasons, TBA→date updates, lookup-failure accounting), `addRefreshedSeasons` (captures the collection before its awaits). |
 | `tmdb-match.js` | 271 | **Match to TMDB** (§7.3): `isTmdbMatchEligible`, `buildTmdbMatchPatch`, `findTmdbMatchConflict`, `tmdbMatchConflictMessage`, the UI (`openTmdbMatch`, `searchTmdbMatch`, `chooseTmdbMatchResult`, `chooseTmdbMatchSeason`, `renderTmdbMatchConfirm`, `cancelTmdbMatch`), and `confirmTmdbMatch` (finishes against `row.collection`). |
-| `derived-views.js` | 470 | **Currently Watching / Coming Soon** (§4a): `DERIVED_VIEWS`; pure rules (`isTvViewRow`, `isTbaRow`, `localTodayStr`, `isReleasedRow`, `seasonOrder`/`compareSeasons`, `showGroupKey`, `deriveCurrentlyWatching`, `deriveComingSoon`); the loader (`loadDerivedView`, `tvRowsFilter`); the filters, renderers and toggles (`toggleDerivedShow`, `toggleDerivedSection`). |
+| `derived-views.js` | 493 | **Currently Watching / Coming Soon** (§4a): `DERIVED_VIEWS`; pure rules (`isTvViewRow`, `isTbaRow`, `localTodayStr`, `isReleasedRow`, `seasonOrder`/`compareSeasons`, `showGroupKey`, `deriveCurrentlyWatching`, `nextStoredSeason`, `deriveComingSoon`); the loader (`loadDerivedView`, `tvRowsFilter`); the filters, renderers and toggles (`toggleDerivedShow`, `toggleDerivedSection`). |
 | `docs/HANDOFF.md` | — | **This handoff**, the single canonical copy. Never loaded by the app. |
 | `tools/identity-audit.mjs` | 261 | Read-only (GET-only) production identity audit with A/B/C/D grading (§16). Pure grading functions are separated from network access. |
 | `tests/identity-candidate.test.js` | 80 | `pickTmdbMovieCandidate` (9 cases). |
@@ -163,13 +165,13 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
 | `tests/tmdb-failures.test.js` | 244 | Outage, partial-failure and partial-add reporting across the real flows, with stubbed calls (21 cases). |
 | `tests/tmdb-match.test.js` | 300 | Match to TMDB patch/conflict rules and the stubbed flow (24 cases). |
 | `tests/app-harness.js` | 219 | **Shared harness, not a suite.** Runs the whole page in a Node `vm` (every script in `watchlist.html` order plus its inline state/boot script) against a fake DOM and an in-memory Supabase/TMDB stand-in. Supports pausing a request (`hold`) to simulate navigation mid-await, forced failures, and count mismatches. No network. |
-| `tests/derived-views.test.js` | 424 | Currently Watching / Coming Soon rules, their rendering, and the grouped-tab season rows after the extraction (30 cases). |
+| `tests/derived-views.test.js` | 485 | Currently Watching / Coming Soon rules (including Up to date's next stored season), their rendering, and the grouped-tab season rows after the extraction (33 cases). |
 | `tests/derived-nav.test.js` | 389 | Startup, pagination and exact-count checks, navigation races, edits from a view (real id, mirrored cache, rollback), and the nine async guards (24 cases). |
 
 **Totals:**
-- 148 global functions, with no duplicate definitions.
+- 150 global functions, with no duplicate definitions.
 - **54** distinct inline-handler names, all defined. The derived views added `switchView`, `loadDerivedView`, `toggleDerivedShow` and `toggleDerivedSection`.
-- **185** offline test cases across 11 suites: 131 existing, 30 in `derived-views`, 24 in `derived-nav`.
+- **188** offline test cases across 11 suites: 131 existing, 33 in `derived-views`, 24 in `derived-nav`.
 
 ---
 
@@ -248,7 +250,15 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
   - A released up-next season has its status select and the normal watch toggle.
   - An **unreleased (future or TBA)** up-next season stays the visible season and shows its stored date or "TBA", an **Upcoming** tag, the status select, and **"Not aired yet" instead of Mark watched**. Example: "Season 3 · TBA".
   - Once its stored date arrives (or a TBA gets a real date), the watch toggle appears on the next render.
-- **Up to date** (**expanded by default** since `e003694`, every time Currently Watching opens; it can still be collapsed) holds shows that have Watching rows but **no unwatched Watching rows**. Each of its cards shows **"Up to date"** where other cards show the up-next season.
+- **Up to date** (**expanded by default** since `e003694`, every time Currently Watching opens; it can still be collapsed) holds shows that have Watching rows but **no unwatched Watching rows**. On its cards:
+  - The **Status** column shows a non-clickable **"Up to date"** label (teal). There's no dropdown, because there's no single up-next season to change; the Watched column shows "—". On mobile the label sits where the status dropdown would be.
+  - The **Up next** column shows the earliest unwatched, non-skipped season stored **after the show's last Watching season** (`nextStoredSeason`), from stored data only:
+    - none: **"No new season on your list yet"** (with a tooltip pointing to ↻ Refresh shows / catalog refresh)
+    - TBA: **"Season N · premiere date TBA"**
+    - future date: **"Season N · <date>"** with the Upcoming tag
+    - already aired but not set to Watching: **"Season N · available since <date>"**
+  - That season is **display only**: the show stays in Up to date until the user sets a season to Watching (owner decision "option A", 2026-10-03). New seasons added by ↻ Refresh shows arrive as **On List**, so they appear here rather than becoming up next.
+  - Expanded season rows keep their own status dropdowns and watch toggles.
   - It's independent of the existing 60-day **Caught Up** rule (`hasWatchableSoonSeason`), which is unchanged.
   - A show whose next Watching season is future or TBA is **not** Up to date.
   - Up to date shows can be expanded, so a watched state can be undone.
@@ -699,6 +709,7 @@ There are no foreign keys and no triggers. RLS is enabled and permissive: the an
 | Offline page harness + derived-view, navigation and async-guard tests (54 cases) | `789d4f5` |
 | Canonical handoff moved into the repo (`docs/HANDOFF.md`) | `6dfa0cd` |
 | Up to date starts expanded; its cards read "Up to date"; cache token `?v=20261002-uptodate1` | `e003694` |
+| Up to date cards: "Up to date" status label, and the next stored season (none / TBA / date / available) in Up next; cache token `?v=20261003-uptodate2` | `1486404` |
 
 Other intentional behaviors:
 
@@ -726,7 +737,9 @@ Other intentional behaviors:
   - A–Z order.
   - No show-level bulk status control and no delete control in either view.
   - Coming Soon: status select only, **no watch button** (including rows dated today); excludes only watched and skipped rows.
-  - Up to date starts **expanded** and its cards read "Up to date" (owner request, 2026-10-02, `e003694`). Coming Soon's TBA section still starts collapsed.
+  - Up to date starts **expanded** (owner request, 2026-10-02, `e003694`). Coming Soon's TBA section still starts collapsed.
+  - Up to date cards show "Up to date" in the Status column and the next stored season in Up next (owner request, 2026-10-03, `1486404`).
+  - **Option A (2026-10-03):** a later season that has aired but isn't set to Watching is only *displayed* ("available since …"); it doesn't move the show back to In progress. Auto-promoting it, or having Refresh shows add new seasons as Watching, would be a separate change.
   - Movies → TV always returns to Currently Watching.
   - No date-horizon filters in v1.
   - The release boundary is re-derived on render only; there's no midnight timer.
@@ -836,14 +849,14 @@ node tests/row-popover.test.js            # expect 5/5
 node tests/tmdb-failures.test.js          # expect 21/21
 node tests/tmdb-match.test.js             # expect 24/24
 node tests/identity-audit.test.mjs        # expect 14/14
-node tests/derived-views.test.js          # expect 30/30
+node tests/derived-views.test.js          # expect 33/33
 node tests/derived-nav.test.js            # expect 24/24
-# total: 185 cases across 11 suites (tests/app-harness.js is a helper, not a suite)
+# total: 188 cases across 11 suites (tests/app-harness.js is a helper, not a suite)
 ```
 
 ### Handler/global sweep
 
-Every inline-handler name must be a defined function. Expected: **54** handler names, none undefined, and no duplicate global function definitions (148 functions).
+Every inline-handler name must be a defined function. Expected: **54** handler names, none undefined, and no duplicate global function definitions (150 functions).
 
 ```bash
 # from the repo root
@@ -947,12 +960,12 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 ```text
 Repo:                     the local Git checkout of this repo (github.com/jaredsclove/Watchlist)
 Branch:                   main (in sync with origin/main), working tree clean
-HEAD:                     "Update handoff for the Up to date default" (docs-only; parent e003694)
-Last app-code commit:     e003694  "Open Currently Watching with Up to date expanded"
+HEAD:                     "Update handoff for Up to date status and next season" (docs-only; parent 1486404)
+Last app-code commit:     1486404  "Show Up to date status and the next stored season on Up to date cards"
 Tracked files:            31 (17 app, 1 doc = docs/HANDOFF.md, 12 in tests/ = 11 suites + app-harness.js, 1 tool)
-                          GitHub Pages must match main byte-for-byte (last verified at 789d4f5; re-verify after pushing e003694)
-Offline tests:            185/185 passing (11 suites); 54 inline handlers, none undefined; 148 functions, no duplicates
-Cache token:              ?v=20261002-uptodate1 (12 JS files + styles.css); config.js unversioned
+                          GitHub Pages must match main byte-for-byte (last verified at e003694; re-verify after pushing 1486404)
+Offline tests:            188/188 passing (11 suites); 54 inline handlers, none undefined; 150 functions, no duplicates
+Cache token:              ?v=20261003-uptodate2 (12 JS files + styles.css); config.js unversioned
 
 watchlist_items:          718 rows
 othertv_shows:             64 rows
@@ -1003,9 +1016,9 @@ Supabase:                 one production project. The temporary rehearsal projec
 1. Inspect the actual repo (your local Git checkout of `jaredsclove/Watchlist`).
 2. Run `git status`.
 3. Confirm the branch is `main` and in sync with `origin/main`.
-4. Confirm `HEAD` is the documentation commit "Update handoff for the Up to date default", whose parent is `e003694` (the last app-code commit, "Open Currently Watching with Up to date expanded"). If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
+4. Confirm `HEAD` is the documentation commit "Update handoff for Up to date status and next season", whose parent is `1486404` (the last app-code commit, "Show Up to date status and the next stored season on Up to date cards"). If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
 5. Inspect the file tree and compare it with §3: 31 tracked files, and roughly the listed line counts.
-6. Run the offline checks in §16: syntax, all 11 test suites (185 cases), and the handler sweep (54 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 420 A / 2 B / 0 C / 0 D).
+6. Run the offline checks in §16: syntax, all 11 test suites (188 cases), and the handler sweep (54 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 420 A / 2 B / 0 C / 0 D).
 7. **Do not modify anything:**
    - no code
    - no schema
