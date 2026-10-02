@@ -296,7 +296,7 @@ test('render: startup shows Currently Watching with the expected shows (films ex
   const html = app.html();
   for (const t of ['Released Show', 'TBA Show', 'Future Show', 'Clone Show']) assert.ok(headerRow(app, t), `${t} shown`);
   assert.ok(!html.includes('Doc Film'), 'films excluded');
-  assert.ok(!headerRow(app, 'Done Show'), 'up-to-date shows are in the collapsed section');
+  assert.ok(headerRow(app, 'Done Show'), 'up-to-date shows are in the (expanded) Up to date section');
   assert.ok(app.el('tableHead').innerHTML.includes('Up next'));
 });
 
@@ -333,12 +333,19 @@ test('render: expanding a show lists every stored season; release rule applies; 
   assert.ok(!html.includes('setShowStatus('), 'no show-level status control');
 });
 
-test('render: Up to date is collapsed by default and expands to allow undo', async () => {
+test('render: Up to date starts expanded, shows "Up to date", collapses, and allows undo', async () => {
   const app = await createApp({ rows: cwFixture() });
-  assert.ok(app.html().includes('Up to date'));
-  assert.ok(!app.html().includes('Done Show'));
+  const row = headerRow(app, 'Done Show');
+  assert.ok(row, 'Up to date shows are visible when the view opens');
+  assert.ok(row.includes('>Up to date<'), 'card shows "Up to date"');
+  assert.ok(!app.html().includes('All watching seasons watched'));
+  assert.ok(card(app, 'Done Show').includes('Up to date'), 'mobile card too');
   app.ctx.toggleDerivedSection('uptodate');
-  assert.ok(headerRow(app, 'Done Show').includes('All watching seasons watched'));
+  assert.ok(!app.html().includes('Done Show'), 'the section can still be collapsed');
+  app.ctx.switchView('comingsoon');
+  app.ctx.switchView('watching');
+  await new Promise(r => setTimeout(r, 20));
+  assert.ok(headerRow(app, 'Done Show'), 'expanded again each time the view opens');
   app.ctx.toggleDerivedShow('othertv|tmdb:4');
   assert.ok(app.html().includes("toggleWatch('done-1')"), 'watched season can be unwatched');
 });

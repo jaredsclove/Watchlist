@@ -325,7 +325,7 @@ function derivedShowHtml(show, today) {
   const upcomingTag = upNext && !show.upNextReleased ? '<span class="upcoming-tag">Upcoming</span>' : '';
   const upNextLabel = upNext
     ? `${esc(upNext.season)} · ${esc(upNext.display_date)}${upcomingTag}`
-    : 'All watching seasons watched';
+    : 'Up to date';
   const releaseOpts = { requireReleased: true, today };
   const statusSelect = stop => upNext
     ? `<select class="status-select s-${upNext.status}"${stop ? ' onclick="event.stopPropagation()"' : ''} onchange="${stop ? 'event.stopPropagation(); ' : ''}setStatus('${upNext.id}', this.value, this)">${statusOptionsHtml(upNext.status)}</select>`

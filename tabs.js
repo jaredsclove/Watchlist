@@ -65,7 +65,7 @@ function switchView(id) {
   addOpen = false;
   tmdbSelectedShow = null;
   expandedShows = new Set();
-  derivedSectionOpen = { uptodate: false, tba: false };
+  derivedSectionOpen = { uptodate: true, tba: false };
   derivedData = null;
   document.getElementById('addForm').style.display = 'none';
   document.getElementById('banner').innerHTML = '';
