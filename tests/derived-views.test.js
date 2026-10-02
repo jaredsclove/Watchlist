@@ -201,6 +201,37 @@ test('release test: today counts as released, tomorrow does not; local date, not
   assert.strictEqual(c.localTodayStr(new Date(2026, 0, 5, 0, 5)), '2026-01-05');
 });
 
+test('up to date: next stored season after the last Watching season — none / TBA / future / available', async () => {
+  const c = await pure();
+  const base = [tv({ season_number: 1, status: 'watching', watched: true }), tv({ season_number: 2, status: 'watching', watched: true, date_sort: '2021-01-01' })];
+  const none = c.deriveCurrentlyWatching(base, TODAY).upToDate[0];
+  assert.strictEqual(none.nextState, 'none');
+  assert.strictEqual(none.next, null);
+  const withTba = c.deriveCurrentlyWatching([...base, tba({ season_number: 3 })], TODAY).upToDate[0];
+  assert.strictEqual(withTba.nextState, 'tba');
+  assert.strictEqual(withTba.next.season_number, 3);
+  const withFuture = c.deriveCurrentlyWatching([...base, tv({ season_number: 3, date_sort: day(30) })], TODAY).upToDate[0];
+  assert.strictEqual(withFuture.nextState, 'future');
+  const withAired = c.deriveCurrentlyWatching([...base, tv({ season_number: 3, date_sort: day(-5) })], TODAY);
+  assert.strictEqual(withAired.upToDate[0].nextState, 'available');
+  assert.strictEqual(withAired.active.length, 0, 'an aired On List season does not make the show active (option A)');
+});
+
+test('up to date: earlier unwatched, skipped and watched later seasons are never "next"; earliest later one wins', async () => {
+  const c = await pure();
+  const rows = [
+    tv({ season_number: 1, status: 'confirmed' }),                 // earlier unwatched, not Watching
+    tv({ season_number: 2, status: 'watching', watched: true }),   // last Watching season
+    tv({ season_number: 3, status: 'skipped', date_sort: day(10) }),
+    tv({ season_number: 4, status: 'confirmed', watched: true }),
+    tv({ season_number: 6, status: 'confirmed', date_sort: day(200) }),
+    tba({ season_number: 5 }),
+  ];
+  const show = c.deriveCurrentlyWatching(rows, TODAY).upToDate[0];
+  assert.strictEqual(show.next.season_number, 5);
+  assert.strictEqual(show.nextState, 'tba');
+});
+
 // ─── Coming Soon rules ────────────────────────────────────────────────────────
 const D = '2026-09-29';
 test('Coming Soon: confirmed future row and today included; yesterday excluded', async () => {
@@ -348,6 +379,36 @@ test('render: Up to date starts expanded, shows "Up to date", collapses, and all
   assert.ok(headerRow(app, 'Done Show'), 'expanded again each time the view opens');
   app.ctx.toggleDerivedShow('othertv|tmdb:4');
   assert.ok(app.html().includes("toggleWatch('done-1')"), 'watched season can be unwatched');
+});
+
+test('render: up to date cards show an "Up to date" status label and what is next on the list', async () => {
+  const rows = [
+    tv({ id: 'n1', title: 'None Show', tmdb_id: 41, status: 'watching', watched: true }),
+    tv({ id: 't1', title: 'Tba Show', tmdb_id: 42, status: 'watching', watched: true }),
+    tba({ id: 't2', title: 'Tba Show', tmdb_id: 42, season_number: 2 }),
+    tv({ id: 'f1', title: 'Future Show', tmdb_id: 43, status: 'watching', watched: true }),
+    tv({ id: 'f2', title: 'Future Show', tmdb_id: 43, season_number: 2, date_sort: day(30) }),
+    tv({ id: 'a1', title: 'Aired Show', tmdb_id: 44, status: 'watching', watched: true }),
+    tv({ id: 'a2', title: 'Aired Show', tmdb_id: 44, season_number: 2, date_sort: day(-3) }),
+  ];
+  const app = await createApp({ rows });
+  const cells = title => { const r = headerRow(app, title); return { r, upNext: r.split('<td')[3] || '', status: r.split('<td')[4] || '', watched: r.split('<td')[5] || '' }; };
+  for (const t of ['None Show', 'Tba Show', 'Future Show', 'Aired Show']) {
+    const { r, status, watched } = cells(t);
+    assert.ok(r, `${t} listed`);
+    assert.ok(status.includes('status-pill') && status.includes('>Up to date<'), `${t}: status column says Up to date`);
+    assert.ok(!r.includes('<select') && !r.includes('toggleWatch('), `${t}: no dropdown or watch button on the card`);
+    assert.ok(watched.includes('—'));
+    const c = card(app, t);
+    assert.ok(c.includes('status-pill') && !c.includes('toggleWatch(') && !c.includes('<select'), `${t}: mobile card has the label, no controls`);
+  }
+  assert.ok(cells('None Show').upNext.includes('No new season on your list yet'));
+  assert.ok(cells('Tba Show').upNext.includes('Season 2 · premiere date TBA'));
+  assert.ok(cells('Future Show').upNext.includes(`Season 2 · ${disp(day(30))}`) && cells('Future Show').upNext.includes('Upcoming'));
+  assert.ok(cells('Aired Show').upNext.includes(`Season 2 · available since ${disp(day(-3))}`));
+  assert.strictEqual(app.get('derivedData.rows.length'), 7);
+  app.ctx.toggleDerivedShow('othertv|tmdb:44');
+  assert.ok(app.html().includes("setStatus('a2'") && app.html().includes("toggleWatch('a2')"), 'expanded seasons keep their own controls');
 });
 
 test('render: source and search filters narrow Currently Watching', async () => {

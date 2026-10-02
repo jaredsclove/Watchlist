@@ -110,12 +110,24 @@ function deriveCurrentlyWatching(rows, today) {
       upNext,
       upNextReleased: upNext ? isReleasedRow(upNext, today) : false
     };
+    if (!upNext) Object.assign(show, nextStoredSeason(seasons, today));
     (upNext ? active : upToDate).push(show);
   }
   const byTitle = (a, b) => compareTitles(a.title, b.title)
     || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
     || cmpStr(a.key, b.key);
   return { active: active.sort(byTitle), upToDate: upToDate.sort(byTitle) };
+}
+
+// For an up-to-date show: the earliest unwatched, non-skipped season stored after
+// its last Watching season (e.g. one added later by Refresh shows, which arrives as
+// On List), and what state it's in. Display only: it doesn't make the show active.
+function nextStoredSeason(sortedSeasons, today) {
+  let lastWatching = -1;
+  sortedSeasons.forEach((r, i) => { if (r.status === 'watching') lastWatching = i; });
+  const next = sortedSeasons.slice(lastWatching + 1).find(r => !r.watched && r.status !== 'skipped') || null;
+  const nextState = !next ? 'none' : isTbaRow(next) ? 'tba' : isReleasedRow(next, today) ? 'available' : 'future';
+  return { next, nextState };
 }
 
 // Unwatched, non-skipped TV rows: those with a confirmed date from today on,
@@ -325,7 +337,9 @@ function derivedShowHtml(show, today) {
   const upcomingTag = upNext && !show.upNextReleased ? '<span class="upcoming-tag">Upcoming</span>' : '';
   const upNextLabel = upNext
     ? `${esc(upNext.season)} · ${esc(upNext.display_date)}${upcomingTag}`
-    : 'Up to date';
+    : upToDateNextLabel(show);
+  // Up to date shows have no single up-next season to change, so their status is a label.
+  const upToDatePill = '<span class="status-pill s-caughtup">Up to date</span>';
   const releaseOpts = { requireReleased: true, today };
   const statusSelect = stop => upNext
     ? `<select class="status-select s-${upNext.status}"${stop ? ' onclick="event.stopPropagation()"' : ''} onchange="${stop ? 'event.stopPropagation(); ' : ''}setStatus('${upNext.id}', this.value, this)">${statusOptionsHtml(upNext.status)}</select>`
@@ -341,7 +355,7 @@ function derivedShowHtml(show, today) {
       </td>
       <td>${badges}</td>
       <td class="date-cell">${upNextLabel}</td>
-      <td>${upNext ? statusSelect(true) : '<span class="confirmed-lbl">—</span>'}</td>
+      <td>${upNext ? statusSelect(true) : upToDatePill}</td>
       <td>${upNext ? seasonWatchControlHtml(upNext, { ...releaseOpts, stopPropagation: true }, false) : '<span class="confirmed-lbl">—</span>'}</td>
       <td class="card-date">${progressLabel}${progressBarHtml}</td>
     </tr>`;
@@ -363,11 +377,20 @@ function derivedShowHtml(show, today) {
       ${upNext ? `<div class="card-actions" onclick="event.stopPropagation()">
         ${statusSelect(false)}
         ${seasonWatchControlHtml(upNext, releaseOpts, false)}
-      </div>` : ''}
+      </div>` : `<div class="card-actions">${upToDatePill}</div>`}
       ${isExpanded ? `<div class="card-subseasons">${seasons.map(r => seasonSubCardHtml(r, subOpts)).join('')}</div>` : ''}
     </div>`;
 
   return { row, card };
+}
+
+// The Up next text for an up-to-date show, from what's stored in the list (no TMDB lookup).
+function upToDateNextLabel(show) {
+  const n = show.next;
+  if (show.nextState === 'tba') return `${esc(n.season)} · premiere date TBA`;
+  if (show.nextState === 'future') return `${esc(n.season)} · ${esc(n.display_date)}<span class="upcoming-tag">Upcoming</span>`;
+  if (show.nextState === 'available') return `${esc(n.season)} · available since ${esc(n.display_date)}`;
+  return `<span title="Based on the seasons stored in your list. New seasons are added by ↻ Refresh shows (Other TV, True Crime / Docs) or a catalog refresh (static tabs).">No new season on your list yet</span>`;
 }
 
 function renderComingSoon(today, keep) {
