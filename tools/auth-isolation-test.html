@@ -13,8 +13,17 @@
     tokens live only in this page's memory and are never displayed or logged.
   * Results show user ids, test names, pass/fail and sanitized error text only.
   Precondition: the test project is locked (db/test/lock_test_project.sql).
+
+  The test project's ref, publishable key and the two test-user ids come from
+  the UNTRACKED file tools/auth-isolation-test.local.js (copy
+  auth-isolation-test.local.example.js and fill it in). The page refuses to run
+  when that file is missing, still holds placeholders, or matches the
+  production project in ../config.js.
 -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- Production values, used only to refuse them. -->
+<script src="../config.js"></script>
+<script src="auth-isolation-test.local.js"></script>
 <style>
   :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --ok: #1a7f37; --bad: #c62828; --line: #e5e5ea; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161618; --fg: #f2f2f7; --muted: #a1a1a6; --ok: #4cc26b; --bad: #ff6b6b; --line: #2c2c2e; } }
@@ -33,7 +42,8 @@
 </head>
 <body>
 <main>
-<h1>Auth isolation test — watchlist-phase0-test</h1>
+<h1>Auth isolation test — temporary test project</h1>
+<div id="config" class="row"></div>
 <p>Test project only. Enter the two test users' credentials; nothing is saved. Tokens stay in memory and are never shown.</p>
 <form id="f" autocomplete="off">
   <fieldset><legend>User A (owns the copied list)</legend>
@@ -52,13 +62,38 @@
 <script>
 (() => {
   'use strict';
-  // ── Hard lock to the approved test project ─────────────────────────────────
-  const TEST_REF = 'hmkbdfexdmhykweyucgr';
+  // ── Hard lock to the configured test project ───────────────────────────────
+  // Values come from the untracked tools/auth-isolation-test.local.js. Anything
+  // missing, malformed, a placeholder, or equal to production stops the page here.
+  const CFG = window.AUTH_ISOLATION_TEST_CONFIG || null;
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  function configProblem() {
+    if (!CFG) return 'Missing tools/auth-isolation-test.local.js: copy auth-isolation-test.local.example.js to it and fill in the test project values.';
+    if (typeof SUPABASE_URL !== 'string' || typeof SUPABASE_KEY !== 'string') return 'Could not load ../config.js, so the production project cannot be ruled out. Refusing to run.';
+    if (!/^[a-z0-9]{20}$/.test(CFG.projectRef || '')) return 'projectRef must be the 20-character test project ref.';
+    if (!/^sb_publishable_[A-Za-z0-9_-]+$/.test(CFG.publishableKey || '')) return 'publishableKey must be the test project\'s sb_publishable_ key.';
+    if (!UUID.test(CFG.userA || '') || !UUID.test(CFG.userB || '') || CFG.userA === CFG.userB) return 'userA and userB must be two different test-user UUIDs.';
+    const testUrl = 'https://' + CFG.projectRef + '.supabase.co';
+    if (testUrl === SUPABASE_URL.replace(/\/+$/, '') || SUPABASE_URL.includes(CFG.projectRef)) return 'projectRef is the PRODUCTION project. Refusing to run.';
+    if (CFG.publishableKey === SUPABASE_KEY) return 'publishableKey is the PRODUCTION key. Refusing to run.';
+    return null;
+  }
+  const PROBLEM = configProblem();
+  const configEl = document.getElementById('config');
+  if (PROBLEM) {
+    configEl.className = 'row bad'; configEl.textContent = 'Not configured: ' + PROBLEM;
+    document.getElementById('run').disabled = true;
+    return;
+  }
+  const TEST_REF = CFG.projectRef;
   const TEST_URL = 'https://' + TEST_REF + '.supabase.co';
-  const TEST_PUBLISHABLE_KEY = 'sb_publishable_699gToX_tqHU2mx3Refyyg_ZjzuWSKz'; // public by design
-  const EXPECTED_A = '63cfd441-87f9-4882-976d-0d0fabe7eda4';
-  const EXPECTED_B = 'cdb783e6-a0b6-4412-8284-56add7ae3126';
+  const TEST_PUBLISHABLE_KEY = CFG.publishableKey; // public by design, but kept out of the repo
+  const EXPECTED_A = CFG.userA;
+  const EXPECTED_B = CFG.userB;
   const TABLES = ['watchlist_items', 'tv_shows', 'othertv_shows', 'custom_collections'];
+  const mask = v => '…' + String(v).slice(-4);
+  configEl.className = 'row info';
+  configEl.textContent = 'Configured: test project ' + mask(TEST_REF) + ' (not production), users A ' + mask(EXPECTED_A) + ' and B ' + mask(EXPECTED_B) + '.';
 
   const logEl = document.getElementById('log');
   const sumEl = document.getElementById('summary');

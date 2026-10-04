@@ -19,6 +19,12 @@ pre-migration production schema), `supabase_shim.sql` (PGlite only), and the
 self-checking `t_*.sql` scripts (prepend `_prelude.sql`; every check rolls back
 its own writes).
 
+Test-project values (project ref, publishable key, test-user ids) are never
+committed. Supply them through the untracked files `db/test/local_test_users.sql`
+and `tools/auth-isolation-test.local.js` (both in `.gitignore`); copy the
+committed `*.example.*` templates. The scripts and the test page refuse to run
+without them, and the page refuses production values.
+
 Rehearsals:
 - Local: `PGLITE_DIR=<dir with @electric-sql/pglite> node tools/db-rehearsal.mjs <backup.json>`
   (set `EXPECT_FINGERPRINT=w/o/c` to compare with production's fingerprints).

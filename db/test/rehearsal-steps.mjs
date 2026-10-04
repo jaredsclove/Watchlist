@@ -49,7 +49,22 @@ export default function register(ctx) {
   step('t_rpc', () => checks('db/test/t_rpc.sql'));
   step('t_restore', () => checks('db/test/t_restore.sql'));
   step('future-auth', () => exec('future sign-in functions (rehearsal only)', read('db/future/auth_switchover.sql')));
-  step('t_two_user', () => checks('db/test/t_two_user.sql'));
+  step('t_two_user', async () => {
+    // Locally there are no real test users: random ids, and t_two_user.sql creates
+    // the matching auth.users rows inside each rolled-back check.
+    await db.query(`select set_config('watchlist_test.user_a', gen_random_uuid()::text, false),
+                           set_config('watchlist_test.user_b', gen_random_uuid()::text, false)`);
+    await checks('db/test/t_two_user.sql');
+  });
+  step('t_two_user-unconfigured', async () => {
+    await db.query(`select set_config('watchlist_test.user_a', '', false), set_config('watchlist_test.user_b', '', false)`);
+    const out = await db.exec(read('db/test/_prelude.sql') + '\n' + read('db/test/t_two_user.sql'));
+    const results = JSON.parse(out.at(-1).rows[0].results);
+    if (results.some(r => r.ok) || !results.every(r => /watchlist_test\.user_[ab] is not set/.test(r.detail))) {
+      throw new Error('t_two_user.sql did not refuse to run without configured test users');
+    }
+    console.log(`  ok   without configured test users every one of the ${results.length} checks fails with a clear message`);
+  });
   step('end-to-end', () => endToEnd(ctx));
 }
 

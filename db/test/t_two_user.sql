@@ -4,11 +4,21 @@
 -- A, applies the lock migration, gives test user B their own rows, and then acts
 -- as A or B the way PostgREST does (role authenticated + JWT sub claim). All of
 -- it is rolled back at the end of each check.
--- Test users (created in the test project's Auth by the owner):
---   A 63cfd441-87f9-4882-976d-0d0fabe7eda4   B cdb783e6-a0b6-4412-8284-56add7ae3126
+-- The two test users' ids come from the session settings watchlist_test.user_a
+-- and watchlist_test.user_b, set by the untracked db/test/local_test_users.sql
+-- (template: db/test/local_test_users.example.sql), run before this script.
+-- Locally, tools/db-rehearsal.mjs sets random ids and creates matching auth.users rows.
 
-create or replace function pg_temp.ua() returns uuid language sql as $$ select '63cfd441-87f9-4882-976d-0d0fabe7eda4'::uuid $$;
-create or replace function pg_temp.ub() returns uuid language sql as $$ select 'cdb783e6-a0b6-4412-8284-56add7ae3126'::uuid $$;
+create or replace function pg_temp.test_user(p_name text) returns uuid language plpgsql as $$
+declare v text := current_setting('watchlist_test.' || p_name, true);
+begin
+  if v is null or v !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    raise exception 'watchlist_test.% is not set: run db/test/local_test_users.sql first (template: local_test_users.example.sql)', p_name;
+  end if;
+  return v::uuid;
+end $$;
+create or replace function pg_temp.ua() returns uuid language sql as $$ select pg_temp.test_user('user_a') $$;
+create or replace function pg_temp.ub() returns uuid language sql as $$ select pg_temp.test_user('user_b') $$;
 create or replace function pg_temp.as_user(p uuid) returns void language sql as $$
   select set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true),
          set_config('role', 'authenticated', true);
@@ -49,6 +59,11 @@ begin
   return jsonb_build_object('show', v_show, 'item', v_item, 'movie', v_movie, 'tracked', v_tracked, 'person', v_person,
     'show_tmdb', s.tmdb_id, 'collection', s.collection, 'item_key_prefix', split_part(s.item_key, '|', 1), 'season_number', s.season_number);
 end $$;
+
+select pg_temp.t('setup: both test-user ids are configured and different', $b$ do $$
+begin
+  if pg_temp.ua() = pg_temp.ub() then raise exception 'user_a and user_b are the same id'; end if;
+end $$ $b$);
 
 select pg_temp.t('auth move: every bootstrap row moves to A (links cascade), counts unchanged, links to auth.users added', $b$ do $$
 declare v_from uuid := (select bootstrap_owner_id from private.app_owner); n_items int := (select count(*) from public.watchlist_items);

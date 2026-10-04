@@ -2,19 +2,27 @@
 -- for the real authenticated-API isolation test (tools/auth-isolation-test.html):
 -- switch-over stage, the bootstrap owner's data moved to test user A, then the
 -- lock (owner = auth.uid() only, owner-only access rules, no anonymous access).
--- Needs db/rpc.sql and db/future/auth_switchover.sql installed. Run as postgres.
+-- Needs db/rpc.sql and db/future/auth_switchover.sql installed. Run as postgres,
+-- after the untracked db/test/local_test_users.sql (template:
+-- local_test_users.example.sql), which sets the two test users' ids.
 begin;
 
-do $$ begin
+do $$
+declare a text := current_setting('watchlist_test.user_a', true); b text := current_setting('watchlist_test.user_b', true);
+begin
+  if a is null or b is null or a = b
+     or a !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     or b !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    raise exception 'set watchlist_test.user_a and watchlist_test.user_b first (db/test/local_test_users.sql)';
+  end if;
   if private.tv_stage() not in ('shadow', 'tv_schema', 'authoritative') then raise exception 'unexpected stage %', private.tv_stage(); end if;
-  if not exists (select 1 from auth.users where id = '63cfd441-87f9-4882-976d-0d0fabe7eda4')
-     or not exists (select 1 from auth.users where id = 'cdb783e6-a0b6-4412-8284-56add7ae3126') then
+  if not exists (select 1 from auth.users where id = a::uuid) or not exists (select 1 from auth.users where id = b::uuid) then
     raise exception 'test users A and B must exist in auth.users';
   end if;
 end $$;
 
 update private.migration_stage set stage = 'authoritative', changed_at = now();
-select private.auth_move_owner('63cfd441-87f9-4882-976d-0d0fabe7eda4');
+select private.auth_move_owner(current_setting('watchlist_test.user_a')::uuid);
 select private.auth_lock();
 
 commit;

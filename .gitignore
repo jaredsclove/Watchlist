@@ -1,0 +1,3 @@
+# Local test-project values (see the matching *.example.* templates). Never commit these.
+tools/auth-isolation-test.local.js
+db/test/local_test_users.sql
