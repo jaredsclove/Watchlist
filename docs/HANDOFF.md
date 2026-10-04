@@ -64,16 +64,17 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 
 - **Working copy:** the local Git checkout of this repo. **Never work from loose copies outside the checkout** (such as files in a downloads folder).
 - **Branch:** `main` is the source of truth. The deployed Pages site must match it byte-for-byte.
-- **Current HEAD:** the documentation commit **"Update handoff after Phase 0 of the TV-show migration"**, the commit that last updated this file. Its parent is `b39584e`. (A file can't contain its own commit hash; run `git log -1` to see it.)
+- **Current HEAD:** the documentation commit **"Note the test-project identifier cleanup in the handoff"**, the commit that last updated this file. Its parent is `9eb622a`. (A file can't contain its own commit hash; run `git log -1` to see it.)
   - The **last app-code commit** is `02f304f`, "Restore through one transactional database function". Everything that runs in the app is identical to `02f304f`; the later Phase 0 commits only add `db/`, `tests/` and `tools/` files.
   - The working tree is clean.
   - All 17 app files were verified byte-identical on GitHub Pages at `b39584e` on 2026-10-04, and all 13 versioned assets returned 200.
-- **Tracked files:** 61.
+- **Tracked files:** 64.
   - 17 app files: 16 JS/CSS + `watchlist.html`.
   - 1 doc: `docs/HANDOFF.md` (this file).
-  - 22 files in `db/`: the migration scripts, rollbacks, stage switches, test-project-only scripts and SQL self-checks (`db/README.md` gives the run order).
+  - 23 files in `db/`: the migration scripts, rollbacks, stage switches, test-project-only scripts, SQL self-checks and a local-values template (`db/README.md` gives the run order).
+  - `.gitignore`: excludes the two local test-project value files.
   - 16 files in `tests/`: 13 test suites, the shared `tests/app-harness.js`, the TV-model reference `tests/tv-model-reference.js` and its shared cases `tests/fixtures/tv-model-cases.json`.
-  - 5 tools.
+  - 6 files in `tools/` (5 tools and one local-values template).
 - **Known-good tags** (annotated; these are rollback points):
   - `post-tmdb-migration-modularization` → `c5b592e` (after the TMDB identity migration + modular split, before any Claude Code changes)
   - `post-same-title-schema-fix` → `8ec56c0` (after the same-title schema fix, before identity hardening)
@@ -115,7 +116,9 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 | `a12c59d` | Add TV database functions, restore and isolation checks, rollbacks |
 | `b5e1470` | Add API-level and model-expectation rehearsal tools; document db run order |
 | `b39584e` | Add genuine-Auth two-user isolation test page for the test project |
-| *(this commit)* | Update handoff after Phase 0 of the TV-show migration |
+| `2bc3410` | Update handoff after Phase 0 of the TV-show migration |
+| `9eb622a` | Move test-project identifiers into untracked local config |
+| *(this commit)* | Note the test-project identifier cleanup in the handoff |
 
 The five commits `a13c1fb`…`e2c1c16` are catalog refreshes made with the `/refresh-catalogs` skill. `8e92095`…`789d4f5` are the derived-views feature. `6dfa0cd` added this handoff (docs only). `e003694` makes Up to date start expanded, and `1486404` adds its status label and next-season text; `bd4c068` and `af600e3` update this handoff (docs only). `e6d5822`…`b39584e` are Phase 0 of the TV-show migration (§18); only `02f304f` changes app files.
 
@@ -981,9 +984,9 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 ```text
 Repo:                     the local Git checkout of this repo (github.com/jaredsclove/Watchlist)
 Branch:                   main (in sync with origin/main), working tree clean
-HEAD:                     "Update handoff after Phase 0 of the TV-show migration" (docs-only; parent b39584e)
+HEAD:                     "Note the test-project identifier cleanup in the handoff" (docs-only; parent 9eb622a)
 Last app-code commit:     02f304f  "Restore through one transactional database function"
-Tracked files:            61 (17 app, 1 doc, 22 in db/, 16 in tests/, 5 tools)
+Tracked files:            64 (17 app, 1 doc, 23 in db/, 16 in tests/, 6 in tools/, .gitignore)
                           all 17 app files byte-identical on GitHub Pages (verified at b39584e); 13 versioned assets 200
 Offline tests:            234/234 passing (13 suites); 54 inline handlers, none undefined; 148 functions, no duplicates
 Cache token:              ?v=20261004-restore1 (12 JS files + styles.css); config.js unversioned
@@ -1036,7 +1039,8 @@ The approved design (planned over several review rounds): user-owned `tv_shows` 
 - **Production is still on the old single-user schema:** no `user_id`, no `tv_shows`, no `private` schema, no production Auth users.
 - **Local rehearsal** (PGlite, real backup): every phase, 82 SQL self-checks, all 196 migrated shows equal to the JavaScript reference, shadow → switch-over → rollback with no status lost, and a full rollback leaving the schema identical and the data equal to production's fingerprints.
 - **Test project rehearsal** (Supabase): the same scripts and checks; direct inserts through the real API with `user_id` protected; concurrent adds; v2 restore round trip; switch-over and rollback; and a **genuine-Auth two-user isolation test through the real API: 39/39** (reads, direct writes, `user_id` tampering, every browser-facing function, seeding, reopen, restore, cross-user id collisions, signed-out access). Sessions were not persisted and both users were signed out.
-- **Test project state:** locked: the copied production data belongs to test user A; owner-only authenticated access rules; no anonymous access to tables or functions.
+- **Test project state:** locked: the copied production data belongs to test user A; owner-only authenticated access rules; no anonymous access to tables or functions. Deleting the temporary project is planned once Phase 1 rehearsals no longer need it.
+- **Test-project identifiers (cleanup `9eb622a`):** the current repo no longer contains the temporary project's ref, its publishable key or the test-user ids. They're supplied locally through untracked files (`tools/auth-isolation-test.local.js`, `db/test/local_test_users.sql`; templates `*.example.*`, excluded by `.gitignore`); the page and scripts refuse to run without them, and the page refuses production values. Older public Git history (the Phase 0 commits up to `2bc3410`) still contains the former values: none is a credential, the project is locked, and **no history rewrite was done** by owner decision. They become inert when the project is deleted.
 - **Disclosures** (all reported to the owner at the time):
   - one POST to production's `rpc/restore_backup` endpoint, before the function existed, to check it wasn't installed; it returned 404 and nothing ran. Production capability checks now use the catalog only;
   - a browser batch the owner rejected had already applied Phase 1b to the test project (test project only); it was verified and kept, as the step was then approved;
@@ -1055,8 +1059,8 @@ The approved design (planned over several review rounds): user-owned `tv_shows` 
 1. Inspect the actual repo (your local Git checkout of `jaredsclove/Watchlist`).
 2. Run `git status`.
 3. Confirm the branch is `main` and in sync with `origin/main`.
-4. Confirm `HEAD` is the documentation commit "Update handoff after Phase 0 of the TV-show migration", whose parent is `b39584e`; the last app-code commit is `02f304f`, "Restore through one transactional database function". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
-5. Inspect the file tree and compare it with §3: 61 tracked files, and roughly the listed line counts.
+4. Confirm `HEAD` is the documentation commit "Note the test-project identifier cleanup in the handoff", whose parent is `9eb622a`; the last app-code commit is `02f304f`, "Restore through one transactional database function". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
+5. Inspect the file tree and compare it with §3: 64 tracked files, and roughly the listed line counts.
 6. Run the offline checks in §16: syntax, all 13 test suites (234 cases), and the handler sweep (54 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 420 A / 2 B / 0 C / 0 D).
 7. **Do not modify anything:**
    - no code
