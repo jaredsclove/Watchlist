@@ -108,6 +108,15 @@ async function createApp({ rows = [], othertvShows = [], tmdb, width = 1200, cou
   };
   // failNext(pred) makes the next matching request return HTTP 500.
   app.failNext = pred => failures.push(pred);
+  // Database functions called as POST rpc/<name>. restore_backup replaces every
+  // table with the backup's rows in one step, as the real function does.
+  app.rpcHandlers = {
+    restore_backup: body => {
+      const tables = body.p_backup.tables;
+      for (const t of Object.keys(tables)) store[t] = clone(tables[t]);
+      return response(200, { restored: Object.fromEntries(Object.keys(tables).map(t => [t, tables[t].length])) });
+    }
+  };
 
   async function fetchStub(url, opts = {}) {
     const method = (opts.method || 'GET').toUpperCase();
@@ -132,6 +141,11 @@ async function createApp({ rows = [], othertvShows = [], tmdb, width = 1200, cou
     const u = new URL(url);
     const table = u.pathname.split('/').pop();
     const params = [...u.searchParams.entries()];
+    if (u.pathname.includes('/rpc/')) {
+      const handler = app.rpcHandlers[table];
+      if (!handler) throw new Error(`harness: unknown rpc ${table}`);
+      return handler(body);
+    }
     const rowsOf = store[table];
     if (!rowsOf) throw new Error(`harness: unknown table ${table}`);
 

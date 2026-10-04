@@ -71,38 +71,6 @@ async function fetchAllRows(table, filter) {
   return allRows;
 }
 
-async function deleteAllRows(table) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=not.is.null`, {
-    method: 'DELETE',
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Prefer': 'return=minimal'
-    }
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Failed to clear ${table}: ${res.status} ${err}`);
-  }
-}
-
-// Inserts rows in fixed-size batches, preserving any fields present on each row
-// (including the original id, since all three tables use uuid PKs with no
-// auto-increment sequence to conflict with). Stops and throws immediately on
-// the first failed batch, naming the table and batch index.
-async function batchInsertRows(table, rows) {
-  for (let i = 0; i < rows.length; i += RESTORE_BATCH_SIZE) {
-    const batch = rows.slice(i, i + RESTORE_BATCH_SIZE);
-    const batchNum = Math.floor(i / RESTORE_BATCH_SIZE) + 1;
-    const totalBatches = Math.ceil(rows.length / RESTORE_BATCH_SIZE);
-    try {
-      await sbFetch('POST', table, batch);
-    } catch(e) {
-      throw new Error(`${table}: batch ${batchNum} of ${totalBatches} failed (rows ${i+1}-${i+batch.length}): ${e.message}`);
-    }
-  }
-}
-
 async function tmdbFetch(path) {
   const res = await fetch(`${TMDB_BASE}${path}`, {
     headers: {

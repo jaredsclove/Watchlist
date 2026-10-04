@@ -15,8 +15,6 @@ function compareRowFields(expected, restored) {
   return diffFields;
 }
 
-const RESTORE_BATCH_SIZE = 200;
-
 // Fetches all rows from all three app tables and assembles the backup JSON object.
 // Does not write anything — pure read + build.
 async function buildBackupObject() {
@@ -399,28 +397,18 @@ async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
     showRestoreModal(`<div class="modal-title">Restoring…</div><div class="modal-progress">${esc(msg)}</div>`);
   };
 
-  // ── Step 2: delete existing rows, then insert backup rows, table by table ──
-  const completedTables = [];
+  // ── Step 2: replace every table in one database transaction ──
+  // restore_backup (db/phase0_restore_v1.sql) deletes and re-inserts all tables
+  // atomically: if anything fails, the database rolls back to exactly what it was.
+  setProgress(`Restoring ${BACKUP_TABLES.length} tables…`);
   try {
-    for (const table of BACKUP_TABLES) {
-      setProgress(`Clearing ${table}…`);
-      await deleteAllRows(table);
-      const rowsToInsert = backup.tables[table];
-      if (rowsToInsert.length > 0) {
-        setProgress(`Restoring ${table} (${rowsToInsert.length} rows)…`);
-        await batchInsertRows(table, rowsToInsert);
-      }
-      completedTables.push(table);
-    }
+    await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup });
   } catch(e) {
-    showRestoreModal(`<div class="modal-title">Restore failed partway through</div>
-      <div class="modal-error">Completed: ${completedTables.length ? completedTables.join(', ') : 'none'}
-Failed: ${esc(e.message)}
+    showRestoreModal(`<div class="modal-title">Restore failed — nothing was changed</div>
+      <div class="modal-error">${esc(e.message)}
 
-Your data is now in a MIXED state — do not treat this as complete. A safety backup of your data from before this restore was downloaded as:
-${esc(preRestoreFilename)}
-
-You can restore that file to return to your pre-restore state.</div>
+The restore runs as a single database transaction, so your data is exactly as it was before. The safety backup is still in your downloads as:
+${esc(preRestoreFilename)}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
     return;
   }
