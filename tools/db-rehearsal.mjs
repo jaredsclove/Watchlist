@@ -49,7 +49,7 @@ async function rpc(role, sub, fn, argsObj) {
 
 const steps = [];
 const step = (name, fn) => steps.push({ name, fn });
-export const ctx = { db, exec, query, asRole, rpc, backup, sqlFile, step };
+export const ctx = { db, exec, query, asRole, rpc, backup, backupPath, sqlFile, step };
 
 step('shim', () => exec('supabase shim', sqlFile('db/test/supabase_shim.sql')));
 step('replica', () => exec('production replica schema', sqlFile('db/test/replica_schema.sql')));

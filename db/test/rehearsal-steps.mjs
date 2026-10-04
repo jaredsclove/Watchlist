@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
+import { execFileSync } from 'child_process';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -13,8 +14,8 @@ export default function register(ctx) {
   const { step, exec, db } = ctx;
 
   // Runs a self-check script (prelude + checks) and fails the step on any failed check.
-  async function checks(file) {
-    const out = await db.exec(read('db/test/_prelude.sql') + '\n' + read(file));
+  async function checks(file, text) {
+    const out = await db.exec(read('db/test/_prelude.sql') + '\n' + (text ?? read(file)));
     const last = out.at(-1).rows[0];
     const results = JSON.parse(last.results || '[]');
     for (const r of results) console.log(`  ${r.ok ? 'ok  ' : 'FAIL'} ${r.check}${r.ok ? '' : `\n       ${r.detail}`}`);
@@ -41,6 +42,9 @@ export default function register(ctx) {
   });
   step('t_1c', () => checks('db/test/t_1c_tv_schema.sql'));
   step('model-vs-reference', () => modelVsReference(ctx));
+  // The generated script used on the Supabase test project, checked here too.
+  step('expectations-sql', () => checks('tools/tv-model-expectations.mjs (generated)',
+    execFileSync(process.execPath, [path.join(ROOT, 'tools/tv-model-expectations.mjs'), ctx.backupPath], { encoding: 'utf8', maxBuffer: 1 << 26 })));
   step('rpc', () => exec('browser-facing TV functions', read('db/rpc.sql')));
   step('t_rpc', () => checks('db/test/t_rpc.sql'));
   step('t_restore', () => checks('db/test/t_restore.sql'));
