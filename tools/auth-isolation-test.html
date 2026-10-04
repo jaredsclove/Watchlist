@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auth Isolation Test</title>
+<!--
+  Two-user isolation test with GENUINE Supabase Auth sessions against the
+  TEMPORARY test project watchlist-phase0-test only. The person running it types
+  both test-user passwords here; nothing is pre-filled or stored.
+  * Hard-locked to one project ref; every request outside it is refused.
+  * Session persistence, auto-refresh and URL session detection are disabled;
+    tokens live only in this page's memory and are never displayed or logged.
+  * Results show user ids, test names, pass/fail and sanitized error text only.
+  Precondition: the test project is locked (db/test/lock_test_project.sql).
+-->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --ok: #1a7f37; --bad: #c62828; --line: #e5e5ea; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161618; --fg: #f2f2f7; --muted: #a1a1a6; --ok: #4cc26b; --bad: #ff6b6b; --line: #2c2c2e; } }
+  :root[data-theme="dark"] { --bg: #161618; --fg: #f2f2f7; --muted: #a1a1a6; --ok: #4cc26b; --bad: #ff6b6b; --line: #2c2c2e; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.45 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; }
+  main { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; } p { color: var(--muted); margin: 0 0 12px; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 10px; padding: 10px; }
+  label { display: block; margin: 4px 0; } input { width: 100%; max-width: 360px; padding: 6px; box-sizing: border-box; }
+  button { padding: 8px 14px; font-size: 14px; }
+  #log { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .row { padding: 3px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .info { color: var(--muted); }
+  #summary { font-weight: 600; margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Auth isolation test — watchlist-phase0-test</h1>
+<p>Test project only. Enter the two test users' credentials; nothing is saved. Tokens stay in memory and are never shown.</p>
+<form id="f" autocomplete="off">
+  <fieldset><legend>User A (owns the copied list)</legend>
+    <label>Email <input id="ae" type="email" autocomplete="off" required></label>
+    <label>Password <input id="ap" type="password" autocomplete="new-password" required></label>
+  </fieldset>
+  <fieldset><legend>User B</legend>
+    <label>Email <input id="be" type="email" autocomplete="off" required></label>
+    <label>Password <input id="bp" type="password" autocomplete="new-password" required></label>
+  </fieldset>
+  <button id="run" type="submit">Sign in both and run</button>
+</form>
+<div id="summary"></div>
+<div id="log"></div>
+</main>
+<script>
+(() => {
+  'use strict';
+  // ── Hard lock to the approved test project ─────────────────────────────────
+  const TEST_REF = 'hmkbdfexdmhykweyucgr';
+  const TEST_URL = 'https://' + TEST_REF + '.supabase.co';
+  const TEST_PUBLISHABLE_KEY = 'sb_publishable_699gToX_tqHU2mx3Refyyg_ZjzuWSKz'; // public by design
+  const EXPECTED_A = '63cfd441-87f9-4882-976d-0d0fabe7eda4';
+  const EXPECTED_B = 'cdb783e6-a0b6-4412-8284-56add7ae3126';
+  const TABLES = ['watchlist_items', 'tv_shows', 'othertv_shows', 'custom_collections'];
+
+  const logEl = document.getElementById('log');
+  const sumEl = document.getElementById('summary');
+  let passed = 0, failed = 0;
+  // Error text is shortened and scrubbed of anything token-shaped before display.
+  const scrub = s => String(s || '').replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[token]').replace(/Bearer\s+\S+/gi, 'Bearer [token]').slice(0, 300);
+  const line = (cls, text) => { const d = document.createElement('div'); d.className = 'row ' + cls; d.textContent = text; logEl.appendChild(d); };
+  async function test(name, fn) {
+    try { await fn(); passed++; line('ok', 'PASS  ' + name); }
+    catch (e) { failed++; line('bad', 'FAIL  ' + name + ' — ' + scrub(e && e.message)); }
+    sumEl.textContent = passed + ' passed, ' + failed + ' failed';
+  }
+  const assert = (c, m) => { if (!c) throw new Error(m); };
+
+  // Every request must go to the test project; anything else is refused.
+  const guardedFetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (!url.startsWith(TEST_URL + '/')) return Promise.reject(new Error('refused request outside the test project'));
+    return fetch(input, init);
+  };
+  if (new URL(TEST_URL).hostname !== TEST_REF + '.supabase.co') throw new Error('test project lock failed');
+
+  const storageSnapshot = async () => ({
+    local: Object.keys(localStorage).sort(), session: Object.keys(sessionStorage).sort(),
+    idb: (indexedDB.databases ? (await indexedDB.databases()).map(d => d.name).sort() : ['(databases() unsupported)']),
+    cookies: document.cookie ? document.cookie.split(';').map(c => c.split('=')[0].trim()).sort() : []
+  });
+  const looksLikeAuth = k => /sb-|supabase|auth|token|session/i.test(k);
+
+  function makeClient() {
+    return supabase.createClient(TEST_URL, TEST_PUBLISHABLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'isolation-test-unused' },
+      global: { fetch: guardedFetch }
+    });
+  }
+
+  // ── Small helpers over a client ────────────────────────────────────────────
+  async function readAll(c, table) {
+    const out = [];
+    for (let from = 0; ; from += 500) {
+      const { data, error } = await c.from(table).select('*').order('id').range(from, from + 499);
+      if (error) throw new Error(table + ': ' + error.code + ' ' + error.message);
+      out.push(...data);
+      if (data.length < 500) break;
+    }
+    return out;
+  }
+  async function digest(rows) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(rows)));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+  }
+  async function fingerprint(c) {
+    const parts = [];
+    for (const t of TABLES) parts.push(t + ':' + await digest(await readAll(c, t)));
+    return parts.join('|');
+  }
+  async function rpc(c, fn, args) {
+    const { data, error } = await c.rpc(fn, args);
+    if (error) { const e = new Error(error.code + ' ' + error.message); e.code = error.code; e.msg = error.message; throw e; }
+    return data;
+  }
+  async function expectRpcRefused(c, fn, args, codes, msgPrefix) {
+    const { error } = await c.rpc(fn, args);
+    assert(error, fn + ' succeeded but must fail');
+    assert(codes.includes(error.code) && (!msgPrefix || String(error.message).startsWith(msgPrefix)),
+      fn + ' failed with an unexpected error: ' + error.code + ' ' + error.message);
+  }
+  const seasonPayload = (key, title, n, date) => ({ item_key: key + '|' + (n === 0 ? 'specials' : 'season ' + n), title,
+    season: n === 0 ? 'Specials' : 'Season ' + n, theme: 'ZZ Net', display_date: 'Jan 1, 2020', date_sort: date || '2020-01-01', season_number: n });
+
+  async function run(creds) {
+    const before = await storageSnapshot();
+    const A = makeClient(), B = makeClient(), anon = makeClient();
+    const ids = { A: null, B: null };
+    try {
+      // ── Genuine sessions ──────────────────────────────────────────────────
+      await test('User A signs in through Supabase Auth (password grant)', async () => {
+        const { data, error } = await A.auth.signInWithPassword({ email: creds.ae, password: creds.ap });
+        if (error) throw new Error('sign-in failed: ' + error.message);
+        ids.A = data.user.id;
+        assert(ids.A === EXPECTED_A, 'signed in as an unexpected user');
+        const iss = JSON.parse(atob(data.session.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).iss;
+        assert(String(iss).startsWith(TEST_URL + '/auth/v1'), 'token issued by another project');
+        line('info', '      User A id: ' + ids.A);
+      });
+      await test('User B signs in through Supabase Auth (password grant)', async () => {
+        const { data, error } = await B.auth.signInWithPassword({ email: creds.be, password: creds.bp });
+        if (error) throw new Error('sign-in failed: ' + error.message);
+        ids.B = data.user.id;
+        assert(ids.B === EXPECTED_B, 'signed in as an unexpected user');
+        line('info', '      User B id: ' + ids.B);
+      });
+      creds.ap = creds.bp = ''; // drop the passwords from memory as soon as both sessions exist
+      if (!ids.A || !ids.B) return;
+
+      // ── A's starting state (restored at the end) ──────────────────────────
+      const aStart = {}; for (const t of TABLES) aStart[t] = await readAll(A, t);
+      const aFpStart = await fingerprint(A);
+      const bb = aStart.tv_shows.find(s => s.title === 'Breaking Bad');
+      const aMovie = aStart.watchlist_items.find(r => r.media_type === 'movie');
+      const aPerson = aStart.custom_collections[0];
+      line('info', '      A starts with ' + TABLES.map(t => aStart[t].length + ' ' + t).join(', '));
+
+      // ── B builds a list through the API, overlapping A's identities ────────
+      const b = {};
+      await test('B seeds Disney+ defaults through seed_tv_defaults (incl. a key A also has)', async () => {
+        const r = await rpc(B, 'seed_tv_defaults', { p_collection: 'disney', p_defaults: [
+          { k: 'the mandalorian|season 1', t: 'The Mandalorian', s: 'Season 1', th: 'Star Wars', d: 'Nov 12, 2019', ds: '2019-11-12' },
+          { k: 'zz b seed|season 1', t: 'ZZ B Seed', s: 'Season 1', th: 'X', d: 'TBA', ds: '2027-01-01', p: true },
+          { k: 'zz b seed film|film', t: 'ZZ B Seed Film', s: 'Film', th: 'X', d: 'Jan 1, 2027', ds: '2027-01-01' }] });
+        assert(r.inserted.length === 3, 'B seeding inserted ' + r.inserted.length);
+      });
+      await test('B adds the same TMDB show as A (Breaking Bad S1–S2) and marks it Complete', async () => {
+        assert(bb, 'A has no Breaking Bad');
+        const r = await rpc(B, 'add_tv_seasons', { p_collection: 'othertv', p_show: { tmdb_id: bb.tmdb_id, title: 'Breaking Bad', show_key: 'breaking bad' },
+          p_seasons: [seasonPayload('breaking bad', 'Breaking Bad', 1), seasonPayload('breaking bad', 'Breaking Bad', 2)] });
+        assert(r.show_created && r.inserted.length === 2, 'unexpected add result');
+        b.bbShow = r.show_id; b.bbSeason = r.inserted[0].id;
+        await rpc(B, 'set_show_status', { p_show_id: b.bbShow, p_status: 'complete' });
+      });
+      await test('B adds an unidentified manual season (for the Match test)', async () => {
+        const r = await rpc(B, 'add_tv_seasons', { p_collection: 'othertv', p_show: { title: 'ZZ B Manual', show_key: 'zz b manual' },
+          p_seasons: [{ item_key: 'zz b manual|season 1', title: 'ZZ B Manual', season: 'Season 1', date_sort: '2020-01-01' }] });
+        b.manualRow = r.inserted[0].id; b.manualShow = r.show_id;
+      });
+      await test('B inserts directly: the same movie as A, A\'s person-collection name, a tracked show', async () => {
+        let r = await B.from('watchlist_items').insert({ collection: 'movies', item_key: aMovie.item_key, title: aMovie.title, season: 'Film',
+          media_type: 'movie', tmdb_id: aMovie.tmdb_id, date_sort: aMovie.date_sort }).select();
+        if (r.error) throw new Error(r.error.code + ' ' + r.error.message); b.movie = r.data[0].id;
+        r = await B.from('custom_collections').insert({ name: aPerson.name, tmdb_person_id: aPerson.tmdb_person_id, role: aPerson.role }).select();
+        if (r.error) throw new Error(r.error.code + ' ' + r.error.message); b.person = r.data[0].id;
+        r = await B.from('othertv_shows').insert({ tmdb_id: 999400001, title: 'ZZ B Tracked', network: 'ZZ', collection: 'othertv' }).select();
+        if (r.error) throw new Error(r.error.code + ' ' + r.error.message); b.tracked = r.data[0].id;
+        assert([b.movie, b.person, b.tracked].every(Boolean), 'missing ids');
+      });
+      const bRows = {}; for (const t of TABLES) bRows[t] = await readAll(B, t);
+      const bFp = await fingerprint(B);
+      const bIds = new Set(TABLES.flatMap(t => bRows[t].map(r => r.id)));
+      const aIds = new Set(TABLES.flatMap(t => aStart[t].map(r => r.id)));
+      const bUnchanged = async what => assert(await fingerprint(B) === bFp, 'B changed after ' + what);
+
+      // ── Reads ───────────────────────────────────────────────────────────────
+      for (const t of TABLES) {
+        await test('read ' + t + ': A sees only A\'s rows; none of B\'s', async () => {
+          const rows = await readAll(A, t);
+          assert(rows.length > 0, 'A sees no rows');
+          assert(rows.every(r => r.user_id === ids.A), 'A sees a row owned by someone else');
+          assert(!rows.some(r => bIds.has(r.id)), 'A sees a B row');
+        });
+        await test('read ' + t + ': B sees only B\'s rows; none of A\'s', async () => {
+          const rows = await readAll(B, t);
+          assert(rows.length > 0, 'B sees no rows');
+          assert(rows.every(r => r.user_id === ids.B), 'B sees a row owned by someone else');
+          assert(!rows.some(r => aIds.has(r.id)), 'B sees an A row');
+        });
+      }
+      await test('read by id: A asking for each of B\'s ids gets nothing (all four tables)', async () => {
+        for (const [t, id] of [['watchlist_items', b.movie], ['tv_shows', b.bbShow], ['othertv_shows', b.tracked], ['custom_collections', b.person]]) {
+          const { data, error } = await A.from(t).select('*').eq('id', id);
+          assert(!error && data.length === 0, t + ' returned B row');
+        }
+      });
+
+      // ── Direct writes ─────────────────────────────────────────────────────
+      await test('direct writes: A cannot update or delete any of B\'s rows (all four tables)', async () => {
+        const tries = [
+          A.from('watchlist_items').update({ watched: true, status: 'watching' }).eq('id', b.movie).select(),
+          A.from('tv_shows').update({ status: 'watching' }).eq('id', b.bbShow).select(),
+          A.from('othertv_shows').update({ title: 'hacked' }).eq('id', b.tracked).select(),
+          A.from('custom_collections').update({ role: 'hacked' }).eq('id', b.person).select(),
+          A.from('watchlist_items').delete().eq('id', b.movie).select(),
+          A.from('tv_shows').delete().eq('id', b.bbShow).select(),
+          A.from('othertv_shows').delete().eq('id', b.tracked).select(),
+          A.from('custom_collections').delete().eq('id', b.person).select()];
+        for (const p of tries) { const { data, error } = await p; assert(error || data.length === 0, 'a write to a B row went through'); }
+        await bUnchanged('A direct writes');
+      });
+      await test('user_id tampering: A cannot insert a row for B, set user_id even to itself, or change user_id', async () => {
+        for (const [t, row] of [['watchlist_items', { collection: 'movies', item_key: 'zz tamper|film', title: 'ZZ', user_id: ids.B }],
+                                ['watchlist_items', { collection: 'movies', item_key: 'zz tamper|film', title: 'ZZ', user_id: ids.A }],
+                                ['tv_shows', { collection: 'othertv', title: 'ZZ', show_key: 'zz', user_id: ids.B }],
+                                ['othertv_shows', { tmdb_id: 1, title: 'ZZ', user_id: ids.B }],
+                                ['custom_collections', { name: 'ZZ', tmdb_person_id: 1, user_id: ids.B }]]) {
+          const { error } = await A.from(t).insert(row);
+          assert(error && error.code === '42501', t + ' insert with user_id: ' + (error ? error.code : 'accepted'));
+        }
+        const { error } = await A.from('watchlist_items').update({ user_id: ids.B }).eq('id', aMovie.id);
+        assert(error && error.code === '42501', 'user_id change: ' + (error ? error.code : 'accepted'));
+        await bUnchanged('tampering attempts');
+      });
+
+      // ── Browser-facing functions: A's ids work, B's ids are not_found ──────
+      let aTemp = {};
+      await test('add_tv_seasons: A adds its own new show (2 seasons) normally', async () => {
+        const r = await rpc(A, 'add_tv_seasons', { p_collection: 'othertv', p_show: { tmdb_id: 999400010, title: 'ZZ A Temp', show_key: 'zz a temp' },
+          p_seasons: [seasonPayload('zz a temp', 'ZZ A Temp', 1), seasonPayload('zz a temp', 'ZZ A Temp', 2)] });
+        assert(r.show_created && r.inserted.length === 2, 'unexpected result');
+        aTemp = { show: r.show_id, s1: r.inserted[0].id, s2: r.inserted[1].id };
+        assert(r.inserted.every(x => x.user_id === ids.A), 'rows not owned by A');
+      });
+      await test('set_show_status: A\'s show changes; B\'s show is not_found and unchanged', async () => {
+        const s = await rpc(A, 'set_show_status', { p_show_id: aTemp.show, p_status: 'watching' });
+        assert(s.status === 'watching', 'A status not set');
+        await expectRpcRefused(A, 'set_show_status', { p_show_id: b.bbShow, p_status: 'watching' }, ['P0002'], 'not_found');
+        await bUnchanged('set_show_status');
+      });
+      await test('set_season_watched: A\'s season changes; B\'s season is not_found', async () => {
+        const r = await rpc(A, 'set_season_watched', { p_row_id: aTemp.s1, p_watched: true });
+        assert(r.watched === true, 'A not watched');
+        await expectRpcRefused(A, 'set_season_watched', { p_row_id: b.bbSeason, p_watched: true }, ['P0002'], 'not_found');
+        await bUnchanged('set_season_watched');
+      });
+      await test('set_season_skipped: A\'s season changes; B\'s season is not_found', async () => {
+        const r = await rpc(A, 'set_season_skipped', { p_row_id: aTemp.s2, p_skipped: true });
+        assert(r.skipped === true, 'A not skipped');
+        await expectRpcRefused(A, 'set_season_skipped', { p_row_id: b.bbSeason, p_skipped: true }, ['P0002'], 'not_found');
+        await bUnchanged('set_season_skipped');
+      });
+      await test('delete_tv_season: A\'s last seasons delete the A show; B\'s season is not_found', async () => {
+        await rpc(A, 'delete_tv_season', { p_row_id: aTemp.s1 });
+        const r = await rpc(A, 'delete_tv_season', { p_row_id: aTemp.s2 });
+        assert(r.show_deleted === true, 'A show not deleted with its last season');
+        await expectRpcRefused(A, 'delete_tv_season', { p_row_id: b.bbSeason }, ['P0002'], 'not_found');
+        await bUnchanged('delete_tv_season');
+      });
+      await test('match_tv_row: A matches its own manual row; B\'s manual row is not_found', async () => {
+        const add = await rpc(A, 'add_tv_seasons', { p_collection: 'othertv', p_show: { title: 'ZZ A Manual', show_key: 'zz a manual' },
+          p_seasons: [{ item_key: 'zz a manual|season 1', title: 'ZZ A Manual', season: 'Season 1', date_sort: '2020-01-01' }] });
+        const patch = t => ({ title: t, season: 'Season 1', item_key: t.toLowerCase() + '|season 1', theme: 'ZZ Net', display_date: 'Jan 1, 2020',
+          date_sort: '2020-01-01', media_type: 'tv', tmdb_id: 999400020, season_number: 1 });
+        const m = await rpc(A, 'match_tv_row', { p_row_id: add.inserted[0].id, p_target: { tmdb_id: 999400020 }, p_patch: patch('ZZ A Matched') });
+        assert(m.blocked === false && m.row.tmdb_id === 999400020, 'A match failed');
+        await expectRpcRefused(A, 'match_tv_row', { p_row_id: b.manualRow, p_target: { tmdb_id: 999400021 }, p_patch: { ...patch('ZZ B Manual'), tmdb_id: 999400021 } },
+          ['P0002'], 'not_found');
+        await bUnchanged('match_tv_row');
+      });
+      await test('add_tv_seasons + reopen: A\'s Complete Breaking Bad reopens; B\'s Complete copy stays Complete', async () => {
+        await rpc(A, 'set_show_status', { p_show_id: bb.id, p_status: 'complete' });
+        const r = await rpc(A, 'add_tv_seasons', { p_collection: 'othertv', p_show: { tmdb_id: bb.tmdb_id, title: 'Breaking Bad', show_key: 'breaking bad' },
+          p_seasons: [seasonPayload('breaking bad', 'Breaking Bad', 6, '2030-01-01')] });
+        assert(r.reopened === true && r.show_status === 'confirmed' && r.show_id === bb.id, 'A not reopened on its own show');
+        const { data } = await B.from('tv_shows').select('status').eq('id', b.bbShow);
+        assert(data[0].status === 'complete', 'B copy changed');
+        await bUnchanged('A add/reopen');
+      });
+      await test('add_tv_seasons: A adding a show only B has creates A\'s own show; B untouched', async () => {
+        const r = await rpc(A, 'add_tv_seasons', { p_collection: 'othertv', p_show: { title: 'ZZ B Manual', show_key: 'zz b manual' },
+          p_seasons: [{ item_key: 'zz b manual|season 1', title: 'ZZ B Manual', season: 'Season 1', date_sort: '2020-01-01' }] });
+        assert(r.show_created === true && r.show_id !== b.manualShow && r.inserted.length === 1, 'did not get its own show');
+        await bUnchanged('A add of B-only show');
+      });
+      await test('seed_tv_defaults: A\'s seeding inserts only for A (the same keys B seeded); B untouched', async () => {
+        const r = await rpc(A, 'seed_tv_defaults', { p_collection: 'disney', p_defaults: [
+          { k: 'the mandalorian|season 1', t: 'The Mandalorian', s: 'Season 1', th: 'Star Wars', d: 'Nov 12, 2019', ds: '2019-11-12' },
+          { k: 'zz b seed|season 1', t: 'ZZ B Seed', s: 'Season 1', th: 'X', d: 'TBA', ds: '2027-01-01', p: true }] });
+        assert(r.inserted.length === 1 && r.inserted[0].user_id === ids.A && r.inserted[0].item_key === 'zz b seed|season 1', 'unexpected seeding result');
+        await bUnchanged('A seeding');
+      });
+
+      // ── Restore ─────────────────────────────────────────────────────────────
+      const backupOf = rowsByTable => ({ format: 'watchlist-tracker-backup', formatVersion: 2, exportedAt: new Date().toISOString(),
+        rowCounts: Object.fromEntries(TABLES.map(t => [t, rowsByTable[t].length])),
+        tables: Object.fromEntries(TABLES.map(t => [t, rowsByTable[t].map(({ user_id, ...rest }) => rest)])) });
+      for (const [t, bId] of [['watchlist_items', b.movie], ['tv_shows', b.bbShow], ['othertv_shows', b.tracked], ['custom_collections', b.person]]) {
+        await test('restore collision: an A backup reusing B\'s ' + t + ' id is refused atomically; A and B unchanged', async () => {
+          const aNow = await fingerprint(A);
+          const bk = backupOf(aStart);
+          const oldId = bk.tables[t][0].id;
+          bk.tables[t][0] = { ...bk.tables[t][0], id: bId };
+          if (t === 'tv_shows') bk.tables.watchlist_items = bk.tables.watchlist_items.map(r => r.show_id === oldId ? { ...r, show_id: bId } : r);
+          await expectRpcRefused(A, 'restore_backup', { p_backup: bk }, ['23505'], 'restore_id_collision');
+          assert(await fingerprint(A) === aNow, 'A changed');
+          await bUnchanged('collision restore');
+        });
+      }
+      await test('restore: A restores its starting backup through the API; A is back exactly; B byte-for-byte unchanged', async () => {
+        const r = await rpc(A, 'restore_backup', { p_backup: backupOf(aStart) });
+        assert(r.restored.watchlist_items === aStart.watchlist_items.length, 'restore count');
+        assert(await fingerprint(A) === aFpStart, 'A differs from its starting state');
+        await bUnchanged('A restore');
+      });
+
+      // ── Signed out: the publishable key alone ──────────────────────────────
+      for (const t of TABLES) {
+        await test('signed out: ' + t + ' cannot be read, inserted, updated or deleted', async () => {
+          const s = await anon.from(t).select('*').limit(5);
+          assert(s.error || (s.data && s.data.length === 0), 'anonymous read returned rows');
+          assert(s.error && s.error.code === '42501', 'anonymous read not refused: ' + (s.error ? s.error.code : 'no error'));
+          const i = await anon.from(t).insert({}); assert(i.error, 'anonymous insert accepted');
+          const u = await anon.from(t).update({ created_at: new Date().toISOString() }).eq('id', '00000000-0000-4000-8000-000000000000'); assert(u.error, 'anonymous update accepted');
+          const d = await anon.from(t).delete().eq('id', '00000000-0000-4000-8000-000000000000'); assert(d.error, 'anonymous delete accepted');
+        });
+      }
+      await test('signed out: every browser-facing function is refused', async () => {
+        const calls = [['set_show_status', { p_show_id: bb.id, p_status: 'watching' }], ['set_season_watched', { p_row_id: aMovie.id, p_watched: true }],
+          ['set_season_skipped', { p_row_id: aMovie.id, p_skipped: true }], ['delete_tv_season', { p_row_id: aMovie.id }],
+          ['add_tv_seasons', { p_collection: 'othertv', p_show: {}, p_seasons: [] }], ['seed_tv_defaults', { p_collection: 'disney', p_defaults: [] }],
+          ['match_tv_row', { p_row_id: aMovie.id, p_target: {}, p_patch: {} }], ['restore_backup', { p_backup: {} }]];
+        const codes = [];
+        for (const [fn, args] of calls) {
+          const { error } = await anon.rpc(fn, args);
+          assert(error, fn + ' succeeded for an anonymous caller');
+          // 42501: permission denied; PGRST202: not visible to the anonymous role at all.
+          assert(['42501', 'PGRST202'].includes(error.code), fn + ' failed with an unexpected error: ' + error.code);
+          codes.push(fn + ' ' + error.code);
+        }
+        line('info', '      refusals: ' + codes.join(', '));
+        assert(await fingerprint(A) === aFpStart, 'A changed');
+        await bUnchanged('anonymous calls');
+      });
+
+      // ── Clean up B's test data through B's own session ───────────────────
+      await test('cleanup: B removes its test rows through its own session; A unchanged', async () => {
+        for (const r of (await readAll(B, 'watchlist_items')).filter(r => r.show_id)) await rpc(B, 'delete_tv_season', { p_row_id: r.id });
+        for (const t of ['watchlist_items', 'othertv_shows', 'custom_collections']) {
+          for (const r of await readAll(B, t)) { const { error } = await B.from(t).delete().eq('id', r.id); if (error) throw new Error(t + ' ' + error.code); }
+        }
+        for (const t of TABLES) assert((await readAll(B, t)).length === 0, 'B still has ' + t);
+        assert(await fingerprint(A) === aFpStart, 'A changed');
+      });
+    } finally {
+      // ── Sign out, drop sessions, check nothing persisted ──────────────────
+      await test('both sessions signed out', async () => {
+        const ra = await A.auth.signOut(); const rb = await B.auth.signOut();
+        if (ra.error) throw new Error('A sign-out: ' + ra.error.message);
+        if (rb.error) throw new Error('B sign-out: ' + rb.error.message);
+        const sa = (await A.auth.getSession()).data.session, sb = (await B.auth.getSession()).data.session;
+        assert(!sa && !sb, 'a session is still held');
+      });
+      await test('nothing persisted: no new localStorage, sessionStorage, IndexedDB or cookie entries', async () => {
+        const after = await storageSnapshot();
+        for (const k of ['local', 'session', 'idb', 'cookies']) {
+          const added = after[k].filter(x => !before[k].includes(x));
+          assert(added.length === 0, k + ' gained: ' + added.join(','));
+          assert(!after[k].some(looksLikeAuth), k + ' holds an auth-looking key');
+        }
+        line('info', '      storage after run: localStorage ' + after.local.length + ', sessionStorage ' + after.session.length +
+          ', IndexedDB ' + after.idb.length + ', cookies ' + after.cookies.length + ' (none created by this page)');
+      });
+    }
+  }
+
+  document.getElementById('f').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const get = id => document.getElementById(id);
+    const creds = { ae: get('ae').value.trim(), ap: get('ap').value, be: get('be').value.trim(), bp: get('bp').value };
+    get('ap').value = ''; get('bp').value = ''; // clear the password fields immediately
+    get('run').disabled = true;
+    logEl.textContent = ''; passed = failed = 0;
+    line('info', 'Running against ' + TEST_URL + ' (test project lock verified)');
+    try { await run(creds); } catch (e) { failed++; line('bad', 'ABORTED — ' + scrub(e && e.message)); }
+    creds.ae = creds.be = creds.ap = creds.bp = '';
+    sumEl.textContent = 'DONE: ' + passed + ' passed, ' + failed + ' failed';
+    get('run').disabled = false;
+  });
+})();
+</script>
+</body>
+</html>
