@@ -655,7 +655,15 @@ There are no foreign keys and no triggers. Since 2026-10-04 there is **one datab
 
 11. Ask before outward-facing actions such as pushing tags, unless already approved for the task.
 
+12. **Never use the Claude preview pane (the in-app / built-in browser) for anything** — not for viewing the app, smoke checks, test pages or local files, and never start a dev server through the preview tooling.
+
+13. **Always use a real tab in the owner's Chrome** (Claude in Chrome) for every browser task, including the Supabase dashboard / SQL Editor, the deployed site and test pages.
+
+14. **Pause and tell the owner whenever a test-account login or a password is needed.** Never type passwords or credentials yourself; say exactly what to enter and where, then wait until the owner confirms it's done.
+
 ### 11a. Tooling notes from the prior environment
+
+> **Superseded where they conflict with rules 12–14:** the notes below mention the in-app browser and local preview from earlier sessions. Do the same work in a real Chrome tab instead.
 
 **These are environment-specific. Use them only if the same desktop/browser tooling is available. If it isn't, adapt the workflow safely and report the limitation rather than assuming these exact mechanics are required.**
 
