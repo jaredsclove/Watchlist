@@ -6,7 +6,7 @@
 >
 > **This repo is public.** Keep this file free of personal details, machine-specific paths, backup locations and infrastructure identifiers that the app doesn't already publish.
 >
-> **Last updated 2026-10-04**, after **Phase 0 of the first-class TV-show migration** (§18): the transactional restore is installed and deployed, and the migration's scripts, tests and rehearsal tools are in the repo. Production still runs the old single-user schema. Earlier: written 2026-09-26 at `4b2d7c9`, moved into the repo 2026-10-02, derived views deployed at `789d4f5` (2026-09-30). Facts marked "last verified 2026-09-26" were not re-checked since.
+> **Last updated 2026-10-04**, after **Phase 1 (1a, 1b, 1c) of the first-class TV-show migration** (§18): backups are format 1 or 2 without `user_id` (deployed); production rows have a bootstrap owner; `tv_shows` exists and is backfilled. **The app still runs the old model, which stays authoritative**; Phase 2 needs separate approval. Earlier: written 2026-09-26 at `4b2d7c9`, moved into the repo 2026-10-02, derived views deployed at `789d4f5` (2026-09-30). Facts marked "last verified 2026-09-26" were not re-checked since.
 
 ---
 
@@ -64,21 +64,22 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 
 - **Working copy:** the local Git checkout of this repo. **Never work from loose copies outside the checkout** (such as files in a downloads folder).
 - **Branch:** `main` is the source of truth. The deployed Pages site must match it byte-for-byte.
-- **Current HEAD:** the documentation commit **"Note the test-project identifier cleanup in the handoff"**, the commit that last updated this file. Its parent is `9eb622a`. (A file can't contain its own commit hash; run `git log -1` to see it.)
-  - The **last app-code commit** is `02f304f`, "Restore through one transactional database function". Everything that runs in the app is identical to `02f304f`; the later Phase 0 commits only add `db/`, `tests/` and `tools/` files.
+- **Current HEAD:** the documentation commit **"Update handoff after Phase 1 of the TV-show migration"**, the commit that last updated this file. Its parent is `b266a5b`. (A file can't contain its own commit hash; run `git log -1` to see it.)
+  - The **last app-code commit** is `b266a5b`, "Phase 1a: back up and restore in format 1 or 2, without user_id".
   - The working tree is clean.
-  - All 17 app files were verified byte-identical on GitHub Pages at `b39584e` on 2026-10-04, and all 13 versioned assets returned 200.
-- **Tracked files:** 64.
+  - All 17 app files were verified byte-identical on GitHub Pages at `b266a5b` on 2026-10-04, and all 13 versioned assets returned 200 with the token `20261005-phase1a`.
+- **Tracked files:** 65.
   - 17 app files: 16 JS/CSS + `watchlist.html`.
   - 1 doc: `docs/HANDOFF.md` (this file).
   - 23 files in `db/`: the migration scripts, rollbacks, stage switches, test-project-only scripts, SQL self-checks and a local-values template (`db/README.md` gives the run order).
   - `.gitignore`: excludes the two local test-project value files.
-  - 16 files in `tests/`: 13 test suites, the shared `tests/app-harness.js`, the TV-model reference `tests/tv-model-reference.js` and its shared cases `tests/fixtures/tv-model-cases.json`.
+  - 17 files in `tests/`: 14 test suites, the shared `tests/app-harness.js`, the TV-model reference `tests/tv-model-reference.js` and its shared cases `tests/fixtures/tv-model-cases.json`.
   - 6 files in `tools/` (5 tools and one local-values template).
 - **Known-good tags** (annotated; these are rollback points):
   - `post-tmdb-migration-modularization` → `c5b592e` (after the TMDB identity migration + modular split, before any Claude Code changes)
   - `post-same-title-schema-fix` → `8ec56c0` (after the same-title schema fix, before identity hardening)
   - `pre-derived-views` → `e2c1c16` (just before the derived views). **Local only, not pushed**; ask before pushing it.
+  - `pre-tv-shows` → `b266a5b` (Phase 1a deployed, taken just before the production Phase 1b migration). **Local only, not pushed**; ask before pushing it.
   - Ask before pushing any new tag.
 - **History:** early commits are a series of "Add files via upload". Everything after that has descriptive messages.
 
@@ -118,9 +119,12 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 | `b39584e` | Add genuine-Auth two-user isolation test page for the test project |
 | `2bc3410` | Update handoff after Phase 0 of the TV-show migration |
 | `9eb622a` | Move test-project identifiers into untracked local config |
-| *(this commit)* | Note the test-project identifier cleanup in the handoff |
+| `c445702` | Note the test-project identifier cleanup in the handoff |
+| `535ddf7` | Add browser and password working rules to the handoff |
+| `b266a5b` | Phase 1a: back up and restore in format 1 or 2, without user_id |
+| *(this commit)* | Update handoff after Phase 1 of the TV-show migration |
 
-The five commits `a13c1fb`…`e2c1c16` are catalog refreshes made with the `/refresh-catalogs` skill. `8e92095`…`789d4f5` are the derived-views feature. `6dfa0cd` added this handoff (docs only). `e003694` makes Up to date start expanded, and `1486404` adds its status label and next-season text; `bd4c068` and `af600e3` update this handoff (docs only). `e6d5822`…`b39584e` are Phase 0 of the TV-show migration (§18); only `02f304f` changes app files.
+The five commits `a13c1fb`…`e2c1c16` are catalog refreshes made with the `/refresh-catalogs` skill. `8e92095`…`789d4f5` are the derived-views feature. `6dfa0cd` added this handoff (docs only). `e003694` makes Up to date start expanded, and `1486404` adds its status label and next-season text; `bd4c068` and `af600e3` update this handoff (docs only). `e6d5822`…`b39584e` are Phase 0 of the TV-show migration (§18); only `02f304f` changes app files. `b266a5b` is Phase 1a (app files and tests); Phase 1b/1c ran the already-committed `db/` scripts on production and needed no commit.
 
 **Script load order** (in `watchlist.html`; the order matters):
 
@@ -133,7 +137,7 @@ The inline script owns the mutable state and the boot sequence:
 That opens **TV → Currently Watching**. The boot makes only paginated GETs; it doesn't call `loadTab()`.
 
 **Cache-busting token (manual; no build system):**
-- `watchlist.html` requests 12 JS files and `styles.css` with `?v=20261004-restore1` (earlier tokens: `?v=20260929-derived1`, `?v=20261002-uptodate1` at `e003694`, `?v=20261003-uptodate2` at `1486404`): `api.js`, `backup-restore.js`, `tabs.js`, `render.js`, `row-actions.js`, `tmdb-search.js`, `collections-pull.js`, `universe-pull.js`, `person-pull.js`, `refresh-shows.js`, `tmdb-match.js`, `derived-views.js`.
+- `watchlist.html` requests 12 JS files and `styles.css` with `?v=20261005-phase1a` (earlier tokens: `?v=20261004-restore1` at `02f304f`, `?v=20260929-derived1`, `?v=20261002-uptodate1` at `e003694`, `?v=20261003-uptodate2` at `1486404`): `api.js`, `backup-restore.js`, `tabs.js`, `render.js`, `row-actions.js`, `tmdb-search.js`, `collections-pull.js`, `universe-pull.js`, `person-pull.js`, `refresh-shows.js`, `tmdb-match.js`, `derived-views.js`.
 - **Rule: when a deployment changes any versioned JS/CSS file, bump the token in `watchlist.html`** (for example `?v=20261015-x1`). This makes a new page load fresh copies instead of stale cached JS that doesn't match it. GitHub Pages caches files for 10 minutes.
 - **`config.js`, `identity.js` and `ui-helpers.js` are deliberately unversioned.** The `/refresh-catalogs` workflow refreshes `config.js` by its plain URL (`fetch('config.js', {cache:'reload'})`), which only works while the page loads it without a token. If a future change to `identity.js` or `ui-helpers.js` must ship together with the page, add a token to that file then. Keep `config.js` unversioned unless the refresh workflow is updated too.
 - An old cached page may keep running the old app for up to about 10 minutes after a deploy. That's accepted; the token guarantees that a **new** page never loads stale JS.
@@ -148,13 +152,13 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
 
 | File | Lines | Owns |
 |---|---:|---|
-| `watchlist.html` | 177 | Markup, **all mutable page state** (`let` vars, §4), script tags (with the `?v=` cache token, §2), boot. Has some harmless orphaned comment headers left over from the modular split. |
+| `watchlist.html` | 178 | Markup, **all mutable page state** (`let` vars, §4), script tags (with the `?v=` cache token, §2), boot. Has some harmless orphaned comment headers left over from the modular split. |
 | `styles.css` | 485 | All CSS, including the derived-view styles (source badge, Upcoming/Today tags, "Not aired yet", the non-clickable "Up to date" status label, collapsible section rows, tab separator). Mobile rules apply below 700px: the desktop `<table id="desktopTable">` is hidden and `#cardList` cards are shown instead. |
-| `config.js` | 442 | Constants: Supabase URL/key, `TABLE`, backup constants (`BACKUP_TABLES`, `BACKUP_FORMAT`, `BACKUP_FORMAT_VERSION`, `BACKUP_PAGE_SIZE`), `COLLECTIONS` + `DEFAULTS` (`truecrime` has `mixedMedia: true`), `WATCH_WITH_OPTIONS` (the household's fixed watch-with tags), `MCU_MOVIES` (39 `{t, id}` entries), `TMDB_TOKEN`/`TMDB_BASE`, `NETWORK_COLORS`, `WATCHABLE_SOON_DAYS` (60), `UNIVERSE_LISTS` (`mcu`), `LAST_BACKUP_KEY`. **Unchanged by the derived views and deliberately unversioned** (§2). |
+| `config.js` | 450 | Constants: Supabase URL/key, `TABLE`, backup constants (`BACKUP_TABLES`, `BACKUP_FORMAT`, `BACKUP_FORMAT_VERSION`, `BACKUP_PAGE_SIZE`), `COLLECTIONS` + `DEFAULTS` (`truecrime` has `mixedMedia: true`), `WATCH_WITH_OPTIONS` (the household's fixed watch-with tags), `MCU_MOVIES` (39 `{t, id}` entries), `TMDB_TOKEN`/`TMDB_BASE`, `NETWORK_COLORS`, `WATCHABLE_SOON_DAYS` (60), `UNIVERSE_LISTS` (`mcu`), `LAST_BACKUP_KEY`, `SHOW_KEY_OVERRIDES` (Phase 1a: maps `disney|the clone wars` to `star wars: the clone wars (2008)`, mirroring the database's `private.tv_show_key_override`). **Deliberately unversioned** (§2). |
 | `identity.js` | 80 | `findExistingRow`, `isAlreadyAdded`, `normalizeTmdbTitle`, `pickTmdbMovieCandidate` (automated flows only), `isDuplicateKeyError`, `duplicateInsertMessage`, `cleanCollectionName` (display only). |
-| `api.js` | 87 | `sbFetch`; `fetchAllRows(table, filter?)` (paginated, exact-count verified; the optional PostgREST filter is used by the derived views, and backup/restore call it without one); `tmdbFetch`. A failed `tmdbFetch` throws `TMDB error <status>` with **`err.status` attached**. (`deleteAllRows`/`batchInsertRows` were removed in `02f304f`.) |
+| `api.js` | 88 | `sbFetch`; `fetchAllRows(table, filter?, select = '*')` (backups pass their exact columns) (paginated, exact-count verified; the optional PostgREST filter is used by the derived views, and backup/restore call it without one); `tmdbFetch`. A failed `tmdbFetch` throws `TMDB error <status>` with **`err.status` attached**. (`deleteAllRows`/`batchInsertRows` were removed in `02f304f`.) |
 | `ui-helpers.js` | 119 | `esc` (HTML-escapes `& < > "`); badge/color helpers; `hasWatchableSoonSeason` (derives "Caught Up"); `parseDate`, `formatDisplayDate`, `showSaved`, `showError`; the **TMDB failure-reporting helpers** `tmdbNameList`, `tmdbLookupFailureNote`, `tmdbAddFailureNote`. |
-| `backup-restore.js` | 513 | Building and downloading backups; the **hardened** validator (`validateBackupObject`, `RESTORE_COLUMNS`, `restoreValueProblem`, `validateBackupRows`, `identityLossErrors`); the guarded restore flow, which now replaces all tables with **one call to the database function `restore_backup`** (§10), and post-restore verification. `finishRestoreAndReload` reloads the active derived view or tab. |
+| `backup-restore.js` | 590 | Building and downloading backups in **format 1 or 2** (`detectBackupFormat` probes `tv_shows` read-only; `BACKUP_FORMATS` lists each format's tables and exact columns; `user_id` is never included); the **hardened** validator (`validateBackupObject`, `RESTORE_COLUMNS`/`RESTORE_COLUMNS_V2`, `restoreValueProblem`, `validateBackupRows`, `validateTvShowRows`, `identityLossErrors`); the guarded restore flow, which now replaces all tables with **one call to the database function `restore_backup`** (§10), and post-restore verification. `finishRestoreAndReload` reloads the active derived view or tab. |
 | `tabs.js` | 158 | `buildTabs` (derived-view tabs first, then collections), `buildMediaSwitch`, `switchMediaType` (TV always lands on Currently Watching), `switchTab` (clears `activeViewId`), `switchView` (opens a derived view; sets `activeTabId = null`), and `loadTab`, which reseeds static defaults and refreshes TBA defaults by `item_key`. |
 | `render.js` | 623 | `renderFilters` and `renderTable` (both hand off to the derived-view renderers when `activeViewId` is set); `renderFilters` keeps filter state on same-tab re-renders. The flat, movies and grouped tables/cards. The shared season-row helpers `seasonWatchControlHtml`, `seasonSubRowHtml` and `seasonSubCardHtml`, used by the grouped tabs (output byte-identical to before) and by Currently Watching. Also popovers (`toggleMorePopover` targets the popover inside the clicked `.more-cell`/`.card-top`), status options, expand/collapse, and the **Match to TMDB entry points** for eligible rows. |
 | `row-actions.js` | 221 | `actionRows()` (the open view's rows or the active tab's rows) and `mirrorRowUpdate()` (copies a saved change onto every cached copy of that row); `setShowStatus`, `toggleWatch`, `setStatus`, `delRow` (a default row becomes `skipped`; any other row is hard-deleted after a `confirm()`; decides "default" from `row.collection`), `toggleAdd`, `toggleFilters`, `addEntry` (manual add with a client-side duplicate guard; captures the collection before its await), `toggleWatchWith`. |
@@ -167,13 +171,14 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
 | `derived-views.js` | 493 | **Currently Watching / Coming Soon** (§4a): `DERIVED_VIEWS`; pure rules (`isTvViewRow`, `isTbaRow`, `localTodayStr`, `isReleasedRow`, `seasonOrder`/`compareSeasons`, `showGroupKey`, `deriveCurrentlyWatching`, `nextStoredSeason`, `deriveComingSoon`); the loader (`loadDerivedView`, `tvRowsFilter`); the filters, renderers and toggles (`toggleDerivedShow`, `toggleDerivedSection`). |
 | `docs/HANDOFF.md` | — | **This handoff**, the single canonical copy. Never loaded by the app. |
 | `tools/identity-audit.mjs` | 261 | Read-only (GET-only) production identity audit with A/B/C/D grading (§16). Pure grading functions are separated from network access. |
-| `db/` | — | **TV-show migration** (§18): `phase0_restore_v1.sql` (installed in production), the Phase 1b/1c migrations, `tv_model.sql`, `rpc.sql`, `restore_backup.sql` (owner-scoped), `stages.sql`, `rollback/`, `future/auth_switchover.sql` (future sign-in project only) and `test/` (test-project-only scripts and self-checking SQL). Run order in `db/README.md`. Only `phase0_restore_v1.sql` has run on production. |
+| `db/` | — | **TV-show migration** (§18): `phase0_restore_v1.sql` (installed in production), the Phase 1b/1c migrations, `tv_model.sql`, `rpc.sql`, `restore_backup.sql` (owner-scoped), `stages.sql`, `rollback/`, `future/auth_switchover.sql` (future sign-in project only) and `test/` (test-project-only scripts and self-checking SQL). Run order in `db/README.md`. On production: `phase0_restore_v1.sql` (Phase 0), then `phase1b_ownership.sql` + `restore_backup.sql` (1b), then `phase1c_tv_schema.sql` + `tv_model.sql` + `phase1c_backfill.sql` (1c). `rpc.sql`, `stages.sql` and everything later have **not** run on production. |
 | `tools/db-rehearsal.mjs`, `db/test/rehearsal-steps.mjs` | 93, 229 | Local rehearsal of every `db/` script on PGlite against a production replica and a real backup (PGlite isn't a repo dependency). |
 | `tools/db-rehearsal-rest.mjs` | 210 | API-level rehearsal against a test project with its publishable key; refuses the production URL. |
 | `tools/tv-model-expectations.mjs` | 91 | Emits the reference model's answers as a self-check SQL script for a test project. |
 | `tools/auth-isolation-test.html` | 420 | Two-user isolation test with genuine Supabase Auth sessions against the temporary test project only (hard-locked; passwords typed by the owner; no persistence). |
 | `tests/tv-model-reference.js` + `tests/fixtures/tv-model-cases.json` | 156, 45 | The approved TV-model rules (up next, Up to date, status migration, compatibility values) and shared cases; not a suite. |
 | `tests/tv-model.test.js` | 108 | The TV-model reference (43 cases). |
+| `tests/backup-format.test.js` | 109 | Backup formats 1 and 2: read-only format probe, exact columns, never `user_id`, format-2 show/link validation, and restore across format combinations (6 cases). |
 | `tests/restore-rpc.test.js` | 73 | Restore makes one `rpc/restore_backup` call, reports failures as "nothing was changed", and still verifies every field (3 cases). |
 | `tests/identity-candidate.test.js` | 80 | `pickTmdbMovieCandidate` (9 cases). |
 | `tests/title-attribute.test.js` | 38 | `esc()` round-trips titles in HTML attributes (5 cases). |
@@ -184,14 +189,14 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
 | `tests/row-popover.test.js` | 88 | `toggleMorePopover` targets the tapped row's popover (5 cases). |
 | `tests/tmdb-failures.test.js` | 244 | Outage, partial-failure and partial-add reporting across the real flows, with stubbed calls (21 cases). |
 | `tests/tmdb-match.test.js` | 300 | Match to TMDB patch/conflict rules and the stubbed flow (24 cases). |
-| `tests/app-harness.js` | 219 | **Shared harness, not a suite.** Runs the whole page in a Node `vm` (every script in `watchlist.html` order plus its inline state/boot script) against a fake DOM and an in-memory Supabase/TMDB stand-in. Supports pausing a request (`hold`) to simulate navigation mid-await, forced failures, and count mismatches. No network. |
+| `tests/app-harness.js` | 244 | **Shared harness, not a suite.** Runs the whole page in a Node `vm` (every script in `watchlist.html` order plus its inline state/boot script) against a fake DOM and an in-memory Supabase/TMDB stand-in. Supports pausing a request (`hold`) to simulate navigation mid-await, forced failures, and count mismatches. No network. |
 | `tests/derived-views.test.js` | 485 | Currently Watching / Coming Soon rules (including Up to date's next stored season), their rendering, and the grouped-tab season rows after the extraction (33 cases). |
 | `tests/derived-nav.test.js` | 389 | Startup, pagination and exact-count checks, navigation races, edits from a view (real id, mirrored cache, rollback), and the nine async guards (24 cases). |
 
 **Totals:**
-- 148 global functions, with no duplicate definitions (150 before `02f304f` removed `deleteAllRows` and `batchInsertRows`).
+- 150 global functions, with no duplicate definitions (148 after `02f304f` removed `deleteAllRows` and `batchInsertRows`; `b266a5b` added `detectBackupFormat` and `validateTvShowRows`).
 - **54** distinct inline-handler names, all defined. The derived views added `switchView`, `loadDerivedView`, `toggleDerivedShow` and `toggleDerivedSection`.
-- **234** offline test cases across 13 suites: 131 earlier, 33 in `derived-views`, 24 in `derived-nav`, 43 in `tv-model`, 3 in `restore-rpc`.
+- **240** offline test cases across 14 suites: 131 earlier, 33 in `derived-views`, 24 in `derived-nav`, 43 in `tv-model`, 3 in `restore-rpc`, 6 in `backup-format`.
 
 ---
 
@@ -341,7 +346,15 @@ This prevents wrong-collection writes after switching tabs or views, `tabData[nu
 - `othertv_shows`: the shows tracked for Refresh shows. Unique on `(collection, tmdb_id)`.
 - `custom_collections`: person collections. Unique on `name`.
 
-There are no foreign keys and no triggers. Since 2026-10-04 there is **one database function, `public.restore_backup`** (§10). RLS is enabled and permissive: the anon role can select, insert, update and delete on all three tables, which is an accepted family-app trade-off. Postgres is 17.6.
+Postgres is 17.6. RLS is enabled and permissive: the anon role can select, insert, update and delete on every public table, which is an accepted family-app trade-off (16 anon policies: the original 12 plus 4 on `tv_shows`). No triggers.
+
+**Since Phase 1 (2026-10-04):**
+- **Ownership (1b):** every public table has `user_id uuid NOT NULL`, defaulting to `private.current_owner_id()`, the bootstrap owner in `private.app_owner` (one owner; no production Auth users; no foreign key to `auth.users`). Clients can't write `user_id`: INSERT/UPDATE are granted per column, excluding it. Reads return it. The unique keys below are per owner (`user_id` leads each). `private` is closed to clients.
+- **TV schema (1c):** `tv_shows` (`id`, `user_id`, `collection`, `title`, `show_key`, `tmdb_id`, `status` in `pending/confirmed/watching/maybe/complete/skipped`, `created_at`), and on `watchlist_items` `show_id uuid` (nullable) and `skipped bool NOT NULL default false`. Composite FK `(show_id, user_id, collection)` → `tv_shows(id, user_id, collection)`, ON UPDATE CASCADE, ON DELETE RESTRICT. Checks: films can't link; `skipped` requires `show_id`. Helper functions in `private` come from `db/tv_model.sql`.
+- **Stage:** `private.migration_stage` = **`tv_schema`**. The old columns (`status`, `watched`) remain the app's source of truth; `tv_shows`/`show_id`/`skipped` are a backfilled snapshot the app doesn't read or write yet, so TV seasons the app adds now are unlinked until Phase 2's resync.
+- **Functions:** `public.restore_backup` (owner-scoped, §10) and the `private` helpers. `db/rpc.sql` is **not** installed.
+
+The column lists below are the original columns; `user_id`, `show_id` and `skipped` come after them.
 
 **Columns (verified from the catalog):**
 - `watchlist_items`:
@@ -382,8 +395,10 @@ There are no foreign keys and no triggers. Since 2026-10-04 there is **one datab
 - `watchlist_items_legacy_item_key_key`: UNIQUE (`collection`, `item_key`) **WHERE `tmdb_id IS NULL`**.
 - `watchlist_items_identity_shape_check`: a CHECK allowing **exactly** the three shapes above. It's written with `IS NOT DISTINCT FROM`, so NULLs can't slip through.
 - Non-unique indexes: `watchlist_items_collection_idx` (`collection`, `date_sort`) and `watchlist_items_tmdb_collection_idx` (`tmdb_collection_id`).
-- `othertv_shows`: `othertv_shows_collection_tmdb_id_key` UNIQUE, plus indexes on `collection` and `tmdb_id`.
-- `custom_collections`: `custom_collections_name_key` UNIQUE, plus an index on `tmdb_person_id`.
+- `othertv_shows`: `othertv_shows_user_collection_tmdb_id_key` UNIQUE (`user_id, collection, tmdb_id`; was `othertv_shows_collection_tmdb_id_key` before 1b), plus indexes on `collection` and `tmdb_id`.
+- `custom_collections`: `custom_collections_user_name_key` UNIQUE (`user_id, name`; was `custom_collections_name_key`), plus an index on `tmdb_person_id`.
+- **Since 1b, `user_id` leads every unique key** (the three `watchlist_items` identity indexes keep their names and predicates) and `watchlist_items_collection_idx` is (`user_id, collection, date_sort`).
+- **Since 1c:** `tv_shows_identified_key` UNIQUE (`user_id, collection, tmdb_id`), `tv_shows_legacy_key` UNIQUE (`user_id, collection, show_key`), `tv_shows_id_owner_collection_key` (the FK target), and `watchlist_items_show_id_idx`.
 - **Removed:** the old global UNIQUE (`collection`, `item_key`). It used to block same-title films with different TMDB ids.
 
 ### Legacy fallback rule
@@ -532,7 +547,8 @@ There are no foreign keys and no triggers. Since 2026-10-04 there is **one datab
 ### Backup (⬇ Backup)
 
 - Exports all three tables with paginated, exact-count-verified fetches.
-- JSON shape: `{ format: 'watchlist-tracker-backup', formatVersion: 1, exportedAt, rowCounts, tables }`.
+- JSON shape: `{ format: 'watchlist-tracker-backup', formatVersion, exportedAt, rowCounts, tables }`.
+- **Format (since `b266a5b`):** the app probes `tv_shows?select=id&limit=1` (read-only). 200 → **format 2**: four tables (`watchlist_items` with 20 columns incl. `show_id`/`skipped`, `tv_shows` 7, `othertv_shows` 6, `custom_collections` 5). 404 `PGRST205` → **format 1**: the original three tables. Anything else aborts. Each table is fetched with its exact column list, so **`user_id` is never in a backup**. Production is now format 2.
 - Filename: `watchlist-backup-YYYY-MM-DD-HHMM.json`.
 - The same backup can be produced from Node by running the app's own `config.js`/`api.js`/`backup-restore.js` in a `vm` sandbox and calling `buildBackupObject()` + `validateBackupObject()`. That's how the recent backups were taken.
 
@@ -542,12 +558,13 @@ There are no foreign keys and no triggers. Since 2026-10-04 there is **one datab
 2. The preview fetches the current data and runs **`identityLossErrors`** against it.
 3. **`executeRestore`** builds a safety backup of the current data **and validates it in memory**, including the identity-loss check against it. Any failure aborts with "nothing was changed".
 4. The safety backup is downloaded (`watchlist-pre-restore-*.json`), and the user confirms they can see it.
-5. One call to the database function **`restore_backup(p_backup)`** (`db/phase0_restore_v1.sql`, installed 2026-10-04) deletes and re-inserts all three tables **in a single transaction**, preserving ids and `created_at`. It re-checks the format, version 1, the table set, `rowCounts` and each row's exact columns, and any error rolls everything back. (Before `02f304f` the app deleted and batch-inserted table by table.)
+5. One call to the database function **`restore_backup(p_backup, p_allow_v1_reset)`** (since 1b: `db/restore_backup.sql`, owner-scoped and stage-aware) replaces **the current owner's** rows **in a single transaction**, preserving ids and `created_at`. It re-checks the format, version, the table set, `rowCounts` and each row's exact columns, and any error rolls everything back. The preview refuses a format-2 file while the database is format 1; a format-1 file into a format-2 database shows a warning and sends `p_allow_v1_reset: true`, which **empties the owner's TV shows and links** (an admin must then run `private.tv_backfill` to rebuild them); otherwise the flag is `false`. (Before `02f304f` the app deleted and batch-inserted table by table.)
 6. The data is re-fetched and verified field by field against the backup.
 
 ### Checks that run before any DELETE (`8c935f3`)
 
-- **Header:** `format`, a numeric `formatVersion` ≤ 1, `exportedAt`, and all three tables present as arrays.
+- **Header:** `format`, a `formatVersion` of 1 or 2, `exportedAt`, and exactly that format's tables present as arrays.
+- **Format 2 shows and links (`validateTvShowRows`):** show statuses, non-empty title/`show_key`, no duplicate identified or legacy shows, every `show_id` present in the backup and in the same collection, no linked films, `skipped` only on linked rows.
 - **`rowCounts` is required** for all three tables, as non-negative integers equal to the array lengths.
 - **Exact column set per row**, taken from **`RESTORE_COLUMNS`** (which mirrors the live schema): unknown and missing columns are both rejected. Key presence is checked separately from nullability.
 - **Value types:** uuid; text; `date_sort` as `YYYY-MM-DD`; ISO timestamps; booleans; 32-bit integers; `text[]` of strings; NOT NULL vs. nullable per column.
@@ -562,9 +579,9 @@ There are no foreign keys and no triggers. Since 2026-10-04 there is **one datab
 
 ### Limits and notes
 
-- **`RESTORE_COLUMNS` must be updated whenever the schema gains a column.** Until it is, restore **safely refuses every backup**, including the safety backup.
+- **`RESTORE_COLUMNS`/`RESTORE_COLUMNS_V2` must be updated whenever the schema gains a column.** Backups request exact columns, so a new column is simply left out of backups until it's added there (and to `restore_backup`).
 - **The mixed-state window is closed:** restore is one database transaction, so a failed restore leaves the data exactly as it was; the app says "nothing was changed" and names the safety backup.
-- **`restore_backup` (production):** `restore_backup(jsonb, boolean)` returning jsonb; plpgsql; `SECURITY INVOKER`; `search_path` set to empty; executable by `anon`, `authenticated` and `service_role`, not `PUBLIC`. Its body matches `db/phase0_restore_v1.sql` exactly (verified by MD5 in the catalog). It runs in about 40 ms in the database. **It has never been called on production.** Phase 1b replaces it with the owner-scoped `db/restore_backup.sql` (same signature).
+- **`restore_backup` (production):** `restore_backup(jsonb, boolean)` returning jsonb; plpgsql; `SECURITY INVOKER`; `search_path` set to empty; executable by `anon`, `authenticated` and `service_role`, not `PUBLIC`. Since 1b its body matches `db/restore_backup.sql` exactly (verified by MD5 in the catalog; it replaced the Phase 0 `db/phase0_restore_v1.sql`). At stage `tv_schema` it accepts format 2, and format 1 only with `p_allow_v1_reset`. **It has never been called on production**; its behavior was verified locally and on the test project.
 - **Minor:** safety-backup filenames only go down to the minute. Two restores in the same minute could make a browser rename the second download to "(1)", while the dialog shows the original name.
 
 ### Rehearsal (2026-09-26)
@@ -581,7 +598,7 @@ There are no foreign keys and no triggers. Since 2026-10-04 there is **one datab
 ### Latest known-good backups
 
 - Backups are kept **outside the repo**, never committed. Ask the owner where current backups live.
-- **The latest validated backup matches the current production baseline** (718 / 64 / 1): taken 2026-10-04 21:55 UTC, immediately before the Phase 0 production change, with the deployed app's own backup code. Production data was unchanged by that change.
+- **The latest validated backup matches the current production baseline:** format 2, 718 / 196 / 64 / 1 (`watchlist_items` / `tv_shows` / `othertv_shows` / `custom_collections`), taken 2026-10-04 22:26 UTC after Phase 1c with the deployed app's own backup code (`b266a5b`). The last format-1 backup (718 / 64 / 1) was taken 22:17 UTC, immediately before Phase 1b; the original-column content of the three tables was unchanged by Phase 1.
 - Older backups are **historical** reference points, not the current operational backup. A future session must **take and validate a fresh backup before any approved production write**, rather than relying on an old file.
 - **Always take and validate a fresh backup before any destructive database work.**
 
@@ -799,7 +816,7 @@ Other intentional behaviors:
 
 - Bulk actions (including a show-level status control in Currently Watching, deliberately left out of v1).
 - Books/Games media types.
-- **First-class TV shows with per-user ownership** (§18): Phase 0 done; Phase 1 needs separate approval.
+- **First-class TV shows with per-user ownership** (§18): Phase 0 and Phase 1 done; Phase 2 needs separate approval.
 - Possible **Unmatch from TMDB** feature (§13).
 
 ### Technical debt / intentional choices
@@ -883,12 +900,13 @@ node tests/derived-views.test.js          # expect 33/33
 node tests/derived-nav.test.js            # expect 24/24
 node tests/tv-model.test.js               # expect 43/43
 node tests/restore-rpc.test.js            # expect 3/3
-# total: 234 cases across 13 suites (tests/app-harness.js and tests/tv-model-reference.js are helpers, not suites)
+node tests/backup-format.test.js          # expect 6/6
+# total: 240 cases across 14 suites (tests/app-harness.js and tests/tv-model-reference.js are helpers, not suites)
 ```
 
 ### Handler/global sweep
 
-Every inline-handler name must be a defined function. Expected: **54** handler names, none undefined, and no duplicate global function definitions (148 functions).
+Every inline-handler name must be a defined function. Expected: **54** handler names, none undefined, and no duplicate global function definitions (150 functions).
 
 ```bash
 # from the repo root
@@ -919,9 +937,10 @@ grep -hoE '^(async )?function [A-Za-z0-9_]+' *.js \
 ```bash
 # from the repo root
 node tools/identity-audit.mjs
-# expect (2026-09-30): 718 rows fetched (422 identified, 296 legacy)
-#         A 420 / B 2 / C 0 / D 0, RESULT: PASS
-#         The 2 B rows are the known one-day date drifts (§13): The Traitors S5 and Avengers: Doomsday.
+# expect (2026-10-04): 718 rows fetched (422 identified, 296 legacy)
+#         A 421 / B 1 / C 0 / D 0, RESULT: PASS
+#         The B row is the known one-day date drift (§13): The Traitors S5. Avengers: Doomsday became A
+#         when TMDB's date moved to match the stored one (no production change).
 # exit codes: 0 = pass, 1 = C/D rows found, 2 = aborted (no result)
 ```
 
@@ -939,16 +958,26 @@ node tools/identity-audit.mjs
 ### Production fingerprints (read-only; SQL Editor)
 
 ```sql
--- Expected counts (2026-09-30): 718 / 64 / 1.
+-- Expected counts (2026-10-04, after Phase 1): 718 / 64 / 1, and 196 tv_shows.
 -- Run this read-only at the start of any session that might write, and use the result
 -- as that session's baseline; re-run it afterwards to prove nothing else changed.
+-- The o_* hashes use the ORIGINAL columns only, so they are comparable with
+-- pre-Phase-1 values (whole-row t::text now includes user_id/show_id/skipped).
+-- The n_* hashes cover the Phase 1c additions (everything except user_id).
 select
   (select count(*) from public.watchlist_items) w_n,
-  (select md5(string_agg(t::text,'|' order by id)) from public.watchlist_items t) w_h,
+  (select md5(string_agg(row(t.id, t.collection, t.item_key, t.title, t.season, t.theme, t.display_date, t.date_sort,
+     t.watched, t.status, t.created_at, t.watch_with, t.collections, t.tmdb_collection_id, t.tmdb_collection_name,
+     t.media_type, t.tmdb_id, t.season_number)::text, '|' order by t.id)) from public.watchlist_items t) w_o,
   (select count(*) from public.othertv_shows) o_n,
-  (select md5(string_agg(t::text,'|' order by id)) from public.othertv_shows t) o_h,
+  (select md5(string_agg(row(t.id, t.tmdb_id, t.title, t.network, t.created_at, t.collection)::text, '|' order by t.id))
+     from public.othertv_shows t) o_o,
   (select count(*) from public.custom_collections) c_n,
-  (select md5(string_agg(t::text,'|' order by id)) from public.custom_collections t) c_h;
+  (select md5(string_agg(row(t.id, t.name, t.tmdb_person_id, t.created_at, t.role)::text, '|' order by t.id))
+     from public.custom_collections t) c_o,
+  (select count(*) from public.tv_shows) s_n,
+  (select md5(string_agg((to_jsonb(t) - 'user_id')::text, '|' order by t.id)) from public.watchlist_items t) w_n_all,
+  (select md5(string_agg((to_jsonb(t) - 'user_id')::text, '|' order by t.id)) from public.tv_shows t) s_n_all;
 ```
 
 Collection consistency (expect 0 rows from each):
@@ -983,7 +1012,7 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 - **Outage simulation:** Refresh shows and Refresh collections say "Couldn't check TMDB right now… Nothing was changed" (never "up to date").
 - **Mobile 375 px:** the "⋯" popover on a movie card opens inside that card.
 - **Derived views:** see the 2026-09-30 checklist in §15 (startup GET-only; TBA up-next season without Mark watched; Up to date section; Coming Soon today row and TBA section; no films; Movies → TV).
-- **After any temporary test:** all three fingerprints equal the baseline, and the audit shows 420 A / 2 B / 0 C / 0 D.
+- **After any temporary test:** all fingerprints equal the baseline, and the audit shows 421 A / 1 B / 0 C / 0 D.
 
 ---
 
@@ -992,37 +1021,44 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 ```text
 Repo:                     the local Git checkout of this repo (github.com/jaredsclove/Watchlist)
 Branch:                   main (in sync with origin/main), working tree clean
-HEAD:                     "Note the test-project identifier cleanup in the handoff" (docs-only; parent 9eb622a)
-Last app-code commit:     02f304f  "Restore through one transactional database function"
-Tracked files:            64 (17 app, 1 doc, 23 in db/, 16 in tests/, 6 in tools/, .gitignore)
-                          all 17 app files byte-identical on GitHub Pages (verified at b39584e); 13 versioned assets 200
-Offline tests:            234/234 passing (13 suites); 54 inline handlers, none undefined; 148 functions, no duplicates
-Cache token:              ?v=20261004-restore1 (12 JS files + styles.css); config.js unversioned
+HEAD:                     "Update handoff after Phase 1 of the TV-show migration" (docs-only; parent b266a5b)
+Last app-code commit:     b266a5b  "Phase 1a: back up and restore in format 1 or 2, without user_id"
+Tracked files:            65 (17 app, 1 doc, 23 in db/, 17 in tests/, 6 in tools/, .gitignore)
+                          all 17 app files byte-identical on GitHub Pages (verified at b266a5b); 13 versioned assets 200
+Offline tests:            240/240 passing (14 suites); 54 inline handlers, none undefined; 150 functions, no duplicates
+Cache token:              ?v=20261005-phase1a (12 JS files + styles.css); config.js unversioned
 
 watchlist_items:          718 rows
 othertv_shows:             64 rows
 custom_collections:         1 row   ("Quentin Tarantino", tmdb_person_id 138, director)
+tv_shows:                 196 rows  (disney 103, othertv 61, 90day 15, sheridan 14, truecrime 3; 64 identified)
+                          status: confirmed (On List) 138, pending 35, watching 10, skipped 10, complete 2, maybe 1
+TV seasons linked:        641 of 641 TV rows; 77 non-TV rows unlinked; 38 rows skipped = true
 
 Fingerprints:             not published here. Compute the current baseline read-only (SQL MD5, §16; or the
-                          anon-key hash method, §11a). Content was unchanged before vs after the 2026-10-04 Phase 0 change.
+                          anon-key hash method, §11a). Original-column content was unchanged by Phase 0 and Phase 1.
 
-Database objects:         one function, public.restore_backup(jsonb, boolean) (Phase 0). No user_id, no tv_shows,
-                          no private schema, no production Auth users. RLS: the original permissive anon policies.
+Database:                 stage tv_schema (§5). user_id NOT NULL on all public tables, one bootstrap owner, owns every row;
+                          clients can't write user_id. tv_shows + show_id/skipped (backfilled snapshot; the old model is
+                          authoritative). public.restore_backup (owner-scoped, = db/restore_backup.sql) and private helpers
+                          (= db/tv_model.sql). db/rpc.sql NOT installed. No production Auth users, no FK to auth.users.
+                          RLS: 16 permissive anon policies (the original 12 + 4 on tv_shows).
 
 Rows per tab:             disney 182, 90day 72, sheridan 42, othertv 354, truecrime 7 (3 TV + 4 films), movies 61
 TV rows in derived views: 641
 Unidentified rows:        296 (all static DEFAULTs, 53 skipped; 0 manual dynamic rows)
 
-Identity audit:           718 rows, 422 identified → 420 A / 2 B / 0 C / 0 D, PASS (node tools/identity-audit.mjs)
-                          B = one-day confirmed-date drift, expected review items (§13): The Traitors S5, Avengers: Doomsday
+Identity audit:           718 rows, 422 identified → 421 A / 1 B / 0 C / 0 D, PASS (node tools/identity-audit.mjs, 2026-10-04)
+                          B = one-day confirmed-date drift, expected review item (§13): The Traitors S5
 Collection consistency:   42 rows / 16 TMDB collections / 0 problems (last verified 2026-09-26)
 
-Backups:                  kept outside the repo. The 2026-10-04 21:55 UTC backup matches 718/64/1. Take and validate a fresh one before any approved write.
+Backups:                  kept outside the repo. The 2026-10-04 22:26 UTC format-2 backup matches 718/196/64/1. Take and validate a fresh one before any approved write.
 
 Tags:
   post-tmdb-migration-modularization → c5b592e
   post-same-title-schema-fix         → 8ec56c0
   pre-derived-views                  → e2c1c16   (local only, not pushed)
+  pre-tv-shows                       → b266a5b   (local only, not pushed)
 
 Supabase:                 the production project, plus a temporary TV-migration test project (kept for Phase 1 rehearsals;
                           locked: owner-only authenticated access, no anonymous access).
@@ -1044,7 +1080,7 @@ Supabase:                 the production project, plus a temporary TV-migration 
 The approved design (planned over several review rounds): user-owned `tv_shows` with show-level status, seasons with `watched` and `skipped`, up next derived from the furthest watched season, one released-only "Up to date" rule, the Complete → On List reopen rule, a bootstrap owner until a later sign-in project, owner-scoped database functions, and per-user transactional restore. `db/README.md` lists the scripts in phase order.
 
 - **Production change (approved):** the transactional v1 `restore_backup` function (§10) and the app change that calls it (`02f304f`, token `?v=20261004-restore1`). Nothing else changed in production; no restore was executed.
-- **Production is still on the old single-user schema:** no `user_id`, no `tv_shows`, no `private` schema, no production Auth users.
+- **At the end of Phase 0, production was still on the old single-user schema:** no `user_id`, no `tv_shows`, no `private` schema, no production Auth users.
 - **Local rehearsal** (PGlite, real backup): every phase, 82 SQL self-checks, all 196 migrated shows equal to the JavaScript reference, shadow → switch-over → rollback with no status lost, and a full rollback leaving the schema identical and the data equal to production's fingerprints.
 - **Test project rehearsal** (Supabase): the same scripts and checks; direct inserts through the real API with `user_id` protected; concurrent adds; v2 restore round trip; switch-over and rollback; and a **genuine-Auth two-user isolation test through the real API: 39/39** (reads, direct writes, `user_id` tampering, every browser-facing function, seeding, reopen, restore, cross-user id collisions, signed-out access). Sessions were not persisted and both users were signed out.
 - **Test project state:** locked: the copied production data belongs to test user A; owner-only authenticated access rules; no anonymous access to tables or functions. Deleting the temporary project is planned once Phase 1 rehearsals no longer need it.
@@ -1054,10 +1090,21 @@ The approved design (planned over several review rounds): user-owned `tv_shows` 
   - a browser batch the owner rejected had already applied Phase 1b to the test project (test project only); it was verified and kept, as the step was then approved;
   - an attempt to serve a test page through the app's preview tool briefly started an unrelated project's dev server; it was stopped within seconds and the added configuration removed.
 
+### Completed: Phase 1 of the TV-show migration (2026-10-04, approved)
+
+- **Starting baseline:** 718 / 64 / 1, the old single-user schema, Phase 0 `restore_backup` only; a validated format-1 backup taken immediately before.
+- **1a (app, `b266a5b`, token `?v=20261005-phase1a`):** backup/restore in format 1 or 2 without `user_id` (§10), `SHOW_KEY_OVERRIDES` (Clone Wars). No visible behavior change. Verified: 17 app files byte-identical on Pages, 13 assets 200, GET-only load, a valid format-1 backup, no console errors.
+- **Local tag `pre-tv-shows` → `b266a5b`** (not pushed), after a fresh validated format-1 backup and fingerprints.
+- **1b (production SQL):** `db/phase1b_ownership.sql` + `db/restore_backup.sql`, run exactly as committed (file hashes checked in the editor before each run). Verified from the catalog only (no production write probes): one owner owning 718 / 64 / 1, 0 NULL `user_id`, `user_id` NOT NULL with the owner as the default, the exact expected indexes, `user_id` writable by no client role and every other column writable, `private` closed, function sources equal to the files, 0 Auth users, fingerprints unchanged, a valid format-1 backup, app loads.
+- **1c (production SQL):** `db/phase1c_tv_schema.sql` + `db/tv_model.sql` + `db/phase1c_backfill.sql` (whose exact-count assertions passed). Results: 196 shows (Disney+ 103, Other TV 61, 90 Day 15, Sheridan 14, True Crime / Docs 3), 64 identified; 641 TV rows linked, 0 TV unlinked, 77 non-TV unlinked; 38 skipped flags; statuses watching 10, confirmed (On List) 138, complete 2, pending 35, skipped 10, maybe 1; 0 unmapped. **Clone Wars:** one show "Star Wars: The Clone Wars (2008)" with Seasons 1–7; the 2008 film is unlinked.
+- **1c verification:** 0 duplicate shows, 0 cross-owner or cross-collection links, 0 TMDB mismatches; original-column fingerprints unchanged; identity audit 421 A / 1 B / 0 C / 0 D; **all 196 production shows equal the JavaScript reference** (status, skipped seasons and up next; one canonical MD5 computed both ways); every `private` helper and `restore_backup` source equals the committed files by MD5, and the shared cases pass against those files locally (`tools/db-rehearsal.mjs`, 8/8 `t_1c` checks) and passed on the test project; a fresh **format-2 backup** taken with the deployed code is valid (4 tables, 20/7/6/5 columns, no `user_id`); the app still loads with GET only and shows the old model.
+- **Rollback readiness:** `db/rollback/phase2_and_1c.sql` (undoes 1c), then `db/rollback/phase1b.sql` + `db/phase0_restore_v1.sql` (undoes 1b), rehearsed in Phase 0 (above); the pre-1b format-1 backup; `pre-tv-shows` for the app. App code needs no rollback for 1b/1c.
+
 ### Next
 
-- **Phase 1 (1a app prep, 1b ownership, 1c TV schema and backfill) needs separate approval.** Nothing is pre-approved.
-- Other candidate follow-ups are listed in §14. For example: review the two B-grade date drifts and re-run the canonical SQL fingerprints.
+- **Phase 2 (`db/rpc.sql` and the Phase 2 block of `stages.sql`: browser-facing functions, stage → `shadow`) needs separate approval.** So do Phase 3, stabilization, cleanup and the future sign-in project. Nothing is pre-approved.
+- Until then the old model is authoritative: don't switch the UI to `tv_shows`, add reopen or the compatibility projection, or point Refresh at `tv_shows`. TV seasons the app adds now stay unlinked until Phase 2's resync.
+- Other candidate follow-ups are listed in §14. For example: review the B-grade date drift.
 - **Any static-tab catalog refresh uses the `/refresh-catalogs` skill.** Startup no longer opens Disney+, so the skill opens the Disney+ tab explicitly.
 
 ---
@@ -1067,9 +1114,9 @@ The approved design (planned over several review rounds): user-owned `tv_shows` 
 1. Inspect the actual repo (your local Git checkout of `jaredsclove/Watchlist`).
 2. Run `git status`.
 3. Confirm the branch is `main` and in sync with `origin/main`.
-4. Confirm `HEAD` is the documentation commit "Note the test-project identifier cleanup in the handoff", whose parent is `9eb622a`; the last app-code commit is `02f304f`, "Restore through one transactional database function". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
-5. Inspect the file tree and compare it with §3: 64 tracked files, and roughly the listed line counts.
-6. Run the offline checks in §16: syntax, all 13 test suites (234 cases), and the handler sweep (54 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 420 A / 2 B / 0 C / 0 D).
+4. Confirm `HEAD` is the documentation commit "Update handoff after Phase 1 of the TV-show migration", whose parent is `b266a5b`; the last app-code commit is `b266a5b`, "Phase 1a: back up and restore in format 1 or 2, without user_id". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
+5. Inspect the file tree and compare it with §3: 65 tracked files, and roughly the listed line counts.
+6. Run the offline checks in §16: syntax, all 14 test suites (240 cases), and the handler sweep (54 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 421 A / 1 B / 0 C / 0 D).
 7. **Do not modify anything:**
    - no code
    - no schema
