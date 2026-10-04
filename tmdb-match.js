@@ -218,6 +218,7 @@ async function confirmTmdbMatch() {
   const isMoviesTab = !!COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
   const patch = buildTmdbMatchPatch(row, m.target, isMoviesTab);
   if (!patch) return;
+  const viaShowFunction = patch.media_type === 'tv' && isTvCollection(row.collection);
   try {
     // Fresh check against the database (not just this page's copy): does another row
     // already hold this identity, or an unmatched row already use the new item_key?
@@ -233,23 +234,35 @@ async function confirmTmdbMatch() {
 
     // Only a row that is still unmatched is updated; the database's unique indexes
     // are the final guard against a match made elsewhere at the same moment.
-    await sbFetch('PATCH', `${TABLE}?id=eq.${row.id}&tmdb_id=is.null&media_type=is.null&season_number=is.null`, patch);
-    const [fresh] = await sbFetch('GET', `${TABLE}?id=eq.${row.id}&select=*`, null) || [];
+    let fresh;
+    if (viaShowFunction) {
+      // match_tv_row moves the season to its identified show, re-checks both
+      // conflicts in the database and registers the show for Refresh shows.
+      const res = await sbRpc('match_tv_row', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: patch });
+      fresh = res && res.row;
+    } else {
+      // A row matched as a film leaves the show it belonged to as a TV season.
+      const body = row.show_id != null ? { ...patch, show_id: null } : patch;
+      await sbFetch('PATCH', `${TABLE}?id=eq.${row.id}&tmdb_id=is.null&media_type=is.null&season_number=is.null`, body);
+      [fresh] = await sbFetch('GET', `${TABLE}?id=eq.${row.id}&select=*`, null) || [];
+    }
     if (!fresh || fresh.tmdb_id !== patch.tmdb_id || fresh.media_type !== patch.media_type || fresh.season_number !== patch.season_number) {
       showError('This row changed somewhere else before the match was saved, so nothing was matched. Reload the page and try again.');
       return;
     }
     Object.assign(row, fresh);
   } catch(e) {
-    showError(isDuplicateKeyError(e)
-      ? 'That TMDB title was added to this list somewhere else just now, so nothing was changed. Reload the page to see it.'
-      : e.message);
+    showError(/not_found: unidentified row|match_conflict: the row changed/.test(String(e.message))
+      ? 'This row changed somewhere else before the match was saved, so nothing was matched. Reload the page and try again.'
+      : isDuplicateKeyError(e)
+        ? 'That TMDB title was added to this list somewhere else just now, so nothing was changed. Reload the page to see it.'
+        : e.message);
     return;
   }
 
   // A matched series is tracked for "Refresh shows", like one added from TMDB. Skip the
   // insert when it's already tracked here; the unique key still covers a race.
-  if (patch.media_type === 'tv') {
+  if (patch.media_type === 'tv' && !viaShowFunction) {
     try {
       const tracked = await sbFetch('GET', `othertv_shows?collection=eq.${encodeURIComponent(row.collection)}&tmdb_id=eq.${patch.tmdb_id}&select=id`, null);
       if (!tracked || tracked.length === 0) {

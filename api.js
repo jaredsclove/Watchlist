@@ -72,6 +72,54 @@ async function fetchAllRows(table, filter, select = '*') {
   return allRows;
 }
 
+// ─── TV structural writes (TV-show migration, Phase 2: shadow) ───────────────
+// TV seasons are added, matched and deleted through database functions that
+// keep every season linked to its show in tv_shows. The season's own status is
+// still the app's source of truth; these functions never change a status.
+// Mirrors private.tv_collections() and private.tv_is_tv_row() in db/tv_model.sql.
+const TV_COLLECTION_IDS = ['disney', '90day', 'sheridan', 'othertv', 'truecrime'];
+function isTvCollection(collectionId) {
+  return TV_COLLECTION_IDS.includes(collectionId);
+}
+function isTvSeasonRow(collectionId, mediaType, season) {
+  return isTvCollection(collectionId) && (mediaType === 'tv' || (mediaType == null && (season || '') !== 'Film'));
+}
+// The show a legacy (unidentified) season belongs to: private.tv_show_key().
+function tvShowKey(collectionId, itemKey) {
+  const prefix = String(itemKey || '').split('|')[0];
+  return SHOW_KEY_OVERRIDES[`${collectionId}|${prefix}`] || prefix;
+}
+function sbRpc(fn, args) {
+  return sbFetch('POST', `rpc/${fn}`, args);
+}
+
+// Adds TV season rows (shaped like a direct watchlist_items insert) through
+// add_tv_seasons, one call per show; the function also registers an identified
+// show for Refresh shows. onInserted(rows) runs after each call, so rows already
+// added stay in the page if a later call fails. Returns the number of requested
+// seasons that were already on the list (the database adds none of those).
+async function addTvSeasonRows(collectionId, rows, onInserted) {
+  const groups = new Map();
+  for (const r of rows) {
+    const showKey = r.tmdb_id != null ? r.item_key.slice(0, r.item_key.lastIndexOf('|')) : tvShowKey(collectionId, r.item_key);
+    const id = r.tmdb_id != null ? `tmdb:${r.tmdb_id}` : `key:${showKey}`;
+    if (!groups.has(id)) {
+      groups.set(id, { show: { tmdb_id: r.tmdb_id ?? null, title: r.title, show_key: showKey, network: r.theme || '' }, seasons: [] });
+    }
+    groups.get(id).seasons.push({
+      item_key: r.item_key, title: r.title, season: r.season, theme: r.theme, display_date: r.display_date,
+      date_sort: r.date_sort, season_number: r.tmdb_id != null ? r.season_number : null
+    });
+  }
+  let alreadyListed = 0;
+  for (const g of groups.values()) {
+    const res = await sbRpc('add_tv_seasons', { p_collection: collectionId, p_show: g.show, p_seasons: g.seasons });
+    alreadyListed += (res.existing || []).length + (res.rejected || []).length;
+    if (res.inserted && res.inserted.length) onInserted(res.inserted);
+  }
+  return alreadyListed;
+}
+
 async function tmdbFetch(path) {
   const res = await fetch(`${TMDB_BASE}${path}`, {
     headers: {

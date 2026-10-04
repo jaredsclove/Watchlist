@@ -44,6 +44,10 @@ function makeEnv({ rows = [], tab = 'movies', tmdb = () => ({}), db = {} } = {})
       }
       log.writes.push({ method, path: p, body: body ? copy(body) : null });
       if (db.fail && db.fail(method, p)) throw db.fail(method, p);
+      if (p === 'rpc/match_tv_row') {
+        const row = rows.find(r => r.id === body.p_row_id);
+        return { blocked: false, row: { ...row, ...body.p_patch, show_id: 'show-silo' }, show_id: 'show-silo' };
+      }
       if (method === 'PATCH') { const id = p.match(/id=eq\.([^&]+)/)[1]; db.afterPatch = rows.map(r => r.id === id ? { ...r, ...body } : r); }
       return null;
     },
@@ -52,6 +56,9 @@ function makeEnv({ rows = [], tab = 'movies', tmdb = () => ({}), db = {} } = {})
   ctx.window = ctx;
   vm.createContext(ctx);
   for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'), ctx);
+  // The TV-write helpers from api.js (isTvCollection, sbRpc, …), without its sbFetch.
+  const api = fs.readFileSync(path.join(__dirname, '..', 'api.js'), 'utf8');
+  vm.runInContext(api.slice(api.indexOf('// ─── TV structural writes'), api.indexOf('async function tmdbFetch')), ctx);
   ctx.showSaved = () => { log.saved++; };
   ctx.cancelTMDBPreview = () => {}; // the real one (tmdb-search.js) needs a DOM
   const text = id => el(id).innerHTML.replace(/<[^>]+>/g, ' ').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
@@ -227,25 +234,50 @@ async function matchSiloS1(db) {
   await env.ctx.confirmTmdbMatch();
   return { row, env, writes: env.log.writes.map(w => `${w.method} ${w.path.split('?')[0]}`) };
 }
-test('confirm TV season, show already tracked here → PATCH only, 0 tracking inserts, no error', async () => {
-  const { row, env, writes } = await matchSiloS1({ tracked: [{ id: 't1' }] });
-  assert.deepStrictEqual(writes, ['PATCH watchlist_items']);
-  assert.deepStrictEqual([row.tmdb_id, row.season_number, row.season, row.title], [125988, 1, 'Season 1', 'Silo']);
+test('confirm TV season on a TV tab → one match_tv_row call with the exact patch and target; the database tracks the show; no other write', async () => {
+  const { row, env, writes } = await matchSiloS1({});
+  assert.deepStrictEqual(writes, ['POST rpc/match_tv_row']);
+  const call = env.log.writes[0].body;
+  assert.strictEqual(call.p_row_id, 'row-1');
+  assert.deepStrictEqual(call.p_target, { tmdb_id: 125988, network: 'Apple TV' });
+  assert.deepStrictEqual(call.p_patch, copy(env.ctx.buildTmdbMatchPatch(manual({ collection: 'othertv' }), { mediaType: 'tv', details: SILO, seasonNumber: 1 }, false)));
+  assert.deepStrictEqual([row.tmdb_id, row.season_number, row.season, row.title, row.show_id], [125988, 1, 'Season 1', 'Silo', 'show-silo']);
   assert.strictEqual(env.banner(), '');
   assert.strictEqual(env.log.saved, 1);
 });
-test('confirm TV season, show not tracked → exactly 1 tracking insert with the canonical values', async () => {
-  const { env, writes } = await matchSiloS1({ tracked: [] });
-  assert.deepStrictEqual(writes, ['PATCH watchlist_items', 'POST othertv_shows']);
-  assert.deepStrictEqual(env.log.writes[1].body, [{ tmdb_id: 125988, title: 'Silo', network: 'Apple TV', collection: 'othertv' }]);
-  assert.strictEqual(env.banner(), '');
+test('confirm TV season, the database finds a conflict (match_conflict 23505) → friendly message, row untouched, no Saved', async () => {
+  const conflict = new Error('Supabase error 409: {"code":"23505","message":"match_conflict: identity already on the list as row x"}');
+  const { row, env } = await matchSiloS1({ fail: (m, p) => (p === 'rpc/match_tv_row' ? conflict : null) });
+  assert.strictEqual(row.tmdb_id, null);
+  assert.ok(env.banner().includes('added to this list somewhere else'), env.banner());
+  assert.strictEqual(env.log.saved, 0);
 });
-test('confirm TV season, race: not tracked when checked but the insert hits 23505 → still harmless, no error', async () => {
-  const { row, env, writes } = await matchSiloS1({ tracked: [], fail: (m, p) => (m === 'POST' && p === 'othertv_shows') ? dup() : null });
-  assert.deepStrictEqual(writes, ['PATCH watchlist_items', 'POST othertv_shows']);
-  assert.strictEqual(row.tmdb_id, 125988);
-  assert.strictEqual(env.banner(), '');
+test('confirm TV season, the row was matched elsewhere (not_found) → "changed somewhere else", no Saved', async () => {
+  const gone = new Error('Supabase error 404: {"code":"P0002","message":"not_found: unidentified row"}');
+  const { row, env } = await matchSiloS1({ fail: (m, p) => (p === 'rpc/match_tv_row' ? gone : null) });
+  assert.strictEqual(row.tmdb_id, null);
+  assert.ok(env.banner().includes('changed somewhere else'), env.banner());
+  assert.strictEqual(env.log.saved, 0);
+});
+test('confirm film for a row linked as a TV season → the guarded PATCH also unlinks it (films never link to a show)', async () => {
+  const row = manual({ collection: 'truecrime', show_id: 'show-legacy' });
+  const env = makeEnv({ tab: 'truecrime', rows: [row], tmdb: searchStub });
+  await openAndSearch(env);
+  await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
+  await env.ctx.confirmTmdbMatch();
+  const patch = env.log.writes.find(w => w.method === 'PATCH');
+  assert.strictEqual(patch.body.show_id, null);
+  assert.strictEqual(patch.body.media_type, 'movie');
+  assert.strictEqual(row.show_id, null);
   assert.strictEqual(env.log.saved, 1);
+});
+test('confirm film for an unlinked row → the PATCH carries no show_id at all', async () => {
+  const row = manual({ collection: 'truecrime', show_id: null });
+  const env = makeEnv({ tab: 'truecrime', rows: [row], tmdb: searchStub });
+  await openAndSearch(env);
+  await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
+  await env.ctx.confirmTmdbMatch();
+  assert.ok(!('show_id' in env.log.writes.find(w => w.method === 'PATCH').body));
 });
 test('6b. confirm when the database already has the target identity → no write, clear message', async () => {
   const row = manual();

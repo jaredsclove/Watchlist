@@ -43,6 +43,182 @@ function response(status, body, headers = {}) {
   };
 }
 
+// The browser-facing TV functions of db/rpc.sql as they behave in the shadow
+// stage, written independently of the app's helpers so the tests can catch an
+// app/database mismatch. Shows live in store.tv_shows when the fake database
+// has that table, otherwise in app.shows. Errors answer like PostgREST.
+const TV_COLLECTIONS = ['disney', '90day', 'sheridan', 'othertv', 'truecrime'];
+const SHOW_KEY_OVERRIDE = { 'disney|the clone wars': 'star wars: the clone wars (2008)' };
+const sqlShowKey = (collection, itemKey) => {
+  const prefix = String(itemKey || '').split('|')[0];
+  return SHOW_KEY_OVERRIDE[`${collection}|${prefix}`] || prefix;
+};
+const isTvRow = r => TV_COLLECTIONS.includes(r.collection) && (r.media_type === 'tv' || (r.media_type == null && (r.season || '') !== 'Film'));
+const validDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+class DbError extends Error {
+  constructor(code, message) { super(message); this.code = code; }
+}
+const HTTP_FOR = { '22023': 400, '23505': 409, P0002: 404, '23000': 409, '40001': 409, '55000': 400 };
+
+function shadowTvFunctions(app, store, newId) {
+  app.shows = [];
+  const shows = () => store.tv_shows || app.shows;
+  const items = () => store.watchlist_items;
+  const seasonLabel = n => (n === 0 ? 'Specials' : `Season ${n}`);
+  function lockOrCreateShow(collection, tmdbId, showKey, title, status) {
+    let s = shows().find(x => x.collection === collection && (tmdbId != null ? x.tmdb_id === tmdbId : x.tmdb_id == null && x.show_key === showKey));
+    if (s) return { show: s, created: false };
+    s = { id: newId(), collection, title, show_key: showKey, tmdb_id: tmdbId, status };
+    shows().push(s);
+    return { show: s, created: true };
+  }
+  function insertRow(fields) {
+    const r = { id: newId(), watched: false, media_type: null, tmdb_id: null, season_number: null, show_id: null, skipped: false, ...fields };
+    items().push(r);
+    return r;
+  }
+  function track(collection, tmdbId, title, network) {
+    if (!store.othertv_shows.some(o => o.collection === collection && o.tmdb_id === tmdbId)) {
+      store.othertv_shows.push({ id: newId(), tmdb_id: tmdbId, title, network, collection });
+    }
+  }
+  const handlers = {
+    add_tv_seasons({ p_collection: coll, p_show: show, p_seasons: seasons }) {
+      const tmdb = show.tmdb_id ?? null;
+      const key = show.show_key || '';
+      if (!TV_COLLECTIONS.includes(coll)) throw new DbError('22023', `invalid_input: ${coll} is not a TV collection`);
+      if (!String(show.title || '').trim() || !key.trim()) throw new DbError('22023', 'invalid_input: show title and show_key are required');
+      if (!Array.isArray(seasons) || !seasons.length) throw new DbError('22023', 'invalid_input: seasons must be a non-empty list');
+      const seen = new Set();
+      for (const s of seasons) {
+        if (!s.item_key || !String(s.title || '').trim() || !String(s.season || '').trim() || !validDate(s.date_sort)) {
+          throw new DbError('22023', `invalid_input: season ${JSON.stringify(s)}`);
+        }
+        let ident;
+        if (tmdb != null) {
+          const n = s.season_number;
+          if (!Number.isInteger(n) || n < 0 || s.season !== seasonLabel(n) || s.item_key !== `${key}|${seasonLabel(n).toLowerCase()}`) {
+            throw new DbError('22023', `invalid_input: season ${JSON.stringify(s)} does not match its number and show`);
+          }
+          ident = String(n);
+        } else {
+          if (s.season_number != null) throw new DbError('22023', 'invalid_input: a legacy season has no season_number');
+          if (s.season === 'Film' || sqlShowKey(coll, s.item_key) !== key) throw new DbError('22023', `invalid_input: season ${s.item_key} does not belong to show ${key}`);
+          ident = s.item_key;
+        }
+        if (seen.has(ident)) throw new DbError('22023', `invalid_input: season ${ident} requested twice`);
+        seen.add(ident);
+      }
+      const { show: target, created } = lockOrCreateShow(coll, tmdb, key, show.title.trim(), show.initial_status || 'confirmed');
+      const inserted = [], existing = [], rejected = [];
+      for (const s of seasons) {
+        const found = items().find(r => r.collection === coll && (tmdb != null
+          ? r.media_type === 'tv' && r.tmdb_id === tmdb && r.season_number === s.season_number
+          : r.tmdb_id == null && r.item_key === s.item_key));
+        if (found) {
+          if (found.show_id != null && found.show_id !== target.id) throw new DbError('23000', 'integrity_fault: season is linked to a different show');
+          existing.push({ season_number: s.season_number ?? null, item_key: found.item_key, id: found.id });
+          continue;
+        }
+        const other = items().find(r => r.collection === coll && r.item_key === s.item_key && (tmdb != null ? r.tmdb_id == null : r.tmdb_id != null));
+        if (other) {
+          rejected.push({ season_number: s.season_number ?? null, item_key: s.item_key,
+            reason: tmdb != null ? 'legacy_row_same_key' : 'identified_row_same_key', conflicting_row_id: other.id });
+          continue;
+        }
+        inserted.push(insertRow({ collection: coll, item_key: s.item_key, title: s.title, season: s.season, theme: s.theme || '',
+          display_date: s.display_date || '', date_sort: s.date_sort, status: 'confirmed', show_id: target.id,
+          ...(tmdb != null ? { media_type: 'tv', tmdb_id: tmdb, season_number: s.season_number } : {}) }));
+      }
+      if (tmdb != null) track(coll, tmdb, show.title.trim(), show.network || '');
+      return { show_id: target.id, show_created: created, inserted: clone(inserted), existing, rejected, reopened: false, show_status: target.status };
+    },
+    seed_tv_defaults({ p_collection: coll, p_defaults: defs }) {
+      if (!TV_COLLECTIONS.includes(coll)) throw new DbError('22023', `invalid_input: ${coll} is not a TV collection`);
+      const keys = new Set();
+      for (const d of defs) {
+        if (!String(d.k || '').includes('|') || !String(d.t || '').trim() || !String(d.s || '').trim() || !validDate(d.ds)
+            || ('p' in d && typeof d.p !== 'boolean')) throw new DbError('22023', `invalid_input: default ${JSON.stringify(d)}`);
+        if (keys.has(d.k)) throw new DbError('22023', `invalid_input: default ${d.k} listed twice`);
+        keys.add(d.k);
+      }
+      const missing = d => !items().some(r => r.collection === coll && r.tmdb_id == null && r.item_key === d.k);
+      const rowFields = d => ({ collection: coll, item_key: d.k, title: d.t, season: d.s, theme: d.th || '', display_date: d.d || '',
+        date_sort: d.ds, status: d.p ? 'pending' : 'confirmed' });
+      const inserted = [];
+      let showsCreated = 0;
+      const groups = new Map();
+      for (const d of defs) {
+        if (d.s === 'Film') continue;
+        const k = sqlShowKey(coll, d.k);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(d);
+      }
+      for (const [k, ds] of groups) {
+        const todo = ds.filter(missing);
+        if (!todo.length) continue;
+        const title = (ds.find(d => d.k.split('|')[0] === k) || ds[0]).t;
+        const { show, created } = lockOrCreateShow(coll, null, k, title, ds.every(d => d.p === true) ? 'pending' : 'confirmed');
+        if (created) showsCreated++;
+        for (const d of todo) inserted.push(insertRow({ ...rowFields(d), show_id: show.id }));
+      }
+      for (const d of defs) if (d.s === 'Film' && missing(d)) inserted.push(insertRow(rowFields(d)));
+      inserted.sort((a, b) => a.date_sort.localeCompare(b.date_sort) || a.item_key.localeCompare(b.item_key));
+      return { inserted: clone(inserted), shows_created: showsCreated, reopened: [], conflicts: [] };
+    },
+    delete_tv_season({ p_row_id: id }) {
+      const r = items().find(x => x.id === id && isTvRow(x));
+      if (!r) throw new DbError('P0002', 'not_found: TV season');
+      store.watchlist_items = items().filter(x => x.id !== id);
+      const show = shows().find(s => s.id === r.show_id);
+      let showDeleted = false;
+      if (show && !items().some(x => x.show_id === show.id)) {
+        shows().splice(shows().indexOf(show), 1);
+        showDeleted = true;
+        if (show.tmdb_id != null) store.othertv_shows = store.othertv_shows.filter(o => !(o.collection === show.collection && o.tmdb_id === show.tmdb_id));
+      }
+      return { deleted_row_id: id, show_id: show ? show.id : null, show_deleted: showDeleted };
+    },
+    match_tv_row({ p_row_id: id, p_target: target, p_patch: patch }) {
+      const tmdb = target.tmdb_id, n = patch.season_number;
+      const key = String(patch.title || '').trim().toLowerCase();
+      if (!Number.isInteger(tmdb) || !Number.isInteger(n) || n < 0 || !key || patch.media_type !== 'tv' || patch.tmdb_id !== tmdb
+          || patch.season !== seasonLabel(n) || patch.item_key !== `${key}|${seasonLabel(n).toLowerCase()}` || !validDate(patch.date_sort)) {
+        throw new DbError('22023', `invalid_input: match patch ${JSON.stringify(patch)}`);
+      }
+      const r = items().find(x => x.id === id && TV_COLLECTIONS.includes(x.collection) && x.tmdb_id == null && x.media_type == null && x.season_number == null);
+      if (!r) throw new DbError('P0002', 'not_found: unidentified row');
+      const c1 = items().find(x => x.collection === r.collection && x.media_type === 'tv' && x.tmdb_id === tmdb && x.season_number === n);
+      if (c1) throw new DbError('23505', `match_conflict: identity already on the list as row ${c1.id}`);
+      const c2 = items().find(x => x.collection === r.collection && x.tmdb_id == null && x.item_key === patch.item_key && x.id !== r.id);
+      if (c2) throw new DbError('23505', `match_conflict: item_key already used by row ${c2.id}`);
+      const legacy = shows().find(s => s.id === r.show_id) || null;
+      const t = shows().find(s => s.collection === r.collection && s.tmdb_id === tmdb);
+      let targetId;
+      if (t) targetId = t.id;
+      else if (legacy && !items().some(x => x.show_id === legacy.id && x.id !== r.id)) {
+        Object.assign(legacy, { tmdb_id: tmdb, title: patch.title.trim(), show_key: key });
+        targetId = legacy.id;
+      } else {
+        targetId = newId();
+        shows().push({ id: targetId, collection: r.collection, title: patch.title.trim(), show_key: key, tmdb_id: tmdb, status: legacy ? legacy.status : 'confirmed' });
+      }
+      Object.assign(r, { title: patch.title, season: patch.season, item_key: patch.item_key, theme: patch.theme ?? r.theme,
+        display_date: patch.display_date ?? r.display_date, date_sort: patch.date_sort, media_type: 'tv', tmdb_id: tmdb, season_number: n, show_id: targetId });
+      if (legacy && legacy.id !== targetId && !items().some(x => x.show_id === legacy.id)) shows().splice(shows().indexOf(legacy), 1);
+      track(r.collection, tmdb, patch.title.trim(), target.network ?? patch.theme ?? '');
+      return { blocked: false, row: clone(r), show_id: targetId };
+    }
+  };
+  return Object.fromEntries(Object.entries(handlers).map(([name, fn]) => [name, body => {
+    try { return response(200, fn(body)); }
+    catch (e) {
+      if (!(e instanceof DbError)) throw e;
+      return response(HTTP_FOR[e.code] || 400, { code: e.code, details: null, hint: null, message: e.message });
+    }
+  }]));
+}
+
 // options:
 //   rows:    initial watchlist_items rows (the fake database)
 //   tmdb:    path => response body for TMDB requests (default: 404)
@@ -118,7 +294,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = null, customC
       const tables = body.p_backup.tables;
       for (const t of Object.keys(tables)) store[t] = clone(tables[t]);
       return response(200, { restored: Object.fromEntries(Object.keys(tables).map(t => [t, tables[t].length])) });
-    }
+    },
+    ...shadowTvFunctions(app, store, () => `new-${nextId++}`)
   };
 
   async function fetchStub(url, opts = {}) {

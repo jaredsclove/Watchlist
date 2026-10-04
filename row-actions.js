@@ -126,7 +126,17 @@ async function delRow(id) {
   const [removed] = td.rows.splice(idx, 1);
   renderTable();
   try {
-    await sbFetch('DELETE', `${TABLE}?id=eq.${id}`, null);
+    if (isTvSeasonRow(removed.collection, removed.media_type, removed.season)) {
+      // delete_tv_season also removes the show once its last season is gone.
+      // A season already deleted elsewhere counts as deleted, like a plain DELETE.
+      try {
+        await sbRpc('delete_tv_season', { p_row_id: id });
+      } catch(e) {
+        if (!String(e.message).includes('not_found:')) throw e;
+      }
+    } else {
+      await sbFetch('DELETE', `${TABLE}?id=eq.${id}`, null);
+    }
     showSaved();
   } catch(e) {
     td.rows.splice(idx, 0, removed);
@@ -178,7 +188,14 @@ async function addEntry() {
     status: 'confirmed'
   };
   try {
-    const inserted = await sbFetch('POST', TABLE, [newRow]);
+    let inserted = null;
+    if (isTvSeasonRow(collectionId, null, season)) {
+      // A TV season joins its show (by show key) through add_tv_seasons.
+      const alreadyListed = await addTvSeasonRows(collectionId, [newRow], rows => { inserted = rows; });
+      if (alreadyListed > 0) { showError('This title and season is already on your list.'); return; }
+    } else {
+      inserted = await sbFetch('POST', TABLE, [newRow]);
+    }
     const td = tabData[collectionId];
     if (inserted && inserted[0] && td) {
       td.rows.push(inserted[0]);

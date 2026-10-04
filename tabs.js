@@ -127,7 +127,13 @@ async function loadTab(collectionId) {
       }
     }
 
-    if (toInsert.length > 0) {
+    if (toInsert.length > 0 && isTvCollection(collectionId)) {
+      // Only the defaults found missing above, so the rule for "missing" stays
+      // exactly this one; seed_tv_defaults links each new season to its show.
+      const missing = new Set(newKeys);
+      const res = await sbRpc('seed_tv_defaults', { p_collection: collectionId, p_defaults: col.defaults.filter(d => missing.has(d.k)) });
+      rows.push(...(res.inserted || []));
+    } else if (toInsert.length > 0) {
       const inserted = await sbFetch('POST', TABLE, toInsert);
       if (inserted) rows.push(...inserted);
     }

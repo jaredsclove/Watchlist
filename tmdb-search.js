@@ -281,14 +281,22 @@ async function addSelectedTMDBSeasons() {
 
   if (toInsert.length === 0) { cancelTMDBPreview(); return; }
 
+  // TV seasons on a TV tab go through add_tv_seasons, which links them to their
+  // show and registers the show for Refresh shows in the same transaction.
+  const viaShowFunction = !isMovie && isTvCollection(collectionId);
+  let alreadyListed = 0;
   try {
-    const inserted = await sbFetch('POST', TABLE, toInsert);
-    if (inserted) tabData[collectionId]?.rows.push(...inserted);
+    if (viaShowFunction) {
+      alreadyListed = await addTvSeasonRows(collectionId, toInsert, inserted => tabData[collectionId]?.rows.push(...inserted));
+    } else {
+      const inserted = await sbFetch('POST', TABLE, toInsert);
+      if (inserted) tabData[collectionId]?.rows.push(...inserted);
+    }
     tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
     // track this show for future refresh lookups (TV shows only — a film has no future seasons)
     // scoped by collection so refresh on one tab doesn't pull in shows from another
-    if (!isMovie) {
+    if (!isMovie && !viaShowFunction) {
       try {
         await sbFetch('POST', 'othertv_shows', [{
           tmdb_id: showId, title: showName, network, collection: collectionId
@@ -310,7 +318,12 @@ async function addSelectedTMDBSeasons() {
       renderFilters();
       renderTable();
     }
+    if (alreadyListed > 0) showError(duplicateInsertMessage('try searching again for a fresh check'));
   } catch(e) {
+    if (viaShowFunction) {
+      tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+      if (activeTabId === collectionId) renderTable();
+    }
     if (isDuplicateKeyError(e)) {
       showError(duplicateInsertMessage('try searching again for a fresh check'));
     } else {

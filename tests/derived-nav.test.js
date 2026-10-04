@@ -9,6 +9,7 @@ const { createApp, runner, settle } = require('./app-harness');
 
 const T = runner('derived-nav');
 const test = T.test;
+const copyOut = v => JSON.parse(JSON.stringify(v));
 
 function day(offset) {
   const d = new Date();
@@ -127,8 +128,16 @@ test('real collection tabs still load (and static tabs still seed) as before', a
   await openTab(app, 'disney');
   const posts = app.writes().filter(r => r.method === 'POST');
   assert.strictEqual(posts.length, 1, 'opening Disney+ seeds its defaults');
-  assert.strictEqual(posts[0].body.length, defaults);
-  assert.ok(posts[0].body.every(b => b.collection === 'disney'));
+  assert.ok(posts[0].url.endsWith('/rpc/seed_tv_defaults'), 'TV defaults are seeded through seed_tv_defaults');
+  assert.strictEqual(posts[0].body.p_collection, 'disney');
+  assert.strictEqual(posts[0].body.p_defaults.length, defaults);
+  // Every default lands once, TV seasons linked to a show, films unlinked, today's row statuses.
+  const seeded = app.store.watchlist_items.filter(r => r.collection === 'disney');
+  assert.strictEqual(seeded.length, defaults);
+  assert.strictEqual(app.get('tabData.disney.rows.length'), defaults);
+  assert.ok(seeded.every(r => (r.season === 'Film') === (r.show_id == null)));
+  const byKey = new Map(app.get("COLLECTIONS.find(c => c.id === 'disney').defaults").map(d => [d.k, d]));
+  assert.ok(seeded.every(r => r.status === (byKey.get(r.item_key).p ? 'pending' : 'confirmed')));
   assert.strictEqual(app.get('activeViewId'), null);
   assert.ok(app.el('tabBar').innerHTML.includes('class="tab active" onclick="switchTab(\'disney\')"'));
   assert.ok(app.el('tableHead').innerHTML.includes('Show &amp; Season'));
@@ -248,7 +257,8 @@ test('guard: addRefreshedSeasons → view mid-POST: inserts into othertv, still 
   app.ctx.switchView('watching'); await settle();
   g.release(); await done; await settle();
   const post = app.writes().find(r => r.method === 'POST');
-  assert.strictEqual(post.body[0].collection, 'othertv');
+  assert.ok(post.url.endsWith('/rpc/add_tv_seasons'));
+  assert.strictEqual(post.body.p_collection, 'othertv');
   assert.ok(app.writes().some(r => r.method === 'PATCH' && r.url.includes('id=eq.ex1') && r.body.date_sort === '2027-01-05'), 'date PATCH not skipped');
   assert.strictEqual(app.get('tabData.othertv.rows.length'), 2);
   assertViewIntact(app);
@@ -276,16 +286,18 @@ test('guard: addSelectedTMDBSeasons → view mid-POST: inserts and registers the
   app.run(`tmdbSelectedShow = { id: 55, name: 'New Show', mediaType: 'tv', details: { networks: [{ name: 'HBO' }], seasons: [{ season_number: 1, air_date: '2026-01-01' }] } };`);
   const prev = app.addEl('tmdbInlinePreview');
   prev.querySelectorAll = sel => (sel === 'input[type="checkbox"][data-season]' ? [{ checked: true, disabled: false, dataset: { season: '1' } }] : []);
-  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/watchlist_items'));
+  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/add_tv_seasons'));
   const done = app.ctx.addSelectedTMDBSeasons();
   await g.reached;
   app.ctx.switchView('watching'); await settle(); // clears tmdbSelectedShow
   g.release(); await done; await settle();
   const posts = app.writes().filter(r => r.method === 'POST');
-  assert.strictEqual(posts[0].body[0].collection, 'othertv');
-  assert.strictEqual(posts[0].body[0].tmdb_id, 55);
-  assert.deepStrictEqual(posts[1].body, [{ tmdb_id: 55, title: 'New Show', network: 'HBO', collection: 'othertv' }], 'tracked for Refresh shows');
+  assert.strictEqual(posts.length, 1, 'one add_tv_seasons call; the function registers the show itself');
+  assert.strictEqual(posts[0].body.p_collection, 'othertv');
+  assert.deepStrictEqual(copyOut(posts[0].body.p_show), { tmdb_id: 55, title: 'New Show', show_key: 'new show', network: 'HBO' });
+  assert.deepStrictEqual(app.store.othertv_shows.map(({ id, ...o }) => o), [{ tmdb_id: 55, title: 'New Show', network: 'HBO', collection: 'othertv' }], 'tracked for Refresh shows');
   assert.strictEqual(app.get('tabData.othertv.rows.length'), 1);
+  assert.ok(app.get('tabData.othertv.rows[0].show_id'), 'the new season is linked to its show');
   assertViewIntact(app);
 });
 
@@ -322,18 +334,20 @@ for (const [name, setup, selector, box] of [
   });
 }
 
-test('guard: confirmTmdbMatch → view mid-PATCH: row matched in place, show tracked, no redraw', async () => {
+test('guard: confirmTmdbMatch → view mid-match: row matched in place, show tracked, no redraw', async () => {
   const app = await createApp({ rows: [tv({ id: 'u1', title: 'Manual', media_type: null, tmdb_id: null, season_number: null, item_key: 'manual|season 1' })] });
   await openTab(app, 'othertv');
   app.run(`window.__tmdbMatch = { rowId: 'u1', results: [], target: { mediaType: 'tv', seasonNumber: 1, details: { id: 77, name: 'Matched Show', networks: [{ name: 'HBO' }], seasons: [{ season_number: 1, air_date: '2020-01-01' }] } } };`);
-  const g = app.hold(r => r.method === 'PATCH');
+  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/match_tv_row'));
   const done = app.ctx.confirmTmdbMatch();
   await g.reached;
   app.ctx.switchView('watching'); await settle();
   g.release(); await done; await settle();
-  assert.ok(app.writes().some(r => r.method === 'PATCH' && r.url.includes('id=eq.u1&tmdb_id=is.null')));
+  assert.deepStrictEqual(app.writes().map(r => r.url.split('/rest/v1/')[1]), ['rpc/match_tv_row'], 'one function call, no direct writes');
+  assert.strictEqual(app.writes()[0].body.p_row_id, 'u1');
   assert.strictEqual(rowIn(app, 'tabData.othertv.rows', 'u1').tmdb_id, 77);
-  assert.ok(app.writes().some(r => r.method === 'POST' && r.url.endsWith('/othertv_shows') && r.body[0].collection === 'othertv'));
+  assert.ok(rowIn(app, 'tabData.othertv.rows', 'u1').show_id, 'linked to the identified show');
+  assert.ok(app.store.othertv_shows.some(o => o.tmdb_id === 77 && o.collection === 'othertv'), 'tracked for Refresh shows');
   assert.strictEqual(app.get('window.__tmdbMatch'), null);
   assertViewIntact(app);
 });
@@ -352,7 +366,8 @@ test('guard: addEntry → view mid-POST: inserts into othertv without touching t
   assert.strictEqual(app.el('addToggleBtn'), null);
   g.release(); await done; await settle();
   const post = app.writes().find(r => r.method === 'POST');
-  assert.strictEqual(post.body[0].collection, 'othertv');
+  assert.ok(post.url.endsWith('/rpc/add_tv_seasons'));
+  assert.strictEqual(post.body.p_collection, 'othertv');
   assert.strictEqual(app.get('tabData.othertv.rows.length'), 1);
   assertViewIntact(app);
 });
