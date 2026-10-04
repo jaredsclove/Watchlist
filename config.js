@@ -371,6 +371,14 @@ const COLLECTIONS = [
 
 const WATCH_WITH_OPTIONS = ['Alone', 'Suzanne', 'Rina', 'Whole Family'];
 
+// Reviewed show-key overrides for built-in rows: "collection|item_key prefix" →
+// the show the row belongs to. Used by the TV-show model (not read by the app yet);
+// must match private.tv_show_key_override in db/tv_model.sql and
+// tests/tv-model-reference.js. Add entries only after review — never by title guessing.
+const SHOW_KEY_OVERRIDES = {
+  'disney|the clone wars': 'star wars: the clone wars (2008)'
+};
+
 // Each entry carries its verified TMDB movie id, so pullUniverse() fetches the
 // exact film instead of guessing from a title search. A plain-string entry
 // (title only) is still accepted, but it only resolves when the search result

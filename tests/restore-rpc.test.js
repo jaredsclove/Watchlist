@@ -40,7 +40,7 @@ test('restore is one rpc/restore_backup call with the whole backup; no table del
   assert.strictEqual(writes.length, 1);
   assert.ok(writes[0].url.endsWith('/rest/v1/rpc/restore_backup'));
   assert.strictEqual(writes[0].method, 'POST');
-  assert.deepStrictEqual(writes[0].body, { p_backup: backup });
+  assert.deepStrictEqual(writes[0].body, { p_backup: backup, p_allow_v1_reset: false });
   assert.deepStrictEqual(app.store.watchlist_items.map(r => r.id), [uuid('b7')]);
   assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
 });

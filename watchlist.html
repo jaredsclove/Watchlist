@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261004-restore1">
+<link rel="stylesheet" href="styles.css?v=20261005-phase1a">
 </head>
 <body>
 
@@ -67,19 +67,19 @@
      deliberately unversioned (the catalog-refresh workflow reloads it by plain URL). -->
 <script src="config.js"></script>
 <script src="identity.js"></script>
-<script src="api.js?v=20261004-restore1"></script>
+<script src="api.js?v=20261005-phase1a"></script>
 <script src="ui-helpers.js"></script>
-<script src="backup-restore.js?v=20261004-restore1"></script>
-<script src="tabs.js?v=20261004-restore1"></script>
-<script src="render.js?v=20261004-restore1"></script>
-<script src="row-actions.js?v=20261004-restore1"></script>
-<script src="tmdb-search.js?v=20261004-restore1"></script>
-<script src="collections-pull.js?v=20261004-restore1"></script>
-<script src="universe-pull.js?v=20261004-restore1"></script>
-<script src="person-pull.js?v=20261004-restore1"></script>
-<script src="refresh-shows.js?v=20261004-restore1"></script>
-<script src="tmdb-match.js?v=20261004-restore1"></script>
-<script src="derived-views.js?v=20261004-restore1"></script>
+<script src="backup-restore.js?v=20261005-phase1a"></script>
+<script src="tabs.js?v=20261005-phase1a"></script>
+<script src="render.js?v=20261005-phase1a"></script>
+<script src="row-actions.js?v=20261005-phase1a"></script>
+<script src="tmdb-search.js?v=20261005-phase1a"></script>
+<script src="collections-pull.js?v=20261005-phase1a"></script>
+<script src="universe-pull.js?v=20261005-phase1a"></script>
+<script src="person-pull.js?v=20261005-phase1a"></script>
+<script src="refresh-shows.js?v=20261005-phase1a"></script>
+<script src="tmdb-match.js?v=20261005-phase1a"></script>
+<script src="derived-views.js?v=20261005-phase1a"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -165,6 +165,7 @@ let personCollectionNames = null; // custom_collections names: null = not loaded
 
 // ─── Restore flow ───────────────────────────────────────────────────────────
 let pendingRestoreData = null; // validated backup object, set once file passes checks
+let pendingRestoreAllowV1Reset = false; // true when a format-1 backup is restored into a format-2 database
 
 
 // ─── Boot ────────────────────────────────────────────────────────────────────

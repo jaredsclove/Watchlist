@@ -19,7 +19,7 @@ const clone = v => JSON.parse(JSON.stringify(v));
 // PostgREST-style filter over in-memory rows: eq., is.null, in.(...)
 function matches(row, params) {
   for (const [k, v] of params) {
-    if (k === 'select' || k === 'order') continue;
+    if (k === 'select' || k === 'order' || k === 'limit') continue;
     if (v === 'is.null') { if (row[k] != null) return false; continue; }
     if (v.startsWith('eq.')) { if (String(row[k]) !== v.slice(3)) return false; continue; }
     if (v.startsWith('in.(')) {
@@ -48,8 +48,11 @@ function response(status, body, headers = {}) {
 //   tmdb:    path => response body for TMDB requests (default: 404)
 //   width:   window.innerWidth (default 1200)
 //   countOverride: total reported in Content-Range (simulates a count mismatch)
-async function createApp({ rows = [], othertvShows = [], tmdb, width = 1200, countOverride = null } = {}) {
-  const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: [] };
+//   tvShows: tv_shows rows; when given, the fake database has the TV-show schema
+//            (backup format 2), otherwise tv_shows doesn't exist (format 1)
+async function createApp({ rows = [], othertvShows = [], tvShows = null, customCollections = [], tmdb, width = 1200, countOverride = null } = {}) {
+  const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
+  if (tvShows) store.tv_shows = clone(tvShows);
   const requests = [];
   const gates = [];
   const failures = [];
@@ -147,10 +150,18 @@ async function createApp({ rows = [], othertvShows = [], tmdb, width = 1200, cou
       return handler(body);
     }
     const rowsOf = store[table];
-    if (!rowsOf) throw new Error(`harness: unknown table ${table}`);
+    // Like PostgREST: a table that doesn't exist answers 404 PGRST205.
+    if (!rowsOf) return response(404, { code: 'PGRST205', message: `Could not find the table 'public.${table}' in the schema cache` });
 
     if (method === 'GET') {
       let found = rowsOf.filter(r => matches(r, params));
+      const select = u.searchParams.get('select');
+      if (select && select !== '*' && select !== 'id') {
+        const cols = select.split(',');
+        found = found.map(r => Object.fromEntries(cols.map(c => [c, r[c] === undefined ? null : r[c]])));
+      }
+      const limit = Number(u.searchParams.get('limit'));
+      if (limit) found = found.slice(0, limit);
       const range = req.headers.Range;
       if (range) {
         found = found.slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

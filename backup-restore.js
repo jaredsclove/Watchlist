@@ -15,19 +15,34 @@ function compareRowFields(expected, restored) {
   return diffFields;
 }
 
-// Fetches all rows from all three app tables and assembles the backup JSON object.
-// Does not write anything — pure read + build.
+// Which backup format the database holds: 2 once the TV-show schema exists
+// (tv_shows readable), otherwise 1. A read-only probe; any other answer is an error.
+async function detectBackupFormat() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/tv_shows?select=id&limit=1`, {
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+  });
+  if (res.ok) return 2;
+  const body = await res.text();
+  if (res.status === 404 && body.includes('PGRST205')) return 1;
+  throw new Error(`Couldn't tell which backup format this database uses: ${res.status} ${body}`);
+}
+
+// Fetches every row of every table in the database's backup format, asking for the
+// format's exact columns (never user_id: a backup is list content, not ownership),
+// and assembles the backup JSON object. Does not write anything.
 async function buildBackupObject() {
+  const formatVersion = await detectBackupFormat();
+  const spec = BACKUP_FORMATS[formatVersion];
   const tables = {};
   const rowCounts = {};
-  for (const table of BACKUP_TABLES) {
-    const rows = await fetchAllRows(table);
+  for (const table of spec.tables) {
+    const rows = await fetchAllRows(table, null, Object.keys(spec.columns[table]).join(','));
     tables[table] = rows;
     rowCounts[table] = rows.length;
   }
   return {
     format: BACKUP_FORMAT,
-    formatVersion: BACKUP_FORMAT_VERSION,
+    formatVersion,
     exportedAt: new Date().toISOString(),
     rowCounts,
     tables
@@ -51,10 +66,6 @@ function timestampForFilename() {
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
 }
-
-// Deletes every row in a table. Supabase requires a filter on DELETE (no filter
-// = rejected), so we match "id is not null", which is true for every row since
-// id is NOT NULL on all three tables.
 
 // ─── Collection definitions ───────────────────────────────────────────────────
 
@@ -86,12 +97,15 @@ function validateBackupObject(obj) {
   const errors = [];
   if (!obj || typeof obj !== 'object') { errors.push('File does not contain a JSON object.'); return errors; }
   if (obj.format !== BACKUP_FORMAT) errors.push(`Unrecognized backup format ("${obj.format}") — this doesn't look like a Watchlist Tracker backup file.`);
-  if (typeof obj.formatVersion !== 'number' || obj.formatVersion > BACKUP_FORMAT_VERSION) errors.push(`Unsupported backup format version (${obj.formatVersion}).`);
+  const spec = BACKUP_FORMATS[obj.formatVersion];
+  if (!spec) { errors.push(`Unsupported backup format version (${obj.formatVersion}).`); return errors; }
   if (!obj.exportedAt || isNaN(Date.parse(obj.exportedAt))) errors.push('Missing or invalid export timestamp.');
   if (!obj.tables || typeof obj.tables !== 'object') { errors.push('Missing "tables" section.'); return errors; }
+  const unexpected = Object.keys(obj.tables).filter(t => !spec.tables.includes(t));
+  if (unexpected.length) errors.push(`Unexpected table(s) for format ${obj.formatVersion}: ${unexpected.join(', ')}.`);
   const hasRowCounts = obj.rowCounts && typeof obj.rowCounts === 'object' && !Array.isArray(obj.rowCounts);
   if (!hasRowCounts) errors.push('Missing "rowCounts" section, so the file can\'t be checked for completeness.');
-  for (const table of BACKUP_TABLES) {
+  for (const table of spec.tables) {
     if (!Array.isArray(obj.tables[table])) {
       errors.push(`Missing or invalid data for table "${table}".`);
       continue;
@@ -114,7 +128,7 @@ function validateBackupObject(obj) {
     errors.push('This backup predates the TMDB identity migration: its watchlist_items rows have no media_type, tmdb_id or season_number. Restoring it would discard the TMDB identity of every show and movie, so it can\'t be used.');
     return errors;
   }
-  return errors.concat(validateBackupRows(obj.tables));
+  return errors.concat(validateBackupRows(obj.tables, obj.formatVersion));
 }
 
 // Every column of the three tables, as the live schema defines them. A backup row
@@ -131,6 +145,21 @@ const RESTORE_COLUMNS = {
   othertv_shows: { id: 'uuid', tmdb_id: 'int', title: 'text', network: 'text', created_at: 'timestamp', collection: 'text' },
   custom_collections: { id: 'uuid', name: 'text', tmdb_person_id: 'int', created_at: 'timestamp', role: 'text?' }
 };
+
+// Format 2 (once the TV-show schema exists): watchlist_items gains show_id (TV
+// seasons only) and skipped, and tv_shows is added. Like format 1, never user_id.
+const RESTORE_COLUMNS_V2 = {
+  ...RESTORE_COLUMNS,
+  watchlist_items: { ...RESTORE_COLUMNS.watchlist_items, show_id: 'uuid?', skipped: 'bool' },
+  tv_shows: { id: 'uuid', collection: 'text', title: 'text', show_key: 'text', tmdb_id: 'int?', status: 'text', created_at: 'timestamp' }
+};
+
+// The backup formats this app reads and writes, by formatVersion.
+const BACKUP_FORMATS = {
+  1: { tables: ['watchlist_items', 'othertv_shows', 'custom_collections'], columns: RESTORE_COLUMNS },
+  2: { tables: ['watchlist_items', 'tv_shows', 'othertv_shows', 'custom_collections'], columns: RESTORE_COLUMNS_V2 }
+};
+const TV_SHOW_STATUSES = ['confirmed', 'highpriority', 'watching', 'complete', 'pending', 'maybe', 'skipped'];
 
 // Returns why a value doesn't fit a RESTORE_COLUMNS type, or null if it does.
 function restoreValueProblem(type, v) {
@@ -152,7 +181,8 @@ function restoreValueProblem(type, v) {
 // Row-level checks that mirror the database: exact columns, value types, the
 // identity-shape CHECK, and every primary/unique key. Anything reported here would
 // otherwise fail only after the tables had already been cleared.
-function validateBackupRows(tables) {
+function validateBackupRows(tables, formatVersion = 1) {
+  const spec = BACKUP_FORMATS[formatVersion];
   const errors = [];
   const report = (label, problems) => {
     if (problems.length === 0) return;
@@ -172,17 +202,17 @@ function validateBackupRows(tables) {
     return dups;
   };
 
-  for (const table of BACKUP_TABLES) {
-    const spec = RESTORE_COLUMNS[table];
+  for (const table of spec.tables) {
+    const columns = spec.columns[table];
     const rows = tables[table];
     const columnProblems = [], typeProblems = [];
     rows.forEach((r, i) => {
       if (!r || typeof r !== 'object' || Array.isArray(r)) { columnProblems.push(`${rowLabel(r, i)} is not an object`); return; }
-      const unknown = Object.keys(r).filter(k => !(k in spec));
-      const missing = Object.keys(spec).filter(k => !(k in r));
+      const unknown = Object.keys(r).filter(k => !(k in columns));
+      const missing = Object.keys(columns).filter(k => !(k in r));
       if (unknown.length) columnProblems.push(`${rowLabel(r, i)} has unknown column(s) ${unknown.join(', ')}`);
       if (missing.length) columnProblems.push(`${rowLabel(r, i)} is missing column(s) ${missing.join(', ')}`);
-      for (const [col, type] of Object.entries(spec)) {
+      for (const [col, type] of Object.entries(columns)) {
         if (!(col in r)) continue;
         const problem = restoreValueProblem(type, r[col]);
         if (problem) typeProblems.push(`${rowLabel(r, i)} ${col} ${problem}`);
@@ -216,7 +246,40 @@ function validateBackupRows(tables) {
     r => JSON.stringify([r.collection, r.tmdb_id]), r => `(collection "${r.collection}", tmdb_id ${r.tmdb_id})`));
   report('custom_collections duplicate name', findDuplicates(tables.custom_collections.filter(r => r && typeof r === 'object'),
     r => typeof r.name === 'string' ? r.name : null, r => `"${r.name}"`));
+  if (formatVersion >= 2) validateTvShowRows(tables, items, report, rowLabel);
   return errors;
+}
+
+// Format 2 only: the shows and the season → show links, mirroring the database's
+// rules (statuses, one show per identity, a season links only to a show of its own
+// collection, films/movies never link, skipped only on linked seasons).
+function validateTvShowRows(tables, items, report, rowLabel) {
+  const shows = tables.tv_shows.filter(r => r && typeof r === 'object');
+  const byId = new Map(shows.map(s => [s.id, s]));
+  const findDup = (rows, keyOf, describe) => {
+    const seen = new Map(), dups = [];
+    rows.forEach((r, i) => { const k = keyOf(r); if (k === null) return; if (seen.has(k)) dups.push(`${describe(r)} on ${rowLabel(rows[seen.get(k)], seen.get(k))} and ${rowLabel(r, i)}`); else seen.set(k, i); });
+    return dups;
+  };
+  report('tv_shows status', shows.map((s, i) => TV_SHOW_STATUSES.includes(s.status) ? null : `${rowLabel(s, i)} has status ${JSON.stringify(s.status)}`).filter(Boolean));
+  report('tv_shows empty title or show_key', shows.map((s, i) => (typeof s.title === 'string' && s.title.trim() && typeof s.show_key === 'string' && s.show_key.trim()) ? null : rowLabel(s, i)).filter(Boolean));
+  report('tv_shows duplicate identified show', findDup(shows, s => s.tmdb_id != null ? JSON.stringify([s.collection, s.tmdb_id]) : null,
+    s => `(collection "${s.collection}", tmdb_id ${s.tmdb_id})`));
+  report('tv_shows duplicate legacy show', findDup(shows, s => s.tmdb_id == null ? JSON.stringify([s.collection, s.show_key]) : null,
+    s => `(collection "${s.collection}", show_key "${s.show_key}")`));
+  const linkProblems = [];
+  items.forEach((r, i) => {
+    const isFilm = r.season === 'Film' || r.media_type === 'movie';
+    if (r.show_id != null) {
+      const show = byId.get(r.show_id);
+      if (!show) linkProblems.push(`${rowLabel(r, i)} links to show ${r.show_id}, which isn't in the backup`);
+      else if (show.collection !== r.collection) linkProblems.push(`${rowLabel(r, i)} links to a show in collection "${show.collection}"`);
+      if (isFilm) linkProblems.push(`${rowLabel(r, i)} is a film but links to a show`);
+    } else if (r.skipped === true) {
+      linkProblems.push(`${rowLabel(r, i)} is skipped but has no show`);
+    }
+  });
+  report('watchlist_items show links', linkProblems);
 }
 
 // Compares the backup with the data currently in the database. Refuses a restore that
@@ -268,8 +331,10 @@ async function renderRestorePreview(backup) {
 
   let currentCounts = {};
   let currentItems = [];
+  let dbFormat;
   try {
-    for (const table of BACKUP_TABLES) {
+    dbFormat = await detectBackupFormat();
+    for (const table of BACKUP_FORMATS[dbFormat].tables) {
       const rows = await fetchAllRows(table);
       currentCounts[table] = rows.length;
       if (table === 'watchlist_items') currentItems = rows;
@@ -281,7 +346,12 @@ async function renderRestorePreview(backup) {
     return;
   }
 
-  const lossErrors = identityLossErrors(currentItems, backup.tables.watchlist_items);
+  // A format-2 backup needs the TV-show schema; a format-1 backup restored into a
+  // format-2 database empties its TV shows (rebuilt afterwards by an admin backfill),
+  // so it needs an explicit confirmation that is passed to the database.
+  const formatErrors = backup.formatVersion > dbFormat
+    ? [`This backup is format ${backup.formatVersion}, which needs the TV-show database; this database is still format ${dbFormat}.`] : [];
+  const lossErrors = formatErrors.concat(identityLossErrors(currentItems, backup.tables.watchlist_items));
   if (lossErrors.length > 0) {
     showRestoreModal(`<div class="modal-title">This file can't be used for restore</div>
       <div class="modal-error">${lossErrors.map(esc).join('\n')}</div>
@@ -289,11 +359,15 @@ async function renderRestorePreview(backup) {
     pendingRestoreData = null;
     return;
   }
+  pendingRestoreAllowV1Reset = backup.formatVersion === 1 && dbFormat === 2;
 
   const backupDate = new Date(backup.exportedAt).toLocaleString();
-  const rows = BACKUP_TABLES.map(t => `
-    <div class="modal-row"><span>${esc(t)}</span><span>${currentCounts[t]} → ${backup.rowCounts[t] ?? backup.tables[t].length}</span></div>
+  const tables = [...new Set([...BACKUP_FORMATS[dbFormat].tables, ...BACKUP_FORMATS[backup.formatVersion].tables])];
+  const rows = tables.map(t => `
+    <div class="modal-row"><span>${esc(t)}</span><span>${currentCounts[t] ?? 0} → ${backup.tables[t] ? (backup.rowCounts[t] ?? backup.tables[t].length) : 0}</span></div>
   `).join('');
+  const v1Warning = pendingRestoreAllowV1Reset
+    ? `<div class="modal-warning">This backup predates TV shows (format 1). Restoring it empties the TV-show data, which then has to be rebuilt by an admin before the next migration step.</div>` : '';
 
   showRestoreModal(`
     <div class="modal-title">Restore from backup?</div>
@@ -305,7 +379,8 @@ async function renderRestorePreview(backup) {
       <div class="modal-label">Rows: current → backup</div>
       ${rows}
     </div>
-    <div class="modal-warning">This will permanently replace all current data in these 3 tables with the contents of this backup. A safety backup of your current data will be downloaded automatically before anything is changed.</div>
+    ${v1Warning}
+    <div class="modal-warning">This will permanently replace all current data in these ${tables.length} tables with the contents of this backup. A safety backup of your current data will be downloaded automatically before anything is changed.</div>
     <div class="modal-actions">
       <button class="btn" onclick="closeRestoreModal()">Cancel</button>
       <button class="btn-danger" id="confirmRestoreBtn" onclick="executeRestore()">Restore database</button>
@@ -321,6 +396,7 @@ function closeRestoreModal() {
   document.getElementById('restoreModalOverlay').style.display = 'none';
   document.getElementById('restoreModalBox').innerHTML = '';
   pendingRestoreData = null;
+  pendingRestoreAllowV1Reset = false;
 }
 
 async function executeRestore() {
@@ -400,9 +476,10 @@ async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
   // ── Step 2: replace every table in one database transaction ──
   // restore_backup (db/phase0_restore_v1.sql) deletes and re-inserts all tables
   // atomically: if anything fails, the database rolls back to exactly what it was.
-  setProgress(`Restoring ${BACKUP_TABLES.length} tables…`);
+  const restoredTables = BACKUP_FORMATS[backup.formatVersion].tables;
+  setProgress(`Restoring ${restoredTables.length} tables…`);
   try {
-    await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup });
+    await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup, p_allow_v1_reset: pendingRestoreAllowV1Reset === true });
   } catch(e) {
     showRestoreModal(`<div class="modal-title">Restore failed — nothing was changed</div>
       <div class="modal-error">${esc(e.message)}
@@ -417,7 +494,7 @@ ${esc(preRestoreFilename)}</div>
   setProgress('Verifying restored data…');
   const verificationErrors = [];
   try {
-    for (const table of BACKUP_TABLES) {
+    for (const table of restoredTables) {
       const restoredRows = await fetchAllRows(table);
       const expectedRows = backup.tables[table];
       if (restoredRows.length !== expectedRows.length) {
@@ -466,7 +543,7 @@ ${esc(preRestoreFilename)}</div>
 
   // ── Step 4: success — only reached if delete+insert+verify all passed for every table ──
   showRestoreModal(`<div class="modal-title">Restore completed successfully</div>
-    <div class="modal-success">All ${BACKUP_TABLES.length} tables restored and verified against the backup.
+    <div class="modal-success">All ${restoredTables.length} tables restored and verified against the backup.
 A safety backup of your data from before this restore was saved as:
 ${esc(preRestoreFilename)}</div>
     <div class="modal-actions"><button class="btn-accent btn" onclick="finishRestoreAndReload()">Close &amp; reload data</button></div>`);
