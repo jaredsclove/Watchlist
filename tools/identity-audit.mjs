@@ -115,7 +115,8 @@ export function gradeMovie(row, movie, candidates = []) {
   const same = sameTitleCandidates(row, movie, candidates);
   if (short || date === 'mismatch' || date === 'tmdb-undated') {
     for (const c of same) {
-      if (short && c.runtime != null && !isShort(c)) add('C', `linked work is a ${movie.runtime}-min short; same-title feature exists: ${c.id} (${c.release_date}, ${c.runtime} min)`);
+      // A feature needs a known feature-length runtime: TMDB's 0 (or none) means unknown.
+      if (short && c.runtime >= SHORT_MIN) add('C', `linked work is a ${movie.runtime}-min short; same-title feature exists: ${c.id} (${c.release_date}, ${c.runtime} min)`);
       if (!isTba(row) && c.release_date && days(c.release_date, row.date_sort) <= CLOSE_DAYS) add('C', `another same-title work ${c.id} (${c.release_date}) matches the stored date better`);
     }
   }
@@ -143,7 +144,48 @@ export function provisionalSeason(row, show, today) {
     && (isTba(row) || (row.date_sort || '') > today);
 }
 
-export function gradeTv(row, show, today = localToday()) {
+// ─── Owner-approved exceptions (tools/identity-exceptions.json) ──────────────
+// An exception turns one specific C finding of one identified row into B (never A)
+// while every value it is bound to still matches: collection, media type, TMDB id,
+// season (where it has one), the local value and TMDB's value. It never applies to
+// a D, to a provisional season, or to any other finding.
+
+export const EXCEPTION_KINDS = {
+  // label "Volume 2" vs season_number 2
+  season_label: { local: ['season'], tmdb: ['season_name'], seasonal: true },
+  // stored date vs TMDB season air date, outside 31 days
+  season_date: { local: ['date_sort'], tmdb: ['air_date'], seasonal: true },
+  // stored show title vs TMDB title that only a working title supports
+  show_title: { local: ['title'], tmdb: ['name', 'alternative_title', 'alternative_title_type'], seasonal: false },
+};
+
+// Throws on anything malformed, so a bad file aborts the audit instead of being ignored.
+export function validateExceptions(doc) {
+  if (!doc || doc.version !== 1 || !Array.isArray(doc.exceptions)) throw new Error('identity exceptions: expected { version: 1, exceptions: [...] }');
+  const ids = new Set();
+  for (const e of doc.exceptions) {
+    const where = `identity exception ${JSON.stringify(e && e.id)}`;
+    const k = e && EXCEPTION_KINDS[e.kind];
+    if (!k) throw new Error(`${where}: unknown kind ${JSON.stringify(e && e.kind)}`);
+    if (typeof e.id !== 'string' || !e.id || ids.has(e.id)) throw new Error(`${where}: missing or duplicate id`);
+    ids.add(e.id);
+    if (typeof e.collection !== 'string' || !e.collection || e.media_type !== 'tv' || !Number.isInteger(e.tmdb_id) || e.tmdb_id <= 0) throw new Error(`${where}: collection, media_type "tv" and tmdb_id are required`);
+    if (k.seasonal ? !(Number.isInteger(e.season_number) && e.season_number >= 0) : e.season_number !== undefined) throw new Error(`${where}: season_number ${k.seasonal ? 'required' : 'not allowed'} for ${e.kind}`);
+    for (const [side, keys] of [['local', k.local], ['tmdb', k.tmdb]]) {
+      if (!e[side] || Object.keys(e[side]).sort().join() !== [...keys].sort().join() || keys.some(x => typeof e[side][x] !== 'string' || !e[side][x])) {
+        throw new Error(`${where}: ${side} must have exactly ${keys.join(', ')}`);
+      }
+    }
+    if (typeof e.reason !== 'string' || e.reason.length < 20) throw new Error(`${where}: reason required`);
+    if (!Array.isArray(e.evidence) || !e.evidence.length || e.evidence.some(u => !/^https:\/\/\S+$/.test(u))) throw new Error(`${where}: evidence URLs required`);
+  }
+  return doc.exceptions;
+}
+
+const sameTarget = (e, row) => e.collection === row.collection && e.media_type === row.media_type && e.tmdb_id === row.tmdb_id
+  && (EXCEPTION_KINDS[e.kind].seasonal ? e.season_number === row.season_number : true);
+
+export function gradeTv(row, show, today = localToday(), exceptions = []) {
   if (!show) return result([['D', `TMDB tv ${row.tmdb_id} not found`]]);
   const s = (show.seasons || []).find(x => x.season_number === row.season_number);
   const f = [];
@@ -164,19 +206,36 @@ export function gradeTv(row, show, today = localToday()) {
   const date = compareDate(row, air);
   const t = titleMatch(row.title, [show.name, show.original_name], acceptedAltTitles(show.alternative_titles?.results));
 
+  // A C finding an owner-approved exception covers exactly (see EXCEPTION_KINDS) becomes B.
+  const applied = [];
+  const addC = (kind, why, bound) => {
+    const e = exceptions.find(x => x.kind === kind && sameTarget(x, row) && bound(x));
+    if (!e) return add('C', why);
+    applied.push(e.id);
+    add('B', `accepted exception ${e.id}: ${why}`);
+  };
+
   const expected = row.season_number === 0 ? 'Specials' : `Season ${row.season_number}`;
-  if (row.season !== expected) add('C', `season label "${row.season}" vs season_number ${row.season_number}`);
+  if (row.season !== expected) addC('season_label', `season label "${row.season}" vs season_number ${row.season_number}`,
+    e => e.local.season === row.season && e.tmdb.season_name === (s.name || '').trim());
 
   if (date === 'tba-now-dated') add('B', `stored TBA, TMDB now ${air}`);
   if (date === 'tmdb-undated') add('B', `stored ${row.date_sort}, TMDB season now undated`);
   if (date === 'close') add('B', `season date ${row.date_sort} vs TMDB ${air} (within ${CLOSE_DAYS} days)`);
-  if (date === 'mismatch') add('C', `season date ${row.date_sort} vs TMDB ${air}`);
+  if (date === 'mismatch') addC('season_date', `season date ${row.date_sort} vs TMDB ${air}`,
+    e => e.local.date_sort === row.date_sort && e.tmdb.air_date === air);
 
   if (t.kind === 'alt') add('A', 'title matches an accepted TMDB alternative title');
   if (t.kind === 'loose') add('B', `show title drift: "${row.title}" vs TMDB "${show.name}"`);
   if (t.kind === 'similar') add(date === 'mismatch' ? 'C' : 'B', `show title changed: "${row.title}" vs TMDB "${show.name}" (similarity ${t.sim})`);
-  if (t.kind === 'different') add(date === 'mismatch' || date === 'tmdb-undated' ? 'D' : 'C', `show title "${row.title}" vs TMDB "${show.name}" (similarity ${t.sim})`);
-  return result(f);
+  if (t.kind === 'different') {
+    const why = `show title "${row.title}" vs TMDB "${show.name}" (similarity ${t.sim})`;
+    if (date === 'mismatch' || date === 'tmdb-undated') add('D', why);
+    else addC('show_title', why, e => e.local.title === row.title && e.tmdb.name === show.name
+      && (show.alternative_titles?.results || []).some(a => a.title === e.tmdb.alternative_title
+        && (a.type || '').toLowerCase() === e.tmdb.alternative_title_type.toLowerCase()));
+  }
+  return { ...result(f), exceptions: applied };
 }
 
 // ─── Network (GET only) ───────────────────────────────────────────────────────
@@ -231,9 +290,15 @@ function tmdbClient(cfg) {
   };
 }
 
-async function auditRow(row, tmdb) {
+// Reads and validates tools/identity-exceptions.json (an empty list if the file is absent).
+export function loadExceptions(file = path.join(repoRoot, 'tools/identity-exceptions.json')) {
+  if (!fs.existsSync(file)) return [];
+  return validateExceptions(JSON.parse(fs.readFileSync(file, 'utf8')));
+}
+
+async function auditRow(row, tmdb, exceptions) {
   if (row.media_type === 'tv') {
-    return gradeTv(row, await tmdb(`/tv/${row.tmdb_id}?append_to_response=alternative_titles`, { allow404: true }));
+    return gradeTv(row, await tmdb(`/tv/${row.tmdb_id}?append_to_response=alternative_titles`, { allow404: true }), localToday(), exceptions);
   }
   if (row.media_type === 'movie') {
     const movie = await tmdb(`/movie/${row.tmdb_id}?append_to_response=alternative_titles`, { allow404: true });
@@ -252,6 +317,7 @@ async function auditRow(row, tmdb) {
 
 async function main() {
   const cfg = loadConfig();
+  const exceptions = loadExceptions();
   console.log('Identity audit — READ-ONLY: issues HTTP GET requests only; nothing is written.');
   console.log(`Supabase host: ${new URL(cfg.SUPABASE_URL).host}  table: ${cfg.TABLE}`);
   console.log(`Started: ${new Date().toISOString()}`);
@@ -263,8 +329,10 @@ async function main() {
   const tmdb = tmdbClient(cfg);
   const counts = { A: 0, B: 0, C: 0, D: 0 };
   const flagged = [], ambiguous = [];
+  const applied = new Map();
   for (const row of identified) {
-    const res = await auditRow(row, tmdb);
+    const res = await auditRow(row, tmdb, exceptions);
+    for (const id of res.exceptions || []) applied.set(id, `${row.collection} | ${row.title} ${row.season || ''} | tv ${row.tmdb_id} s${row.season_number}`);
     counts[res.grade]++;
     const label = `${row.collection} | ${row.title} ${row.season || ''} | ${row.media_type} ${row.tmdb_id}${row.season_number != null ? ' s' + row.season_number : ''} | ${row.id}`;
     if (res.grade !== 'A') flagged.push(`${res.grade}  ${label}\n${res.findings.map(([g, w]) => `     [${g}] ${w}`).join('\n')}`);
@@ -279,6 +347,14 @@ async function main() {
   console.log(flagged.length ? flagged.join('\n') : '  none');
   console.log(`\nSame-title ambiguity (${ambiguous.length} rows with other same-title works on TMDB; informational unless graded C/D above):`);
   console.log(ambiguous.length ? ambiguous.join('\n') : '  none');
+  console.log(`\nOwner-approved exceptions (${exceptions.length} in tools/identity-exceptions.json; each turns one specific C into B, never A):`);
+  for (const e of exceptions) {
+    const target = `${e.collection} tv ${e.tmdb_id}${e.season_number !== undefined ? ' s' + e.season_number : ''}`;
+    const onRow = identified.some(r => r.collection === e.collection && r.media_type === e.media_type && r.tmdb_id === e.tmdb_id
+      && (e.season_number === undefined || r.season_number === e.season_number));
+    console.log(applied.has(e.id) ? `  applied      ${e.id} → ${applied.get(e.id)}`
+      : `  not applied  ${e.id} (${target}): ${onRow ? 'the row no longer has exactly this finding with the bound values; review or retire it' : 'no identified row with this identity'}`);
+  }
   const pass = counts.C === 0 && counts.D === 0;
   console.log(`\nRESULT: ${pass ? 'PASS' : 'FAIL'} — ${counts.C} C, ${counts.D} D`);
   return pass;

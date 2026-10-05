@@ -16,7 +16,7 @@ import fs from 'fs';
 import path from 'path';
 import vm from 'vm';
 import { fileURLToPath } from 'url';
-import { gradeTv, localToday } from './identity-audit.mjs';
+import { gradeTv, localToday, loadExceptions } from './identity-audit.mjs';
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BUILTIN = ['disney', '90day', 'sheridan'];
@@ -62,6 +62,7 @@ async function main() {
   if (!BUILTIN.includes(collection)) { console.error('usage: node tools/tmdb-enrich-candidates.mjs <disney|90day|sheridan> [--out=file.json]'); process.exit(2); }
   const cfg = loadConfig();
   const today = localToday();
+  const exceptions = loadExceptions(); // owner-approved audit exceptions, so grades match tools/identity-audit.mjs
   const tmdbCache = new Map();
   const tmdb = p => { if (!tmdbCache.has(p)) tmdbCache.set(p, get(cfg.TMDB_BASE + p, { Authorization: `Bearer ${cfg.TMDB_TOKEN}` }).then(r => r.json())); return tmdbCache.get(p); };
 
@@ -91,7 +92,7 @@ async function main() {
       const mapping = seasons.map(r => {
         const n = plainSeason(r.season);
         if (n == null) return { season: r.season, date: r.display_date, flag: 'label is not exactly "Season N": needs the owner\'s decision; never forced' };
-        const g = gradeTv({ ...r, media_type: 'tv', tmdb_id: d.id, season_number: n }, d, today);
+        const g = gradeTv({ ...r, media_type: 'tv', tmdb_id: d.id, season_number: n }, d, today, exceptions);
         return { season: r.season, date: r.display_date, season_number: n, on_tmdb: listed.has(n), grade: g.grade, findings: g.findings.map(f => f[1]) };
       });
       candidates.push({ id: d.id, name: d.name, original_name: d.original_name, first_air: d.first_air_date, status: d.status,

@@ -1,0 +1,51 @@
+{
+  "about": "Owner-approved identity-audit exceptions (tools/identity-audit.mjs). Each one turns one specific C finding into B (never A) while every bound value still matches; otherwise the finding stands. Never applies to D, never to provisional seasons, never to any other finding. Approved 2026-10-05 for future enrichment; see docs/HANDOFF.md §16.",
+  "version": 1,
+  "exceptions": [
+    {
+      "id": "visions-volume-1",
+      "kind": "season_label",
+      "collection": "disney", "media_type": "tv", "tmdb_id": 114478, "season_number": 1,
+      "local": { "season": "Volume 1" },
+      "tmdb": { "season_name": "Season 1" },
+      "reason": "Star Wars: Visions is released in volumes; the curated label \"Volume 1\" is TMDB season 1 (same 2021-09-22 release, same nine shorts).",
+      "evidence": ["https://www.themoviedb.org/tv/114478-star-wars-visions/season/1", "https://www.starwars.com/series/star-wars-visions"]
+    },
+    {
+      "id": "visions-volume-2",
+      "kind": "season_label",
+      "collection": "disney", "media_type": "tv", "tmdb_id": 114478, "season_number": 2,
+      "local": { "season": "Volume 2" },
+      "tmdb": { "season_name": "Volume 2" },
+      "reason": "The curated label \"Volume 2\" is TMDB season 2, which TMDB itself names \"Volume 2\" (2023-05-04).",
+      "evidence": ["https://www.themoviedb.org/tv/114478-star-wars-visions/season/2", "https://www.starwars.com/series/star-wars-visions"]
+    },
+    {
+      "id": "visions-volume-3",
+      "kind": "season_label",
+      "collection": "disney", "media_type": "tv", "tmdb_id": 114478, "season_number": 3,
+      "local": { "season": "Volume 3" },
+      "tmdb": { "season_name": "Volume 3" },
+      "reason": "The curated label \"Volume 3\" is TMDB season 3, which TMDB itself names \"Volume 3\" (2025-10-29).",
+      "evidence": ["https://www.themoviedb.org/tv/114478-star-wars-visions/season/3", "https://www.starwars.com/series/star-wars-visions"]
+    },
+    {
+      "id": "rebels-s2-premiere",
+      "kind": "season_date",
+      "collection": "disney", "media_type": "tv", "tmdb_id": 60554, "season_number": 2,
+      "local": { "date_sort": "2015-06-20" },
+      "tmdb": { "air_date": "2015-10-14" },
+      "reason": "The stored date is the official Season 2 premiere, the TV film \"The Siege of Lothal\" (Disney XD, 2015-06-20); TMDB files it under Specials and starts season 2 on 2015-10-14.",
+      "evidence": ["https://starwars.fandom.com/wiki/The_Siege_of_Lothal", "https://en.wikipedia.org/wiki/Star_Wars_Rebels", "https://www.themoviedb.org/tv/60554-star-wars-rebels/season/0"]
+    },
+    {
+      "id": "acolyte-title",
+      "kind": "show_title",
+      "collection": "disney", "media_type": "tv", "tmdb_id": 114479,
+      "local": { "title": "Star Wars: The Acolyte" },
+      "tmdb": { "name": "The Acolyte", "alternative_title": "Star Wars: The Acolyte", "alternative_title_type": "working title" },
+      "reason": "Curated title kept by the owner; TMDB's title is \"The Acolyte\" and lists \"Star Wars: The Acolyte\" only as a US working title, which the audit otherwise ignores.",
+      "evidence": ["https://www.themoviedb.org/tv/114479-the-acolyte", "https://www.starwars.com/series/the-acolyte"]
+    }
+  ]
+}
