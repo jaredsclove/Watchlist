@@ -98,7 +98,7 @@ function deriveCurrentlyWatching(rows, shows, today) {
     seasonsByShow.get(r.show_id).push(r);
   });
   const active = [], upToDate = [];
-  for (const show of (shows instanceof Map ? shows.values() : shows)) {
+  for (const show of (typeof shows.values === 'function' && typeof shows.get === 'function' ? shows.values() : shows)) {
     if (show.status !== 'watching') continue;
     const seasons = (seasonsByShow.get(show.id) || []).sort(compareSeasons);
     if (seasons.length === 0) continue;
@@ -124,7 +124,7 @@ function deriveCurrentlyWatching(rows, shows, today) {
 // Linked, unwatched, non-skipped seasons of a show that isn't Skipped: those with
 // a confirmed date from today on, and those still TBA (whatever their guessed date_sort).
 function deriveComingSoon(rows, shows, today) {
-  const showOf = r => (shows instanceof Map ? shows.get(r.show_id) : shows.find(s => s.id === r.show_id));
+  const showOf = r => (typeof shows.get === 'function' ? shows.get(r.show_id) : shows.find(s => s.id === r.show_id));
   const eligible = rows.filter(r => {
     if (!isTvViewRow(r) || !r.show_id || r.watched || r.skipped) return false;
     const show = showOf(r);
