@@ -275,9 +275,9 @@ test('confirm film for a row linked as a TV season → the guarded PATCH also un
   assert.deepStrictEqual(env.log.writes.map(w => `${w.method} ${w.path}`), ['PATCH watchlist_items?id=eq.row-1&tmdb_id=is.null&media_type=is.null&season_number=is.null', 'DELETE tv_shows?id=eq.show-legacy']);
   assert.strictEqual(env.log.saved, 1);
 });
-test('confirm film, the former show still has seasons (23503) → matched, no error', async () => {
+test('confirm film, the former show still has seasons (ON DELETE RESTRICT, 23001) → matched, no error', async () => {
   const row = manual({ collection: 'truecrime', show_id: 'show-legacy' });
-  const restrict = new Error('Supabase error 409: {"code":"23503","message":"update or delete on table \\"tv_shows\\" violates foreign key constraint"}');
+  const restrict = new Error('Supabase error 409: {"code":"23001","message":"update or delete on table \\"tv_shows\\" violates RESTRICT setting of foreign key constraint"}');
   const env = makeEnv({ tab: 'truecrime', rows: [row], tmdb: searchStub, db: { fail: (m, p) => (m === 'DELETE' ? restrict : null) } });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));

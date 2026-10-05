@@ -254,13 +254,14 @@ async function confirmTmdbMatch() {
       await sbFetch('PATCH', `${TABLE}?id=eq.${row.id}&tmdb_id=is.null&media_type=is.null&season_number=is.null`, body);
       [fresh] = await sbFetch('GET', `${TABLE}?id=eq.${row.id}&select=*`, null) || [];
       // A show left with no seasons is removed, like deleting its last season.
-      // The season link's ON DELETE RESTRICT refuses this while any season remains.
+      // The season link's ON DELETE RESTRICT refuses this while any season remains
+      // (restrict_violation 23001; 23503 accepted too).
       if (formerShowId != null && fresh && fresh.show_id == null) {
         try {
           await sbFetch('DELETE', `tv_shows?id=eq.${formerShowId}`, null);
           tvShowsById.delete(formerShowId);
         } catch(e) {
-          if (!String(e.message).includes('23503')) showError(`Matched, but couldn't remove the now-empty show: ${e.message}`);
+          if (!/23001|23503/.test(String(e.message))) showError(`Matched, but couldn't remove the now-empty show: ${e.message}`);
         }
       }
     }
