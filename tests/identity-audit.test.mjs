@@ -3,7 +3,7 @@
 // No network, no database: TMDB objects below are trimmed copies of real
 // responses (values as of 2026-09-26), passed straight to the pure graders.
 import assert from 'assert';
-import { gradeMovie, gradeTv, loadExceptions, validateExceptions } from '../tools/identity-audit.mjs';
+import { gradeMovie, gradeTv, loadExceptions, validateExceptions, exceptionReport } from '../tools/identity-audit.mjs';
 
 const genres = (...names) => names.map(name => ({ name }));
 const movie = (id, title, release_date, runtime, g, alts = []) =>
@@ -137,12 +137,43 @@ exceptionTest('Acolyte title plus a far-off date → D (never lowered)', 'D',
 exceptionTest('the Acolyte exception does not cover a different stored title → C', 'C',
   () => gradeTv(dRow('Star Wars: The High Republic', 114479, 1, 'Season 1', '2024-06-04'), ACOLYTE, TODAY, EXC), []);
 
+// The Single Life S1: curated TLC premiere (2021-08-09) vs TMDB's discovery+ date (2021-02-21).
+const SINGLE = { id: 118422, name: '90 Day: The Single Life', original_name: '90 Day: The Single Life', alternative_titles: { results: [] }, seasons: [
+  { season_number: 1, name: 'Season 1', air_date: '2021-02-21' }, { season_number: 2, name: 'Season 2', air_date: '2021-11-12' }] };
+const sl = (o = {}) => ({ collection: '90day', title: '90 Day: The Single Life', season: 'Season 1', theme: 'Spinoff', display_date: 'Aug 9, 2021',
+  date_sort: '2021-08-09', media_type: 'tv', tmdb_id: 118422, season_number: 1, ...o });
+exceptionTest('Single Life S1 TLC premiere vs TMDB discovery+ date, with its exception → B', 'B', () => gradeTv(sl(), SINGLE, TODAY, EXC), ['single-life-s1-tlc-premiere']);
+exceptionTest('Single Life S1 without exceptions → C', 'C', () => gradeTv(sl(), SINGLE, TODAY), []);
+exceptionTest('Single Life S1 with a different stored date → C', 'C', () => gradeTv(sl({ date_sort: '2021-08-10', display_date: 'Aug 10, 2021' }), SINGLE, TODAY, EXC), []);
+exceptionTest('Single Life S1 when TMDB moves season 1 → C', 'C',
+  () => gradeTv(sl(), { ...SINGLE, seasons: SINGLE.seasons.map(x => x.season_number === 1 ? { ...x, air_date: '2021-02-22' } : x) }, TODAY, EXC), []);
+exceptionTest('the same stored date mapped to season 2 → C (bound to season 1)', 'C', () => gradeTv(sl({ season: 'Season 2', season_number: 2 }), SINGLE, TODAY, EXC), []);
+exceptionTest('the same identity in another collection → C', 'C', () => gradeTv(sl({ collection: 'othertv' }), SINGLE, TODAY, EXC), []);
+exceptionTest('Single Life S1 under an unrelated title → D: the date exception applies to its own finding, the row still fails', 'D',
+  () => gradeTv(sl({ title: 'Completely Different Show' }), SINGLE, TODAY, EXC), ['single-life-s1-tlc-premiere']);
+
+// Reporting: an applied exception on a row that still fails is never reported as a pass.
+const reportCase = (name, expect, fn) => test(`report: ${name}`, 'OK', () => { const lines = fn(); return { grade: lines.every((l, i) => expect[i].test(l)) && lines.length === expect.length ? 'OK' : JSON.stringify(lines), findings: [] }; });
+const one = id => [EXC.find(e => e.id === id)];
+reportCase('applied on a row that passes', [/^  applied      single-life-s1-tlc-premiere → .* \(grade B\)$/],
+  () => exceptionReport(one('single-life-s1-tlc-premiere'), new Map([['single-life-s1-tlc-premiere', [{ label: '90day | 90 Day: The Single Life Season 1 | tv 118422 s1', grade: 'B' }]]]), []));
+reportCase('applied on a row that still fails (D)', [/^  applied, ROW STILL FAILS  single-life-s1-tlc-premiere → .*: grade D from another finding/],
+  () => exceptionReport(one('single-life-s1-tlc-premiere'), new Map([['single-life-s1-tlc-premiere', [{ label: 'x', grade: 'D' }]]]), []));
+reportCase('not applied, identified row present (finding changed)', [/^  not applied  rebels-s2-premiere \(disney tv 60554 s2\): the row no longer has exactly this finding/],
+  () => exceptionReport(one('rebels-s2-premiere'), new Map(), [{ collection: 'disney', media_type: 'tv', tmdb_id: 60554, season_number: 2 }]));
+reportCase('not applied, no identified row', [/^  not applied  acolyte-title \(disney tv 114479\): no identified row with this identity$/],
+  () => exceptionReport(one('acolyte-title'), new Map(), []));
+test('every gradeTv result lists its applied exceptions (also missing-season and provisional paths)', 'OK', () => {
+  const paths = [gradeTv(vol(4, '2026-01-01'), VISIONS, TODAY, EXC), gradeTv(S5(), SILO, TODAY, EXC), gradeTv(vol(2, '2023-05-04'), null, TODAY, EXC)];
+  return { grade: paths.every(r => Array.isArray(r.exceptions) && r.exceptions.length === 0) ? 'OK' : 'missing', findings: [] };
+});
+
 // Validation: a malformed file aborts (it is never silently ignored).
 const throws = (name, doc) => test(`exceptions file rejected: ${name}`, 'REJECTED', () => {
   try { validateExceptions(doc); return { grade: 'ACCEPTED', findings: [] }; } catch { return { grade: 'REJECTED', findings: [] }; }
 });
 const good = EXC[0];
-test('the committed exceptions file validates (5 exceptions)', 'OK', () => ({ grade: EXC.length === 5 ? 'OK' : String(EXC.length), findings: [] }));
+test('the committed exceptions file validates (6 exceptions)', 'OK', () => ({ grade: EXC.length === 6 ? 'OK' : String(EXC.length), findings: [] }));
 throws('unknown kind', { version: 1, exceptions: [{ ...good, kind: 'any_finding' }] });
 throws('duplicate id', { version: 1, exceptions: [good, good] });
 throws('no evidence', { version: 1, exceptions: [{ ...good, evidence: [] }] });

@@ -46,6 +46,15 @@
       "tmdb": { "name": "The Acolyte", "alternative_title": "Star Wars: The Acolyte", "alternative_title_type": "working title" },
       "reason": "Curated title kept by the owner; TMDB's title is \"The Acolyte\" and lists \"Star Wars: The Acolyte\" only as a US working title, which the audit otherwise ignores.",
       "evidence": ["https://www.themoviedb.org/tv/114479-the-acolyte", "https://www.starwars.com/series/the-acolyte"]
+    },
+    {
+      "id": "single-life-s1-tlc-premiere",
+      "kind": "season_date",
+      "collection": "90day", "media_type": "tv", "tmdb_id": 118422, "season_number": 1,
+      "local": { "date_sort": "2021-08-09" },
+      "tmdb": { "air_date": "2021-02-21" },
+      "reason": "The curated date is Season 1's TLC premiere (Monday, Aug 9, 2021); the season first streamed on discovery+ from Feb 21, 2021 (Discovery's Jan 25, 2021 release), which is TMDB's season date. Both are real premieres; the TLC date is kept.",
+      "evidence": ["https://www.monstersandcritics.com/tv/reality-tv/new-discovery-series-90-day-the-single-life-is-coming-to-tlc-heres-when-you-can-watch/", "https://www.thewrap.com/90-day-franchise-adds-spinoff-about-past-stars-whose-relationships-crashed-and-burned/", "https://www.themoviedb.org/tv/118422-90-day-the-single-life/season/1"]
     }
   ]
 }

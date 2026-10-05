@@ -185,22 +185,40 @@ export function validateExceptions(doc) {
 const sameTarget = (e, row) => e.collection === row.collection && e.media_type === row.media_type && e.tmdb_id === row.tmdb_id
   && (EXCEPTION_KINDS[e.kind].seasonal ? e.season_number === row.season_number : true);
 
+// Report lines for the exceptions file. applied: Map id → [{ label, grade }] for the rows
+// where the exception changed a finding. An exception can apply while another finding
+// still fails the row (C/D); that is reported as such, never as a pass.
+export function exceptionReport(exceptions, applied, identified) {
+  return exceptions.map(e => {
+    const hits = applied.get(e.id) || [];
+    if (hits.length) {
+      return hits.map(h => ['C', 'D'].includes(h.grade)
+        ? `  applied, ROW STILL FAILS  ${e.id} → ${h.label}: grade ${h.grade} from another finding (this exception covers only its own finding)`
+        : `  applied      ${e.id} → ${h.label} (grade ${h.grade})`).join('\n');
+    }
+    const target = `${e.collection} tv ${e.tmdb_id}${e.season_number !== undefined ? ' s' + e.season_number : ''}`;
+    const onRow = identified.some(r => r.collection === e.collection && r.media_type === e.media_type && r.tmdb_id === e.tmdb_id
+      && (e.season_number === undefined || r.season_number === e.season_number));
+    return `  not applied  ${e.id} (${target}): ${onRow ? 'the row no longer has exactly this finding with the bound values; review or retire it' : 'no identified row with this identity'}`;
+  });
+}
+
 export function gradeTv(row, show, today = localToday(), exceptions = []) {
-  if (!show) return result([['D', `TMDB tv ${row.tmdb_id} not found`]]);
+  if (!show) return { ...result([['D', `TMDB tv ${row.tmdb_id} not found`]]), exceptions: [] };
   const s = (show.seasons || []).find(x => x.season_number === row.season_number);
   const f = [];
   const add = (g, why) => f.push([g, why]);
   if (!s) {
     if (!provisionalSeason(row, show, today)) {
       const released = !isTba(row) && (row.date_sort || '') <= today;
-      return result([['D', `show ${row.tmdb_id} (${show.name}) has no season ${row.season_number}${released ? ' (already released)' : ''}`]]);
+      return { ...result([['D', `show ${row.tmdb_id} (${show.name}) has no season ${row.season_number}${released ? ' (already released)' : ''}`]]), exceptions: [] };
     }
     add('B', `provisional future season not yet listed by TMDB (season ${row.season_number}; not TMDB-verified)`);
     const t = titleMatch(row.title, [show.name, show.original_name], acceptedAltTitles(show.alternative_titles?.results));
     if (t.kind === 'loose') add('B', `show title drift: "${row.title}" vs TMDB "${show.name}"`);
     if (t.kind === 'similar') add('C', `show title changed: "${row.title}" vs TMDB "${show.name}" (similarity ${t.sim})`);
     if (t.kind === 'different') add('D', `show title "${row.title}" vs TMDB "${show.name}" (similarity ${t.sim})`);
-    return result(f);
+    return { ...result(f), exceptions: [] }; // exceptions never apply to provisional seasons
   }
   const air = s.air_date || '';
   const date = compareDate(row, air);
@@ -332,7 +350,7 @@ async function main() {
   const applied = new Map();
   for (const row of identified) {
     const res = await auditRow(row, tmdb, exceptions);
-    for (const id of res.exceptions || []) applied.set(id, `${row.collection} | ${row.title} ${row.season || ''} | tv ${row.tmdb_id} s${row.season_number}`);
+    for (const id of res.exceptions || []) applied.set(id, [...(applied.get(id) || []), { label: `${row.collection} | ${row.title} ${row.season || ''} | tv ${row.tmdb_id} s${row.season_number}`, grade: res.grade }]);
     counts[res.grade]++;
     const label = `${row.collection} | ${row.title} ${row.season || ''} | ${row.media_type} ${row.tmdb_id}${row.season_number != null ? ' s' + row.season_number : ''} | ${row.id}`;
     if (res.grade !== 'A') flagged.push(`${res.grade}  ${label}\n${res.findings.map(([g, w]) => `     [${g}] ${w}`).join('\n')}`);
@@ -348,13 +366,7 @@ async function main() {
   console.log(`\nSame-title ambiguity (${ambiguous.length} rows with other same-title works on TMDB; informational unless graded C/D above):`);
   console.log(ambiguous.length ? ambiguous.join('\n') : '  none');
   console.log(`\nOwner-approved exceptions (${exceptions.length} in tools/identity-exceptions.json; each turns one specific C into B, never A):`);
-  for (const e of exceptions) {
-    const target = `${e.collection} tv ${e.tmdb_id}${e.season_number !== undefined ? ' s' + e.season_number : ''}`;
-    const onRow = identified.some(r => r.collection === e.collection && r.media_type === e.media_type && r.tmdb_id === e.tmdb_id
-      && (e.season_number === undefined || r.season_number === e.season_number));
-    console.log(applied.has(e.id) ? `  applied      ${e.id} → ${applied.get(e.id)}`
-      : `  not applied  ${e.id} (${target}): ${onRow ? 'the row no longer has exactly this finding with the bound values; review or retire it' : 'no identified row with this identity'}`);
-  }
+  for (const line of exceptionReport(exceptions, applied, identified)) console.log(line);
   const pass = counts.C === 0 && counts.D === 0;
   console.log(`\nRESULT: ${pass ? 'PASS' : 'FAIL'} — ${counts.C} C, ${counts.D} D`);
   return pass;
