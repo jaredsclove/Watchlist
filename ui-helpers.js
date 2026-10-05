@@ -54,16 +54,6 @@ function esc(t) {
   return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function hasWatchableSoonSeason(seasons) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() + WATCHABLE_SOON_DAYS);
-  const cutoffStr = cutoff.toISOString().substring(0,10);
-  return seasons.some(s => {
-    if (s.watched || s.status === 'skipped') return false;
-    if (/TBA/i.test(s.display_date)) return false;
-    return s.date_sort <= cutoffStr;
-  });
-}
 function parseDate(d) {
   const mo = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
   const m = d.match(/(\w+)\s+(\d+),?\s+(\d{4})/);

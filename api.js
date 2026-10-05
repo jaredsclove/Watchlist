@@ -94,8 +94,8 @@ function sbRpc(fn, args) {
 
 // Adds TV season rows (shaped like a direct watchlist_items insert) through
 // add_tv_seasons, one call per show; each call is atomic, and the function also
-// registers an identified show for Refresh shows and reopens a Complete show that
-// gets a genuinely new season. onInserted(rows) runs after each call, so rows
+// reopens a Complete show that gets a genuinely new season (Refresh shows finds
+// identified shows in tv_shows). onInserted(rows) runs after each call, so rows
 // already added stay in the page if a later call fails. Returns
 // { inserted, alreadyListed, rejected, reopened: [show titles] }.
 async function addTvSeasonRows(collectionId, rows, onInserted) {

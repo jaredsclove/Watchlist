@@ -81,7 +81,7 @@ test('manual season already in the database (not in this page) → "already on y
 });
 
 // ── Delete ──
-test('deleting a non-default TV season → delete_tv_season; the last one removes the show and its Refresh tracking', async () => {
+test('deleting a non-default TV season → delete_tv_season; the last one removes the show, so Refresh shows no longer offers it', async () => {
   const app = await createApp({ rows: [tv({ id: 'a' }), tv({ id: 'b', season_number: 2, season: 'Season 2', item_key: 'show|season 2' })],
     tvShows: [show()], othertvShows: [{ id: 'o1', tmdb_id: 100, title: 'Show', network: 'HBO', collection: 'othertv' }] });
   await openTab(app, 'othertv');
@@ -90,9 +90,12 @@ test('deleting a non-default TV season → delete_tv_season; the last one remove
   await app.ctx.delRow('b'); await settle();
   assert.deepStrictEqual(writes(app), ['POST rpc/delete_tv_season', 'POST rpc/delete_tv_season']);
   assert.deepStrictEqual(app.store.tv_shows, []);
-  assert.deepStrictEqual(app.store.othertv_shows, []);
+  assert.strictEqual(app.store.othertv_shows.length, 1, 'the old tracking row is left alone (unused at stage final)');
   assert.strictEqual(app.get('tabData.othertv.rows.length'), 0);
   assert.strictEqual(banner(app), '');
+  await app.ctx.refreshShows(); await settle();
+  assert.ok(app.el('tmdbPreview').innerHTML.includes('nothing to refresh'), 'Refresh finds no show to check');
+  assert.ok(!app.requests.some(r => !r.url.includes('/rest/v1/')), 'no TMDB lookup for the deleted show');
 });
 
 test('a TV season already deleted elsewhere counts as deleted (like a plain DELETE); other errors roll back', async () => {
@@ -200,7 +203,8 @@ test('TMDB search: a film on True Crime / Docs stays a direct insert with no tra
   const series = app.store.watchlist_items.find(r => r.tmdb_id === 10);
   assert.ok(series.show_id);
   assert.ok(app.store.watchlist_items.find(r => r.tmdb_id === 9).show_id == null);
-  assert.deepStrictEqual(app.store.othertv_shows.map(o => [o.tmdb_id, o.network, o.collection]), [[10, 'Netflix', 'truecrime']]);
+  assert.ok(app.store.tv_shows.some(s => s.tmdb_id === 10 && s.collection === 'truecrime'), 'an identified show, which Refresh shows checks');
+  assert.deepStrictEqual(app.store.othertv_shows, [], 'the old tracking table is no longer written (stage final)');
 });
 
 // ── Seeding built-in defaults ──

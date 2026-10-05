@@ -441,8 +441,6 @@ const NETWORK_COLORS = {
   'Western': '#a0522d'
 };
 
-const WATCHABLE_SOON_DAYS = 60;
-
 const UNIVERSE_LISTS = {
   mcu: { label: 'MCU', titles: MCU_MOVIES }
 };

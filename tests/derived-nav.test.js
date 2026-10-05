@@ -299,7 +299,8 @@ test('guard: addSelectedTMDBSeasons → view mid-POST: inserts and registers the
   assert.strictEqual(posts.length, 1, 'one add_tv_seasons call; the function registers the show itself');
   assert.strictEqual(posts[0].body.p_collection, 'othertv');
   assert.deepStrictEqual(copyOut(posts[0].body.p_show), { tmdb_id: 55, title: 'New Show', show_key: 'new show', network: 'HBO' });
-  assert.deepStrictEqual(app.store.othertv_shows.map(({ id, ...o }) => o), [{ tmdb_id: 55, title: 'New Show', network: 'HBO', collection: 'othertv' }], 'tracked for Refresh shows');
+  assert.ok(app.store.tv_shows.some(s => s.tmdb_id === 55 && s.collection === 'othertv'), 'an identified show, which Refresh shows checks');
+  assert.deepStrictEqual(app.store.othertv_shows, [], 'the old tracking table is no longer written (stage final)');
   assert.strictEqual(app.get('tabData.othertv.rows.length'), 1);
   assert.ok(app.get('tabData.othertv.rows[0].show_id'), 'the new season is linked to its show');
   assertViewIntact(app);
@@ -351,7 +352,7 @@ test('guard: confirmTmdbMatch → view mid-match: row matched in place, show tra
   assert.strictEqual(app.writes()[0].body.p_row_id, 'u1');
   assert.strictEqual(rowIn(app, 'tabData.othertv.rows', 'u1').tmdb_id, 77);
   assert.ok(rowIn(app, 'tabData.othertv.rows', 'u1').show_id, 'linked to the identified show');
-  assert.ok(app.store.othertv_shows.some(o => o.tmdb_id === 77 && o.collection === 'othertv'), 'tracked for Refresh shows');
+  assert.ok(app.store.tv_shows.some(s => s.tmdb_id === 77 && s.collection === 'othertv'), 'an identified show, which Refresh shows checks');
   assert.strictEqual(app.get('window.__tmdbMatch'), null);
   assertViewIntact(app);
 });

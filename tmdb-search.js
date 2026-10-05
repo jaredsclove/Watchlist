@@ -282,7 +282,7 @@ async function addSelectedTMDBSeasons() {
   if (toInsert.length === 0) { cancelTMDBPreview(); return; }
 
   // TV seasons on a TV tab go through add_tv_seasons, which links them to their
-  // show and registers the show for Refresh shows in the same transaction.
+  // show (an identified show is then checked by Refresh shows).
   const viaShowFunction = !isMovie && isTvCollection(collectionId);
   let outcome = null;
   try {
@@ -294,23 +294,6 @@ async function addSelectedTMDBSeasons() {
     }
     tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
-    // track this show for future refresh lookups (TV shows only — a film has no future seasons)
-    // scoped by collection so refresh on one tab doesn't pull in shows from another
-    if (!isMovie && !viaShowFunction) {
-      try {
-        await sbFetch('POST', 'othertv_shows', [{
-          tmdb_id: showId, title: showName, network, collection: collectionId
-        }]);
-      } catch(e) {
-        // Expected: this show is already tracked for this collection (unique constraint
-        // on collection+tmdb_id) — that's fine, nothing to do. Anything else is a real
-        // failure (e.g. network/Supabase issue) and should be surfaced, not hidden,
-        // since it means "Refresh shows" won't find this show later.
-        if (!(e.message.includes('23505') || e.message.includes('duplicate key'))) {
-          showError(`Added, but couldn't register this show for future refresh checks: ${e.message}`);
-        }
-      }
-    }
 
     showSaved();
     if (activeTabId === collectionId) {

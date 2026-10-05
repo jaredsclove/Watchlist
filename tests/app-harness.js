@@ -44,7 +44,7 @@ function response(status, body, headers = {}) {
 }
 
 // The browser-facing TV functions of db/rpc.sql as they behave in the shadow and
-// authoritative stages (app.stage; default 'authoritative'), written independently
+// authoritative and final stages (app.stage; default 'final', production's stage), written independently
 // of the app's helpers so the tests can catch an app/database mismatch. Shows live
 // in store.tv_shows. The compatibility values the database writes to the season
 // status in the authoritative stage aren't simulated: the app must not read them.
@@ -112,7 +112,10 @@ function tvFunctions(app, store, newId) {
     items().push(r);
     return r;
   }
+  // Refresh tracking (othertv_shows) is kept only in the shadow and authoritative stages.
+  const keepsTracking = () => ['shadow', 'authoritative'].includes(app.stage);
   function track(collection, tmdbId, title, network) {
+    if (!keepsTracking()) return;
     if (!store.othertv_shows.some(o => o.collection === collection && o.tmdb_id === tmdbId)) {
       store.othertv_shows.push({ id: newId(), tmdb_id: tmdbId, title, network, collection });
     }
@@ -214,7 +217,7 @@ function tvFunctions(app, store, newId) {
       if (show && !items().some(x => x.show_id === show.id)) {
         shows().splice(shows().indexOf(show), 1);
         showDeleted = true;
-        if (show.tmdb_id != null) store.othertv_shows = store.othertv_shows.filter(o => !(o.collection === show.collection && o.tmdb_id === show.tmdb_id));
+        if (show.tmdb_id != null && keepsTracking()) store.othertv_shows = store.othertv_shows.filter(o => !(o.collection === show.collection && o.tmdb_id === show.tmdb_id));
       }
       return { deleted_row_id: id, show_id: show ? show.id : null, show_deleted: showDeleted };
     },
@@ -294,9 +297,9 @@ function tvFunctions(app, store, newId) {
 //            format 2); TV rows given without show_id are linked to shows as the
 //            Phase 1c backfill would (see linkFixtureRows)
 //   format1: true for a database without the TV-show schema (no tv_shows)
-//   stage:   migration stage the TV functions behave by (default 'authoritative')
+//   stage:   migration stage the TV functions behave by (default 'final')
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
-  format1 = false, stage = 'authoritative' } = {}) {
+  format1 = false, stage = 'final' } = {}) {
   const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
   if (!format1) store.tv_shows = clone(tvShows || []);
   const requests = [];

@@ -236,8 +236,8 @@ async function confirmTmdbMatch() {
     // are the final guard against a match made elsewhere at the same moment.
     let fresh;
     if (viaShowFunction) {
-      // match_tv_row moves the season to its identified show, re-checks both
-      // conflicts in the database and registers the show for Refresh shows.
+      // match_tv_row moves the season to its identified show (checked by Refresh
+      // shows from then on) and re-checks both conflicts in the database.
       const res = await sbRpc('match_tv_row', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: patch });
       if (res && res.blocked) {
         // The identified show is already on this list with a different status;
@@ -284,18 +284,6 @@ async function confirmTmdbMatch() {
     return;
   }
 
-  // A matched series is tracked for "Refresh shows", like one added from TMDB. Skip the
-  // insert when it's already tracked here; the unique key still covers a race.
-  if (patch.media_type === 'tv' && !viaShowFunction) {
-    try {
-      const tracked = await sbFetch('GET', `othertv_shows?collection=eq.${encodeURIComponent(row.collection)}&tmdb_id=eq.${patch.tmdb_id}&select=id`, null);
-      if (!tracked || tracked.length === 0) {
-        await sbFetch('POST', 'othertv_shows', [{ tmdb_id: patch.tmdb_id, title: patch.title, network: patch.theme, collection: row.collection }]);
-      }
-    } catch(e) {
-      if (!isDuplicateKeyError(e)) showError(`Matched, but couldn't register this show for future refresh checks: ${e.message}`);
-    }
-  }
   // row.collection is where the row lives; the user may have switched tabs or
   // views while the checks and writes above were in flight.
   if (window.__tmdbMatch === m) window.__tmdbMatch = null;
