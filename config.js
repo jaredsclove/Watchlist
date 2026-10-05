@@ -175,7 +175,7 @@ const COLLECTIONS = [
   {k:"limitless with chris hemsworth|season 2",t:"Limitless with Chris Hemsworth",s:"Season 2",th:"Documentary",d:"Aug 15, 2025",ds:"2025-08-15",p:true},
   {k:"doogie kamealoha, m.d.|season 2",t:"Doogie Kameāloha, M.D.",s:"Season 2",th:"Drama",d:"Mar 31, 2023",ds:"2023-03-31",p:true},
   {k:"high school musical: the musical: the series|season 3",t:"High School Musical: The Musical: The Series",s:"Season 3",th:"Musical",d:"Aug 10, 2022",ds:"2022-08-10",p:true},
-  {k:"the proud family: louder and prouder|season 2",t:"The Proud Family: Louder and Prouder",s:"Season 2",th:"Animation",d:"Sep 28, 2023",ds:"2023-09-28",p:true},
+  {k:"the proud family: louder and prouder|season 2",t:"The Proud Family: Louder and Prouder",s:"Season 2",th:"Animation",d:"Feb 1, 2023",ds:"2023-02-01",p:true},
   {k:"the proud family: louder and prouder|season 3",t:"The Proud Family: Louder and Prouder",s:"Season 3",th:"Animation",d:"Aug 6, 2025",ds:"2025-08-06",p:true},
   {k:"the proud family: louder and prouder|season 4",t:"The Proud Family: Louder and Prouder",s:"Season 4",th:"Animation",d:"Jul 29, 2026",ds:"2026-07-29",p:true},
   {k:"high school musical: the musical: the series|season 4",t:"High School Musical: The Musical: The Series",s:"Season 4",th:"Musical",d:"Aug 9, 2023",ds:"2023-08-09",p:true},
