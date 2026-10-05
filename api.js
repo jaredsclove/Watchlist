@@ -72,10 +72,9 @@ async function fetchAllRows(table, filter, select = '*') {
   return allRows;
 }
 
-// ─── TV structural writes (TV-show migration, Phase 2: shadow) ───────────────
+// ─── TV structural writes (TV-show migration) ────────────────────────────────
 // TV seasons are added, matched and deleted through database functions that
-// keep every season linked to its show in tv_shows. The season's own status is
-// still the app's source of truth; these functions never change a status.
+// keep every season linked to its show in tv_shows (show status: tv-shows.js).
 // Mirrors private.tv_collections() and private.tv_is_tv_row() in db/tv_model.sql.
 const TV_COLLECTION_IDS = ['disney', '90day', 'sheridan', 'othertv', 'truecrime'];
 function isTvCollection(collectionId) {
@@ -94,10 +93,11 @@ function sbRpc(fn, args) {
 }
 
 // Adds TV season rows (shaped like a direct watchlist_items insert) through
-// add_tv_seasons, one call per show; the function also registers an identified
-// show for Refresh shows. onInserted(rows) runs after each call, so rows already
-// added stay in the page if a later call fails. Returns the number of requested
-// seasons that were already on the list (the database adds none of those).
+// add_tv_seasons, one call per show; each call is atomic, and the function also
+// registers an identified show for Refresh shows and reopens a Complete show that
+// gets a genuinely new season. onInserted(rows) runs after each call, so rows
+// already added stay in the page if a later call fails. Returns
+// { inserted, alreadyListed, rejected, reopened: [show titles] }.
 async function addTvSeasonRows(collectionId, rows, onInserted) {
   const groups = new Map();
   for (const r of rows) {
@@ -111,13 +111,22 @@ async function addTvSeasonRows(collectionId, rows, onInserted) {
       date_sort: r.date_sort, season_number: r.tmdb_id != null ? r.season_number : null
     });
   }
-  let alreadyListed = 0;
+  const outcome = { inserted: 0, alreadyListed: 0, rejected: 0, reopened: [] };
   for (const g of groups.values()) {
     const res = await sbRpc('add_tv_seasons', { p_collection: collectionId, p_show: g.show, p_seasons: g.seasons });
-    alreadyListed += (res.existing || []).length + (res.rejected || []).length;
-    if (res.inserted && res.inserted.length) onInserted(res.inserted);
+    outcome.alreadyListed += (res.existing || []).length;
+    outcome.rejected += (res.rejected || []).length;
+    const show = tvShowsById.get(res.show_id);
+    if (show) show.status = res.show_status;
+    else tvShowsById.set(res.show_id, { id: res.show_id, collection: collectionId, title: g.show.title, show_key: g.show.show_key,
+      tmdb_id: g.show.tmdb_id, status: res.show_status });
+    if (res.reopened) outcome.reopened.push(tvShowsById.get(res.show_id).title);
+    if (res.inserted && res.inserted.length) {
+      outcome.inserted += res.inserted.length;
+      onInserted(res.inserted);
+    }
   }
-  return alreadyListed;
+  return outcome;
 }
 
 async function tmdbFetch(path) {

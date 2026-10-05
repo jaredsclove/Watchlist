@@ -150,10 +150,10 @@ async function addRefreshedSeasons() {
   if (toInsert.length === 0 && toUpdate.length === 0) { cancelTMDBPreview(); return; }
 
   let changed = false;
-  let alreadyListed = 0;
+  let outcome = null;
   try {
     if (toInsert.length > 0 && isTvCollection(collectionId)) {
-      alreadyListed = await addTvSeasonRows(collectionId, toInsert, inserted => {
+      outcome = await addTvSeasonRows(collectionId, toInsert, inserted => {
         tabData[collectionId]?.rows.push(...inserted);
         changed = true;
       });
@@ -181,7 +181,7 @@ async function addRefreshedSeasons() {
       renderFilters();
       renderTable();
     }
-    if (alreadyListed > 0) showError(duplicateInsertMessage('try "↻ Refresh shows" again for a fresh check'));
+    if (outcome) showTvAddOutcome(outcome);
   } catch(e) {
     if (changed) {
       tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));

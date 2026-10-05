@@ -346,11 +346,14 @@ async function renderRestorePreview(backup) {
     return;
   }
 
-  // A format-2 backup needs the TV-show schema; a format-1 backup restored into a
-  // format-2 database empties its TV shows (rebuilt afterwards by an admin backfill),
-  // so it needs an explicit confirmation that is passed to the database.
+  // A format-2 backup needs the TV-show schema. Since the switch to show-level
+  // status, a TV show's status lives only in tv_shows, so a format-1 backup (which
+  // has none) can't be restored into a format-2 database; the database refuses it too.
   const formatErrors = backup.formatVersion > dbFormat
-    ? [`This backup is format ${backup.formatVersion}, which needs the TV-show database; this database is still format ${dbFormat}.`] : [];
+    ? [`This backup is format ${backup.formatVersion}, which needs the TV-show database; this database is still format ${dbFormat}.`]
+    : backup.formatVersion < dbFormat
+      ? [`This backup predates TV shows (format ${backup.formatVersion}). TV show status is now stored per show, so only format ${dbFormat} backups can be restored.`]
+      : [];
   const lossErrors = formatErrors.concat(identityLossErrors(currentItems, backup.tables.watchlist_items));
   if (lossErrors.length > 0) {
     showRestoreModal(`<div class="modal-title">This file can't be used for restore</div>
@@ -359,15 +362,13 @@ async function renderRestorePreview(backup) {
     pendingRestoreData = null;
     return;
   }
-  pendingRestoreAllowV1Reset = backup.formatVersion === 1 && dbFormat === 2;
+  pendingRestoreAllowV1Reset = false;
 
   const backupDate = new Date(backup.exportedAt).toLocaleString();
   const tables = [...new Set([...BACKUP_FORMATS[dbFormat].tables, ...BACKUP_FORMATS[backup.formatVersion].tables])];
   const rows = tables.map(t => `
     <div class="modal-row"><span>${esc(t)}</span><span>${currentCounts[t] ?? 0} → ${backup.tables[t] ? (backup.rowCounts[t] ?? backup.tables[t].length) : 0}</span></div>
   `).join('');
-  const v1Warning = pendingRestoreAllowV1Reset
-    ? `<div class="modal-warning">This backup predates TV shows (format 1). Restoring it empties the TV-show data, which then has to be rebuilt by an admin before the next migration step.</div>` : '';
 
   showRestoreModal(`
     <div class="modal-title">Restore from backup?</div>
@@ -379,7 +380,6 @@ async function renderRestorePreview(backup) {
       <div class="modal-label">Rows: current → backup</div>
       ${rows}
     </div>
-    ${v1Warning}
     <div class="modal-warning">This will permanently replace all current data in these ${tables.length} tables with the contents of this backup. A safety backup of your current data will be downloaded automatically before anything is changed.</div>
     <div class="modal-actions">
       <button class="btn" onclick="closeRestoreModal()">Cancel</button>

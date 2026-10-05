@@ -1,8 +1,9 @@
-// Offline tests for the TV-show migration's Phase 2 (shadow) app changes: TV
+// Offline tests for the app's TV writes on the first-class show model: TV
 // structural writes (seeding defaults, Refresh shows, TMDB search add, manual
 // Add entry, Match to TMDB, Delete) go through the database functions, which
-// link every new season to its show; films, movies and every status, watched,
-// skip and date edit stay direct writes, and no function changes a status.
+// link every new season to its show and reopen a Complete show that gets a
+// genuinely new season; show status, Watched and Skip go through their functions;
+// films, movies and date edits stay direct writes.
 // Run from the repo root: node tests/tv-writes.test.js
 // No network, no database (see tests/app-harness.js for the function stand-ins).
 const assert = require('assert');
@@ -44,7 +45,7 @@ test('manual TV season → add_tv_seasons with the legacy show key; the season i
   assert.strictEqual(rows.length, 2);
   assert.ok(rows[0].show_id && rows[0].show_id === rows[1].show_id, 'both seasons on one show');
   assert.deepStrictEqual(Array.from(rows, r => r.status), ['confirmed', 'confirmed']);
-  assert.strictEqual(app.shows.length, 1);
+  assert.strictEqual(app.store.tv_shows.length, 1);
   assert.strictEqual(banner(app), '');
 });
 
@@ -54,7 +55,7 @@ test('manual "The Clone Wars" season on Disney+ joins the overridden show key', 
   const call = app.writes().find(r => r.url.endsWith('/rpc/add_tv_seasons'));
   assert.strictEqual(call.body.p_show.show_key, 'star wars: the clone wars (2008)');
   // Opening Disney+ seeded its defaults, including the Clone Wars seasons: Season 8 joins that same show.
-  const cw = app.shows.filter(s => s.show_key === 'star wars: the clone wars (2008)');
+  const cw = app.store.tv_shows.filter(s => s.show_key === 'star wars: the clone wars (2008)');
   assert.strictEqual(cw.length, 1);
   const s8 = app.store.watchlist_items.find(r => r.item_key === 'the clone wars|season 8');
   assert.strictEqual(s8.show_id, cw[0].id);
@@ -107,18 +108,23 @@ test('a TV season already deleted elsewhere counts as deleted (like a plain DELE
   assert.strictEqual(app.get('tabData.othertv.rows.length'), 1, 'row put back');
 });
 
-test('deleting a movie is a plain DELETE; "deleting" a built-in default is still a skipped PATCH', async () => {
+test('deleting a movie is a plain DELETE; × on a built-in TV season skips it (set_season_skipped); × on a built-in film is the skipped PATCH', async () => {
   const film = tv({ id: 'm', collection: 'movies', media_type: 'movie', season: 'Film', season_number: null, show_id: null, item_key: 'film|film' });
   const app = await createApp({ rows: [film] });
   app.ctx.switchMediaType('movie'); await settle();
   await app.ctx.delRow('m'); await settle();
+  assert.deepStrictEqual(writes(app), ['DELETE watchlist_items']);
   const app2 = await createApp();
   await openTab(app2, 'disney');
   const def = app2.get('tabData.disney.rows').find(r => r.season !== 'Film');
+  const defFilm = app2.get('tabData.disney.rows').find(r => r.season === 'Film');
   await app2.ctx.delRow(def.id); await settle();
-  assert.deepStrictEqual(writes(app), ['DELETE watchlist_items']);
-  assert.deepStrictEqual(writes(app2), ['POST rpc/seed_tv_defaults', 'PATCH watchlist_items']);
-  assert.strictEqual(app2.store.watchlist_items.find(r => r.id === def.id).status, 'skipped');
+  await app2.ctx.delRow(defFilm.id); await settle();
+  assert.deepStrictEqual(writes(app2), ['POST rpc/seed_tv_defaults', 'POST rpc/set_season_skipped', 'PATCH watchlist_items']);
+  const stored = id => app2.store.watchlist_items.find(r => r.id === id);
+  assert.strictEqual(stored(def.id).skipped, true, 'the season is skipped, nothing deleted');
+  assert.strictEqual(stored(defFilm.id).status, 'skipped');
+  assert.strictEqual(app2.store.watchlist_items.length, app2.get("COLLECTIONS.find(c => c.id === 'disney').defaults.length"));
 });
 
 // ── Refresh shows ──
@@ -204,14 +210,62 @@ test('a fully seeded tab makes no write at all on load', async () => {
 });
 
 // ── Old season status stays authoritative ──
-test('status, watched and watch-with edits on TV seasons are still direct PATCHes, never functions', async () => {
-  const app = await createApp({ rows: [tv({ id: 'a' })], tvShows: [show()] });
+test('show status, Watched and Skip go through their functions; films keep direct PATCHes; no season status is ever written', async () => {
+  const film = tv({ id: 'f', collection: 'truecrime', media_type: 'movie', season: 'Film', season_number: null, tmdb_id: 900, show_id: null, item_key: 'doc|film' });
+  const app = await createApp({ rows: [tv({ id: 'a' }), film], tvShows: [show()] });
   await openTab(app, 'othertv');
-  await app.ctx.setStatus('a', 'watching', null); await settle();
+  await app.ctx.setShowStatusById('s100', 'watching'); await settle();
   await app.ctx.toggleWatch('a'); await settle();
-  assert.deepStrictEqual(writes(app), ['PATCH watchlist_items', 'PATCH watchlist_items']);
-  assert.deepStrictEqual([app.store.watchlist_items[0].status, app.store.watchlist_items[0].watched], ['watching', true]);
-  assert.strictEqual(app.store.tv_shows[0].status, 'confirmed', 'the shadow show status is only updated by the resync');
+  await app.ctx.setSeasonSkipped('a', true); await settle();
+  await app.ctx.setStatus('a', 'complete', null); await settle(); // a TV season has no row-level status: ignored
+  await openTab(app, 'truecrime');
+  await app.ctx.setStatus('f', 'watching', null); await settle();
+  await app.ctx.toggleWatch('f'); await settle();
+  assert.deepStrictEqual(writes(app), ['POST rpc/set_show_status', 'POST rpc/set_season_watched', 'POST rpc/set_season_skipped', 'PATCH watchlist_items', 'PATCH watchlist_items']);
+  assert.ok(!app.writes().some(r => r.body && r.url.includes('watchlist_items?id=eq.a')), 'no direct write to the TV season');
+  assert.strictEqual(app.store.tv_shows[0].status, 'watching');
+  const a = app.store.watchlist_items.find(r => r.id === 'a');
+  assert.deepStrictEqual([a.watched, a.skipped, a.status], [true, true, 'confirmed']);
+});
+
+// ── Complete-show reopen and add outcomes (authoritative stage) ──
+test('Refresh adding a genuinely new season to a Complete show reopens it On List, atomically, with a notice', async () => {
+  const app = await createApp({ rows: [tv({ id: 'a', watched: true })], tvShows: [show({ status: 'complete' })] });
+  await openTab(app, 'othertv');
+  refreshSetup(app, [{ show: { title: 'Show', tmdb_id: 100 }, details: { networks: [] }, newOnes: [{ season_number: 2, air_date: '2027-01-01' }] }], [[0, 2]]);
+  await app.ctx.addRefreshedSeasons(); await settle();
+  assert.strictEqual(app.store.tv_shows[0].status, 'confirmed');
+  assert.strictEqual(app.get("tvShowsById.get('s100').status"), 'confirmed', 'the page shows the reopened status');
+  assert.ok(app.el('banner').innerHTML.includes('&quot;Show&quot; was Complete and got a new season'), app.el('banner').innerHTML);
+  assert.strictEqual(banner(app), '');
+});
+
+test('a request whose seasons are all already listed: "Already on your list.", no reopen; a mix reports counts', async () => {
+  const app = await createApp({ rows: [tv({ id: 'a' })], tvShows: [show({ status: 'complete' })] });
+  await openTab(app, 'othertv');
+  refreshSetup(app, [{ show: { title: 'Show', tmdb_id: 100 }, details: { networks: [] }, newOnes: [{ season_number: 1, air_date: '2020-01-01' }] }], [[0, 1]]);
+  await app.ctx.addRefreshedSeasons(); await settle();
+  assert.ok(banner(app).includes('Already on your list.'), banner(app));
+  assert.strictEqual(app.store.tv_shows[0].status, 'complete', 'a duplicate is a no-op: no reopen');
+  refreshSetup(app, [{ show: { title: 'Show', tmdb_id: 100 }, details: { networks: [] }, newOnes: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 3, air_date: '2028-01-01' }] }], [[0, 1], [0, 3]]);
+  await app.ctx.addRefreshedSeasons(); await settle();
+  assert.ok(banner(app).includes('Added 1 season; 1 already on your list.'), banner(app));
+});
+
+test('seeding a new built-in season into a Complete show reopens it; a Skipped show stays Skipped', async () => {
+  const app0 = await createApp();
+  await openTab(app0, '90day');
+  const all = app0.store.watchlist_items, shows = app0.store.tv_shows;
+  // Two multi-season shows: drop one season of each, mark one show Complete and the other Skipped.
+  const multi = shows.filter(s => all.filter(r => r.show_id === s.id).length > 1).slice(0, 2);
+  const [c, k] = multi;
+  c.status = 'complete'; k.status = 'skipped';
+  const gone = [all.find(r => r.show_id === c.id), all.find(r => r.show_id === k.id)].map(r => r.id);
+  const app = await createApp({ rows: all.filter(r => !gone.includes(r.id)), tvShows: shows });
+  await openTab(app, '90day');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === c.id).status, 'confirmed');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === k.id).status, 'skipped');
+  assert.ok(app.el('banner').innerHTML.includes(`"${c.title}" was Complete and got a new season`), app.el('banner').innerHTML);
 });
 
 T.run();

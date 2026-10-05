@@ -445,6 +445,20 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .section-count { color: var(--text3); }
 .status-pill { display: inline-block; padding: 4px 10px; border-radius: var(--radius); font-size: 12px; font-weight: 500; border: 1px solid; white-space: nowrap; }
 .status-pill.s-caughtup { background: var(--teal-bg); color: var(--teal); border-color: var(--teal); }
+.status-pill.s-confirmed { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
+.status-pill.s-highpriority { background: var(--gold-bg); color: var(--gold); border-color: var(--gold-border); }
+.status-pill.s-watching { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
+.status-pill.s-complete { background: var(--surface2); color: var(--text2); border-color: var(--border2); }
+.status-pill.s-pending { background: var(--orange-bg); color: var(--orange); border-color: var(--orange); }
+.status-pill.s-maybe { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
+.status-pill.s-skipped { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+/* Show-level status (applies to every season of the show) and season Skip / Keep */
+.show-status-select { font-weight: 600; }
+.skip-btn { background: none; border: 1px dashed var(--border2); border-radius: var(--radius); padding: 4px 10px; cursor: pointer; font-size: 12px; color: var(--text3); white-space: nowrap; }
+.skip-btn:hover { border-color: var(--red); color: var(--red); }
+.skip-btn.kept { border-style: solid; color: var(--text2); }
+.skip-btn.kept:hover { border-color: var(--green-border); color: var(--green); }
+.card-actions .skip-btn { padding: 7px 10px; }
 
 /* ── Filter toggle (mobile) ── */
 .filter-toggle-btn { display: none; }

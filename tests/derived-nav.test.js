@@ -49,14 +49,17 @@ const noNullCollection = app => app.writes().forEach(r => {
 });
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
-test('startup: Currently Watching opens with one paginated GET of the TV collections and no writes', async () => {
+test('startup: Currently Watching opens with one paginated GET of the TV collections, one of the shows, and no writes', async () => {
   const app = await createApp({ rows: [tv({ status: 'watching' })] });
   assert.strictEqual(app.get('activeViewId'), 'watching');
   assert.strictEqual(app.get('activeTabId'), null);
   assert.strictEqual(app.writes().length, 0, 'no POST/PATCH/DELETE');
   const reads = app.requests.filter(isDerivedRead);
   assert.strictEqual(reads.length, 1);
-  assert.strictEqual(app.requests.length, 1, 'no per-tab loads, no seeding reads');
+  const showReads = app.requests.filter(r => r.url.includes('/rest/v1/tv_shows'));
+  assert.strictEqual(showReads.length, 1);
+  assert.strictEqual(showReads[0].headers['Prefer'], 'count=exact', 'shows are paginated and count-checked too');
+  assert.strictEqual(app.requests.length, 2, 'no per-tab loads, no seeding reads');
   const list = decodeURIComponent(reads[0].url.match(/collection=in\.\(([^)]*)\)/)[1]).split(',').map(x => x.replace(/"/g, ''));
   assert.deepStrictEqual(list, TV_IDS);
   assert.strictEqual(reads[0].headers['Prefer'], 'count=exact');
@@ -180,8 +183,8 @@ test('restore reload re-reads the active view (no loadTab(null))', async () => {
   const before = app.requests.length;
   app.ctx.finishRestoreAndReload(); await settle();
   const after = app.requests.slice(before);
-  assert.strictEqual(after.length, 1);
-  assert.ok(isDerivedRead(after[0]));
+  assert.strictEqual(after.length, 2, 'the TV rows and the shows');
+  assert.ok(after.some(isDerivedRead) && after.some(r => r.url.includes('/rest/v1/tv_shows')));
   assertViewIntact(app);
 });
 
@@ -199,15 +202,14 @@ async function watchingApp() {
 }
 const rowIn = (app, where, id) => app.get(`(${where}).find(r => r.id === '${id}')`);
 
-test('edit from Currently Watching PATCHes the real row id, mirrors the tab cache, re-derives', async () => {
+test('Watched from Currently Watching goes through set_season_watched by the real row id, mirrors the tab cache, re-derives', async () => {
   const app = await watchingApp();
   const before = app.writes().length;
   await app.ctx.toggleWatch('w1');
   const w = app.writes().slice(before);
   assert.strictEqual(w.length, 1);
-  assert.strictEqual(w[0].method, 'PATCH');
-  assert.ok(w[0].url.endsWith('watchlist_items?id=eq.w1'), w[0].url);
-  assert.deepStrictEqual(w[0].body, { watched: true });
+  assert.ok(w[0].url.endsWith('/rpc/set_season_watched'), w[0].url);
+  assert.deepStrictEqual(w[0].body, { p_row_id: 'w1', p_watched: true });
   assert.strictEqual(rowIn(app, 'derivedData.rows', 'w1').watched, true);
   assert.strictEqual(rowIn(app, 'tabData.othertv.rows', 'w1').watched, true, 'source tab cache kept in sync');
   assert.notStrictEqual(rowIn(app, 'derivedData.rows', 'w1'), rowIn(app, 'tabData.othertv.rows', 'w1'), 'separate copies');
@@ -215,9 +217,9 @@ test('edit from Currently Watching PATCHes the real row id, mirrors the tab cach
   assert.ok(html.includes("toggleWatch('w2')") && !html.includes("toggleWatch('w1')"), 'up next advanced to S2');
 });
 
-test('a failed PATCH rolls back the local change and mirrors nothing', async () => {
+test('a failed Watched write rolls back the local change and mirrors nothing', async () => {
   const app = await watchingApp();
-  app.failNext(r => r.method === 'PATCH');
+  app.failNext(r => r.url.endsWith('/rpc/set_season_watched'));
   await app.ctx.toggleWatch('w1');
   assert.strictEqual(rowIn(app, 'derivedData.rows', 'w1').watched, false);
   assert.strictEqual(rowIn(app, 'tabData.othertv.rows', 'w1').watched, false);
@@ -225,18 +227,20 @@ test('a failed PATCH rolls back the local change and mirrors nothing', async () 
   assert.ok(app.el('tbody').innerHTML.includes("toggleWatch('w1')"), 'still up next');
 });
 
-test('status change from a view: Watching → Complete moves up next; Coming Soon status edits mirror too', async () => {
+test('show status from a view: Watching → Complete removes the show; Skip in Coming Soon mirrors to the tab cache', async () => {
   const app = await watchingApp();
-  await app.ctx.setStatus('w1', 'complete', null);
-  assert.strictEqual(rowIn(app, 'tabData.othertv.rows', 'w1').status, 'complete');
-  assert.ok(app.el('tbody').innerHTML.includes("toggleWatch('w2')"));
-  await app.ctx.setStatus('w2', 'confirmed', null);
-  assert.ok(!app.el('tbody').innerHTML.includes('derived-show-row'), 'no Watching rows left → show leaves the list');
+  const showId = rowIn(app, 'derivedData.rows', 'w1').show_id;
+  assert.ok(app.el('tbody').innerHTML.includes("toggleWatch('w1')"));
+  await app.ctx.setShowStatusById(showId, 'complete');
+  assert.ok(!app.el('tbody').innerHTML.includes('derived-show-row'), 'the show is no longer Watching');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === showId).status, 'complete');
+  assert.ok(!app.writes().some(r => r.method === 'PATCH'), 'no season status PATCH');
   app.ctx.switchView('comingsoon'); await settle();
-  await app.ctx.setStatus('c1', 'highpriority', null);
+  await app.ctx.setSeasonSkipped('c1', true);
   const last = app.writes().pop();
-  assert.ok(last.url.endsWith('id=eq.c1') && last.body.status === 'highpriority');
-  assert.strictEqual(rowIn(app, 'tabData.othertv.rows', 'c1').status, 'highpriority');
+  assert.ok(last.url.endsWith('/rpc/set_season_skipped'));
+  assert.deepStrictEqual(last.body, { p_row_id: 'c1', p_skipped: true });
+  assert.strictEqual(rowIn(app, 'tabData.othertv.rows', 'c1').skipped, true, 'source tab cache kept in sync');
 });
 
 // ─── Async flows that can finish after a navigation (capture-at-start guards) ─

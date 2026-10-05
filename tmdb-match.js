@@ -239,18 +239,41 @@ async function confirmTmdbMatch() {
       // match_tv_row moves the season to its identified show, re-checks both
       // conflicts in the database and registers the show for Refresh shows.
       const res = await sbRpc('match_tv_row', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: patch });
+      if (res && res.blocked) {
+        // The identified show is already on this list with a different status;
+        // nothing was written. Matching never changes a show's status.
+        showError(`Not matched: "${patch.title}" is already on this list as ${statusOptionLabel(res.target_status).replace(/^\S+ /, '')}, `
+          + `but this row's show is ${statusOptionLabel(res.legacy_status).replace(/^\S+ /, '')}. Give both the same status first, then match again.`);
+        return;
+      }
       fresh = res && res.row;
     } else {
       // A row matched as a film leaves the show it belonged to as a TV season.
-      const body = row.show_id != null ? { ...patch, show_id: null } : patch;
+      const formerShowId = row.show_id ?? null;
+      const body = formerShowId != null ? { ...patch, show_id: null } : patch;
       await sbFetch('PATCH', `${TABLE}?id=eq.${row.id}&tmdb_id=is.null&media_type=is.null&season_number=is.null`, body);
       [fresh] = await sbFetch('GET', `${TABLE}?id=eq.${row.id}&select=*`, null) || [];
+      // A show left with no seasons is removed, like deleting its last season.
+      // The season link's ON DELETE RESTRICT refuses this while any season remains.
+      if (formerShowId != null && fresh && fresh.show_id == null) {
+        try {
+          await sbFetch('DELETE', `tv_shows?id=eq.${formerShowId}`, null);
+          tvShowsById.delete(formerShowId);
+        } catch(e) {
+          if (!String(e.message).includes('23503')) showError(`Matched, but couldn't remove the now-empty show: ${e.message}`);
+        }
+      }
     }
     if (!fresh || fresh.tmdb_id !== patch.tmdb_id || fresh.media_type !== patch.media_type || fresh.season_number !== patch.season_number) {
       showError('This row changed somewhere else before the match was saved, so nothing was matched. Reload the page and try again.');
       return;
     }
     Object.assign(row, fresh);
+    // The season may have joined an existing show, or its show may now be identified.
+    if (viaShowFunction) {
+      try { await loadTvShows(row.collection); }
+      catch(e) { showError(`Matched, but couldn't reload the show list: ${e.message}`); }
+    }
   } catch(e) {
     showError(/not_found: unidentified row|match_conflict: the row changed/.test(String(e.message))
       ? 'This row changed somewhere else before the match was saved, so nothing was matched. Reload the page and try again.'

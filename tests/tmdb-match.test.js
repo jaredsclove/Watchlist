@@ -8,7 +8,7 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'tmdb-search.js', 'tmdb-match.js'];
+const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'tmdb-search.js', 'tmdb-match.js', 'tv-shows.js'];
 const copy = v => JSON.parse(JSON.stringify(v)); // into this realm, so deepStrictEqual compares values
 
 // Rows as the app stores them
@@ -33,6 +33,7 @@ function makeEnv({ rows = [], tab = 'movies', tmdb = () => ({}), db = {} } = {})
     console, setTimeout: () => 0,
     document: { getElementById: el, querySelectorAll: () => [] },
     tabData: { [tab]: { rows, loaded: true, newKeys: [] } },
+    tvShowsById: new Map(),
     activeTabId: tab,
     tmdbFetch: async p => tmdb(p),
     sbFetch: async (method, p, body) => {
@@ -45,6 +46,7 @@ function makeEnv({ rows = [], tab = 'movies', tmdb = () => ({}), db = {} } = {})
       log.writes.push({ method, path: p, body: body ? copy(body) : null });
       if (db.fail && db.fail(method, p)) throw db.fail(method, p);
       if (p === 'rpc/match_tv_row') {
+        if (db.blocked) return { blocked: true, legacy_status: 'watching', target_status: 'complete', legacy_show_id: 'L', target_show_id: 'T' };
         const row = rows.find(r => r.id === body.p_row_id);
         return { blocked: false, row: { ...row, ...body.p_patch, show_id: 'show-silo' }, show_id: 'show-silo' };
       }
@@ -269,7 +271,27 @@ test('confirm film for a row linked as a TV season → the guarded PATCH also un
   assert.strictEqual(patch.body.show_id, null);
   assert.strictEqual(patch.body.media_type, 'movie');
   assert.strictEqual(row.show_id, null);
+  // The former show is removed if it has no seasons left (ON DELETE RESTRICT refuses otherwise).
+  assert.deepStrictEqual(env.log.writes.map(w => `${w.method} ${w.path}`), ['PATCH watchlist_items?id=eq.row-1&tmdb_id=is.null&media_type=is.null&season_number=is.null', 'DELETE tv_shows?id=eq.show-legacy']);
   assert.strictEqual(env.log.saved, 1);
+});
+test('confirm film, the former show still has seasons (23503) → matched, no error', async () => {
+  const row = manual({ collection: 'truecrime', show_id: 'show-legacy' });
+  const restrict = new Error('Supabase error 409: {"code":"23503","message":"update or delete on table \\"tv_shows\\" violates foreign key constraint"}');
+  const env = makeEnv({ tab: 'truecrime', rows: [row], tmdb: searchStub, db: { fail: (m, p) => (m === 'DELETE' ? restrict : null) } });
+  await openAndSearch(env);
+  await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
+  await env.ctx.confirmTmdbMatch();
+  assert.strictEqual(row.tmdb_id, 438631);
+  assert.strictEqual(env.banner(), '');
+  assert.strictEqual(env.log.saved, 1);
+});
+test('confirm TV season blocked (target show has another status) → nothing written beyond the call, clear message, no Saved', async () => {
+  const { row, env, writes } = await matchSiloS1({ blocked: true });
+  assert.deepStrictEqual(writes, ['POST rpc/match_tv_row']);
+  assert.strictEqual(row.tmdb_id, null);
+  assert.ok(/Not matched: "Silo" is already on this list as Complete, but this row's show is Watching/.test(env.banner()), env.banner());
+  assert.strictEqual(env.log.saved, 0);
 });
 test('confirm film for an unlinked row → the PATCH carries no show_id at all', async () => {
   const row = manual({ collection: 'truecrime', show_id: null });

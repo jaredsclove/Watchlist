@@ -1,27 +1,3 @@
-async function setShowStatus(title, status) {
-  const td = tabData[activeTabId];
-  if (!td) return;
-  const rows = td.rows.filter(r => r.title === title);
-  if (rows.length === 0) return;
-
-  const previousStatuses = rows.map(r => r.status);
-  rows.forEach(r => { r.status = status; });
-  renderTable();
-
-  try {
-    await sbFetch('PATCH',
-      `${TABLE}?collection=eq.${encodeURIComponent(activeTabId)}&title=eq.${encodeURIComponent(title)}`,
-      { status }
-    );
-    showSaved();
-  } catch(e) {
-    rows.forEach((r, i) => { r.status = previousStatuses[i]; });
-    renderTable();
-    showError(e.message);
-  }
-}
-
-
 // ─── Actions ──────────────────────────────────────────────────────────────────
 // The rows the visible controls came from: the open derived view's cross-TV rows,
 // or the active collection tab's rows. Row actions PATCH by the row's real id
@@ -47,8 +23,14 @@ async function toggleWatch(id) {
   row.watched = newVal;
   renderTable();
   try {
-    await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { watched: newVal });
-    mirrorRowUpdate(id, { watched: newVal });
+    if (isTvSeason(row)) {
+      // The database also keeps the show's compatibility values in step.
+      const saved = await sbRpc('set_season_watched', { p_row_id: id, p_watched: newVal });
+      mirrorRowUpdate(id, saved || { watched: newVal });
+    } else {
+      await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { watched: newVal });
+      mirrorRowUpdate(id, { watched: newVal });
+    }
     showSaved();
   } catch(e) {
     row.watched = !newVal;
@@ -57,9 +39,10 @@ async function toggleWatch(id) {
   }
 }
 
+// Row-level status: films only. A TV season's status is its show's (setShowStatusById).
 async function setStatus(id, status, selectEl) {
   const row = actionRows().find(r => r.id === id);
-  if (!row) return;
+  if (!row || isTvSeason(row)) return;
   const old = row.status;
   row.status = status;
   // update select styling immediately
@@ -90,23 +73,25 @@ async function setStatus(id, status, selectEl) {
 }
 
 async function delRow(id) {
-  if (!confirm('Remove this entry?')) return;
   const td = tabData[activeTabId];
   if (!td) return; // collection tabs only; derived views have no delete control
   const idx = td.rows.findIndex(r => r.id === id);
   if (idx === -1) return;
   const row = td.rows[idx];
 
-  // If this row came from the tab's built-in default list, a hard delete would
-  // just get silently re-created the next time the tab loads (loadTab reseeds
-  // any default key missing from the database). So for defaults, "delete" instead
-  // sets status to 'skipped' — same reversible mechanism already used everywhere
-  // else in the app (hidden from the default view, visible under "Skipped", and
-  // restorable via the existing "↩ Keep" control). Non-default items (anything
-  // added manually or pulled from TMDB) have nothing to reseed from, so they keep
-  // the exact hard-delete behavior as before.
+  // A row from the tab's built-in default list would just be re-created the next
+  // time the tab loads (loadTab reseeds any missing default), so for defaults ×
+  // means Skip instead: a TV season is skipped (reversible with ↩ Keep, nothing
+  // deleted); a default film gets the row status 'skipped' as before. Anything
+  // added manually or from TMDB is really deleted, after a confirm.
   const col = COLLECTIONS.find(c => c.id === row.collection);
   const isDefaultItem = col && Array.isArray(col.defaults) && col.defaults.some(d => d.k === row.item_key);
+
+  if (isDefaultItem && isTvSeason(row)) {
+    await setSeasonSkipped(id, true);
+    return;
+  }
+  if (!confirm('Remove this entry?')) return;
 
   if (isDefaultItem) {
     const previousStatus = row.status;
@@ -126,11 +111,12 @@ async function delRow(id) {
   const [removed] = td.rows.splice(idx, 1);
   renderTable();
   try {
-    if (isTvSeasonRow(removed.collection, removed.media_type, removed.season)) {
+    if (isTvSeason(removed)) {
       // delete_tv_season also removes the show once its last season is gone.
       // A season already deleted elsewhere counts as deleted, like a plain DELETE.
       try {
-        await sbRpc('delete_tv_season', { p_row_id: id });
+        const res = await sbRpc('delete_tv_season', { p_row_id: id });
+        if (res && res.show_deleted) tvShowsById.delete(res.show_id);
       } catch(e) {
         if (!String(e.message).includes('not_found:')) throw e;
       }
@@ -191,8 +177,9 @@ async function addEntry() {
     let inserted = null;
     if (isTvSeasonRow(collectionId, null, season)) {
       // A TV season joins its show (by show key) through add_tv_seasons.
-      const alreadyListed = await addTvSeasonRows(collectionId, [newRow], rows => { inserted = rows; });
-      if (alreadyListed > 0) { showError('This title and season is already on your list.'); return; }
+      const outcome = await addTvSeasonRows(collectionId, [newRow], rows => { inserted = rows; });
+      if (outcome.inserted === 0) { showError('This title and season is already on your list.'); return; }
+      if (outcome.reopened.length) showTvAddOutcome(outcome);
     } else {
       inserted = await sbFetch('POST', TABLE, [newRow]);
     }

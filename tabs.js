@@ -127,16 +127,21 @@ async function loadTab(collectionId) {
       }
     }
 
+    let reopenedIds = [];
     if (toInsert.length > 0 && isTvCollection(collectionId)) {
       // Only the defaults found missing above, so the rule for "missing" stays
-      // exactly this one; seed_tv_defaults links each new season to its show.
+      // exactly this one; seed_tv_defaults links each new season to its show
+      // (and reopens a Complete show that gets a new season).
       const missing = new Set(newKeys);
       const res = await sbRpc('seed_tv_defaults', { p_collection: collectionId, p_defaults: col.defaults.filter(d => missing.has(d.k)) });
       rows.push(...(res.inserted || []));
+      reopenedIds = res.reopened || [];
     } else if (toInsert.length > 0) {
       const inserted = await sbFetch('POST', TABLE, toInsert);
       if (inserted) rows.push(...inserted);
     }
+    // A TV tab's statuses live on its shows: read them after any seeding.
+    if (isTvCollection(collectionId)) await loadTvShows(collectionId);
 
     rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
@@ -148,8 +153,12 @@ async function loadTab(collectionId) {
     if (activeTabId !== collectionId) return;
 
     if (newKeys.length > 0) {
+      const reopened = reopenedIds.map(id => tvShowsById.get(id)?.title).filter(Boolean);
+      const reopenedNote = reopened.length
+        ? ` ${reopened.map(t => `"${esc(t)}"`).join(', ')} ${reopened.length === 1 ? 'was' : 'were'} Complete and got a new season, so ${reopened.length === 1 ? 'it is' : 'they are'} back On List.`
+        : '';
       document.getElementById('banner').innerHTML =
-        `<div class="banner">✦ ${newKeys.length} new entr${newKeys.length===1?'y':'ies'} added.</div>`;
+        `<div class="banner">✦ ${newKeys.length} new entr${newKeys.length===1?'y':'ies'} added.${reopenedNote}</div>`;
     }
 
     renderFilters();

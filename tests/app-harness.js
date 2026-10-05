@@ -43,10 +43,12 @@ function response(status, body, headers = {}) {
   };
 }
 
-// The browser-facing TV functions of db/rpc.sql as they behave in the shadow
-// stage, written independently of the app's helpers so the tests can catch an
-// app/database mismatch. Shows live in store.tv_shows when the fake database
-// has that table, otherwise in app.shows. Errors answer like PostgREST.
+// The browser-facing TV functions of db/rpc.sql as they behave in the shadow and
+// authoritative stages (app.stage; default 'authoritative'), written independently
+// of the app's helpers so the tests can catch an app/database mismatch. Shows live
+// in store.tv_shows. The compatibility values the database writes to the season
+// status in the authoritative stage aren't simulated: the app must not read them.
+// Errors answer like PostgREST.
 const TV_COLLECTIONS = ['disney', '90day', 'sheridan', 'othertv', 'truecrime'];
 const SHOW_KEY_OVERRIDE = { 'disney|the clone wars': 'star wars: the clone wars (2008)' };
 const sqlShowKey = (collection, itemKey) => {
@@ -60,9 +62,42 @@ class DbError extends Error {
 }
 const HTTP_FOR = { '22023': 400, '23505': 409, P0002: 404, '23000': 409, '40001': 409, '55000': 400 };
 
-function shadowTvFunctions(app, store, newId) {
-  app.shows = [];
-  const shows = () => store.tv_shows || app.shows;
+const TV_STATUSES = ['confirmed', 'highpriority', 'watching', 'complete', 'pending', 'maybe', 'skipped'];
+
+// Links fixture TV rows that have no show_id the way the Phase 1c backfill does:
+// one show per collection + TMDB id (or show key), status and skip flags from the
+// approved migration rule (old aggregate status for a pattern the rule doesn't map).
+function linkFixtureRows(store, newId) {
+  const M = require('./tv-model-reference');
+  const groups = new Map();
+  for (const r of store.watchlist_items) {
+    if (!isTvRow(r) || r.show_id) continue;
+    const key = r.tmdb_id != null ? `${r.collection}|tmdb:${r.tmdb_id}` : `${r.collection}|key:${sqlShowKey(r.collection, r.item_key)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  for (const seasons of groups.values()) {
+    const r0 = seasons[0];
+    const showKey = r0.tmdb_id != null ? String(r0.item_key).split('|')[0] : sqlShowKey(r0.collection, r0.item_key);
+    let show = store.tv_shows.find(s => s.collection === r0.collection && (r0.tmdb_id != null ? s.tmdb_id === r0.tmdb_id : s.tmdb_id == null && s.show_key === showKey));
+    if (!show) {
+      const m = M.migrateShow(seasons);
+      const titleRow = seasons.find(x => String(x.item_key).split('|')[0] === showKey) || r0;
+      show = { id: newId(), collection: r0.collection, title: titleRow.title, show_key: showKey, tmdb_id: r0.tmdb_id ?? null,
+        status: m.unmapped ? M.oldAggregateStatus(seasons) : m.status, created_at: '2026-01-01T00:00:00+00:00' };
+      store.tv_shows.push(show);
+      for (const x of seasons) if (x.skipped === undefined) x.skipped = !m.unmapped && m.skippedIds.has(x.id);
+    }
+    for (const x of seasons) { x.show_id = show.id; if (x.skipped === undefined) x.skipped = false; }
+  }
+}
+
+function tvFunctions(app, store, newId) {
+  const shows = () => store.tv_shows;
+  const authoritative = () => ['authoritative', 'final'].includes(app.stage);
+  const requireAuthoritative = fn => {
+    if (!authoritative()) throw new DbError('55000', `not_available: ${fn} is not available in stage ${app.stage}`);
+  };
   const items = () => store.watchlist_items;
   const seasonLabel = n => (n === 0 ? 'Specials' : `Season ${n}`);
   function lockOrCreateShow(collection, tmdbId, showKey, title, status) {
@@ -130,8 +165,10 @@ function shadowTvFunctions(app, store, newId) {
           display_date: s.display_date || '', date_sort: s.date_sort, status: 'confirmed', show_id: target.id,
           ...(tmdb != null ? { media_type: 'tv', tmdb_id: tmdb, season_number: s.season_number } : {}) }));
       }
+      let reopened = false;
+      if (inserted.length && authoritative() && target.status === 'complete') { target.status = 'confirmed'; reopened = true; }
       if (tmdb != null) track(coll, tmdb, show.title.trim(), show.network || '');
-      return { show_id: target.id, show_created: created, inserted: clone(inserted), existing, rejected, reopened: false, show_status: target.status };
+      return { show_id: target.id, show_created: created, inserted: clone(inserted), existing, rejected, reopened, show_status: target.status };
     },
     seed_tv_defaults({ p_collection: coll, p_defaults: defs }) {
       if (!TV_COLLECTIONS.includes(coll)) throw new DbError('22023', `invalid_input: ${coll} is not a TV collection`);
@@ -146,6 +183,7 @@ function shadowTvFunctions(app, store, newId) {
       const rowFields = d => ({ collection: coll, item_key: d.k, title: d.t, season: d.s, theme: d.th || '', display_date: d.d || '',
         date_sort: d.ds, status: d.p ? 'pending' : 'confirmed' });
       const inserted = [];
+      const reopened = [];
       let showsCreated = 0;
       const groups = new Map();
       for (const d of defs) {
@@ -161,10 +199,11 @@ function shadowTvFunctions(app, store, newId) {
         const { show, created } = lockOrCreateShow(coll, null, k, title, ds.every(d => d.p === true) ? 'pending' : 'confirmed');
         if (created) showsCreated++;
         for (const d of todo) inserted.push(insertRow({ ...rowFields(d), show_id: show.id }));
+        if (!created && authoritative() && show.status === 'complete') { show.status = 'confirmed'; reopened.push(show.id); }
       }
       for (const d of defs) if (d.s === 'Film' && missing(d)) inserted.push(insertRow(rowFields(d)));
       inserted.sort((a, b) => a.date_sort.localeCompare(b.date_sort) || a.item_key.localeCompare(b.item_key));
-      return { inserted: clone(inserted), shows_created: showsCreated, reopened: [], conflicts: [] };
+      return { inserted: clone(inserted), shows_created: showsCreated, reopened, conflicts: [] };
     },
     delete_tv_season({ p_row_id: id }) {
       const r = items().find(x => x.id === id && isTvRow(x));
@@ -194,6 +233,9 @@ function shadowTvFunctions(app, store, newId) {
       if (c2) throw new DbError('23505', `match_conflict: item_key already used by row ${c2.id}`);
       const legacy = shows().find(s => s.id === r.show_id) || null;
       const t = shows().find(s => s.collection === r.collection && s.tmdb_id === tmdb);
+      if (t && legacy && authoritative() && t.status !== legacy.status) {
+        return { blocked: true, legacy_status: legacy.status, target_status: t.status, legacy_show_id: legacy.id, target_show_id: t.id };
+      }
       let targetId;
       if (t) targetId = t.id;
       else if (legacy && !items().some(x => x.show_id === legacy.id && x.id !== r.id)) {
@@ -208,6 +250,30 @@ function shadowTvFunctions(app, store, newId) {
       if (legacy && legacy.id !== targetId && !items().some(x => x.show_id === legacy.id)) shows().splice(shows().indexOf(legacy), 1);
       track(r.collection, tmdb, patch.title.trim(), target.network ?? patch.theme ?? '');
       return { blocked: false, row: clone(r), show_id: targetId };
+    },
+    set_show_status({ p_show_id: id, p_status: status }) {
+      requireAuthoritative('set_show_status');
+      if (!TV_STATUSES.includes(status)) throw new DbError('22023', `invalid_input: status ${status}`);
+      const show = shows().find(s => s.id === id);
+      if (!show) throw new DbError('P0002', 'not_found: show');
+      show.status = status;
+      return clone(show);
+    },
+    set_season_watched({ p_row_id: id, p_watched: watched }) {
+      requireAuthoritative('set_season_watched');
+      if (typeof watched !== 'boolean') throw new DbError('22023', 'invalid_input: watched');
+      const r = items().find(x => x.id === id && x.show_id != null);
+      if (!r) throw new DbError('P0002', 'not_found: TV season');
+      r.watched = watched;
+      return clone(r);
+    },
+    set_season_skipped({ p_row_id: id, p_skipped: skipped }) {
+      requireAuthoritative('set_season_skipped');
+      if (typeof skipped !== 'boolean') throw new DbError('22023', 'invalid_input: skipped');
+      const r = items().find(x => x.id === id && x.show_id != null);
+      if (!r) throw new DbError('P0002', 'not_found: TV season');
+      r.skipped = skipped;
+      return clone(r);
     }
   };
   return Object.fromEntries(Object.entries(handlers).map(([name, fn]) => [name, body => {
@@ -224,18 +290,23 @@ function shadowTvFunctions(app, store, newId) {
 //   tmdb:    path => response body for TMDB requests (default: 404)
 //   width:   window.innerWidth (default 1200)
 //   countOverride: total reported in Content-Range (simulates a count mismatch)
-//   tvShows: tv_shows rows; when given, the fake database has the TV-show schema
-//            (backup format 2), otherwise tv_shows doesn't exist (format 1)
-async function createApp({ rows = [], othertvShows = [], tvShows = null, customCollections = [], tmdb, width = 1200, countOverride = null } = {}) {
+//   tvShows: tv_shows rows (the fake database has the TV-show schema, backup
+//            format 2); TV rows given without show_id are linked to shows as the
+//            Phase 1c backfill would (see linkFixtureRows)
+//   format1: true for a database without the TV-show schema (no tv_shows)
+//   stage:   migration stage the TV functions behave by (default 'authoritative')
+async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
+  format1 = false, stage = 'authoritative' } = {}) {
   const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
-  if (tvShows) store.tv_shows = clone(tvShows);
+  if (!format1) store.tv_shows = clone(tvShows || []);
   const requests = [];
   const gates = [];
   const failures = [];
   const consoleErrors = [];
   const selectors = {};
   let nextId = 1;
-  const app = { store, requests, selectors, consoleErrors, countOverride };
+  const app = { store, requests, selectors, consoleErrors, countOverride, stage };
+  if (store.tv_shows) linkFixtureRows(store, () => `new-${nextId++}`);
 
   // ── fake DOM ──
   const registry = new Map();
@@ -295,7 +366,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = null, customC
       for (const t of Object.keys(tables)) store[t] = clone(tables[t]);
       return response(200, { restored: Object.fromEntries(Object.keys(tables).map(t => [t, tables[t].length])) });
     },
-    ...shadowTvFunctions(app, store, () => `new-${nextId++}`)
+    ...tvFunctions(app, store, () => `new-${nextId++}`)
   };
 
   async function fetchStub(url, opts = {}) {

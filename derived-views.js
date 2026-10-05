@@ -1,9 +1,9 @@
 // ─── Derived TV views: Currently Watching, Coming Soon ────────────────────────
-// Read-only views over the stored TV rows of every TV collection. They are not
+// Views over every TV collection's seasons and shows (tv_shows). They are not
 // collections: nothing here writes a `collection` value, seeds defaults, calls
 // TMDB, or touches backup/restore. While one is open, activeViewId holds its id
-// and activeTabId is null. Edits go through the normal row actions, which PATCH
-// the row's real id (see actionRows / mirrorRowUpdate in row-actions.js).
+// and activeTabId is null. Edits go through the show and season actions
+// (tv-shows.js, row-actions.js), by the show's or the row's real id.
 // Defined here rather than in config.js so the catalog-refresh workflow's
 // config.js cache handling is unaffected.
 const DERIVED_VIEWS = [
@@ -86,32 +86,34 @@ function compareTitles(a, b) {
   return (a || '').localeCompare(b || '', undefined, { sensitivity: 'base' });
 }
 
-// Shows with at least one Watching row. The up-next season is the earliest
-// Watching && !watched season, released or not. A show whose Watching rows are
-// all watched is "up to date" instead. Both lists are A–Z by title.
-function deriveCurrentlyWatching(rows, today) {
-  const groups = new Map();
+// Watching shows (tv_shows.status), each with its seasons in sorted order, its up
+// next season and whether it is Up to date (none of its remaining seasons has
+// aired). Up to date is a state, not a stored status. Both lists are A–Z by
+// title, then collection. `shows` is a Map or list of tv_shows rows.
+function deriveCurrentlyWatching(rows, shows, today) {
+  const seasonsByShow = new Map();
   rows.forEach(r => {
-    if (!isTvViewRow(r)) return;
-    const key = showGroupKey(r);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
+    if (!isTvViewRow(r) || !r.show_id) return;
+    if (!seasonsByShow.has(r.show_id)) seasonsByShow.set(r.show_id, []);
+    seasonsByShow.get(r.show_id).push(r);
   });
   const active = [], upToDate = [];
-  for (const [key, seasons] of groups) {
-    if (!seasons.some(r => r.status === 'watching')) continue;
-    seasons.sort(compareSeasons);
-    const upNext = seasons.find(r => r.status === 'watching' && !r.watched) || null;
-    const show = {
-      key,
-      collection: seasons[0].collection,
-      title: (upNext || seasons[0]).title,
+  for (const show of (shows instanceof Map ? shows.values() : shows)) {
+    if (show.status !== 'watching') continue;
+    const seasons = (seasonsByShow.get(show.id) || []).sort(compareSeasons);
+    if (seasons.length === 0) continue;
+    const upNext = upNextSeason(seasons);
+    const item = {
+      key: show.id,
+      show,
+      collection: show.collection,
+      title: show.title,
       seasons,
       upNext,
-      upNextReleased: upNext ? isReleasedRow(upNext, today) : false
+      upNextReleased: upNext ? isReleasedRow(upNext, today) : false,
+      upToDate: isShowUpToDate(seasons, today)
     };
-    if (!upNext) Object.assign(show, nextStoredSeason(seasons, today));
-    (upNext ? active : upToDate).push(show);
+    (item.upToDate ? upToDate : active).push(item);
   }
   const byTitle = (a, b) => compareTitles(a.title, b.title)
     || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
@@ -119,21 +121,15 @@ function deriveCurrentlyWatching(rows, today) {
   return { active: active.sort(byTitle), upToDate: upToDate.sort(byTitle) };
 }
 
-// For an up-to-date show: the earliest unwatched, non-skipped season stored after
-// its last Watching season (e.g. one added later by Refresh shows, which arrives as
-// On List), and what state it's in. Display only: it doesn't make the show active.
-function nextStoredSeason(sortedSeasons, today) {
-  let lastWatching = -1;
-  sortedSeasons.forEach((r, i) => { if (r.status === 'watching') lastWatching = i; });
-  const next = sortedSeasons.slice(lastWatching + 1).find(r => !r.watched && r.status !== 'skipped') || null;
-  const nextState = !next ? 'none' : isTbaRow(next) ? 'tba' : isReleasedRow(next, today) ? 'available' : 'future';
-  return { next, nextState };
-}
-
-// Unwatched, non-skipped TV rows: those with a confirmed date from today on,
-// and those still TBA (whatever their guessed date_sort).
-function deriveComingSoon(rows, today) {
-  const eligible = rows.filter(r => isTvViewRow(r) && !r.watched && r.status !== 'skipped');
+// Linked, unwatched, non-skipped seasons of a show that isn't Skipped: those with
+// a confirmed date from today on, and those still TBA (whatever their guessed date_sort).
+function deriveComingSoon(rows, shows, today) {
+  const showOf = r => (shows instanceof Map ? shows.get(r.show_id) : shows.find(s => s.id === r.show_id));
+  const eligible = rows.filter(r => {
+    if (!isTvViewRow(r) || !r.show_id || r.watched || r.skipped) return false;
+    const show = showOf(r);
+    return !!show && show.status !== 'skipped';
+  });
   const order = (a, b) => cmpStr(a.date_sort, b.date_sort)
     || compareTitles(a.title, b.title)
     || seasonOrder(a, b)
@@ -150,8 +146,8 @@ function tvRowsFilter() {
   return `collection=in.(${tvCollectionIds().map(id => encodeURIComponent(`"${id}"`)).join(',')})`;
 }
 
-// One paginated, exact-count-checked read of every TV collection's rows. GET
-// only: no seeding, no TBA refresh. Refetched each time a view is entered.
+// Paginated, exact-count-checked reads of every TV collection's rows and of every
+// show. GET only: no seeding, no TBA refresh. Refetched each time a view is entered.
 async function loadDerivedView() {
   const viewId = activeViewId;
   if (!viewId) return;
@@ -161,8 +157,9 @@ async function loadDerivedView() {
   showError('');
   paintDerivedMessage('Loading…', false);
   try {
-    const rows = await fetchAllRows(TABLE, tvRowsFilter());
+    const [rows, shows] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows')]);
     if (seq !== derivedLoadSeq || activeViewId !== viewId) return;
+    tvShowsById = new Map(shows.map(s => [s.id, s]));
     derivedData = { rows: rows.filter(isTvViewRow), loaded: true };
     renderFilters();
     renderTable();
@@ -274,7 +271,7 @@ function derivedSectionHtml(name, label, count) {
 }
 
 function renderCurrentlyWatching(today, keep) {
-  const { active, upToDate } = deriveCurrentlyWatching(derivedData.rows, today);
+  const { active, upToDate } = deriveCurrentlyWatching(derivedData.rows, tvShowsById, today);
   const shownActive = active.filter(keep);
   const shownUpToDate = upToDate.filter(keep);
 
@@ -292,9 +289,9 @@ function renderCurrentlyWatching(today, keep) {
 
   if (shownActive.length === 0) {
     const msg = active.length + upToDate.length === 0
-      ? 'Nothing is marked Watching yet. Set a season to ▶ Watching on any TV tab and it shows up here.'
+      ? 'Nothing is marked Watching yet. Set a show to ▶ Watching on any TV tab and it shows up here.'
       : active.length === 0
-        ? 'Nothing in progress. Every season marked Watching has been watched.'
+        ? 'Nothing in progress. Every Watching show is up to date.'
         : 'No in-progress shows match your filters.';
     html += `<tr class="empty-row"><td colspan="6">${esc(msg)}</td></tr>`;
     cardHtml += `<div class="empty-row" style="padding:2rem 0">${esc(msg)}</div>`;
@@ -317,16 +314,18 @@ function renderCurrentlyWatching(today, keep) {
   document.getElementById('cardList').innerHTML = cardHtml;
 }
 
-// One show: a header row/card for its up-next season (or its up-to-date state),
-// plus every stored season of the show in this collection when expanded.
-function derivedShowHtml(show, today) {
-  const { key, seasons, upNext } = show;
+// One Watching show: a header row/card with its up-next season (or, when Up to
+// date, what is next on the list), the show-level status control and, for a
+// show in progress, the up-next season's watch control; expanded, every season
+// of the show with Watched and Skip / Keep.
+function derivedShowHtml(item, today) {
+  const { key, show, seasons, upNext, upToDate } = item;
   const isExpanded = expandedShows.has(key);
   const keyArg = esc(key).replace(/'/g, "\\'");
   const theme = (upNext || seasons[0]).theme;
-  const badges = `${sourceBadgeHtml(show.collection)} ${themeBadgeHtml(show.collection, theme)}`;
+  const badges = `${sourceBadgeHtml(item.collection)} ${themeBadgeHtml(item.collection, theme)}`;
 
-  const trackable = seasons.filter(s => s.status !== 'skipped');
+  const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;
   const progressPct = trackable.length > 0 ? Math.round(watchedCount / trackable.length * 100) : 0;
   const progressLabel = trackable.length > 0 ? `${watchedCount}/${trackable.length} watched` : `${seasons.length} season${seasons.length === 1 ? '' : 's'}`;
@@ -334,29 +333,26 @@ function derivedShowHtml(show, today) {
     ? `<div class="mini-progress-track"><div class="mini-progress-fill" style="width:${progressPct}%"></div></div>`
     : '';
 
-  const upcomingTag = upNext && !show.upNextReleased ? '<span class="upcoming-tag">Upcoming</span>' : '';
-  const upNextLabel = upNext
-    ? `${esc(upNext.season)} · ${esc(upNext.display_date)}${upcomingTag}`
-    : upToDateNextLabel(show);
-  // Up to date shows have no single up-next season to change, so their status is a label.
-  const upToDatePill = '<span class="status-pill s-caughtup">Up to date</span>';
+  const upcomingTag = upNext && !item.upNextReleased ? '<span class="upcoming-tag">Upcoming</span>' : '';
+  const upNextLabel = upToDate
+    ? upToDateNextLabel(upNext)
+    : `${esc(upNext.season)} · ${esc(upNext.display_date)}${upcomingTag}`;
+  const upToDatePill = upToDate ? ' <span class="status-pill s-caughtup">Up to date</span>' : '';
   const releaseOpts = { requireReleased: true, today };
-  const statusSelect = stop => upNext
-    ? `<select class="status-select s-${upNext.status}"${stop ? ' onclick="event.stopPropagation()"' : ''} onchange="${stop ? 'event.stopPropagation(); ' : ''}setStatus('${upNext.id}', this.value, this)">${statusOptionsHtml(upNext.status)}</select>`
-    : '';
   const subOpts = { isNew: false, showMatch: false, showDelete: false, requireReleased: true, today };
+  const watchCell = !upToDate && upNext ? seasonWatchControlHtml(upNext, { ...releaseOpts, stopPropagation: true }, false) : '<span class="confirmed-lbl">—</span>';
 
   let row = `<tr class="show-group-row derived-show-row" onclick="toggleDerivedShow('${keyArg}')">
       <td>
         <div class="show-title-row">
-          <div class="show-title-left"><span class="show-title">${esc(show.title)}</span></div>
+          <div class="show-title-left"><span class="show-title">${esc(item.title)}</span></div>
           <span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span>
         </div>
       </td>
       <td>${badges}</td>
       <td class="date-cell">${upNextLabel}</td>
-      <td>${upNext ? statusSelect(true) : upToDatePill}</td>
-      <td>${upNext ? seasonWatchControlHtml(upNext, { ...releaseOpts, stopPropagation: true }, false) : '<span class="confirmed-lbl">—</span>'}</td>
+      <td>${showStatusSelectHtml(show, { stopPropagation: true })}${upToDatePill}</td>
+      <td>${watchCell}</td>
       <td class="card-date">${progressLabel}${progressBarHtml}</td>
     </tr>`;
   if (isExpanded) row += seasons.map(r => seasonSubRowHtml(r, subOpts)).join('');
@@ -364,7 +360,7 @@ function derivedShowHtml(show, today) {
   const card = `<div class="item-card show-group-card">
       <div class="card-top" onclick="toggleDerivedShow('${keyArg}')" style="cursor:pointer">
         <div class="card-title-block">
-          <span class="card-title">${esc(show.title)}</span>
+          <span class="card-title">${esc(item.title)}</span>
           <span class="card-season">${upNextLabel}</span>
         </div>
         <span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span>
@@ -374,27 +370,26 @@ function derivedShowHtml(show, today) {
         <span class="card-date">${progressLabel}</span>
         ${progressBarHtml}
       </div>
-      ${upNext ? `<div class="card-actions" onclick="event.stopPropagation()">
-        ${statusSelect(false)}
-        ${seasonWatchControlHtml(upNext, releaseOpts, false)}
-      </div>` : `<div class="card-actions">${upToDatePill}</div>`}
+      <div class="card-actions" onclick="event.stopPropagation()">
+        ${showStatusSelectHtml(show)}${upToDatePill}
+        ${!upToDate && upNext ? seasonWatchControlHtml(upNext, releaseOpts, false) : ''}
+      </div>
       ${isExpanded ? `<div class="card-subseasons">${seasons.map(r => seasonSubCardHtml(r, subOpts)).join('')}</div>` : ''}
     </div>`;
 
   return { row, card };
 }
 
-// The Up next text for an up-to-date show, from what's stored in the list (no TMDB lookup).
-function upToDateNextLabel(show) {
-  const n = show.next;
-  if (show.nextState === 'tba') return `${esc(n.season)} · premiere date TBA`;
-  if (show.nextState === 'future') return `${esc(n.season)} · ${esc(n.display_date)}<span class="upcoming-tag">Upcoming</span>`;
-  if (show.nextState === 'available') return `${esc(n.season)} · available since ${esc(n.display_date)}`;
-  return `<span title="Based on the seasons stored in your list. New seasons are added by ↻ Refresh shows (Other TV, True Crime / Docs) or a catalog refresh (static tabs).">No new season on your list yet</span>`;
+// What is next for an Up to date show, from what's stored in the list (no TMDB
+// lookup): a future or TBA up-next season, or nothing yet.
+function upToDateNextLabel(upNext) {
+  if (!upNext) return `<span title="Based on the seasons stored in your list. New seasons are added by ↻ Refresh shows (Other TV, True Crime / Docs) or a catalog refresh (static tabs).">No new season on your list yet</span>`;
+  if (isTbaRow(upNext)) return `Next: ${esc(upNext.season)} · premiere date TBA`;
+  return `Next: ${esc(upNext.season)} · ${esc(upNext.display_date)}<span class="upcoming-tag">Upcoming</span>`;
 }
 
 function renderComingSoon(today, keep) {
-  const { dated, tba } = deriveComingSoon(derivedData.rows, today);
+  const { dated, tba } = deriveComingSoon(derivedData.rows, tvShowsById, today);
   const shownDated = dated.filter(keep);
   const shownTba = tba.filter(keep);
   const in30 = new Date();
@@ -445,12 +440,14 @@ function renderComingSoon(today, keep) {
   document.getElementById('cardList').innerHTML = cardHtml;
 }
 
-// Status control plus source/date details. No watch control: Coming Soon is
-// about availability; watching happens in Currently Watching or the source tab.
+// Source/date details, the show's status as a label, and Skip only: Coming
+// Soon is about availability, so there is no status menu, watch control or delete.
 function comingSoonRowHtml(r, today) {
-  const rowClass = r.status === 'maybe' ? 'row-maybe' : '';
+  const status = displayStatus(r);
+  const rowClass = status === 'maybe' ? 'row-maybe' : '';
   const todayTag = r.date_sort === today ? '<span class="today-tag">Today</span>' : '';
-  const statusSelect = `<select class="status-select s-${r.status}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>`;
+  const statusPill = `<span class="status-pill s-${status}" title="Show status">${esc(statusOptionLabel(status))}</span>`;
+  const skip = seasonSkipButtonHtml(r);
   const row = `<tr class="${rowClass}">
       <td>
         <span class="show-title">${esc(r.title)}</span>
@@ -460,8 +457,8 @@ function comingSoonRowHtml(r, today) {
       <td>${sourceBadgeHtml(r.collection)}</td>
       <td>${themeBadgeHtml(r.collection, r.theme)}</td>
       <td class="date-cell">${esc(r.display_date)}</td>
-      <td>${statusSelect}</td>
-      <td></td>
+      <td>${statusPill}</td>
+      <td>${skip}</td>
     </tr>`;
   const card = `<div class="item-card ${rowClass}">
       <div class="card-top">
@@ -476,7 +473,7 @@ function comingSoonRowHtml(r, today) {
         ${themeBadgeHtml(r.collection, r.theme)}
         <span class="card-date">${esc(r.display_date)}</span>
       </div>
-      <div class="card-actions">${statusSelect}</div>
+      <div class="card-actions">${statusPill} ${skip}</div>
     </div>`;
   return { row, card };
 }

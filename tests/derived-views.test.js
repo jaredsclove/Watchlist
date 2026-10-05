@@ -1,10 +1,16 @@
-// Offline tests for the derived TV views (derived-views.js): the Currently
-// Watching and Coming Soon rules, their rendering, and the season-row extraction
-// in render.js that the grouped tabs share with Currently Watching.
+// Offline tests for the derived TV views (derived-views.js) on the first-class
+// show model (Phase 3): Currently Watching membership is the show status, up next
+// and Up to date follow the approved rules (checked against tests/tv-model-reference.js
+// on every shared case), Coming Soon takes linked, unwatched, non-skipped seasons
+// of shows that aren't Skipped; and the rendering of those views and of the
+// collection tabs' show-level controls. A TV season's own `status` column is a
+// compatibility copy: these tests scramble it to prove nothing reads it.
 // Run from the repo root: node tests/derived-views.test.js
 // No network, no database (see tests/app-harness.js).
 const assert = require('assert');
-const { createApp, runner } = require('./app-harness');
+const { createApp, runner, settle } = require('./app-harness');
+const M = require('./tv-model-reference');
+const CASES = require('./fixtures/tv-model-cases.json');
 
 const T = runner('derived-views');
 const test = T.test;
@@ -20,466 +26,268 @@ const disp = iso => { const [y, m, d] = iso.split('-').map(Number); return `${MO
 const TODAY = day(0);
 
 let n = 0;
-// A dynamic TV season row (othertv) unless overridden.
-function tv(o = {}) {
-  const num = o.season_number !== undefined ? o.season_number : 1;
-  const date = o.date_sort || '2020-01-01';
-  return {
-    id: o.id || `r${String(++n).padStart(4, '0')}`,
-    collection: 'othertv', title: 'Show', theme: 'HBO', status: 'confirmed', watched: false,
-    media_type: 'tv', tmdb_id: 100, season_number: num,
-    season: num === 0 ? 'Specials' : `Season ${num}`,
-    display_date: disp(date), date_sort: date, item_key: '', watch_with: [], collections: [],
-    ...o
-  };
+const nid = p => `${p}${String(++n).padStart(4, '0')}`;
+// A show and its seasons. Season specs: { num | season, w, s (skipped), date, tba }.
+// Each season's own status is deliberately misleading ('pending'): it must not matter.
+function show(o, specs) {
+  const s = { id: nid('show'), collection: 'othertv', title: 'Show', show_key: (o.title || 'Show').toLowerCase(), tmdb_id: 100, status: 'confirmed', ...o };
+  const identified = s.tmdb_id != null;
+  const rows = specs.map(sp => {
+    const num = sp.num !== undefined ? sp.num : null;
+    const label = sp.season || (num === 0 ? 'Specials' : `Season ${num}`);
+    const date = sp.tba ? '2099-01-01' : (sp.date || '2020-01-01');
+    return {
+      id: sp.id || nid('r'), collection: s.collection, title: s.title, theme: 'HBO', status: 'pending',
+      watched: !!sp.w, skipped: !!sp.s, show_id: s.id,
+      media_type: identified ? 'tv' : null, tmdb_id: identified ? s.tmdb_id : null, season_number: identified ? num : null,
+      season: label, display_date: sp.tba ? 'TBA' : (sp.display || disp(date)), date_sort: date,
+      item_key: `${s.show_key}|${label.toLowerCase()}`, watch_with: [], collections: []
+    };
+  });
+  return { show: s, rows };
 }
-const tba = o => tv({ display_date: 'TBA', date_sort: '2099-01-01', ...o });
-// A legacy/static row (no TMDB identity), e.g. on the Disney+ tab.
-const legacy = o => tv({ collection: 'disney', media_type: null, tmdb_id: null, season_number: null, theme: 'Star Wars', ...o });
+const film = o => ({ id: nid('f'), collection: 'truecrime', title: 'Doc Film', theme: 'Studio', status: 'watching', watched: false,
+  media_type: 'movie', tmdb_id: 900, season_number: null, season: 'Film', display_date: disp(day(5)), date_sort: day(5),
+  item_key: 'doc film|film', watch_with: [], collections: [], show_id: null, skipped: false, ...o });
+const all = (...xs) => ({ rows: xs.flatMap(x => x.rows || [x]), shows: xs.filter(x => x.show).map(x => x.show) });
 const ids = list => Array.from(list, r => r.id);
 
 let ctx; // pure functions only need the scripts loaded
 async function pure() { if (!ctx) ctx = (await createApp()).ctx; return ctx; }
+const cw = async (data, today = TODAY) => (await pure()).deriveCurrentlyWatching(data.rows, data.shows, today);
+const cs = async (data, today = TODAY) => (await pure()).deriveComingSoon(data.rows, data.shows, today);
 
-// ─── Currently Watching rules ─────────────────────────────────────────────────
-test('one Watching unwatched season is the up-next season', async () => {
+// ─── The approved up-next / Up to date rules ──────────────────────────────────
+test('app up next and Up to date equal the reference model on every shared case', async () => {
   const c = await pure();
-  const s1 = tv({ status: 'watching' });
-  const { active, upToDate } = c.deriveCurrentlyWatching([s1], TODAY);
-  assert.strictEqual(active.length, 1);
-  assert.strictEqual(active[0].upNext.id, s1.id);
-  assert.strictEqual(upToDate.length, 0);
+  for (const k of CASES.upNext) {
+    const seasons = M.caseSeasons(k.seasons, CASES.today);
+    const next = c.upNextSeason(seasons);
+    assert.strictEqual(next ? next.id : null, k.upNext, k.name);
+    assert.strictEqual(c.isShowUpToDate(seasons, CASES.today), k.upToDate, k.name);
+  }
+  assert.ok(CASES.upNext.length >= 7);
 });
 
-test('earliest Watching && !watched wins (S1 complete, S2 watched, S3/S4 unwatched → S3)', async () => {
-  const c = await pure();
-  const rows = [
-    tv({ season_number: 4, status: 'watching', date_sort: '2023-01-01' }),
-    tv({ season_number: 1, status: 'complete', watched: true }),
-    tv({ season_number: 3, status: 'watching', date_sort: '2022-01-01' }),
-    tv({ season_number: 2, status: 'watching', watched: true, date_sort: '2021-01-01' }),
-  ];
-  const { active } = c.deriveCurrentlyWatching(rows, TODAY);
-  assert.strictEqual(active[0].upNext.season_number, 3);
+test('membership is the show status: a Watching show is in, other statuses are out, whatever its seasons say', async () => {
+  const w = show({ title: 'In', status: 'watching' }, [{ num: 1 }]);
+  const others = ['confirmed', 'highpriority', 'complete', 'pending', 'maybe', 'skipped'].map(st => show({ title: st, status: st, tmdb_id: null }, [{ season: 'Season 1' }]));
+  others.forEach(o => o.rows.forEach(r => { r.status = 'watching'; })); // compatibility copies say Watching: ignored
+  const { active, upToDate } = await cw(all(w, ...others));
+  assert.deepStrictEqual(Array.from([...active, ...upToDate], x => x.title), ['In']);
 });
 
-test('earliest qualifying season wins even when it is future-dated', async () => {
-  const c = await pure();
-  const rows = [tv({ season_number: 1, status: 'watching', watched: true }),
-    tv({ season_number: 2, status: 'watching', date_sort: day(40) }),
-    tv({ season_number: 3, status: 'watching', date_sort: day(400) })];
-  const [show] = c.deriveCurrentlyWatching(rows, TODAY).active;
-  assert.strictEqual(show.upNext.season_number, 2);
-  assert.strictEqual(show.upNextReleased, false);
+test('up next is the first unwatched, non-skipped season after the furthest watched one', async () => {
+  const a = show({ status: 'watching' }, [{ num: 1, w: true }, { num: 2 }, { num: 3, w: true }, { num: 4 }]);
+  assert.strictEqual((await cw(all(a))).active[0].upNext.season_number, 4, 'older unwatched S2 never moves progress back');
+  const b = show({ status: 'watching' }, [{ num: 1, w: true }, { num: 2, s: true }, { num: 3 }]);
+  assert.strictEqual((await cw(all(b))).active[0].upNext.season_number, 3, 'skipped S2 is passed over');
+  const c = show({ status: 'watching' }, [{ num: 3 }, { num: 1 }, { num: 2 }]);
+  assert.strictEqual((await cw(all(c))).active[0].upNext.season_number, 1, 'nothing watched → first season');
 });
 
-test('earliest qualifying season wins even when it is TBA (2099 and free-text TBA)', async () => {
-  const c = await pure();
-  const dyn = c.deriveCurrentlyWatching([tv({ status: 'watching', watched: true }), tba({ season_number: 3, status: 'watching' })], TODAY).active[0];
-  assert.strictEqual(dyn.upNext.season_number, 3);
-  assert.strictEqual(dyn.upNextReleased, false);
-  const stat = c.deriveCurrentlyWatching([legacy({ title: 'Static', season: 'Season 2', status: 'watching', display_date: 'TBA 2027', date_sort: '2026-06-01' })], TODAY).active[0];
-  assert.strictEqual(stat.upNextReleased, false, 'a TBA label wins over a guessed past date_sort');
+test('Up to date: no remaining season has aired; a future or TBA up-next season is still "next"', async () => {
+  const fut = show({ title: 'Future', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(30) }]);
+  const tbaShow = show({ title: 'Tba', status: 'watching', tmdb_id: 101 }, [{ num: 1, w: true }, { num: 2, tba: true }]);
+  const done = show({ title: 'Done', status: 'watching', tmdb_id: 102 }, [{ num: 1, w: true }, { num: 2, w: true }]);
+  const aired = show({ title: 'Aired', status: 'watching', tmdb_id: 103 }, [{ num: 1, w: true }, { num: 2, date: day(-1) }, { num: 3, date: day(30) }]);
+  const { active, upToDate } = await cw(all(fut, tbaShow, done, aired));
+  assert.deepStrictEqual(Array.from(active, x => x.title), ['Aired']);
+  assert.deepStrictEqual(Array.from(upToDate, x => x.title), ['Done', 'Future', 'Tba']);
+  assert.strictEqual(upToDate.find(x => x.title === 'Future').upNext.season_number, 2);
+  assert.strictEqual(upToDate.find(x => x.title === 'Done').upNext, null);
 });
 
-test('all Watching seasons watched → Up to date (and not in the main list)', async () => {
+test('released means not TBA and dated on or before local today (today counts; a TBA label beats a guessed date)', async () => {
   const c = await pure();
-  const rows = [tv({ season_number: 1, status: 'watching', watched: true }), tv({ season_number: 2, status: 'watching', watched: true }), tv({ season_number: 3, status: 'confirmed' })];
-  const { active, upToDate } = c.deriveCurrentlyWatching(rows, TODAY);
+  const today = show({ status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: TODAY }]);
+  const tomorrow = show({ status: 'watching', tmdb_id: 101 }, [{ num: 1, w: true }, { num: 2, date: day(1) }]);
+  assert.strictEqual(c.isShowUpToDate(today.rows, TODAY), false);
+  assert.strictEqual(c.isShowUpToDate(tomorrow.rows, TODAY), true);
+  const guessed = show({ status: 'watching', tmdb_id: null, title: 'Static' }, [{ season: 'Season 1', w: true }, { season: 'Season 2', date: '2020-06-01', display: 'TBA 2027' }]);
+  assert.strictEqual(c.isShowUpToDate(guessed.rows, TODAY), true);
+});
+
+test('specials never move progress when numbered seasons exist; a specials-only title progresses through them', async () => {
+  const mixed = show({ status: 'watching' }, [{ num: 0, date: '2019-01-01' }, { num: 1, w: true }, { num: 2 }]);
+  assert.strictEqual((await cw(all(mixed))).active[0].upNext.season_number, 2);
+  const onlySpecials = show({ status: 'watching', tmdb_id: null, title: 'Specials only' }, [{ season: 'Special 1', w: true }, { season: 'Special 2' }]);
+  // Without numbered seasons every season is in the progression list.
+  assert.ok((await cw(all(onlySpecials))).active.length + (await cw(all(onlySpecials))).upToDate.length === 1);
+});
+
+test('the known future-model difference: a Severance-like show (all aired seasons watched, next one dated) is Up to date', async () => {
+  const sev = show({ title: 'Severance', status: 'watching' }, [{ num: 1, w: true }, { num: 2, w: true }, { num: 3, date: day(200) }]);
+  const { active, upToDate } = await cw(all(sev));
   assert.strictEqual(active.length, 0);
-  assert.strictEqual(upToDate.length, 1);
-  assert.strictEqual(upToDate[0].upNext, null);
+  assert.strictEqual(upToDate[0].upNext.season_number, 3);
 });
 
-test('an unwatched future/TBA Watching season keeps the show out of Up to date', async () => {
-  const c = await pure();
-  const { active, upToDate } = c.deriveCurrentlyWatching([tv({ status: 'watching', watched: true }), tba({ season_number: 2, status: 'watching' })], TODAY);
-  assert.strictEqual(active.length, 1);
-  assert.strictEqual(upToDate.length, 0);
-});
-
-test('shows with no Watching row are not included', async () => {
-  const c = await pure();
-  const { active, upToDate } = c.deriveCurrentlyWatching([tv({ status: 'confirmed' }), tv({ season_number: 2, status: 'highpriority' })], TODAY);
-  assert.strictEqual(active.length + upToDate.length, 0);
-});
-
-test('numbered seasons beat Specials; Specials are up next only when nothing numbered qualifies', async () => {
-  const c = await pure();
-  const both = c.deriveCurrentlyWatching([tv({ season_number: 0, status: 'watching', date_sort: '2019-01-01' }), tv({ season_number: 2, status: 'watching' })], TODAY);
-  assert.strictEqual(both.active[0].upNext.season_number, 2);
-  const onlySpecials = c.deriveCurrentlyWatching([tv({ season_number: 0, status: 'watching' }), tv({ season_number: 1, status: 'watching', watched: true })], TODAY);
-  assert.strictEqual(onlySpecials.active[0].upNext.season_number, 0);
-  const staticSpecial = c.deriveCurrentlyWatching([legacy({ title: 'X', season: 'Special', status: 'watching', date_sort: '2010-01-01' }), legacy({ title: 'X', season: 'Season 3', status: 'watching' })], TODAY);
-  assert.strictEqual(staticSpecial.active[0].upNext.season, 'Season 3');
-});
-
-test('static labels: "Season 5 (Part 1/Part 2)" tie-break by date; "Volume N" parses', async () => {
-  const c = await pure();
-  const parts = [legacy({ title: 'Saga', season: 'Season 5 (Part 2)', status: 'watching', date_sort: '2021-06-01' }),
-    legacy({ title: 'Saga', season: 'Season 5 (Part 1)', status: 'watching', date_sort: '2021-01-01' }),
-    legacy({ title: 'Saga', season: 'Season 10', status: 'watching', date_sort: '2020-01-01' })];
-  assert.strictEqual(c.deriveCurrentlyWatching(parts, TODAY).active[0].upNext.season, 'Season 5 (Part 1)');
-  const vols = [legacy({ title: 'V', season: 'Volume 2', status: 'watching', date_sort: '2019-01-01' }), legacy({ title: 'V', season: 'Volume 1', status: 'watching', date_sort: '2020-01-01' })];
-  assert.strictEqual(c.deriveCurrentlyWatching(vols, TODAY).active[0].upNext.season, 'Volume 1');
-});
-
-test('the row id breaks a complete tie deterministically', async () => {
-  const c = await pure();
-  const a = tv({ id: 'zzz', status: 'watching' }), b = tv({ id: 'aaa', status: 'watching' });
-  assert.strictEqual(c.deriveCurrentlyWatching([a, b], TODAY).active[0].upNext.id, 'aaa');
-  assert.strictEqual(c.deriveCurrentlyWatching([b, a], TODAY).active[0].upNext.id, 'aaa');
-});
-
-test('static legacy TV rows with no TMDB identity work (grouped by title)', async () => {
-  const c = await pure();
-  const rows = [legacy({ title: 'Star Wars: The Clone Wars (2008)', season: 'Season 1', status: 'watching' }),
-    legacy({ title: 'Star Wars: The Clone Wars (2008)', season: 'Season 2', status: 'confirmed' })];
-  const [show] = c.deriveCurrentlyWatching(rows, TODAY).active;
-  assert.strictEqual(show.collection, 'disney');
-  assert.strictEqual(show.seasons.length, 2);
-  assert.strictEqual(show.upNext.season, 'Season 1');
-});
-
-test('films are excluded: truecrime movies, static "Film" rows, the Movies tab', async () => {
-  const c = await pure();
-  const rows = [
-    tv({ collection: 'truecrime', media_type: 'movie', season: 'Film', season_number: null, status: 'watching' }),
-    legacy({ collection: 'sheridan', title: 'A Film', season: 'Film', status: 'watching' }),
-    tv({ collection: 'movies', media_type: 'movie', season: 'Film', season_number: null, status: 'watching' }),
-  ];
-  const { active, upToDate } = c.deriveCurrentlyWatching(rows, TODAY);
-  assert.strictEqual(active.length + upToDate.length, 0);
-  assert.strictEqual(rows.filter(r => c.isTvViewRow(r)).length, 0);
-  assert.ok(c.isTvViewRow(tv({ collection: 'truecrime' })), 'truecrime TV rows are included');
-});
-
-test('the same show in two collections stays two separate shows', async () => {
-  const c = await pure();
-  const rows = [tv({ status: 'watching' }), tv({ collection: 'truecrime', status: 'watching' })];
-  const { active } = c.deriveCurrentlyWatching(rows, TODAY);
+test('films and unlinked rows are never in Currently Watching; the same title in two collections is two shows', async () => {
+  const a = show({ title: 'Twin', status: 'watching' }, [{ num: 1 }]);
+  const b = show({ title: 'Twin', status: 'watching', collection: 'truecrime' }, [{ num: 1 }]);
+  const unlinked = { ...a.rows[0], id: nid('u'), show_id: null };
+  const { active } = await cw({ rows: [...a.rows, ...b.rows, unlinked, film()], shows: [a.show, b.show] });
   assert.strictEqual(active.length, 2);
-  assert.deepStrictEqual(Array.from(active, s => s.collection).sort(), ['othertv', 'truecrime']);
-  active.forEach(s => assert.ok(s.seasons.every(r => r.collection === s.collection)));
+  assert.deepStrictEqual(Array.from(active, x => x.collection), ['othertv', 'truecrime'], 'A–Z, then collection label');
+  assert.ok(active.every(x => x.seasons.length === 1));
 });
 
-test('order is A–Z by title, then collection label', async () => {
-  const c = await pure();
-  const rows = [
-    tv({ title: 'beta', tmdb_id: 1, status: 'watching' }),
-    tv({ title: 'Alpha', tmdb_id: 2, status: 'watching' }),
-    legacy({ title: 'alpha', status: 'watching' }),
-  ];
-  const order = Array.from(c.deriveCurrentlyWatching(rows, TODAY).active, s => `${s.title}/${s.collection}`);
-  assert.deepStrictEqual(order, ['alpha/disney', 'Alpha/othertv', 'beta/othertv']);
+// ─── Coming Soon ──────────────────────────────────────────────────────────────
+test('Coming Soon: linked unwatched seasons dated today or later, plus TBA; yesterday out', async () => {
+  const s = show({ status: 'confirmed' }, [{ num: 1, date: day(-1) }, { num: 2, date: TODAY }, { num: 3, date: day(9) }, { num: 4, tba: true }]);
+  const { dated, tba } = await cs(all(s));
+  assert.deepStrictEqual(Array.from(dated, r => r.season_number), [2, 3]);
+  assert.deepStrictEqual(Array.from(tba, r => r.season_number), [4]);
 });
 
-test('re-deriving after edits: watched advances (even to a TBA season); status changes move up next', async () => {
-  const c = await pure();
-  const s1 = tv({ season_number: 1, status: 'watching' });
-  const s2 = tv({ season_number: 2, status: 'watching', date_sort: '2021-01-01' });
-  const s3 = tba({ season_number: 3, status: 'watching' });
-  const rows = [s1, s2, s3];
-  s1.watched = true;
-  assert.strictEqual(c.deriveCurrentlyWatching(rows, TODAY).active[0].upNext.id, s2.id);
-  s2.status = 'complete';
-  const next = c.deriveCurrentlyWatching(rows, TODAY).active[0];
-  assert.strictEqual(next.upNext.id, s3.id);
-  assert.strictEqual(next.upNextReleased, false);
-  s3.status = 'confirmed';
-  assert.strictEqual(c.deriveCurrentlyWatching(rows, TODAY).upToDate.length, 1, 'no unwatched Watching row left');
-  s1.watched = false; // an earlier season set back to unwatched Watching becomes up next
-  assert.strictEqual(c.deriveCurrentlyWatching(rows, TODAY).active[0].upNext.id, s1.id);
+test('Coming Soon: watched and skipped seasons, and every season of a Skipped show, are excluded; other statuses stay', async () => {
+  const s = show({ status: 'complete' }, [{ num: 1, date: day(3), w: true }, { num: 2, date: day(4), s: true }, { num: 3, date: day(5) }]);
+  const sk = show({ status: 'skipped', tmdb_id: 101, title: 'Skipped show' }, [{ num: 1, date: day(6) }]);
+  const others = ['highpriority', 'watching', 'pending', 'maybe'].map((st, i) => show({ status: st, tmdb_id: 200 + i, title: st }, [{ num: 1, date: day(7) }]));
+  const { dated } = await cs(all(s, sk, ...others));
+  assert.deepStrictEqual(Array.from(dated, r => r.title).sort(), ['Show', 'highpriority', 'maybe', 'pending', 'watching']);
 });
 
-test('release test: today counts as released, tomorrow does not; local date, not UTC', async () => {
-  const c = await pure();
-  assert.strictEqual(c.isReleasedRow(tv({ date_sort: '2026-09-29' }), '2026-09-29'), true);
-  assert.strictEqual(c.isReleasedRow(tv({ date_sort: '2026-09-30' }), '2026-09-29'), false);
-  assert.strictEqual(c.isReleasedRow(tba({}), '2026-09-29'), false);
-  assert.strictEqual(c.localTodayStr(new Date(2026, 8, 29, 23, 45)), '2026-09-29');
-  assert.strictEqual(c.localTodayStr(new Date(2026, 0, 5, 0, 5)), '2026-01-05');
+test('Coming Soon: films and unlinked rows are excluded; order is date, title, season, collection', async () => {
+  const b = show({ title: 'Bravo', status: 'confirmed' }, [{ num: 2, date: day(5) }, { num: 1, date: day(5) }]);
+  const a = show({ title: 'Alpha', status: 'confirmed', tmdb_id: 101 }, [{ num: 1, date: day(5) }, { num: 3, date: day(2) }]);
+  const unlinked = { ...a.rows[0], id: nid('u'), show_id: null };
+  const { dated } = await cs({ rows: [...b.rows, ...a.rows, unlinked, film({ date_sort: day(5) })], shows: [a.show, b.show] });
+  assert.deepStrictEqual(Array.from(dated, r => `${r.title} ${r.season_number}`), ['Alpha 3', 'Alpha 1', 'Bravo 1', 'Bravo 2']);
 });
 
-test('up to date: next stored season after the last Watching season — none / TBA / future / available', async () => {
-  const c = await pure();
-  const base = [tv({ season_number: 1, status: 'watching', watched: true }), tv({ season_number: 2, status: 'watching', watched: true, date_sort: '2021-01-01' })];
-  const none = c.deriveCurrentlyWatching(base, TODAY).upToDate[0];
-  assert.strictEqual(none.nextState, 'none');
-  assert.strictEqual(none.next, null);
-  const withTba = c.deriveCurrentlyWatching([...base, tba({ season_number: 3 })], TODAY).upToDate[0];
-  assert.strictEqual(withTba.nextState, 'tba');
-  assert.strictEqual(withTba.next.season_number, 3);
-  const withFuture = c.deriveCurrentlyWatching([...base, tv({ season_number: 3, date_sort: day(30) })], TODAY).upToDate[0];
-  assert.strictEqual(withFuture.nextState, 'future');
-  const withAired = c.deriveCurrentlyWatching([...base, tv({ season_number: 3, date_sort: day(-5) })], TODAY);
-  assert.strictEqual(withAired.upToDate[0].nextState, 'available');
-  assert.strictEqual(withAired.active.length, 0, 'an aired On List season does not make the show active (option A)');
-});
-
-test('up to date: earlier unwatched, skipped and watched later seasons are never "next"; earliest later one wins', async () => {
-  const c = await pure();
-  const rows = [
-    tv({ season_number: 1, status: 'confirmed' }),                 // earlier unwatched, not Watching
-    tv({ season_number: 2, status: 'watching', watched: true }),   // last Watching season
-    tv({ season_number: 3, status: 'skipped', date_sort: day(10) }),
-    tv({ season_number: 4, status: 'confirmed', watched: true }),
-    tv({ season_number: 6, status: 'confirmed', date_sort: day(200) }),
-    tba({ season_number: 5 }),
-  ];
-  const show = c.deriveCurrentlyWatching(rows, TODAY).upToDate[0];
-  assert.strictEqual(show.next.season_number, 5);
-  assert.strictEqual(show.nextState, 'tba');
-});
-
-// ─── Coming Soon rules ────────────────────────────────────────────────────────
-const D = '2026-09-29';
-test('Coming Soon: confirmed future row and today included; yesterday excluded', async () => {
-  const c = await pure();
-  const fut = tv({ date_sort: '2026-10-14' }), today = tv({ season_number: 2, date_sort: D }), past = tv({ season_number: 3, date_sort: '2026-09-28' });
-  const { dated, tba: t } = c.deriveComingSoon([fut, today, past], D);
-  assert.deepStrictEqual(ids(dated), [today.id, fut.id]);
-  assert.strictEqual(t.length, 0);
-});
-
-test('Coming Soon: TBA by display text regardless of guessed (even past) date_sort; 2099 is TBA', async () => {
-  const c = await pure();
-  const staticPast = legacy({ collection: '90day', title: 'HEA', season: 'Season 10', display_date: 'TBA 2026', date_sort: '2026-06-01' });
-  const staticFuture = legacy({ title: 'Mando', display_date: 'TBA (announced)', date_sort: '2027-03-01' });
-  const dyn = tba({});
-  const { dated, tba: t } = c.deriveComingSoon([staticPast, staticFuture, dyn], D);
-  assert.strictEqual(dated.length, 0);
-  assert.deepStrictEqual(ids(t), [staticPast.id, staticFuture.id, dyn.id], 'TBA ordered by date_sort');
-});
-
-test('Coming Soon: watched and skipped excluded (dated and TBA)', async () => {
-  const c = await pure();
-  const rows = [tv({ date_sort: '2026-12-01', watched: true }), tv({ season_number: 2, date_sort: '2026-12-01', status: 'skipped' }),
-    tba({ season_number: 3, watched: true }), tba({ season_number: 4, status: 'skipped' })];
-  const { dated, tba: t } = c.deriveComingSoon(rows, D);
-  assert.strictEqual(dated.length + t.length, 0);
-});
-
-test('Coming Soon: Complete / Maybe / Pending / High Priority / Watching / On List stay eligible', async () => {
-  const c = await pure();
-  const statuses = ['complete', 'maybe', 'pending', 'highpriority', 'watching', 'confirmed'];
-  const rows = statuses.map((status, i) => tv({ tmdb_id: 500 + i, status, date_sort: '2026-11-01' }));
-  assert.strictEqual(c.deriveComingSoon(rows, D).dated.length, statuses.length);
-});
-
-test('Coming Soon: TV only — every kind of film is excluded', async () => {
-  const c = await pure();
-  const rows = [
-    tv({ collection: 'truecrime', media_type: 'movie', season: 'Film', season_number: null, date_sort: '2026-11-01' }),
-    legacy({ collection: 'sheridan', title: 'Call of Duty', season: 'Film', date_sort: '2028-06-30' }),
-    tv({ collection: 'movies', media_type: 'movie', season: 'Film', season_number: null, date_sort: '2026-11-01' }),
-    legacy({ collection: 'disney', title: 'Film TBA', season: 'Film', display_date: 'TBA', date_sort: '2027-01-01' }),
-  ];
-  const { dated, tba: t } = c.deriveComingSoon(rows, D);
-  assert.strictEqual(dated.length + t.length, 0);
-});
-
-test('Coming Soon: static and dynamic rows both work; order is date, title, season, collection', async () => {
-  const c = await pure();
-  const a = legacy({ collection: 'sheridan', title: 'Tulsa King', season: 'Season 4', date_sort: '2026-10-16' });
-  const b = tv({ title: 'Elsbeth', season_number: 4, date_sort: '2026-10-08' });
-  const c1 = tv({ title: 'Same Day', tmdb_id: 7, season_number: 2, date_sort: '2026-10-20' });
-  const c2 = tv({ title: 'Same Day', tmdb_id: 7, season_number: 1, date_sort: '2026-10-20' });
-  const d1 = tv({ collection: 'truecrime', title: 'Twin', tmdb_id: 8, date_sort: '2026-10-21' });
-  const d2 = tv({ collection: 'othertv', title: 'Twin', tmdb_id: 8, date_sort: '2026-10-21' });
-  const { dated } = c.deriveComingSoon([a, b, c1, c2, d1, d2], D);
-  assert.deepStrictEqual(ids(dated), [b.id, a.id, c2.id, c1.id, d2.id, d1.id]);
-});
-
-// ─── Rendering ────────────────────────────────────────────────────────────────
-function cwFixture() {
-  return [
-    // Released up next (S2)
-    tv({ id: 'rel-1', title: 'Released Show', tmdb_id: 1, season_number: 1, status: 'watching', watched: true }),
-    tv({ id: 'rel-2', title: 'Released Show', tmdb_id: 1, season_number: 2, status: 'watching', date_sort: day(-10) }),
-    tv({ id: 'rel-3', title: 'Released Show', tmdb_id: 1, season_number: 3, status: 'confirmed', date_sort: day(90) }),
-    // TBA up next (S3), plus a future season wrongly marked watched
-    tv({ id: 'tba-2', title: 'TBA Show', tmdb_id: 2, season_number: 2, status: 'watching', watched: true }),
-    tba({ id: 'tba-3', title: 'TBA Show', tmdb_id: 2, season_number: 3, status: 'watching' }),
-    tv({ id: 'tba-4', title: 'TBA Show', tmdb_id: 2, season_number: 4, status: 'confirmed', watched: true, date_sort: day(300) }),
-    // Future up next
-    tv({ id: 'fut-1', title: 'Future Show', tmdb_id: 3, season_number: 1, status: 'watching', date_sort: day(20) }),
-    // Up to date
-    tv({ id: 'done-1', title: 'Done Show', tmdb_id: 4, season_number: 1, status: 'watching', watched: true }),
-    // Static show
-    legacy({ id: 'dis-1', title: 'Clone Show', season: 'Season 1', status: 'watching' }),
-    // Film (excluded)
-    tv({ id: 'film-1', collection: 'truecrime', media_type: 'movie', season: 'Film', season_number: null, title: 'Doc Film', status: 'watching' }),
-  ];
+// ─── Rendering: Currently Watching and Coming Soon ────────────────────────────
+async function viewApp(data) {
+  const app = await createApp({ rows: data.rows, tvShows: data.shows });
+  await settle();
+  return app;
 }
+const tbody = app => app.el('tbody').innerHTML;
+const cards = app => app.el('cardList').innerHTML;
 
-// The header-row markup for one show in the desktop table.
-function headerRow(app, title) {
-  const rows = app.el('tbody').innerHTML.split('<tr ');
-  return rows.find(r => r.includes('derived-show-row') && r.includes(`>${title}<`)) || '';
-}
-function card(app, title) {
-  return app.el('cardList').innerHTML.split('<div class="item-card').find(c => c.includes(`>${title}<`)) || '';
-}
-
-test('render: startup shows Currently Watching with the expected shows (films excluded)', async () => {
-  const app = await createApp({ rows: cwFixture() });
-  const html = app.html();
-  for (const t of ['Released Show', 'TBA Show', 'Future Show', 'Clone Show']) assert.ok(headerRow(app, t), `${t} shown`);
-  assert.ok(!html.includes('Doc Film'), 'films excluded');
-  assert.ok(headerRow(app, 'Done Show'), 'up-to-date shows are in the (expanded) Up to date section');
-  assert.ok(app.el('tableHead').innerHTML.includes('Up next'));
-});
-
-test('render: a released up-next season shows status + watch controls (desktop and mobile)', async () => {
-  const app = await createApp({ rows: cwFixture() });
-  const row = headerRow(app, 'Released Show');
-  assert.ok(row.includes("setStatus('rel-2'"));
-  assert.ok(row.includes("toggleWatch('rel-2')"));
-  assert.ok(row.includes('event.stopPropagation(); toggleWatch'), 'watch click does not toggle expand');
-  const c = card(app, 'Released Show');
-  assert.ok(c.includes("setStatus('rel-2'") && c.includes("toggleWatch('rel-2')"));
-});
-
-test('render: a TBA or future up-next season shows the date and status, but no Mark watched', async () => {
-  const app = await createApp({ rows: cwFixture() });
-  for (const [title, id, label] of [['TBA Show', 'tba-3', 'Season 3 · TBA'], ['Future Show', 'fut-1', `Season 1 · ${disp(day(20))}`]]) {
-    const row = headerRow(app, title), c = card(app, title);
-    assert.ok(row.includes(label), `${title}: ${label}`);
-    assert.ok(row.includes('Upcoming') && row.includes('Not aired yet'));
-    assert.ok(row.includes(`setStatus('${id}'`) && c.includes(`setStatus('${id}'`));
-    assert.ok(!row.includes(`toggleWatch('${id}')`) && !c.includes(`toggleWatch('${id}')`));
+test('render: both kinds of Watching cards carry the show-level status control; Up to date is a tag, not a status', async () => {
+  const p = show({ title: 'Progress', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-3) }]);
+  const u = show({ title: 'Current', status: 'watching', tmdb_id: 101 }, [{ num: 1, w: true }, { num: 2, date: day(40) }]);
+  const app = await viewApp(all(p, u));
+  for (const html of [tbody(app), cards(app)]) {
+    assert.strictEqual((html.match(/setShowStatusById\(/g) || []).length, 2, 'one show control per card');
+    assert.ok(!/setStatus\(/.test(html), 'no row-level status control for TV');
+    assert.ok(html.includes('Up to date</span>'));
+    assert.ok(html.includes(`Next: Season 2 · ${disp(day(40))}`));
   }
+  assert.ok(app.el('statsRow').innerHTML.includes('In progress') && app.el('statsRow').innerHTML.includes('Up to date'));
+  assert.ok(tbody(app).includes(`toggleWatch('${p.rows[1].id}')`), 'released up next: Mark watched');
+  assert.ok(!tbody(app).includes(`toggleWatch('${u.rows[1].id}')`), 'up to date: no watch control for the future season');
 });
 
-test('render: expanding a show lists every stored season; release rule applies; no delete/match', async () => {
-  const app = await createApp({ rows: cwFixture() });
-  app.ctx.toggleDerivedShow('othertv|tmdb:2');
-  const html = app.html();
-  for (const id of ['tba-2', 'tba-3', 'tba-4']) assert.ok(html.includes(`setStatus('${id}'`), `${id} listed`);
-  assert.ok(!html.includes("toggleWatch('tba-3')"), 'unreleased unwatched season: no Mark watched');
-  assert.ok(html.includes("toggleWatch('tba-4')"), 'unreleased but watched season keeps its toggle (undo)');
-  assert.ok(html.includes("toggleWatch('tba-2')"));
-  assert.ok(!html.includes('delRow(') && !html.includes('openTmdbMatch('), 'no delete or match controls');
-  assert.ok(!html.includes('setShowStatus('), 'no show-level status control');
+test('render: the show control is clearly show-scoped (label and "applies to all seasons")', async () => {
+  const p = show({ title: 'Scoped', status: 'watching' }, [{ num: 1 }]);
+  const app = await viewApp(all(p));
+  assert.ok(tbody(app).includes('Show: ▶ Watching'));
+  assert.ok(tbody(app).includes('Applies to all seasons of Scoped'));
 });
 
-test('render: Up to date starts expanded, shows "Up to date", collapses, and allows undo', async () => {
-  const app = await createApp({ rows: cwFixture() });
-  const row = headerRow(app, 'Done Show');
-  assert.ok(row, 'Up to date shows are visible when the view opens');
-  assert.ok(row.includes('>Up to date<'), 'card shows "Up to date"');
-  assert.ok(!app.html().includes('All watching seasons watched'));
-  assert.ok(card(app, 'Done Show').includes('Up to date'), 'mobile card too');
-  app.ctx.toggleDerivedSection('uptodate');
-  assert.ok(!app.html().includes('Done Show'), 'the section can still be collapsed');
-  app.ctx.switchView('comingsoon');
-  app.ctx.switchView('watching');
-  await new Promise(r => setTimeout(r, 20));
-  assert.ok(headerRow(app, 'Done Show'), 'expanded again each time the view opens');
-  app.ctx.toggleDerivedShow('othertv|tmdb:4');
-  assert.ok(app.html().includes("toggleWatch('done-1')"), 'watched season can be unwatched');
+test('render: an expanded Watching show lists every season with Watched and Skip / Keep, no delete or match', async () => {
+  const p = show({ title: 'Expand', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-3) }, { num: 3, s: true, date: day(-2) }]);
+  const app = await viewApp(all(p));
+  app.ctx.toggleDerivedShow(p.show.id); await settle();
+  const html = tbody(app);
+  assert.ok(html.includes(`setSeasonSkipped('${p.rows[1].id}', true)`));
+  assert.ok(html.includes(`setSeasonSkipped('${p.rows[2].id}', false)`), 'skipped season offers Keep');
+  assert.ok(!/delRow\(|openTmdbMatch\(/.test(html));
 });
 
-test('render: up to date cards show an "Up to date" status label and what is next on the list', async () => {
-  const rows = [
-    tv({ id: 'n1', title: 'None Show', tmdb_id: 41, status: 'watching', watched: true }),
-    tv({ id: 't1', title: 'Tba Show', tmdb_id: 42, status: 'watching', watched: true }),
-    tba({ id: 't2', title: 'Tba Show', tmdb_id: 42, season_number: 2 }),
-    tv({ id: 'f1', title: 'Future Show', tmdb_id: 43, status: 'watching', watched: true }),
-    tv({ id: 'f2', title: 'Future Show', tmdb_id: 43, season_number: 2, date_sort: day(30) }),
-    tv({ id: 'a1', title: 'Aired Show', tmdb_id: 44, status: 'watching', watched: true }),
-    tv({ id: 'a2', title: 'Aired Show', tmdb_id: 44, season_number: 2, date_sort: day(-3) }),
-  ];
-  const app = await createApp({ rows });
-  const cells = title => { const r = headerRow(app, title); return { r, upNext: r.split('<td')[3] || '', status: r.split('<td')[4] || '', watched: r.split('<td')[5] || '' }; };
-  for (const t of ['None Show', 'Tba Show', 'Future Show', 'Aired Show']) {
-    const { r, status, watched } = cells(t);
-    assert.ok(r, `${t} listed`);
-    assert.ok(status.includes('status-pill') && status.includes('>Up to date<'), `${t}: status column says Up to date`);
-    assert.ok(!r.includes('<select') && !r.includes('toggleWatch('), `${t}: no dropdown or watch button on the card`);
-    assert.ok(watched.includes('—'));
-    const c = card(app, t);
-    assert.ok(c.includes('status-pill') && !c.includes('toggleWatch(') && !c.includes('<select'), `${t}: mobile card has the label, no controls`);
-  }
-  assert.ok(cells('None Show').upNext.includes('No new season on your list yet'));
-  assert.ok(cells('Tba Show').upNext.includes('Season 2 · premiere date TBA'));
-  assert.ok(cells('Future Show').upNext.includes(`Season 2 · ${disp(day(30))}`) && cells('Future Show').upNext.includes('Upcoming'));
-  assert.ok(cells('Aired Show').upNext.includes(`Season 2 · available since ${disp(day(-3))}`));
-  assert.strictEqual(app.get('derivedData.rows.length'), 7);
-  app.ctx.toggleDerivedShow('othertv|tmdb:44');
-  assert.ok(app.html().includes("setStatus('a2'") && app.html().includes("toggleWatch('a2')"), 'expanded seasons keep their own controls');
+test('render: changing the show status from Currently Watching calls set_show_status and moves the show', async () => {
+  const p = show({ title: 'Move', status: 'watching' }, [{ num: 1, date: day(-3) }]);
+  const app = await viewApp(all(p));
+  await app.ctx.setShowStatusById(p.show.id, 'complete'); await settle();
+  const call = app.writes().find(r => r.url.endsWith('/rpc/set_show_status'));
+  assert.deepStrictEqual([call.body.p_show_id, call.body.p_status], [p.show.id, 'complete']);
+  assert.strictEqual(app.store.tv_shows[0].status, 'complete');
+  assert.ok(!tbody(app).includes('derived-show-row'), 'no Watching shows left');
+  assert.strictEqual(app.writes().length, 1, 'one show write, no season PATCHes');
 });
 
-test('render: source and search filters narrow Currently Watching', async () => {
-  const app = await createApp({ rows: cwFixture() });
-  app.el('fSource').value = 'disney';
-  app.ctx.renderTable();
-  assert.ok(headerRow(app, 'Clone Show'));
-  assert.ok(!headerRow(app, 'Released Show'));
-  app.el('fSource').value = '';
-  app.el('fSearch').value = 'future';
-  app.ctx.renderTable();
-  assert.ok(headerRow(app, 'Future Show'));
-  assert.ok(!headerRow(app, 'Clone Show'));
-});
-
-function csFixture() {
-  return [
-    tv({ id: 'cs-today', title: 'Today Show', tmdb_id: 11, date_sort: day(0) }),
-    tv({ id: 'cs-soon', title: 'Soon Show', tmdb_id: 12, date_sort: day(5), status: 'pending' }),
-    tv({ id: 'cs-past', title: 'Past Show', tmdb_id: 13, date_sort: day(-1) }),
-    tba({ id: 'cs-tba', title: 'Tba Show', tmdb_id: 14 }),
-    legacy({ id: 'cs-stba', title: 'Static Tba', display_date: 'TBA 2027', date_sort: day(200) }),
-    tv({ id: 'cs-skip', title: 'Skipped Show', tmdb_id: 15, date_sort: day(3), status: 'skipped' }),
-    tv({ id: 'cs-w', title: 'Watched Show', tmdb_id: 16, date_sort: day(3), watched: true }),
-  ];
-}
-
-test('render: Coming Soon — dated rows, Today tag, TBA collapsed, status only, no watch/delete', async () => {
-  const app = await createApp({ rows: csFixture() });
-  app.ctx.switchView('comingsoon');
-  await new Promise(r => setTimeout(r, 20));
-  let html = app.html();
-  assert.ok(html.includes("setStatus('cs-today'") && html.includes("setStatus('cs-soon'"));
+test('render: Coming Soon has Skip only — no status menu, no watch control, no delete; Skip removes the row', async () => {
+  const s = show({ title: 'Soon', status: 'pending' }, [{ num: 1, date: TODAY }, { num: 2, tba: true }]);
+  const app = await createApp({ rows: s.rows, tvShows: [s.show] });
+  app.ctx.switchView('comingsoon'); await settle();
+  const html = tbody(app) + cards(app);
   assert.ok(html.includes('Today'));
-  assert.ok(!html.includes('Past Show') && !html.includes('Skipped Show') && !html.includes('Watched Show'));
-  assert.ok(html.includes('TBA') && !html.includes('Tba Show'), 'TBA section collapsed by default');
-  app.ctx.toggleDerivedSection('tba');
-  html = app.html();
-  assert.ok(html.includes("setStatus('cs-tba'") && html.includes("setStatus('cs-stba'"));
-  assert.ok(!html.includes('toggleWatch(') && !html.includes('delRow('), 'no watch or delete controls anywhere');
-  assert.ok(html.indexOf('Today Show') < html.indexOf('Soon Show'), 'chronological');
+  assert.ok(html.includes(`setSeasonSkipped('${s.rows[0].id}', true)`));
+  assert.ok(!/<select|toggleWatch\(|delRow\(|setShowStatusById\(/.test(html));
+  assert.ok(html.includes('⏳ Pending'), 'the show status is shown as a label');
+  await app.ctx.setSeasonSkipped(s.rows[0].id, true); await settle();
+  assert.ok(app.writes().some(r => r.url.endsWith('/rpc/set_season_skipped')));
+  assert.ok(!tbody(app).includes(`setSeasonSkipped('${s.rows[0].id}'`));
 });
 
-// ─── Season-row extraction: grouped tabs unchanged ────────────────────────────
-test('grouped tab after extraction: same controls per season (desktop and mobile)', async () => {
-  const rows = [
-    tv({ id: 'g1', title: 'Grouped', season_number: 1, status: 'watching', watched: true }),
-    tba({ id: 'g2', title: 'Grouped', season_number: 2, status: 'watching' }),
-    tv({ id: 'g3', title: 'Grouped', season_number: 0, status: 'skipped' }),
-    tv({ id: 'g4', title: 'Manual', media_type: null, tmdb_id: null, season_number: null, season: 'Season 1', status: 'confirmed' }),
-  ];
-  const app = await createApp({ rows });
-  app.ctx.switchTab('othertv');
-  await new Promise(r => setTimeout(r, 20));
+// ─── Rendering: collection tabs ───────────────────────────────────────────────
+test('flat tab (Disney+): TV rows get the show control and Skip; × on a built-in season means Skip; films stay row-level', async () => {
+  const app0 = await createApp();
+  app0.ctx.switchTab('disney'); await settle();
+  const app = await createApp({ rows: app0.store.watchlist_items, tvShows: app0.store.tv_shows });
+  app.ctx.switchTab('disney'); await settle();
+  const rows = app.get('tabData.disney.rows');
+  const tvRow = rows.find(r => r.season !== 'Film' && !r.skipped);
+  const filmRow = rows.find(r => r.season === 'Film');
+  const html = tbody(app);
+  assert.ok(html.includes(`setShowStatusById('${tvRow.show_id}'`));
+  assert.ok(html.includes(`setSeasonSkipped('${tvRow.id}', true)`));
+  assert.ok(html.includes(`setStatus('${filmRow.id}'`), 'films keep the row status control');
+  assert.ok(html.includes('title="Skip this season"'));
+  await app.ctx.delRow(tvRow.id); await settle();
+  assert.deepStrictEqual(app.writes().map(r => r.url.split('/rest/v1/')[1]), ['rpc/set_season_skipped']);
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === tvRow.id).skipped, true, 'skipped, not deleted');
+});
+
+test('grouped tab: one group per show (by show_id) with the show control; seasons have Skip / Keep + Watched; True Crime films unchanged', async () => {
+  const s = show({ title: 'Grouped', status: 'watching', collection: 'truecrime' }, [{ num: 1, w: true }, { num: 2, date: day(-1) }]);
+  const f = film();
+  const app = await createApp({ rows: [...s.rows, f], tvShows: [s.show] });
+  app.ctx.switchTab('truecrime'); await settle();
+  app.ctx.toggleShowExpand(`show:${s.show.id}`); await settle();
+  const html = tbody(app);
+  assert.strictEqual((html.match(/show-group-row/g) || []).length, 2, 'the show and the film');
+  assert.ok(html.includes(`setShowStatusById('${s.show.id}'`));
+  assert.ok(html.includes(`setSeasonSkipped('${s.rows[1].id}', true)`));
+  assert.ok(html.includes(`toggleWatch('${s.rows[1].id}')`));
+  assert.ok(html.includes(`setStatus('${f.id}'`), 'the film keeps its row-level status');
+  assert.ok(!html.includes(`setStatus('${s.rows[0].id}'`), 'no row-level status for a season');
+});
+
+test('grouped tab filters: "Watching only" lists every Watching show; "Up to date only" just the up-to-date ones', async () => {
+  const p = show({ title: 'Progress', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-3) }]);
+  const u = show({ title: 'Current', status: 'watching', tmdb_id: 101 }, [{ num: 1, w: true }]);
+  const o = show({ title: 'Listed', status: 'confirmed', tmdb_id: 102 }, [{ num: 1 }]);
+  const app = await createApp({ rows: [...p.rows, ...u.rows, ...o.rows], tvShows: [p.show, u.show, o.show] });
+  app.ctx.switchTab('othertv'); await settle();
+  const titles = () => [...tbody(app).matchAll(/<span class="show-title">([^<]+)<\/span>/g)].map(m => m[1]);
   app.el('fWatch').value = '';
-  app.ctx.toggleShowExpand('Grouped');
-  app.ctx.toggleShowExpand('Manual');
-  const desk = app.el('tbody').innerHTML, mob = app.el('cardList').innerHTML;
-  for (const html of [desk, mob]) {
-    for (const id of ['g1', 'g2', 'g3', 'g4']) {
-      assert.ok(html.includes(`setStatus('${id}'`), `status ${id}`);
-      assert.ok(html.includes(`delRow('${id}')`), `delete ${id}`);
-    }
-    assert.ok(html.includes("toggleWatch('g1')"));
-    assert.ok(html.includes("toggleWatch('g2')"), 'tabs keep Mark watched on unreleased rows');
-    assert.ok(!html.includes("toggleWatch('g3')"), 'skipped rows have no watch button');
-    assert.ok(html.includes("openTmdbMatch('g4')") && !html.includes("openTmdbMatch('g1')"), 'match only for unidentified rows');
-    assert.ok(!html.includes('Not aired yet'));
-  }
-  assert.ok(mob.includes('>✓</button>'), 'mobile keeps the compact watched label');
-  assert.ok(desk.includes('>✓ Watched</button>'));
+  app.el('fStatus').value = 'watching'; app.ctx.renderTable();
+  assert.deepStrictEqual(titles(), ['Progress', 'Current']);
+  app.el('fStatus').value = 'uptodate'; app.ctx.renderTable();
+  assert.deepStrictEqual(titles(), ['Current']);
+  app.el('fStatus').value = ''; app.ctx.renderTable();
+  assert.deepStrictEqual(titles(), ['Progress', 'Current', 'Listed'], 'Watching in progress, Watching up to date, then On List');
+});
+
+test('the season status column is never read for TV: scrambling it changes no view or tab', async () => {
+  const p = show({ title: 'A', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-3) }, { num: 3, tba: true }]);
+  const q = show({ title: 'B', status: 'maybe', tmdb_id: 101 }, [{ num: 1, date: day(4) }, { num: 2, s: true }]);
+  const render = async scramble => {
+    const data = all(p, q);
+    const rows = data.rows.map(r => ({ ...r, status: scramble }));
+    const app = await createApp({ rows, tvShows: data.shows.map(s => ({ ...s })) });
+    const out = [tbody(app), app.el('statsRow').innerHTML];
+    app.ctx.switchView('comingsoon'); await settle(); out.push(tbody(app));
+    app.ctx.switchTab('othertv'); await settle(); app.el('fWatch').value = ''; app.ctx.renderTable(); out.push(tbody(app), app.el('statsRow').innerHTML);
+    return out.join('\n');
+  };
+  const a = await render('skipped'), b = await render('watching'), c = await render('complete');
+  assert.strictEqual(a, b);
+  assert.strictEqual(b, c);
 });
 
 T.run();

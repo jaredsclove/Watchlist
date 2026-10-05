@@ -28,7 +28,7 @@ const v2Shows = () => [show('c1')];
 const v1Rows = () => [item('a1'), movie('b1')];
 
 test('format 1 database: backup is format 1, exact columns, no user_id', async () => {
-  const app = await createApp({ rows: v1Rows() });
+  const app = await createApp({ rows: v1Rows(), format1: true });
   const b = await app.run('buildBackupObject()');
   assert.strictEqual(b.formatVersion, 1);
   assert.deepStrictEqual(Array.from(Object.keys(b.tables)).sort(), ['custom_collections', 'othertv_shows', 'watchlist_items']);
@@ -70,7 +70,7 @@ test('format 2 validation refuses user_id, dangling or cross-collection links, l
 test('restore: a format 2 file into a format 1 database is refused before anything changes', async () => {
   const src = await createApp({ rows: v2Rows(), tvShows: v2Shows() });
   const v2 = await src.run('buildBackupObject()');
-  const app = await createApp({ rows: v1Rows() });
+  const app = await createApp({ rows: v1Rows(), format1: true });
   app.ctx.__b = v2;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
   assert.match(app.el('restoreModalBox').innerHTML, /needs the TV-show database/);
@@ -78,22 +78,22 @@ test('restore: a format 2 file into a format 1 database is refused before anythi
   assert.ok(app.requests.every(r => r.method === 'GET'));
 });
 
-test('restore: a format 1 file into a format 2 database warns and sends the explicit confirmation flag', async () => {
-  const src = await createApp({ rows: v1Rows() });
+test('restore: a format 1 file into a format 2 database is refused before anything changes (show status lives in tv_shows)', async () => {
+  const src = await createApp({ rows: v1Rows(), format1: true });
   const v1 = await src.run('buildBackupObject()');
   const app = await createApp({ rows: v2Rows(), tvShows: v2Shows() });
   app.ctx.__b = v1;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
-  assert.match(app.el('restoreModalBox').innerHTML, /predates TV shows/);
-  assert.strictEqual(app.get('pendingRestoreAllowV1Reset'), true);
-  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
-  const call = app.requests.find(r => r.url.includes('/rpc/restore_backup'));
-  assert.deepStrictEqual(call.body.p_allow_v1_reset, true);
+  assert.match(app.el('restoreModalBox').innerHTML, /predates TV shows \(format 1\)/);
+  assert.match(app.el('restoreModalBox').innerHTML, /only format 2 backups can be restored/);
+  assert.strictEqual(app.get('pendingRestoreData'), null);
+  assert.strictEqual(app.get('pendingRestoreAllowV1Reset'), false);
+  assert.ok(app.requests.every(r => r.method === 'GET'), 'nothing written');
 });
 
 test('restore: same-format restores send the flag as false', async () => {
-  for (const [rows, tvShows] of [[v1Rows(), null], [v2Rows(), v2Shows()]]) {
-    const app = await createApp({ rows, tvShows });
+  for (const [rows, tvShows, format1] of [[v1Rows(), [], true], [v2Rows(), v2Shows(), false]]) {
+    const app = await createApp({ rows, tvShows, format1 });
     const b = await app.run('buildBackupObject()');
     app.ctx.__b = b;
     await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');

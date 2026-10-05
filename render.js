@@ -73,7 +73,7 @@ function renderFilters() {
         <option value="confirmed">On list only</option>
         <option value="highpriority">High Priority only</option>
         <option value="watching">Watching only</option>
-        <option value="caughtup">Caught Up only</option>
+        <option value="uptodate">Up to date only</option>
         <option value="complete">Complete only</option>
         <option value="pending">Pending only</option>
         <option value="maybe">Maybe Later only</option>
@@ -167,15 +167,18 @@ function renderTable() {
 
   let list = [...td.rows].sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
-  if (fStatus === 'caughtup') {
-    // "Caught Up" is a derived, show-level status — never stored on an individual
-    // row. At the row level we pass through the same rows as "Watching" and let
-    // the grouped renderer split Watching vs. Caught Up by derived aggStatus.
-    list = list.filter(r => r.status === 'watching');
+  // A TV season's status is its show's (tv-shows.js); a film's is its own.
+  // "Up to date" isn't a stored status: Watching shows none of whose remaining
+  // seasons has aired.
+  if (fStatus === 'uptodate') {
+    const upToDate = upToDateShowIds(td.rows, localTodayStr());
+    list = list.filter(r => isTvSeason(r) && upToDate.has(r.show_id) && !isOffList(r));
+  } else if (fStatus === 'skipped') {
+    list = list.filter(isOffList);
   } else if (fStatus) {
-    list = list.filter(r => r.status === fStatus);
+    list = list.filter(r => displayStatus(r) === fStatus && !isOffList(r));
   } else {
-    list = list.filter(r => r.status !== 'skipped');
+    list = list.filter(r => !isOffList(r));
   }
 
   if (fSearch) list = list.filter(r => r.title.toLowerCase().includes(fSearch));
@@ -192,14 +195,24 @@ function renderTable() {
   if (fWatch === 'watched')   list = list.filter(r => r.watched);
   if (fWatch === 'unwatched') list = list.filter(r => !r.watched);
 
-  const trackable = statsList.filter(r => r.status !== 'skipped');
+  const trackable = statsList.filter(r => !isOffList(r));
   const watched   = trackable.filter(r => r.watched).length;
   const total     = trackable.length;
   const pct       = total > 0 ? Math.round(watched/total*100) : 0;
-  const pending   = statsList.filter(r => r.status === 'pending').length;
-  const maybe     = statsList.filter(r => r.status === 'maybe').length;
-  const watching     = statsList.filter(r => r.status === 'watching').length;
-  const highPriority = statsList.filter(r => r.status === 'highpriority').length;
+  // Status counts: one per show for TV seasons, one per film.
+  const countStatus = status => {
+    const shows = new Set();
+    let films = 0;
+    statsList.forEach(r => {
+      if (displayStatus(r) !== status) return;
+      if (isTvSeason(r)) shows.add(r.show_id); else films++;
+    });
+    return shows.size + films;
+  };
+  const pending   = countStatus('pending');
+  const maybe     = countStatus('maybe');
+  const watching     = countStatus('watching');
+  const highPriority = countStatus('highpriority');
 
   document.getElementById('statsRow').innerHTML = `
     <div class="stat"><div class="stat-num">${total}</div><div class="stat-label">On List</div></div>
@@ -263,6 +276,8 @@ function updateTableHeader(col) {
 }
 
 // ─── Flat rendering (Disney+, 90 Day, Sheridan) ───────────────────────────────
+// TV seasons show their show's status (a show-scoped control) and Skip / Keep;
+// films keep their own row-level status.
 function renderFlatTable(list, td) {
   let html = '', cardHtml = '', lastYear = '';
   list.forEach(r => {
@@ -274,12 +289,23 @@ function renderFlatTable(list, td) {
     }
     const isNew = td.newKeys.includes(r.item_key);
     const bc = badgeClass(r.theme);
-    const isSkipped = r.status === 'skipped';
-    const isMaybe   = r.status === 'maybe';
-    const statusClass = `s-${r.status}`;
-    const statusOptions = statusOptionsHtml(r.status);
-    const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptions}</select>`;
+    const tv = isTvSeason(r);
+    const isSkipped = isOffList(r);
+    const isMaybe   = displayStatus(r) === 'maybe';
+    const statusCell = tv
+      ? showStatusSelectHtml(showOfRow(r))
+      : `<select class="status-select s-${r.status}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>`;
     const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
+    const watchBtn = `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓ Watched':'Mark watched'}</button>`;
+    // A skipped season can be kept again; a season of a Skipped show follows its show.
+    const showSkipped = tv && displayStatus(r) === 'skipped';
+    const seasonControls = !tv
+      ? (!isSkipped ? watchBtn : '')
+      : showSkipped ? '' : r.skipped ? seasonSkipButtonHtml(r) : `${watchBtn} ${seasonSkipButtonHtml(r)}`;
+    // × on a built-in TV season means Skip (see delRow), so a skipped one has none.
+    const builtInTv = tv && isDefaultRow(r);
+    const delBtn = cls => (builtInTv && isSkipped) ? ''
+      : `<button class="${cls}" onclick="delRow('${r.id}')" title="${builtInTv ? 'Skip this season' : 'Remove'}">×</button>`;
 
     html += `<tr class="${rowClass}">
       <td>
@@ -290,11 +316,8 @@ function renderFlatTable(list, td) {
       <td><button class="badge ${bc} badge-clickable" onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this theme">${esc(r.theme)}</button></td>
       <td class="date-cell">${esc(r.display_date)}</td>
       <td>${statusCell}</td>
-      <td>${!isSkipped
-        ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓ Watched':'Mark watched'}</button>`
-        : `<span class="confirmed-lbl">—</span>`
-      }</td>
-      <td><button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button></td>
+      <td>${seasonControls || `<span class="confirmed-lbl">—</span>`}</td>
+      <td>${delBtn('del-btn')}</td>
     </tr>`;
 
     cardHtml += `<div class="item-card ${rowClass}">
@@ -304,23 +327,41 @@ function renderFlatTable(list, td) {
           <span class="card-season">${esc(r.season)}</span>
           ${isNew?'<span class="new-tag">New</span>':''}
         </div>
-        <button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>
+        ${delBtn('card-del-btn')}
       </div>
       <div class="card-meta">
         <button class="badge ${bc} badge-clickable" onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this theme">${esc(r.theme)}</button>
         <span class="card-date">${esc(r.display_date)}</span>
       </div>
       <div class="card-actions">
-        <select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptions}</select>
-        ${!isSkipped
-          ? `<button class="watch-btn${r.watched?' watched':''}" onclick="toggleWatch('${r.id}')">${r.watched?'✓ Watched':'Mark watched'}</button>`
-          : ''
-        }
+        ${statusCell}
+        ${seasonControls}
       </div>
     </div>`;
   });
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
+}
+
+// From the tab's built-in default list (× then means Skip, never delete).
+function isDefaultRow(r) {
+  const col = COLLECTIONS.find(c => c.id === r.collection);
+  return !!(col && Array.isArray(col.defaults) && col.defaults.some(d => d.k === r.item_key));
+}
+
+// Watching shows among these rows that are Up to date (none of their remaining seasons has aired).
+function upToDateShowIds(rows, today) {
+  const byShow = new Map();
+  rows.forEach(r => {
+    if (!isTvSeason(r) || !r.show_id) return;
+    if (!byShow.has(r.show_id)) byShow.set(r.show_id, []);
+    byShow.get(r.show_id).push(r);
+  });
+  const out = new Set();
+  for (const [id, seasons] of byShow) {
+    if (tvShowsById.get(id)?.status === 'watching' && isShowUpToDate(seasons, today)) out.add(id);
+  }
+  return out;
 }
 
 // ─── Movies rendering (standalone films, with Watch With + Collections tags) ──
@@ -434,32 +475,17 @@ document.addEventListener('click', function(e) {
 
 
 // ─── Grouped rendering (Other TV, True Crime/Docs) ────────────────────────────
+// Row-level status options: films (TV shows use showStatusSelectHtml).
 function statusOptionsHtml(status) {
-  // "Caught Up" is purely derived (see hasWatchableSoonSeason) — never a status the
-  // user sets directly. It only appears in this list when it's already the current
-  // value (so the dropdown displays it correctly), and it's disabled so re-selecting
-  // it can't happen — Supabase should never end up with a literal "caughtup" status.
-  const caughtUpOption = status === 'caughtup'
-    ? `<option value="caughtup" selected disabled>✓ Caught Up</option>`
-    : '';
-  return `
-    <option value="confirmed"${status==='confirmed'?' selected':''}>✓ On List</option>
-    <option value="highpriority"${status==='highpriority'?' selected':''}>⭐ High Priority</option>
-    <option value="watching"${status==='watching'?' selected':''}>▶ Watching</option>
-    ${caughtUpOption}
-    <option value="complete"${status==='complete'?' selected':''}>◆ Complete</option>
-    <option value="pending"${status==='pending'?' selected':''}>⏳ Pending</option>
-    <option value="maybe"${status==='maybe'?' selected':''}>? Maybe Later</option>
-    <option value="skipped"${status==='skipped'?' selected':''}>✕ Skipped</option>
-  `;
+  return TV_STATUS_ORDER.map(s => `<option value="${s}"${status === s ? ' selected' : ''}>${statusOptionLabel(s)}</option>`).join('');
 }
 
 // The watch control for one season row. Derived views pass requireReleased, which
 // replaces "Mark watched" with a note until the season has aired (a row already
 // marked watched keeps its toggle so it can be undone). Collection tabs keep a
-// watch button on every row that isn't skipped. compact is the mobile label.
+// watch button on every row that's on the list. compact is the mobile label.
 function seasonWatchControlHtml(r, opts, compact) {
-  if (r.status === 'skipped') return compact ? '' : `<span class="confirmed-lbl">—</span>`;
+  if (isOffList(r)) return compact ? '' : `<span class="confirmed-lbl">—</span>`;
   if (opts.requireReleased && !r.watched && !isReleasedRow(r, opts.today)) {
     return `<span class="not-aired-lbl">Not aired yet</span>`;
   }
@@ -467,13 +493,20 @@ function seasonWatchControlHtml(r, opts, compact) {
   return `<button class="watch-btn${r.watched?' watched':''}" onclick="${opts.stopPropagation ? 'event.stopPropagation(); ' : ''}toggleWatch('${r.id}')">${label}</button>`;
 }
 
+// The per-row control in a season list: Skip / Keep for a TV season (its status
+// is the show's), the row-level status for a film. A season of a Skipped show
+// follows its show and has none.
+function seasonRowControlHtml(r, opts = {}) {
+  if (!isTvSeason(r)) return `<select class="status-select s-${r.status}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>`;
+  if (displayStatus(r) === 'skipped') return `<span class="confirmed-lbl">Show skipped</span>`;
+  return seasonSkipButtonHtml(r, opts);
+}
+
 // One season of a grouped show: a desktop sub-row and a mobile card row.
 // opts: { isNew, showMatch, showDelete, requireReleased, today }
 function seasonSubRowHtml(r, opts) {
-  const isSkipped = r.status === 'skipped';
-  const isMaybe   = r.status === 'maybe';
-  const statusClass = `s-${r.status}`;
-  const statusCell = `<select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>`;
+  const isSkipped = isOffList(r);
+  const isMaybe   = displayStatus(r) === 'maybe';
   const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
   return `<tr class="${rowClass} sub-row">
         <td style="padding-left:28px">
@@ -482,94 +515,84 @@ function seasonSubRowHtml(r, opts) {
         </td>
         <td>${opts.showMatch ? `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</td>
         <td class="date-cell">${esc(r.display_date)}</td>
-        <td>${statusCell}</td>
+        <td>${seasonRowControlHtml(r)}</td>
         <td>${seasonWatchControlHtml(r, opts, false)}</td>
         <td>${opts.showDelete ? `<button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>` : ''}</td>
       </tr>`;
 }
 
 function seasonSubCardHtml(r, opts) {
-  const statusClass = `s-${r.status}`;
   return `<div class="card-subseason-row">
           <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}${opts.showMatch ? ` <button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</span>
           <div class="card-actions">
-            <select class="status-select ${statusClass}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>
+            ${seasonRowControlHtml(r)}
             ${seasonWatchControlHtml(r, opts, true)}
             ${opts.showDelete ? `<button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>` : ''}
           </div>
         </div>`;
 }
 
+// The group a row belongs to: its show (by show_id) for a TV season, the row
+// itself for a film.
+function groupKeyOf(r) {
+  return isTvSeason(r) && r.show_id ? `show:${r.show_id}` : `row:${r.id}`;
+}
+
 function renderGroupedTable(list, td, fStatus) {
-  // Which shows are visible is determined by the filtered `list`.
-  // But once a show is visible, its season breakdown/progress/badges should reflect
-  // ALL of that show's seasons in Supabase — not just the ones surviving the current filter —
-  // otherwise progress counts (e.g. "2/3 watched") get skewed by filters like "Not watched".
-  const visibleTitles = new Set(list.map(r => r.title));
+  // Which groups are visible is determined by the filtered `list`. Once a group is
+  // visible, its season breakdown/progress reflects ALL of its seasons, not just
+  // the ones surviving the current filter (e.g. "Not watched").
+  const visibleKeys = new Set(list.map(groupKeyOf));
+  const today = localTodayStr();
 
   const groups = new Map();
   td.rows.forEach(r => {
-    if (!visibleTitles.has(r.title)) return;
-    if (!groups.has(r.title)) groups.set(r.title, []);
-    groups.get(r.title).push(r);
+    const key = groupKeyOf(r);
+    if (!visibleKeys.has(key)) return;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
   });
 
-  // Status priority order for sorting: Watching > Caught Up > High Priority > On List > Complete > Pending > Maybe Later > Skipped
-  const statusOrder = ['watching','caughtup','highpriority','confirmed','complete','pending','maybe','skipped'];
+  // Order: Watching (in progress, then Up to date) > High Priority > On List > Complete > Pending > Maybe Later > Skipped
+  const rankOf = g => g.status === 'watching' ? (g.upToDate ? 1 : 0) : TV_STATUS_ORDER.indexOf(g.status) + 1;
 
-  const groupList = [...groups.entries()].map(([title, seasons]) => {
-    seasons.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
-    // aggregate status: earliest-priority status present among this show's seasons
-    let aggStatus = 'confirmed';
-    for (const s of statusOrder) { if (seasons.some(x => x.status === s)) { aggStatus = s; break; } }
-    // derived (not stored): a show sitting at "Watching" with nothing actually
-    // watchable soon displays as "Caught Up" instead — purely a display state,
-    // the underlying stored status remains "watching" in Supabase.
-    if (aggStatus === 'watching' && !hasWatchableSoonSeason(seasons)) {
-      aggStatus = 'caughtup';
-    }
-    return { title, seasons, earliestDate: seasons[0].date_sort, aggStatus };
+  const groupList = [...groups.entries()].map(([key, seasons]) => {
+    seasons.sort(isTvSeason(seasons[0]) ? compareSeasons : (a, b) => a.date_sort.localeCompare(b.date_sort));
+    const show = isTvSeason(seasons[0]) ? showOfRow(seasons[0]) : null;
+    const status = show ? show.status : seasons[0].status;
+    const upToDate = !!show && status === 'watching' && isShowUpToDate(seasons, today);
+    const earliestDate = seasons.reduce((m, r) => (r.date_sort < m ? r.date_sort : m), seasons[0].date_sort);
+    return { key, show, seasons, status, upToDate, earliestDate, title: show ? show.title : seasons[0].title };
   });
-  groupList.sort((a,b) => {
-    const rankDiff = statusOrder.indexOf(a.aggStatus) - statusOrder.indexOf(b.aggStatus);
-    if (rankDiff !== 0) return rankDiff;
-    return a.earliestDate.localeCompare(b.earliestDate);
-  });
-
-  // "Watching" and "Caught Up" are split by the derived aggStatus — a group's real
-  // stored status stays "watching" in Supabase either way; only the filtered view differs.
-  let visibleGroupList = groupList;
-  if (fStatus === 'watching') {
-    visibleGroupList = groupList.filter(group => group.aggStatus === 'watching');
-  } else if (fStatus === 'caughtup') {
-    visibleGroupList = groupList.filter(group => group.aggStatus === 'caughtup');
-  }
+  groupList.sort((a, b) => (rankOf(a) - rankOf(b)) || a.earliestDate.localeCompare(b.earliestDate));
 
   let html = '', cardHtml = '';
-  visibleGroupList.forEach(group => {
-    const { title, seasons, aggStatus } = group;
-    const isExpanded = expandedShows.has(title);
-    const network = seasons[0].theme || 'Unknown';
+  groupList.forEach(group => {
+    const { key, show, seasons, status, upToDate, title } = group;
+    const isExpanded = expandedShows.has(key);
+    const first = seasons[0];
+    const network = first.theme || 'Unknown';
     const badgeStyle = networkBadgeStyle(network);
-    const trackableSeasons = seasons.filter(s => s.status !== 'skipped');
+    const trackableSeasons = seasons.filter(s => !isOffList(s));
     const watchedCount = trackableSeasons.filter(s => s.watched).length;
     const totalCount = trackableSeasons.length;
     const anyNew = seasons.some(s => td.newKeys.includes(s.item_key));
-
-    const aggClass = `s-${aggStatus}`;
 
     const progressPct = totalCount > 0 ? Math.round(watchedCount/totalCount*100) : 0;
     const progressLabel = totalCount > 0 ? `${watchedCount}/${totalCount} watched` : `${seasons.length} season${seasons.length===1?'':'s'}`;
     const progressBarHtml = totalCount > 0
       ? `<div class="mini-progress-track"><div class="mini-progress-fill" style="width:${progressPct}%"></div></div>`
       : '';
-    const titleEsc = esc(title).replace(/'/g,"\\'");
-    const masterStatusCell = `<select class="status-select ${aggClass}" onclick="event.stopPropagation()" onchange="event.stopPropagation(); setShowStatus('${titleEsc}', this.value)">${statusOptionsHtml(aggStatus)}</select>`;
+    const keyArg = esc(key).replace(/'/g,"\\'");
+    const masterStatusCell = show
+      ? showStatusSelectHtml(show, { stopPropagation: true })
+      : `<select class="status-select s-${status}" onclick="event.stopPropagation()" onchange="event.stopPropagation(); setStatus('${first.id}', this.value, this)">${statusOptionsHtml(status)}</select>`;
+    const upToDateTag = upToDate ? '<span class="status-pill s-caughtup">Up to date</span>' : '';
 
     const seasonOpts = r => ({ isNew: td.newKeys.includes(r.item_key), showMatch: isTmdbMatchEligible(r), showDelete: true });
     const seasonRowsHtml = seasons.map(r => seasonSubRowHtml(r, seasonOpts(r))).join('');
 
-    html += `<tr class="show-group-row" onclick="toggleShowExpand('${titleEsc}')">
+    html += `<tr class="show-group-row" onclick="toggleShowExpand('${keyArg}')">
       <td>
         <div class="show-title-row">
           <div class="show-title-left">
@@ -580,15 +603,15 @@ function renderGroupedTable(list, td, fStatus) {
         </div>
       </td>
       <td><button class="badge badge-clickable" ${badgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(network).replace(/'/g,"\\'")}')" title="Filter by this network">${esc(network)}</button></td>
-      <td class="date-cell">${esc(seasons[0].display_date)}</td>
-      <td>${masterStatusCell}</td>
+      <td class="date-cell">${esc(first.display_date)}</td>
+      <td>${masterStatusCell} ${upToDateTag}</td>
       <td class="card-date">${progressLabel}${progressBarHtml}</td>
       <td><span class="confirmed-lbl">—</span></td>
     </tr>`;
     if (isExpanded) html += seasonRowsHtml;
 
     cardHtml += `<div class="item-card show-group-card">
-      <div class="card-top" onclick="toggleShowExpand('${titleEsc}')" style="cursor:pointer">
+      <div class="card-top" onclick="toggleShowExpand('${keyArg}')" style="cursor:pointer">
         <div class="card-title-block">
           <span class="card-title">${esc(title)}</span>
           ${anyNew?'<span class="new-tag">New</span>':''}
@@ -597,27 +620,25 @@ function renderGroupedTable(list, td, fStatus) {
       </div>
       <div class="card-meta">
         <button class="badge badge-clickable" ${badgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(network).replace(/'/g,"\\'")}')" title="Filter by this network">${esc(network)}</button>
-        <span class="card-date">${esc(seasons[0].display_date)} · ${progressLabel}</span>
+        <span class="card-date">${esc(first.display_date)} · ${progressLabel}</span>
         ${progressBarHtml}
       </div>
       <div class="card-actions" onclick="event.stopPropagation()">
-        ${masterStatusCell}
+        ${masterStatusCell} ${upToDateTag}
       </div>
       ${isExpanded ? `<div class="card-subseasons">${seasons.map(r => seasonSubCardHtml(r, seasonOpts(r))).join('')}</div>` : ''}
     </div>`;
   });
 
-  const emptyMsg = fStatus === 'caughtup'
-    ? `Nothing caught up right now — shows land here once they're marked Watching with no new episodes due in the next 60 days.`
-    : fStatus === 'watching'
-      ? `Nothing watchable in the next 60 days — check "Caught Up" or "All (except Skipped)" to see everything marked Watching.`
-      : `No entries match your filters.`;
+  const emptyMsg = fStatus === 'uptodate'
+    ? `Nothing is up to date right now — Watching shows land here once none of their remaining seasons has aired.`
+    : `No entries match your filters.`;
   document.getElementById('tbody').innerHTML = html || `<tr class="empty-row"><td colspan="6">${emptyMsg}</td></tr>`;
   document.getElementById('cardList').innerHTML = cardHtml || `<div class="empty-row" style="padding:2rem 0">${emptyMsg}</div>`;
 }
 
-function toggleShowExpand(title) {
-  if (expandedShows.has(title)) expandedShows.delete(title);
-  else expandedShows.add(title);
+function toggleShowExpand(key) {
+  if (expandedShows.has(key)) expandedShows.delete(key);
+  else expandedShows.add(key);
   renderTable();
 }
