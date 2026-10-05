@@ -6,7 +6,7 @@
 >
 > **This repo is public.** Keep this file free of personal details, machine-specific paths, backup locations and infrastructure identifiers that the app doesn't already publish.
 >
-> **Last updated 2026-10-05**, after **TMDB identity enrichment of 81 Disney+ shows** (after the 8 Sheridan shows) and the follow-up: owner-approved audit exceptions, the Tales of the Jedi S2 skip, the **Proud Family S2 date correction (completed)**, and the **TMDB enrichment of 6 90 Day shows (completed)** (§18) on the completed first-class TV-show model (stage `final`). A TV show's status lives on its show (`tv_shows.status`); seasons hold watched, skipped, identity, dates and metadata. Enrichment adds identity only. Further enrichment (Proud Family, Visions, Rebels, The Acolyte, The Single Life, held 90 Day/Disney+/Sheridan cases) and the future sign-in (Auth/RLS) project each need separate approval.
+> **Last updated 2026-10-05**, after **TMDB identity enrichment of 81 Disney+ shows** (after the 8 Sheridan shows) and the follow-up: owner-approved audit exceptions, the Tales of the Jedi S2 skip, the **Proud Family S2 date correction (completed)**, the **TMDB enrichment of 6 90 Day shows (completed)**, and the **TMDB enrichment of The Proud Family: Louder and Prouder (completed)** (§18) on the completed first-class TV-show model (stage `final`). A TV show's status lives on its show (`tv_shows.status`); seasons hold watched, skipped, identity, dates and metadata. Enrichment adds identity only. Further enrichment (Visions, Rebels, The Acolyte, The Single Life, held 90 Day/Disney+/Sheridan cases) and the future sign-in (Auth/RLS) project each need separate approval.
 
 ---
 
@@ -64,7 +64,7 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 
 - **Working copy:** the local Git checkout of this repo. **Never work from loose copies outside the checkout** (such as files in a downloads folder).
 - **Branch:** `main` is the source of truth. The deployed Pages site must match it byte-for-byte.
-- **Current HEAD:** the documentation commit **"Update handoff: Proud Family S2 date correction completed"**, the commit that last updated this file. Its parent is `71cc336` (handoff after the 90 Day enrichment) ← `c1893a1` (audit: Single Life exception + clearer exception reporting; tools/tests only). (A file can't contain its own commit hash; run `git log -1` to see it.)
+- **Current HEAD:** the documentation commit **"Update handoff after the Proud Family TMDB enrichment"**, the commit that last updated this file. Its parent is `35d7895` (handoff: Proud Family S2 date correction) ← `71cc336` ← `c1893a1` (audit: Single Life exception + clearer exception reporting; tools/tests only). (A file can't contain its own commit hash; run `git log -1` to see it.)
   - The **last app-code commit** is `24dc443`, a one-line `config.js` change (Proud Family S2 date, §18). After the 2026-10-05 GitHub Actions outage it was pushed with `1513aea` and **deployed and verified** (all 18 app files byte-identical on Pages, including that line; the earlier `841f0f3` docs-only deploy was superseded). The previous app-code commit is `4550060`, "Explain seasons of a TMDB-matched built-in show that need review". `c1893a1` and `71cc336` are pushed and Pages verified; check `git status` for this commit.
   - The working tree is clean.
   - All 18 app files were verified byte-identical on GitHub Pages at `4550060` on 2026-10-05, and all 14 versioned assets returned 200 with the token `20261005-enrich1`.
@@ -938,8 +938,8 @@ grep -hoE '^(async )?function [A-Za-z0-9_]+' *.js \
 ```bash
 # from the repo root
 node tools/identity-audit.mjs
-# last result (2026-10-05, after the 90 Day enrichment): 719 rows fetched (621 identified)
-#         A 582 / B 39 / C 0 / D 0, RESULT: PASS
+# last result (2026-10-05, after the Proud Family enrichment): 719 rows fetched (625 identified)
+#         A 584 / B 41 / C 0 / D 0, RESULT: PASS
 #         B rows: kept date drifts within 31 days, title-suffix/punctuation drift, and 7 provisional
 #         future Disney+ seasons (§17, §18). All 6 exceptions "not applied" (none of those shows enriched).
 #         Counts change with normal use: compare against a fresh run, not these numbers.
@@ -1018,7 +1018,7 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 - **Outage simulation:** Refresh shows and Refresh collections say "Couldn't check TMDB right now… Nothing was changed" (never "up to date").
 - **Mobile 375 px:** the "⋯" popover on a movie card opens inside that card.
 - **Derived views:** see the 2026-09-30 checklist in §15 (startup GET-only; TBA up-next season without Mark watched; Up to date section; Coming Soon today row and TBA section; no films; Movies → TV).
-- **After any temporary test:** all fingerprints equal the session's starting baseline, and the audit equals the session's starting audit (582 A / 39 B / 0 C / 0 D as of 2026-10-05).
+- **After any temporary test:** all fingerprints equal the session's starting baseline, and the audit equals the session's starting audit (584 A / 41 B / 0 C / 0 D as of 2026-10-05).
 
 ---
 
@@ -1027,7 +1027,7 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 ```text
 Repo:                     the local Git checkout of this repo (github.com/jaredsclove/Watchlist)
 Branch:                   main (in sync with origin/main), working tree clean
-HEAD:                     "Update handoff: Proud Family S2 date correction completed" (docs-only; parent 71cc336 ← c1893a1)
+HEAD:                     "Update handoff after the Proud Family TMDB enrichment" (docs-only; parent 35d7895 ← 71cc336)
 Last app-code commit:     24dc443  config.js: Proud Family S2 date (deployed and verified on Pages, 2026-10-05)
 Tracked files:            73 (18 app, 1 doc, 27 in db/, 18 in tests/, 8 in tools/, .gitignore)
                           all 18 app files byte-identical on GitHub Pages (verified at 4550060); 14 versioned assets 200
@@ -1037,8 +1037,8 @@ Cache token:              ?v=20261005-enrich1 (13 JS files + styles.css); config
 watchlist_items:          719 rows
 othertv_shows:             64 rows
 custom_collections:         1 row   ("Quentin Tarantino", tmdb_person_id 138, director)
-tv_shows:                 197 rows  (disney 103, othertv 62, 90day 15, sheridan 14, truecrime 3; 160 identified:
-                          disney 81, othertv 62, sheridan 8, 90day 6, truecrime 3)
+tv_shows:                 197 rows  (disney 103, othertv 62, 90day 15, sheridan 14, truecrime 3; 161 identified:
+                          disney 82, othertv 62, sheridan 8, 90day 6, truecrime 3)
                           show status (authoritative): confirmed (On List) 138, pending 35, watching 10, skipped 10,
                           complete 2, maybe 1, highpriority 0
 TV seasons linked:        642 of 642 TV rows; 77 non-TV rows (films) unlinked; 39 seasons skipped = true (Tales of the Jedi S2 added 2026-10-05); 126 rows watched
@@ -1055,11 +1055,11 @@ Database:                 stage final (§5, since 2026-10-05 14:32 UTC). user_id
 
 Rows per tab:             disney 182, 90day 72, sheridan 42, othertv 355, truecrime 7 (3 TV + 4 films), movies 61
 TV rows in derived views: 642 (all linked to a show)
-Unidentified rows:        98 (static DEFAULTs not enriched; 0 manual dynamic rows)
+Unidentified rows:        94 (static DEFAULTs not enriched; 0 manual dynamic rows)
 
-Identity audit:           719 rows, 621 identified → 582 A / 39 B / 0 C / 0 D, PASS (node tools/identity-audit.mjs, 2026-10-05)
+Identity audit:           719 rows, 625 identified → 584 A / 41 B / 0 C / 0 D, PASS (node tools/identity-audit.mjs, 2026-10-05)
                           B = The Traitors S5 and Marshals S1 (one-day drifts, kept) + 90 Day Fiancé S4 and The Last Resort S1
-                          (stored dates kept, within 31 days) + 35 Disney+ seasons: stored dates
+                          (stored dates kept, within 31 days) + Proud Family S1 and S3 (one-day differences, kept) + 35 Disney+ seasons: stored dates
                           within 31 days, title differences such as "(Netflix)"/"(2008)" suffixes or "–" vs "-", and 7
                           provisional future seasons (Alien: Earth S2, Daredevil: Born Again S3, Marvel Zombies S2,
                           Shōgun S2, Maul – Shadow Lord S2, X-Men '97 S3, Your Friendly Neighborhood Spider-Man S2)
@@ -1067,8 +1067,8 @@ Collection consistency:   42 rows / 16 TMDB collections / 0 problems (last verif
 
 Backups:                  kept outside the repo. Sheridan enrichment: before 18:54 UTC, after 19:04 UTC. Disney+ enrichment: before
                           19:51 UTC, after 20:11 UTC. Tales of the Jedi skip: before 21:08, after 21:09. 90 Day enrichment: before
-                          21:35 UTC, after 21:38 UTC. Proud Family S2 correction: before 21:47, after 21:48 UTC
-                          (2026-10-05; format 2, 719/197/64/1, valid).
+                          21:35 UTC, after 21:38 UTC. Proud Family S2 correction: before 21:47, after 21:48 UTC.
+                          Proud Family enrichment: before 21:53, after 21:54 UTC (2026-10-05; format 2, 719/197/64/1, valid).
 
 Tags:
   post-tmdb-migration-modularization → c5b592e
@@ -1215,13 +1215,23 @@ Baseline before the review: repo 3 commits ahead of `origin/main` (not pushed; G
 - **Result:** post-verify 719 / 197 / 642 linked, 6 shows + 37 seasons identified, 621 identified rows, 0 mismatches/duplicates. **Backup diff:** exactly 6 × `tv_shows.tmdb_id` + 37 × (`media_type`, `tmdb_id`, `season_number`), each as planned; 0 unexpected changes; every date (incl. the two kept B dates), title, label, key, status, watched/skipped flag and link unchanged. **Audit 621 identified, 582 A / 39 B / 0 C / 0 D** (as predicted). Deployed site with writes blocked: 90 Day tab 2 GETs, no seeding, no write attempts; Currently Watching 6 + 4, Coming Soon 13 dated / 21 TBA. Rollback files kept privately, not run.
 
 ### Follow-up after the 90 Day run (2026-10-05)
-- **Proud Family S2 date correction — completed in production 2026-10-05 (owner-approved):** config deployed and verified first; the fresh read-only dry run matched exactly one row (would_update 1, already_corrected 0) and equalled the rehearsal; the exact rehearsed guarded update (hash-checked; raises unless exactly one row) succeeded; the re-read showed would_update 0, already_corrected 1. **Changed:** `display_date` "Sep 28, 2023" → "Feb 1, 2023" and `date_sort` 2023-09-28 → 2023-02-01 on that one row; **no other field of that row and nothing in any other row or table changed** (field-by-field diff of validated pre/post format-2 backups). Status (pending), watched/skipped (false/false), title, label, item_key, show link and TMDB identity (none) are unchanged. Audit unchanged: **621 identified, 582 A / 39 B / 0 C / 0 D**. The guarded rollback file exists privately (outside the repo) and **was not run**. **Proud Family remains unenriched and is now ready for separately approved TMDB enrichment** (125438; expected S1 B, S2 A, S3 B, S4 A).
+- **Proud Family S2 date correction — completed in production 2026-10-05 (owner-approved):** config deployed and verified first; the fresh read-only dry run matched exactly one row (would_update 1, already_corrected 0) and equalled the rehearsal; the exact rehearsed guarded update (hash-checked; raises unless exactly one row) succeeded; the re-read showed would_update 0, already_corrected 1. **Changed:** `display_date` "Sep 28, 2023" → "Feb 1, 2023" and `date_sort` 2023-09-28 → 2023-02-01 on that one row; **no other field of that row and nothing in any other row or table changed** (field-by-field diff of validated pre/post format-2 backups). Status (pending), watched/skipped (false/false), title, label, item_key, show link and TMDB identity (none) are unchanged. Audit unchanged: **621 identified, 582 A / 39 B / 0 C / 0 D**. The guarded rollback file exists privately (outside the repo) and **was not run**. At that point Proud Family was still unenriched and ready for separately approved TMDB enrichment (125438; expected S1 B, S2 A, S3 B, S4 A) — **done later the same day (below)**.
 - **The Single Life S1 exception (`c1893a1`, approved):** implemented with tests, plus "applied, ROW STILL FAILS" reporting (§16). The show is **not enriched**.
 - **Love in Paradise S3 (no change; unresolved):** still requires an official network/streamer source or the two-independent-trades standard; secondary articles citing Variety do not count as two independent trades. The date is consistent in accessible coverage — Screen Rant (Feb 28, 2023, citing Variety: "season 3 will debut on Monday, April 17"), TV Shows Ace (Mar 1, 2023, Variety reporting TLC's release: "Monday, April 17 … 8 p.m."), E! News (Mar 28, 2023) and TMDB — but the trade source itself (Variety's exclusive) and the WBD release could not be opened, so it is **not yet verified by an accessible official or trade source**.
 
+
+### Completed: TMDB identity enrichment — The Proud Family: Louder and Prouder (2026-10-05, approved)
+
+- **Scope:** this one show only, TMDB 125438 (owner-approved; no other enrichment in this run). Local display title and the curated labels `Season 1`–`Season 4` kept exactly; mapped Season N → TMDB season N.
+- **Before writing (read-only):** repo `main` = `origin/main`, clean; stage `final`; counts 719 / 197 / 642 linked, 621 identified rows; audit 582 A / 39 B / 0 C / 0 D; the show still legacy (no TMDB id, Pending); S2 still Feb 1, 2023 / 2023-02-01; no Disney+ show or row already using 125438; all four seasons linked to the same show; production unchanged since the S2 correction's post-run backup. Fresh validated format-2 backup.
+- **Rehearsal (local, exact replica of a fresh snapshot): 46/46** — pre-flight, dry run = manifest, guards, atomicity, only the identity fields change, all four stored dates and every watched/skipped flag and status unchanged, up next unchanged for all 197 shows, duplicates refused (re-run, a second show with 125438, the unique season index), Disney+ tab GET-only and byte-identical, Currently Watching / Coming Soon identical, seeding the 182 defaults a no-op, a later `Season 5` joins and `Season 5 (Part 1)` is held for review, rollback restores the snapshot.
+- **Production:** regenerated files byte-identical to the rehearsed set; catalog (31 function sources, privileges, stage) = rehearsed; pre-flight 4 rows / 0 mismatches; **admin dry run identical to the rehearsal**; then one atomic, self-verifying `private.tv_enrich_show` call (not the user-facing Match flow), verified read-only against the pre-run backup.
+- **Written (only):** `tv_shows.tmdb_id` null → 125438; on Seasons 1–4: `media_type` null → `tv`, `tmdb_id` null → 125438, `season_number` null → 1/2/3/4. **Field-level diff of validated pre/post format-2 backups: exactly those 13 fields, nothing else** — title, item_keys, labels, collection, show status (pending), watched/skipped (all false), display_date/date_sort (incl. Feb 1, 2023), created_at and links unchanged; other tables unchanged.
+- **Checks:** post-verify 719 / 197 / 642 linked, 625 identified rows, 0 mismatches, 0 duplicate shows or seasons. **Grades: S1 B, S2 A, S3 B, S4 A** (S1/S3 one-day differences kept; no date changed). **Audit 625 identified, 584 A / 41 B / 0 C / 0 D, PASS.** Deployed Disney+ tab with writes blocked: 2 GETs, no seeding, no write attempts, Proud Family shown as one show with its four seasons and stored dates; Currently Watching 6 + 4, Coming Soon 13 dated / 21 TBA. The guarded rollback file exists privately and was not run.
+
 ### Next
 
-- **Pending owner approval:** enrichment of Proud Family (date corrected; ready), Visions, Rebels, The Acolyte and The Single Life (exception in place); Love in Paradise S3 needs evidence meeting the source standard before any correction.
+- **Pending owner approval:** enrichment of Visions, Rebels, The Acolyte and The Single Life (exception in place); Love in Paradise S3 needs evidence meeting the source standard before any correction.
 - **Held / unchanged:** Happily Ever After? (no confirmed renewal found), the six Skipped 90 Day shows, Wonder Man, Tales of the Jedi (S2 skipped), Clone Wars (2003), Limitless, the 14 Specials, the Sheridan held shows.
 - **The TV-show migration is complete.** Enrichment continues only on approval (same process: read-only review → owner decisions → rehearsal → dry run → per-show apply); the 90 Day review is done and awaits decisions. No production write, no schema change, no 90 Day until approved. Parts/volumes or any non-`Season N` label are never forced into a season number (as with Yellowstone and Star Wars: Visions). Recheck the waiting Sheridan shows and the held Disney+ cases (Wonder Man; the audit-blocked shows) when TMDB or the owner's decisions change. The separate **future sign-in (Auth/RLS) project** (`db/future/auth_switchover.sql`) needs its own approval.
 - **Identity audit:** 547 A / 37 B / 0 C / 0 D is the baseline (after the Disney+ enrichment). TMDB data can change upstream; a benign TMDB correction that changes A/B is explained and accepted as the new baseline, not treated as a regression. A provisional B becomes normal grading once TMDB lists the season, or **D** if the season is released while TMDB still doesn't list it. Any C or D, or an unexplained A→B, is a stop condition.
@@ -1235,7 +1245,7 @@ Baseline before the review: repo 3 commits ahead of `origin/main` (not pushed; G
 1. Inspect the actual repo (your local Git checkout of `jaredsclove/Watchlist`).
 2. Run `git status`.
 3. Confirm the branch is `main` and in sync with `origin/main`.
-4. Confirm `HEAD` is the docs commit "Update handoff: Proud Family S2 date correction completed" (it follows `71cc336`, the handoff after the 90 Day enrichment, and `c1893a1`, the Single Life exception and reporting change); check that it is pushed (§2). The previous app-code commit is `4550060`, "Explain seasons of a TMDB-matched built-in show that need review". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
+4. Confirm `HEAD` is the docs commit "Update handoff after the Proud Family TMDB enrichment" (it follows `35d7895`, `71cc336` and `c1893a1`); check that it is pushed (§2). The previous app-code commit is `4550060`, "Explain seasons of a TMDB-matched built-in show that need review". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
 5. Inspect the file tree and compare it with §3: 73 tracked files, and roughly the listed line counts.
 6. Run the offline checks in §16: syntax, all 15 test suites (303 cases), and the handler sweep (55 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 547 A / 37 B / 0 C / 0 D).
 7. **Do not modify anything:**
