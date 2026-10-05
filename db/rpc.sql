@@ -31,6 +31,98 @@ language sql immutable set search_path = '' as $$
   select coalesce(p = any(array['confirmed','highpriority','watching','complete','pending','maybe','skipped']), false)
 $$;
 
+-- Built-in collections (the catalog tabs, no TMDB search). A show there can be
+-- given a TMDB identity by admin enrichment (db/admin/tv_enrich.sql); later
+-- built-in or manual seasons of it must join that show, never a second one.
+create or replace function private.tv_builtin_collections() returns text[]
+language sql immutable set search_path = '' as $$ select array['disney', '90day', 'sheridan']::text[] $$;
+
+-- The season number of a plain "Season N" label (N >= 1); null for anything else
+-- (Specials, parts, volumes, "Season 5 (Final)", …).
+create or replace function private.tv_plain_season_number(p_label text) returns integer
+language sql immutable set search_path = '' as $$
+  select case when p_label ~ '^Season [1-9][0-9]{0,3}$' then substring(p_label from 8)::integer end
+$$;
+
+-- Adds seasons (legacy-keyed: item_key, label, dates) to an enriched built-in show
+-- as identified seasons: a plain "Season N" becomes TMDB season N of the show.
+-- Per season: the same item_key already on that identity → existing (no-op); a
+-- label that isn't a plain "Season N", or an item_key/identity held by another
+-- row → rejected for review. Inserts nothing else and never creates a show.
+-- p_seasons items: {item_key, title, season, theme?, display_date?, date_sort, status?}.
+-- Returns {inserted uuid[], existing jsonb, rejected jsonb}.
+create or replace function private.tv_add_to_enriched_show(p_show_id uuid, p_seasons jsonb) returns jsonb
+language plpgsql set search_path = '' as $$
+declare
+  p_show public.tv_shows;
+  s jsonb;
+  v_num integer;
+  v_row public.watchlist_items;
+  v_conflict uuid;
+  r public.watchlist_items;
+  v_inserted uuid[] := '{}';
+  v_existing jsonb := '[]';
+  v_rejected jsonb := '[]';
+begin
+  select * into p_show from public.tv_shows where id = p_show_id;
+  for s in select * from jsonb_array_elements(p_seasons) loop
+    v_num := private.tv_plain_season_number(s ->> 'season');
+    if v_num is null then
+      v_rejected := v_rejected || jsonb_build_object('item_key', s ->> 'item_key', 'season', s ->> 'season',
+        'reason', 'enriched_show_label', 'show_id', p_show.id);
+      continue;
+    end if;
+    select * into v_row from public.watchlist_items
+    where user_id = p_show.user_id and collection = p_show.collection and item_key = s ->> 'item_key'
+    order by id limit 1;
+    if found then
+      if v_row.show_id = p_show.id and v_row.media_type = 'tv' and v_row.tmdb_id = p_show.tmdb_id and v_row.season_number = v_num then
+        v_existing := v_existing || jsonb_build_object('season_number', v_num, 'item_key', v_row.item_key, 'id', v_row.id);
+      else
+        v_rejected := v_rejected || jsonb_build_object('item_key', s ->> 'item_key', 'season', s ->> 'season',
+          'reason', 'identity_conflict', 'conflicting_row_id', v_row.id);
+      end if;
+      continue;
+    end if;
+    select id into v_conflict from public.watchlist_items
+    where user_id = p_show.user_id and collection = p_show.collection and media_type = 'tv'
+      and tmdb_id = p_show.tmdb_id and season_number = v_num;
+    if found then
+      v_rejected := v_rejected || jsonb_build_object('item_key', s ->> 'item_key', 'season', s ->> 'season',
+        'reason', 'identity_conflict', 'conflicting_row_id', v_conflict);
+      continue;
+    end if;
+    r := null;
+    insert into public.watchlist_items (collection, item_key, title, season, theme, display_date, date_sort, watched,
+      status, media_type, tmdb_id, season_number, show_id)
+    values (p_show.collection, s ->> 'item_key', s ->> 'title', s ->> 'season', coalesce(s ->> 'theme', ''),
+      coalesce(s ->> 'display_date', ''), s ->> 'date_sort', false, coalesce(s ->> 'status', 'confirmed'),
+      'tv', p_show.tmdb_id, v_num, p_show.id)
+    on conflict do nothing
+    returning * into r;
+    if r.id is not null then v_inserted := v_inserted || r.id;
+    else v_rejected := v_rejected || jsonb_build_object('item_key', s ->> 'item_key', 'season', s ->> 'season', 'reason', 'identity_conflict');
+    end if;
+  end loop;
+  return jsonb_build_object('inserted', to_jsonb(v_inserted), 'existing', v_existing, 'rejected', v_rejected);
+end $$;
+
+-- The enriched show a built-in, legacy-keyed season belongs to, by show key: one
+-- show → its id (the show is locked); none → null; more than one → raises (ambiguous).
+create or replace function private.tv_enriched_show_for(p_owner uuid, p_collection text, p_show_key text) returns uuid
+language plpgsql set search_path = '' as $$
+declare v uuid; v_n int;
+begin
+  if not (p_collection = any(private.tv_builtin_collections())) then return null; end if;
+  select count(*) into v_n from public.tv_shows
+  where user_id = p_owner and collection = p_collection and show_key = p_show_key and tmdb_id is not null;
+  if v_n = 0 then return null; end if;
+  if v_n > 1 then raise exception 'integrity_fault: % TMDB-matched shows share the key %', v_n, p_show_key using errcode = '23000'; end if;
+  select id into v from public.tv_shows
+  where user_id = p_owner and collection = p_collection and show_key = p_show_key and tmdb_id is not null for update;
+  return v;
+end $$;
+
 -- Locks one of the owner's shows, creating it when missing; returns its id and
 -- whether it was created. Two concurrent calls resolve to the same show (the
 -- insert skips duplicates, then the existing row is locked).
@@ -91,6 +183,7 @@ declare
   v_existing jsonb := '[]';
   v_rejected jsonb := '[]';
   v_reopened boolean := false;
+  v_enriched jsonb;
 begin
   begin v_tmdb := (p_show ->> 'tmdb_id')::integer;
   exception when others then raise exception 'invalid_input: show tmdb_id' using errcode = '22023'; end;
@@ -129,6 +222,28 @@ begin
     if v_ident = any(v_seen) then raise exception 'invalid_input: season % requested twice', v_ident using errcode = '22023'; end if;
     v_seen := v_seen || v_ident;
   end loop;
+
+  -- A legacy-keyed season of an enriched built-in show joins that show.
+  if v_tmdb is null then
+    v_show_id := private.tv_enriched_show_for(v_owner, p_collection, v_key);
+    if v_show_id is not null then
+      select * into v_show from public.tv_shows where id = v_show_id;
+      v_enriched := private.tv_add_to_enriched_show(v_show_id,
+        (select jsonb_agg(x - 'season_number') from jsonb_array_elements(p_seasons) x));
+      v_inserted := array(select jsonb_array_elements_text(v_enriched -> 'inserted')::uuid);
+      if cardinality(v_inserted) > 0 and v_stage in ('authoritative', 'final') and v_show.status = 'complete' then
+        update public.tv_shows set status = 'confirmed' where id = v_show.id;
+        v_reopened := true;
+      end if;
+      if cardinality(v_inserted) > 0 and v_stage = 'authoritative' then perform private.tv_project_legacy_status(v_show.id); end if;
+      return jsonb_build_object(
+        'show_id', v_show.id, 'show_created', false,
+        'inserted', coalesce((select jsonb_agg(to_jsonb(w) order by w.season_number, w.item_key)
+                              from public.watchlist_items w where w.id = any(v_inserted)), '[]'),
+        'existing', v_enriched -> 'existing', 'rejected', v_enriched -> 'rejected', 'reopened', v_reopened,
+        'show_status', (select status from public.tv_shows where id = v_show.id));
+    end if;
+  end if;
 
   select show_id, created into v_show_id, v_created
   from private.tv_lock_or_create_show(v_owner, p_collection, v_tmdb, v_key, v_title, v_init);
@@ -234,6 +349,7 @@ declare
   v_reopened uuid[] := '{}';
   v_conflicts jsonb := '[]';
   v_n int;
+  v_enriched jsonb;
 begin
   if p_collection is null or not (p_collection = any(private.tv_collections())) then
     raise exception 'invalid_input: % is not a TV collection', p_collection using errcode = '22023';
@@ -265,6 +381,27 @@ begin
              where w.user_id = v_owner and w.collection = p_collection and w.tmdb_id is null and w.item_key = defs.def ->> 'k')) as missing
     from defs group by defs.show_key
   loop
+    -- Defaults of an enriched built-in show join that show as identified seasons
+    -- (a default already on it is a no-op; anything else is reported for review).
+    v_show_id := private.tv_enriched_show_for(v_owner, p_collection, g.show_key);
+    if v_show_id is not null then
+      select * into v_show from public.tv_shows where id = v_show_id;
+      v_enriched := private.tv_add_to_enriched_show(v_show_id, (
+        select coalesce(jsonb_agg(jsonb_build_object('item_key', x.def ->> 'k', 'title', x.def ->> 't', 'season', x.def ->> 's',
+          'theme', x.def ->> 'th', 'display_date', x.def ->> 'd', 'date_sort', x.def ->> 'ds',
+          'status', case when coalesce((x.def ->> 'p')::boolean, false) then 'pending' else 'confirmed' end)), '[]')
+        from jsonb_array_elements(p_defaults) as x(def)
+        where x.def ->> 's' <> 'Film' and private.tv_show_key(p_collection, x.def ->> 'k') = g.show_key));
+      v_n := jsonb_array_length(v_enriched -> 'inserted');
+      v_inserted := v_inserted || array(select jsonb_array_elements_text(v_enriched -> 'inserted')::uuid);
+      v_conflicts := v_conflicts || (v_enriched -> 'rejected');
+      if v_n > 0 and v_stage in ('authoritative', 'final') and v_show.status = 'complete' then
+        update public.tv_shows set status = 'confirmed' where id = v_show.id;
+        v_reopened := v_reopened || v_show.id;
+      end if;
+      if v_n > 0 and v_stage = 'authoritative' then perform private.tv_project_legacy_status(v_show.id); end if;
+      continue;
+    end if;
     if g.missing is null then
       -- Every row exists; report any that is linked to a different show.
       v_conflicts := v_conflicts || coalesce((
@@ -497,9 +634,13 @@ end $$;
 
 -- ── Permissions ──────────────────────────────────────────────────────────────
 revoke all on function private.tv_require_stage(text, text[]), private.tv_valid_date(text), private.tv_valid_status(text),
-  private.tv_lock_or_create_show(uuid, text, integer, text, text, text), private.tv_lock_season(uuid, uuid) from public;
+  private.tv_lock_or_create_show(uuid, text, integer, text, text, text), private.tv_lock_season(uuid, uuid),
+  private.tv_builtin_collections(), private.tv_plain_season_number(text), private.tv_add_to_enriched_show(uuid, jsonb),
+  private.tv_enriched_show_for(uuid, text, text) from public;
 grant execute on function private.tv_require_stage(text, text[]), private.tv_valid_date(text), private.tv_valid_status(text),
-  private.tv_lock_or_create_show(uuid, text, integer, text, text, text), private.tv_lock_season(uuid, uuid) to anon, authenticated;
+  private.tv_lock_or_create_show(uuid, text, integer, text, text, text), private.tv_lock_season(uuid, uuid),
+  private.tv_builtin_collections(), private.tv_plain_season_number(text), private.tv_add_to_enriched_show(uuid, jsonb),
+  private.tv_enriched_show_for(uuid, text, text) to anon, authenticated;
 
 revoke all on function public.add_tv_seasons(text, jsonb, jsonb), public.seed_tv_defaults(text, jsonb),
   public.set_show_status(uuid, text), public.set_season_watched(uuid, boolean), public.set_season_skipped(uuid, boolean),

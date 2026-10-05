@@ -47,6 +47,8 @@ export default function register(ctx) {
     execFileSync(process.execPath, [path.join(ROOT, 'tools/tv-model-expectations.mjs'), ctx.backupPath], { encoding: 'utf8', maxBuffer: 1 << 26 })));
   step('rpc', () => exec('browser-facing TV functions', read('db/rpc.sql')));
   step('t_rpc', () => checks('db/test/t_rpc.sql'));
+  step('admin-enrich', () => exec('admin TMDB enrichment', read('db/admin/tv_enrich.sql')));
+  step('t_enrich', () => checks('db/test/t_enrich.sql'));
   step('t_restore', () => checks('db/test/t_restore.sql'));
   step('future-auth', () => exec('future sign-in functions (rehearsal only)', read('db/future/auth_switchover.sql')));
   step('t_two_user', async () => {

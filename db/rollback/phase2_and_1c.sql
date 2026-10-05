@@ -18,7 +18,9 @@ drop function if exists public.add_tv_seasons(text, jsonb, jsonb), public.seed_t
   private.tv_require_stage(text, text[]), private.tv_valid_date(text), private.tv_valid_status(text),
   private.tv_lock_or_create_show(uuid, text, integer, text, text, text), private.tv_lock_season(uuid, uuid),
   private.tv_backfill(uuid), private.tv_shadow_resync(uuid), private.tv_project_legacy_status(uuid),
-  private.tv_watching_anchor(uuid), private.tv_up_next(uuid);
+  private.tv_watching_anchor(uuid), private.tv_up_next(uuid),
+  private.tv_builtin_collections(), private.tv_plain_season_number(text), private.tv_add_to_enriched_show(uuid, jsonb),
+  private.tv_enriched_show_for(uuid, text, text), private.tv_enrich_show(uuid, text, integer, jsonb, boolean);
 
 alter table public.watchlist_items
   drop constraint watchlist_items_show_fkey,
