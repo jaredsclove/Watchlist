@@ -123,12 +123,43 @@ export function gradeMovie(row, movie, candidates = []) {
 }
 
 // show: TMDB /tv/{id}?append_to_response=alternative_titles, or null if TMDB has no such id.
-export function gradeTv(row, show) {
+// Today's date (local), as YYYY-MM-DD.
+export function localToday(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+// A season TMDB doesn't list is normally D. It is a provisional B only when the
+// curated catalog is simply one season ahead of TMDB: the show itself matches
+// (title graded as usual), the label is exactly "Season N" for this row's N >= 1,
+// N is TMDB's next season (highest listed + 1; no gap, no lower number), no TMDB
+// season already carries the name "Season N", and the season is TBA or future-dated.
+// It is never reported as TMDB-verified. Once TMDB lists it, normal grading applies.
+export function provisionalSeason(row, show, today) {
+  const n = row.season_number;
+  const listed = (show.seasons || []).map(x => x.season_number);
+  return Number.isInteger(n) && n >= 1 && row.season === `Season ${n}`
+    && n === Math.max(0, ...listed) + 1
+    && !(show.seasons || []).some(x => (x.name || '').trim() === `Season ${n}`)
+    && (isTba(row) || (row.date_sort || '') > today);
+}
+
+export function gradeTv(row, show, today = localToday()) {
   if (!show) return result([['D', `TMDB tv ${row.tmdb_id} not found`]]);
   const s = (show.seasons || []).find(x => x.season_number === row.season_number);
-  if (!s) return result([['D', `show ${row.tmdb_id} (${show.name}) has no season ${row.season_number}`]]);
   const f = [];
   const add = (g, why) => f.push([g, why]);
+  if (!s) {
+    if (!provisionalSeason(row, show, today)) {
+      const released = !isTba(row) && (row.date_sort || '') <= today;
+      return result([['D', `show ${row.tmdb_id} (${show.name}) has no season ${row.season_number}${released ? ' (already released)' : ''}`]]);
+    }
+    add('B', `provisional future season not yet listed by TMDB (season ${row.season_number}; not TMDB-verified)`);
+    const t = titleMatch(row.title, [show.name, show.original_name], acceptedAltTitles(show.alternative_titles?.results));
+    if (t.kind === 'loose') add('B', `show title drift: "${row.title}" vs TMDB "${show.name}"`);
+    if (t.kind === 'similar') add('C', `show title changed: "${row.title}" vs TMDB "${show.name}" (similarity ${t.sim})`);
+    if (t.kind === 'different') add('D', `show title "${row.title}" vs TMDB "${show.name}" (similarity ${t.sim})`);
+    return result(f);
+  }
   const air = s.air_date || '';
   const date = compareDate(row, air);
   const t = titleMatch(row.title, [show.name, show.original_name], acceptedAltTitles(show.alternative_titles?.results));

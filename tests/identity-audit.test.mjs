@@ -57,6 +57,26 @@ test('nonexistent TV season: Silo season 9', 'D', () => gradeTv({ ...SILO_S4, se
 test('stale TBA → TMDB now dated: Silo S4 before correction', 'B',
   () => gradeTv({ ...SILO_S4, display_date: 'TBA', date_sort: '2099-01-01' }, SILO));
 test('corrected TBA row: Silo S4 after correction', 'A', () => gradeTv(SILO_S4, SILO));
+
+// Provisional future seasons (catalog one season ahead of TMDB). Fixed "today".
+const TODAY = '2026-10-05';
+const S5 = o => ({ ...SILO_S4, season: 'Season 5', season_number: 5, display_date: 'TBA', date_sort: '2099-01-01', ...o });
+test('provisional: next season, TBA, not on TMDB yet → B (not TMDB-verified)', 'B', () => {
+  const r = gradeTv(S5(), SILO, TODAY);
+  if (!r.findings.some(([, why]) => /provisional future season not yet listed by TMDB/.test(why) && /not TMDB-verified/.test(why))) throw new Error('wording');
+  return r;
+});
+test('provisional: next season with a future date → B', 'B', () => gradeTv(S5({ display_date: 'Jul 1, 2028', date_sort: '2028-07-01' }), SILO, TODAY));
+test('same season once its date has passed, still absent from TMDB → D', 'D', () => gradeTv(S5({ display_date: 'Jul 1, 2026', date_sort: '2026-07-01' }), SILO, TODAY));
+test('label not exactly "Season N" ("Season 5 (Final)") → D', 'D', () => gradeTv(S5({ season: 'Season 5 (Final)' }), SILO, TODAY));
+test('not the next season (TMDB lists 1 and 3; ours is 2) → D', 'D', () =>
+  gradeTv(S5({ season: 'Season 2', season_number: 2 }), { ...SILO, seasons: [{ season_number: 1, air_date: '2026-03-14' }, { season_number: 3, name: 'Season 3', air_date: null }] }, TODAY));
+test('TMDB already names another season "Season 5" → D', 'D', () =>
+  gradeTv(S5(), { ...SILO, seasons: [...SILO.seasons.slice(0, 3), { season_number: 4, name: 'Season 5', air_date: '2027-07-08' }] }, TODAY));
+test('once TMDB lists the season, normal grading applies (dates match) → A', 'A', () =>
+  gradeTv(S5({ display_date: 'Jul 1, 2028', date_sort: '2028-07-01' }), { ...SILO, seasons: [...SILO.seasons, { season_number: 5, name: 'Season 5', air_date: '2028-07-01' }] }, TODAY));
+test('provisional season of a show whose title doesn\'t match → D', 'D', () =>
+  gradeTv(S5(), { ...SILO, id: 244447, name: 'The Hunting Wives', original_name: 'The Hunting Wives' }, TODAY));
 test('wrong show: Silo row → a show with a different title', 'D',
   () => gradeTv(SILO_S4, { ...SILO, id: 244447, name: 'The Hunting Wives', original_name: 'The Hunting Wives',
     seasons: [{ season_number: 4, air_date: '2029-01-01' }] }));
