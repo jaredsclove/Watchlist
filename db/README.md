@@ -11,7 +11,7 @@ production step needs explicit approval and a fresh validated backup first.
 | Phase 2 | `rpc.sql`, then the Phase 2 block in `stages.sql` | Browser-facing functions; stage → shadow |
 | Phase 3 | the Phase 3 block in `stages.sql` | Stage → authoritative (the switch-over) |
 | Clean-up C1 | the C1 block in `stages.sql` | Stop writing compatibility values |
-| Rollbacks | `stages.sql` (Phase 3), `rollback/phase2_and_1c.sql`, `rollback/phase1b.sql` + `phase0_restore_v1.sql` | Undo each phase |
+| Rollbacks | `rollback/final.sql` (C1: stage final → authoritative + re-project every show), `rollback/othertv_from_tv_shows.sql` (before reverting the app to a version whose Refresh reads `othertv_shows`, i.e. before `59dd6a1`), `stages.sql` (Phase 3), `rollback/phase2_and_1c.sql`, `rollback/phase1b.sql` + `phase0_restore_v1.sql` | Undo each phase, newest first |
 | Future sign-in | `future/auth_switchover.sql` | Not part of this migration |
 
 `test/` is for test projects and local runs only: `replica_schema.sql` (the
