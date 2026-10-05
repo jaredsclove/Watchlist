@@ -6,7 +6,7 @@
 >
 > **This repo is public.** Keep this file free of personal details, machine-specific paths, backup locations and infrastructure identifiers that the app doesn't already publish.
 >
-> **Last updated 2026-10-05**, after **Phase 3 of the first-class TV-show migration** (§18): stage `authoritative`. **A TV show's status now lives on its show (`tv_shows.status`)**: show-level status controls, seasons with Watched and Skip / Keep, Currently Watching = Watching shows with Up to date from the released-only rule. The season `status` column is only a compatibility copy (written by the database for rollback; never read by the app). Stabilization/cleanup needs separate approval.
+> **Last updated 2026-10-05**, after the **first-class TV-show migration was completed** (§18): stage **`final`**. A TV show's status lives on its show (`tv_shows.status`); seasons hold watched, skipped, identity, dates and metadata. The season `status` column stays populated but is no longer written for TV and never read. Refresh shows checks the identified shows in `tv_shows`; `othertv_shows` stays in the database, unused. The only remaining related work is the separate future sign-in (Auth/RLS) project.
 
 ---
 
@@ -64,14 +64,14 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 
 - **Working copy:** the local Git checkout of this repo. **Never work from loose copies outside the checkout** (such as files in a downloads folder).
 - **Branch:** `main` is the source of truth. The deployed Pages site must match it byte-for-byte.
-- **Current HEAD:** the documentation commit **"Update handoff after Phase 3 of the TV-show migration"**, the commit that last updated this file. Its parent is `62b5b71`. (A file can't contain its own commit hash; run `git log -1` to see it.)
-  - The **last app-code commit** is `62b5b71`, "Accept any Map-like show collection in the derived views" (Phase 3 is `a182eae` + `62b5b71`).
+- **Current HEAD:** the documentation commit **"Update handoff after completing the TV-show migration"**, the commit that last updated this file. Its parent is `bc43e2c`. (A file can't contain its own commit hash; run `git log -1` to see it.)
+  - The **last app-code commit** is `bc43e2c`, "Cleanup after the final stage: retire Caught Up, stop writing Refresh tracking".
   - The working tree is clean.
-  - All 18 app files were verified byte-identical on GitHub Pages at `62b5b71` on 2026-10-05, and all 14 versioned assets returned 200 with the token `20261005-phase3`.
-- **Tracked files:** 67.
+  - All 18 app files were verified byte-identical on GitHub Pages at `bc43e2c` on 2026-10-05, and all 14 versioned assets returned 200 with the token `20261005-final1`.
+- **Tracked files:** 69.
   - 18 app files: 17 JS/CSS + `watchlist.html`.
   - 1 doc: `docs/HANDOFF.md` (this file).
-  - 23 files in `db/`: the migration scripts, rollbacks, stage switches, test-project-only scripts, SQL self-checks and a local-values template (`db/README.md` gives the run order).
+  - 25 files in `db/`: the migration scripts, rollbacks, stage switches, test-project-only scripts, SQL self-checks and a local-values template (`db/README.md` gives the run order).
   - `.gitignore`: excludes the two local test-project value files.
   - 18 files in `tests/`: 15 test suites, the shared `tests/app-harness.js`, the TV-model reference `tests/tv-model-reference.js` and its shared cases `tests/fixtures/tv-model-cases.json`.
   - 6 files in `tools/` (5 tools and one local-values template).
@@ -128,7 +128,12 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 | `c93a36f` | Record Phase 2 readiness criterion 12 in the handoff |
 | `a182eae` | Phase 3: show-level TV status, Skip/Keep seasons, Up to date everywhere |
 | `62b5b71` | Accept any Map-like show collection in the derived views |
-| *(this commit)* | Update handoff after Phase 3 of the TV-show migration |
+| `28181c2` | Update handoff after Phase 3 of the TV-show migration |
+| `1127320` | Treat ON DELETE RESTRICT (23001) as 'show still has seasons' after a film match |
+| `59dd6a1` | Refresh shows checks the tab's identified shows from tv_shows |
+| `dbc7580` | Add rollback scripts for the final stage and Refresh tracking |
+| `bc43e2c` | Cleanup after the final stage: retire Caught Up, stop writing Refresh tracking |
+| *(this commit)* | Update handoff after completing the TV-show migration |
 
 The five commits `a13c1fb`…`e2c1c16` are catalog refreshes made with the `/refresh-catalogs` skill. `8e92095`…`789d4f5` are the derived-views feature. `6dfa0cd` added this handoff (docs only). `e003694` makes Up to date start expanded, and `1486404` adds its status label and next-season text; `bd4c068` and `af600e3` update this handoff (docs only). `e6d5822`…`b39584e` are Phase 0 of the TV-show migration (§18); only `02f304f` changes app files. `b266a5b` is Phase 1a (app files and tests); Phase 1b/1c ran the already-committed `db/` scripts on production and needed no commit. `09f24aa` is the Phase 2 app change; Phase 2's database step ran the committed `db/rpc.sql` and the Phase 2 block of `db/stages.sql`.
 
@@ -143,7 +148,7 @@ The inline script owns the mutable state and the boot sequence:
 That opens **TV → Currently Watching**. The boot makes only paginated GETs; it doesn't call `loadTab()`.
 
 **Cache-busting token (manual; no build system):**
-- `watchlist.html` requests 13 JS files and `styles.css` with `?v=20261005-phase3` (earlier tokens: `?v=20261005-phase2` at `09f24aa`, `?v=20261005-phase1a` at `b266a5b`, `?v=20261004-restore1` at `02f304f`, `?v=20260929-derived1`, `?v=20261002-uptodate1` at `e003694`, `?v=20261003-uptodate2` at `1486404`): `api.js`, `backup-restore.js`, `tabs.js`, `render.js`, `row-actions.js`, `tmdb-search.js`, `collections-pull.js`, `universe-pull.js`, `person-pull.js`, `refresh-shows.js`, `tmdb-match.js`, `derived-views.js`, `tv-shows.js`.
+- `watchlist.html` requests 13 JS files and `styles.css` with `?v=20261005-final1` (earlier tokens: `?v=20261005-refresh1` at `59dd6a1`, `?v=20261005-phase3` at `62b5b71`, `?v=20261005-phase2` at `09f24aa`, `?v=20261005-phase1a` at `b266a5b`, `?v=20261004-restore1` at `02f304f`, `?v=20260929-derived1`, `?v=20261002-uptodate1` at `e003694`, `?v=20261003-uptodate2` at `1486404`): `api.js`, `backup-restore.js`, `tabs.js`, `render.js`, `row-actions.js`, `tmdb-search.js`, `collections-pull.js`, `universe-pull.js`, `person-pull.js`, `refresh-shows.js`, `tmdb-match.js`, `derived-views.js`, `tv-shows.js`.
 - **Rule: when a deployment changes any versioned JS/CSS file, bump the token in `watchlist.html`** (for example `?v=20261015-x1`). This makes a new page load fresh copies instead of stale cached JS that doesn't match it. GitHub Pages caches files for 10 minutes.
 - **`config.js`, `identity.js` and `ui-helpers.js` are deliberately unversioned.** The `/refresh-catalogs` workflow refreshes `config.js` by its plain URL (`fetch('config.js', {cache:'reload'})`), which only works while the page loads it without a token. If a future change to `identity.js` or `ui-helpers.js` must ship together with the page, add a token to that file then. Keep `config.js` unversioned unless the refresh workflow is updated too.
 - An old cached page may keep running the old app for up to about 10 minutes after a deploy. That's accepted; the token guarantees that a **new** page never loads stale JS.
@@ -160,20 +165,20 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
 |---|---:|---|
 | `watchlist.html` | 180 | Markup, **all mutable page state** (`let` vars, §4, including `tvShowsById`, the loaded `tv_shows` rows by id), script tags (with the `?v=` cache token, §2), boot. Has some harmless orphaned comment headers left over from the modular split. |
 | `styles.css` | 499 | All CSS, including the derived-view styles (source badge, Upcoming/Today tags, "Not aired yet", the "Up to date" pill), status pills for every status, the show-scoped status select and the Skip / Keep button. |
-| `config.js` | 450 | Constants: Supabase URL/key, `TABLE`, backup constants (`BACKUP_TABLES`, `BACKUP_FORMAT`, `BACKUP_FORMAT_VERSION`, `BACKUP_PAGE_SIZE`), `COLLECTIONS` + `DEFAULTS` (`truecrime` has `mixedMedia: true`), `WATCH_WITH_OPTIONS` (the household's fixed watch-with tags), `MCU_MOVIES` (39 `{t, id}` entries), `TMDB_TOKEN`/`TMDB_BASE`, `NETWORK_COLORS`, `WATCHABLE_SOON_DAYS` (60, retired with Caught Up; removal is stabilization cleanup), `UNIVERSE_LISTS` (`mcu`), `LAST_BACKUP_KEY`, `SHOW_KEY_OVERRIDES` (Phase 1a: maps `disney|the clone wars` to `star wars: the clone wars (2008)`, mirroring the database's `private.tv_show_key_override`). **Deliberately unversioned** (§2). |
+| `config.js` | 448 | Constants: Supabase URL/key, `TABLE`, backup constants (`BACKUP_TABLES`, `BACKUP_FORMAT`, `BACKUP_FORMAT_VERSION`, `BACKUP_PAGE_SIZE`), `COLLECTIONS` + `DEFAULTS` (`truecrime` has `mixedMedia: true`), `WATCH_WITH_OPTIONS` (the household's fixed watch-with tags), `MCU_MOVIES` (39 `{t, id}` entries), `TMDB_TOKEN`/`TMDB_BASE`, `NETWORK_COLORS`, `UNIVERSE_LISTS` (`mcu`), `LAST_BACKUP_KEY`, `SHOW_KEY_OVERRIDES` (Phase 1a: maps `disney|the clone wars` to `star wars: the clone wars (2008)`, mirroring the database's `private.tv_show_key_override`). **Deliberately unversioned** (§2). |
 | `identity.js` | 80 | `findExistingRow`, `isAlreadyAdded`, `normalizeTmdbTitle`, `pickTmdbMovieCandidate` (automated flows only), `isDuplicateKeyError`, `duplicateInsertMessage`, `cleanCollectionName` (display only). |
 | `api.js` | 145 | `sbFetch`; `fetchAllRows(table, filter?, select = '*')` (backups pass their exact columns) (paginated, exact-count verified; the optional PostgREST filter is used by the derived views, and backup/restore call it without one); **TV structural writes (Phase 2):** `TV_COLLECTION_IDS`, `isTvCollection`, `isTvSeasonRow`, `tvShowKey` (mirrors the database's TV-row and show-key rules, including `SHOW_KEY_OVERRIDES`), `sbRpc`, and `addTvSeasonRows` (one `add_tv_seasons` call per show; returns `{inserted, alreadyListed, rejected, reopened}` and keeps `tvShowsById` current). `tmdbFetch`. A failed `tmdbFetch` throws `TMDB error <status>` with **`err.status` attached**. (`deleteAllRows`/`batchInsertRows` were removed in `02f304f`.) |
-| `ui-helpers.js` | 119 | `esc` (HTML-escapes `& < > "`); badge/color helpers; `hasWatchableSoonSeason` (the retired Caught Up rule: no longer called; kept until stabilization cleanup because this file is unversioned); `parseDate`, `formatDisplayDate`, `showSaved`, `showError`; the **TMDB failure-reporting helpers** `tmdbNameList`, `tmdbLookupFailureNote`, `tmdbAddFailureNote`. |
+| `ui-helpers.js` | 109 | `esc` (HTML-escapes `& < > "`); badge/color helpers; `parseDate`, `formatDisplayDate`, `showSaved`, `showError`; the **TMDB failure-reporting helpers** `tmdbNameList`, `tmdbLookupFailureNote`, `tmdbAddFailureNote`. |
 | `backup-restore.js` | 590 | Building and downloading backups in **format 1 or 2** (`detectBackupFormat` probes `tv_shows` read-only; `BACKUP_FORMATS` lists each format's tables and exact columns; `user_id` is never included); the **hardened** validator (`validateBackupObject`, `RESTORE_COLUMNS`/`RESTORE_COLUMNS_V2`, `restoreValueProblem`, `validateBackupRows`, `validateTvShowRows`, `identityLossErrors`); the guarded restore flow, which now replaces all tables with **one call to the database function `restore_backup`** (§10), and post-restore verification. `finishRestoreAndReload` reloads the active derived view or tab. |
 | `tabs.js` | 173 | `buildTabs` (derived-view tabs first, then collections), `buildMediaSwitch`, `switchMediaType` (TV always lands on Currently Watching), `switchTab` (clears `activeViewId`), `switchView` (opens a derived view; sets `activeTabId = null`), and `loadTab`, which reseeds static defaults (on TV tabs only the defaults missing by `item_key`, through `seed_tv_defaults`) and refreshes TBA defaults by `item_key`; then loads the tab's shows (`loadTvShows`) and notes any Complete show reopened by seeding. |
 | `render.js` | 644 | `renderFilters` and `renderTable` (both hand off to the derived-view renderers when `activeViewId` is set); status filter by show status (`displayStatus`) and off-list state (`isOffList`), plus "Up to date only"; stats count TV statuses per show. **Flat** tabs (`renderFlatTable`): a TV season has the show-scoped status control, Watched and Skip / Keep; × on a built-in TV season means Skip. **Grouped** tabs (`renderGroupedTable`): one group per show (`show_id`), with the show control and an Up to date tag; seasons have Skip / Keep + Watched (+ × delete, Match); a True Crime / Docs film is its own group with its row status. Movies (`renderMoviesTable`) unchanged. Shared season helpers `seasonSubRowHtml`, `seasonSubCardHtml`, `seasonWatchControlHtml`, `seasonRowControlHtml`. |
 | `row-actions.js` | 225 | `actionRows()` and `mirrorRowUpdate()`; `toggleWatch` (a TV season through `set_season_watched`, a film by PATCH); `setStatus` (films only; ignored for a TV season); `delRow` (× on a built-in TV season → Skip via `setSeasonSkipped`, no confirm; a built-in film → status `skipped` after a confirm; anything else is really deleted after a confirm, a TV season through `delete_tv_season`, which removes an emptied show); `toggleAdd`, `toggleFilters`, `addEntry` (a TV season via `add_tv_seasons`), `toggleWatchWith`. |
-| `tmdb-search.js` | 333 | Manual TMDB search: `tmdbSearchModeFor`, `selectTmdbSearchResults` (per-tab result selection, cap 6), `searchTMDB`, select/preview, `addSelectedTMDBSeasons` (captures collection and show id before its awaits; TV seasons on a TV tab go through `add_tv_seasons`, which also registers the show), `cancelTMDBPreview`, `resetTMDBSearchUI`. |
+| `tmdb-search.js` | 316 | Manual TMDB search: `tmdbSearchModeFor`, `selectTmdbSearchResults` (per-tab result selection, cap 6), `searchTMDB`, select/preview, `addSelectedTMDBSeasons` (captures collection and show id before its awaits; TV seasons on a TV tab go through `add_tv_seasons`, which also registers the show), `cancelTMDBPreview`, `resetTMDBSearchUI`. |
 | `collections-pull.js` | 347 | Pull rest of collection, Refresh collections (with lookup-failure accounting), `updateCollectionRefreshLink`, filter-from-tag helpers. Both add flows capture the collection before their awaits. |
 | `universe-pull.js` | 217 | `pullUniverse` (id-backed; conservative title fallback; separates a genuine 404 "not found" from a failed request) and `addPulledUniverseMovies` (captures the collection before its awaits). |
 | `person-pull.js` | 324 | Person search/select/role, `pullPersonFilmography` (same-title handling, tag backfill; captures the collection and won't redraw or write a preview into another tab or view), `addPulledPersonMovies`, `refreshPersonCollection`. |
-| `refresh-shows.js` | 196 | `tmdbSeasonDateUpdate`, `refreshShows` (new seasons, TBA→date updates, lookup-failure accounting), `addRefreshedSeasons` (captures the collection before its awaits; new seasons go through `add_tv_seasons`, one call per show). |
-| `tmdb-match.js` | 307 | **Match to TMDB** (§7.3): `isTmdbMatchEligible`, `buildTmdbMatchPatch`, `findTmdbMatchConflict`, `tmdbMatchConflictMessage`, the UI (`openTmdbMatch`, `searchTmdbMatch`, `chooseTmdbMatchResult`, `chooseTmdbMatchSeason`, `renderTmdbMatchConfirm`, `cancelTmdbMatch`), and `confirmTmdbMatch` (finishes against `row.collection`; a TV-season match on a TV tab goes through `match_tv_row`; a film match on a row linked as a TV season also sets `show_id` to null, since films are never linked, then deletes the show if that emptied it (refused by ON DELETE RESTRICT otherwise); a blocked match (the target show has another status) explains itself and writes nothing). |
+| `refresh-shows.js` | 200 | `tmdbSeasonDateUpdate`, `refreshShows` (checks the tab's **identified shows from `tv_shows`** — `othertv_shows` is no longer read; new seasons, TBA→date updates, lookup-failure accounting), `addRefreshedSeasons` (captures the collection before its awaits; new seasons go through `add_tv_seasons`, one call per show). |
+| `tmdb-match.js` | 296 | **Match to TMDB** (§7.3): `isTmdbMatchEligible`, `buildTmdbMatchPatch`, `findTmdbMatchConflict`, `tmdbMatchConflictMessage`, the UI (`openTmdbMatch`, `searchTmdbMatch`, `chooseTmdbMatchResult`, `chooseTmdbMatchSeason`, `renderTmdbMatchConfirm`, `cancelTmdbMatch`), and `confirmTmdbMatch` (finishes against `row.collection`; a TV-season match on a TV tab goes through `match_tv_row`; a film match on a row linked as a TV season also sets `show_id` to null, since films are never linked, then deletes the show if that emptied it (refused by ON DELETE RESTRICT — `23001` — otherwise, which is not an error); a blocked match (the target show has another status) explains itself and writes nothing). |
 | `derived-views.js` | 490 | **Currently Watching / Coming Soon** (§4a): `DERIVED_VIEWS`; pure rules (`isTvViewRow`, `isTbaRow`, `localTodayStr`, `isReleasedRow`, `seasonOrder`/`compareSeasons`, `deriveCurrentlyWatching(rows, shows, today)` = the Watching shows with up next and Up to date, `deriveComingSoon(rows, shows, today)`); the loader (`loadDerivedView`: TV rows + all shows, both paginated); the renderers (show control on every Watching card, Skip only in Coming Soon) and toggles. |
 | `docs/HANDOFF.md` | — | **This handoff**, the single canonical copy. Never loaded by the app. |
 | `tools/identity-audit.mjs` | 261 | Read-only (GET-only) production identity audit with A/B/C/D grading (§16). Pure grading functions are separated from network access. |
@@ -194,17 +199,17 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
 | `tests/restore-validation.test.js` | 123 | Pre-delete restore validation and identity-loss protection (35 cases). |
 | `tests/search-selection.test.js` | 92 | Per-tab TMDB search selection (10 cases). |
 | `tests/row-popover.test.js` | 88 | `toggleMorePopover` targets the tapped row's popover (5 cases). |
-| `tests/tmdb-failures.test.js` | 244 | Outage, partial-failure and partial-add reporting across the real flows, with stubbed calls (21 cases). |
+| `tests/tmdb-failures.test.js` | 247 | Outage, partial-failure and partial-add reporting across the real flows, with stubbed calls (21 cases). |
 | `tests/tmdb-match.test.js` | 354 | Match to TMDB patch/conflict rules and the stubbed flow, including `match_tv_row`, the blocked match, the film-match unlink and empty-show removal (28 cases). |
-| `tests/tv-writes.test.js` | 271 | TV write routing: which writes use the TV functions and which stay direct; linking, the Clone Wars key, duplicates and "Already on your list", last-season delete, the seeding rule, Complete-show reopen (Refresh and seeding), Skipped shows stay Skipped (16 cases). |
-| `tests/app-harness.js` | 492 | **Shared harness, not a suite.** Runs the whole page in a Node `vm` (every script in `watchlist.html` order plus its inline state/boot script) against a fake DOM and an in-memory Supabase/TMDB stand-in. Supports pausing a request (`hold`) to simulate navigation mid-await, forced failures, and count mismatches. It also has independent in-memory versions of the browser-facing TV functions in the shadow and authoritative stages (`stage` option, default authoritative; reopen and the Match block included; the compatibility copies aren't simulated), and links fixture TV rows to shows the way the backfill does. `format1: true` gives a database without `tv_shows`. No network. |
+| `tests/tv-writes.test.js` | 294 | TV write routing: which writes use the TV functions and which stay direct; linking, the Clone Wars key, duplicates and "Already on your list", last-season delete, the seeding rule, Complete-show reopen (Refresh and seeding), Skipped shows stay Skipped, Refresh shows reading identified shows from `tv_shows` (17 cases). |
+| `tests/app-harness.js` | 495 | **Shared harness, not a suite.** Runs the whole page in a Node `vm` (every script in `watchlist.html` order plus its inline state/boot script) against a fake DOM and an in-memory Supabase/TMDB stand-in. Supports pausing a request (`hold`) to simulate navigation mid-await, forced failures, and count mismatches. It also has independent in-memory versions of the browser-facing TV functions in the shadow and authoritative stages (`stage` option, default `final` like production; reopen and the Match block included; the tracking table only in shadow/authoritative; the compatibility copies aren't simulated), and links fixture TV rows to shows the way the backfill does. `format1: true` gives a database without `tv_shows`. No network. |
 | `tests/derived-views.test.js` | 293 | Phase 3 view rules: up next and Up to date equal the reference model on every shared case; membership by show status; Coming Soon eligibility; rendering of show controls, Skip / Keep, Coming Soon's Skip-only controls, flat and grouped tabs, the Up to date filter; and a test that scrambling the season `status` column changes nothing (20 cases). |
-| `tests/derived-nav.test.js` | 408 | Startup, pagination and exact-count checks, navigation races, edits from a view (real id, mirrored cache, rollback), and the nine async guards (24 cases). |
+| `tests/derived-nav.test.js` | 409 | Startup, pagination and exact-count checks, navigation races, edits from a view (real id, mirrored cache, rollback), and the nine async guards (24 cases). |
 
 **Totals:**
-- 176 global functions, with no duplicate definitions (155 after Phase 2; Phase 3 added `tv-shows.js` and the new renderer helpers, and removed the title-based `setShowStatus` and `nextStoredSeason`).
+- 175 global functions, with no duplicate definitions (155 after Phase 2; Phase 3 added `tv-shows.js` and the new renderer helpers and removed the title-based `setShowStatus` and `nextStoredSeason`; cleanup removed `hasWatchableSoonSeason`).
 - **55** distinct inline-handler names, all defined. Phase 3 added `setShowStatusById` and `setSeasonSkipped` and removed `setShowStatus`.
-- **247** offline test cases across 15 suites (255 before Phase 3): `derived-views` was rewritten for the show model (33 → 20 cases), `tmdb-match` 26 → 28, `tv-writes` 13 → 16.
+- **248** offline test cases across 15 suites (255 before Phase 3): `derived-views` was rewritten for the show model (33 → 20 cases), `tmdb-match` 26 → 28, `tv-writes` 13 → 17.
 
 ---
 
@@ -339,7 +344,7 @@ Postgres is 17.6. RLS is enabled and permissive: the anon role can select, inser
 **Since Phase 1 (2026-10-04) and Phase 2 (2026-10-05):**
 - **Ownership (1b):** every public table has `user_id uuid NOT NULL`, defaulting to `private.current_owner_id()`, the bootstrap owner in `private.app_owner` (one owner; no production Auth users; no foreign key to `auth.users`). Clients can't write `user_id`: INSERT/UPDATE are granted per column, excluding it. Reads return it. The unique keys below are per owner (`user_id` leads each). `private` is closed to clients.
 - **TV schema (1c):** `tv_shows` (`id`, `user_id`, `collection`, `title`, `show_key`, `tmdb_id`, `status` in `pending/confirmed/watching/maybe/complete/skipped`, `created_at`), and on `watchlist_items` `show_id uuid` (nullable) and `skipped bool NOT NULL default false`. Composite FK `(show_id, user_id, collection)` → `tv_shows(id, user_id, collection)`, ON UPDATE CASCADE, ON DELETE RESTRICT. Checks: films can't link; `skipped` requires `show_id`. Helper functions in `private` come from `db/tv_model.sql`.
-- **Stage:** `private.migration_stage` = **`authoritative`** (Phase 3, 2026-10-05 14:02 UTC). **`tv_shows.status` is the TV workflow status.** Season rows are authoritative for watched, skipped, identity, dates and metadata only. The season `status` column is a **compatibility copy** for rollback, written by the database on every TV write (`private.tv_project_legacy_status`): for On List / High Priority / Complete / Pending / Maybe, non-skipped seasons = the show status; for Watching, the anchor (up next; else the furthest watched; else the first season) = `watching` and other non-skipped = `confirmed`; skipped seasons = `skipped`; a Skipped show's seasons = `skipped`. At the switch all 196 shows were normalized to this projection (84 copies across 15 shows changed; nothing else). The app never reads it. Reopen on: a genuinely new season added to a Complete show (Refresh, TMDB add, manual add, seeding) reopens it On List, atomically; duplicates, date-only updates, Match and Restore don't.
+- **Stage:** `private.migration_stage` = **`final`** (since 2026-10-05 14:32 UTC; `authoritative` from 14:02). **`tv_shows.status` is the TV workflow status.** Season rows are authoritative for watched, skipped, identity, dates and metadata. The season `status` column stays populated (it was normalized to the approved projection at the Phase 3 switch and verified exact for all 196 shows just before `final`) but **is no longer written for TV** (the functions skip `private.tv_project_legacy_status` at `final`) and is never read by the app; it is not dropped. At `final` the functions also **no longer maintain `othertv_shows`**; Refresh shows reads the identified shows in `tv_shows` instead (`59dd6a1`), and `othertv_shows` stays in the database, unused (64 rows, equal to the identified shows when `final` began). Reopen: a genuinely new season added to a Complete show (Refresh, TMDB add, manual add, seeding) reopens it On List, atomically; duplicates, date-only updates, Match and Restore don't. Skipped shows stay Skipped.
 - **Functions:** `public.restore_backup` (owner-scoped, §10), the `private` helpers (`db/tv_model.sql`) and `db/rpc.sql`: `add_tv_seasons`, `seed_tv_defaults`, `match_tv_row`, `delete_tv_season`, `set_show_status`, `set_season_watched`, `set_season_skipped` — all used by the app since Phase 3. All are SECURITY INVOKER with an empty `search_path`, executable by `anon`/`authenticated`, not `PUBLIC`.
 
 The column lists below are the original columns; `user_id`, `show_id` and `skipped` come after them.
@@ -747,7 +752,7 @@ The column lists below are the original columns; `user_id`, `show_id` and `skipp
 
 Other intentional behaviors:
 
-- **TV status is show-level** (Phase 3): one status per show in `tv_shows`; seasons have Watched and Skip / Keep. **Up to date** (a Watching show none of whose remaining seasons has aired) is derived, never stored, and used everywhere; the 60-day **Caught Up** state is retired (`hasWatchableSoonSeason` and `WATCHABLE_SOON_DAYS` remain unused until stabilization cleanup).
+- **TV status is show-level** (Phase 3): one status per show in `tv_shows`; seasons have Watched and Skip / Keep. **Up to date** (a Watching show none of whose remaining seasons has aired) is derived, never stored, and used everywhere; the 60-day **Caught Up** state is retired and its code removed (`bc43e2c`).
 - `"Complete"` is a real stored show status; a genuinely new season reopens a Complete show to On List (Skipped shows stay Skipped).
 - × on a **built-in TV season** skips it (reversible with ↩ Keep; never deletes). × on a **built-in film** sets its row status `skipped` after a confirm. Other rows are really deleted after a `confirm()`; deleting the last season of a show deletes the show (and, for an identified show, its Refresh-shows tracking).
 - Match to TMDB never changes a show's status: it's **blocked** when the target show is already on the list with a different status; matching a TV season as a film unlinks it and removes a show it empties.
@@ -796,7 +801,6 @@ Other intentional behaviors:
 - **Rare two-tab first-load race** on a static tab can collide while reseeding defaults; `loadTab` can then show a raw database error.
 - **A literal `\` in a title** could break inline JavaScript handler strings.
 - **Restore safety-backup filename** only goes down to the minute (§10).
-- **`hasWatchableSoonSeason`** (UTC dates) is no longer used: Caught Up was retired in Phase 3. Removing it and `WATCHABLE_SOON_DAYS` is stabilization cleanup (both files are unversioned, so a cached older page could still call it).
 - **Review the two B-grade date drifts** (§13) and decide whether to update them (user decision; never auto-applied).
 - **Canonical SQL fingerprints** (§16) were last recorded on 2026-09-28. The 2026-09-30 check used the anon-key hash method (§11a) and showed no change across the deployment. Re-run the SQL form when convenient.
 - Possible derived-view enhancements, **not planned**: restore the last TV tab on Movies → TV; date-horizon filters in Coming Soon; ignoring a leading "The" when sorting.
@@ -805,7 +809,7 @@ Other intentional behaviors:
 
 - Bulk actions (including a show-level status control in Currently Watching, deliberately left out of v1).
 - Books/Games media types.
-- **First-class TV shows with per-user ownership** (§18): Phases 0–3 done (show status authoritative since 2026-10-05). **Stabilization and cleanup need separate approval** (§18), as does the future sign-in (Auth/RLS) project.
+- **First-class TV shows with per-user ownership** (§18): **complete** (stage `final` since 2026-10-05, §18). The future sign-in (Auth/RLS) project is separate and needs its own approval.
 - Possible **Unmatch from TMDB** feature (§13).
 
 ### Technical debt / intentional choices
@@ -890,13 +894,13 @@ node tests/derived-nav.test.js            # expect 24/24
 node tests/tv-model.test.js               # expect 43/43
 node tests/restore-rpc.test.js            # expect 3/3
 node tests/backup-format.test.js          # expect 6/6
-node tests/tv-writes.test.js              # expect 16/16
-# total: 247 cases across 15 suites (tests/app-harness.js and tests/tv-model-reference.js are helpers, not suites)
+node tests/tv-writes.test.js              # expect 17/17
+# total: 248 cases across 15 suites (tests/app-harness.js and tests/tv-model-reference.js are helpers, not suites)
 ```
 
 ### Handler/global sweep
 
-Every inline-handler name must be a defined function. Expected: **55** handler names, none undefined, and no duplicate global function definitions (176 functions).
+Every inline-handler name must be a defined function. Expected: **55** handler names, none undefined, and no duplicate global function definitions (175 functions).
 
 ```bash
 # from the repo root
@@ -993,7 +997,7 @@ having count(distinct c) > 1;
 Use page memory, with writes blocked, unless a write is explicitly approved.
 
 - **MCU pull** with all films present: 39 direct `/movie/{id}` lookups, 0 title searches, 0 database writes, and "0 new, 39 already on your list".
-- **Refresh shows (Other TV):** 60 tracked shows. Tehran S4 is offered (a policy decision not to add it), and nothing else.
+- **Refresh shows (Other TV):** 61 identified shows (from `tv_shows`). Tehran S4 is offered (a policy decision not to add it), and nothing else (re-verified 2026-10-05).
 - **True Crime / Docs Refresh shows:** 3 tracked shows, "Everything's up to date".
 - **Search "Dune":**
   - Movies → 6 films including Dune: Part Two.
@@ -1006,17 +1010,17 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 
 ---
 
-## 17. Source-of-truth baseline (verified 2026-10-05, after Phase 3)
+## 17. Source-of-truth baseline (verified 2026-10-05, after the migration was completed)
 
 ```text
 Repo:                     the local Git checkout of this repo (github.com/jaredsclove/Watchlist)
 Branch:                   main (in sync with origin/main), working tree clean
-HEAD:                     "Update handoff after Phase 3 of the TV-show migration" (docs-only; parent 62b5b71)
-Last app-code commit:     62b5b71  "Accept any Map-like show collection in the derived views" (Phase 3 = a182eae + 62b5b71)
-Tracked files:            67 (18 app, 1 doc, 23 in db/, 18 in tests/, 6 in tools/, .gitignore)
-                          all 18 app files byte-identical on GitHub Pages (verified at 62b5b71); 14 versioned assets 200
-Offline tests:            247/247 passing (15 suites); 55 inline handlers, none undefined; 176 functions, no duplicates
-Cache token:              ?v=20261005-phase3 (13 JS files + styles.css); config.js unversioned
+HEAD:                     "Update handoff after completing the TV-show migration" (docs-only; parent bc43e2c)
+Last app-code commit:     bc43e2c  "Cleanup after the final stage: retire Caught Up, stop writing Refresh tracking"
+Tracked files:            69 (18 app, 1 doc, 25 in db/, 18 in tests/, 6 in tools/, .gitignore)
+                          all 18 app files byte-identical on GitHub Pages (verified at bc43e2c); 14 versioned assets 200
+Offline tests:            248/248 passing (15 suites); 55 inline handlers, none undefined; 175 functions, no duplicates
+Cache token:              ?v=20261005-final1 (13 JS files + styles.css); config.js unversioned
 
 watchlist_items:          718 rows
 othertv_shows:             64 rows
@@ -1025,14 +1029,14 @@ tv_shows:                 196 rows  (disney 103, othertv 61, 90day 15, sheridan 
                           show status (authoritative): confirmed (On List) 138, pending 35, watching 10, skipped 10,
                           complete 2, maybe 1, highpriority 0
 TV seasons linked:        641 of 641 TV rows; 77 non-TV rows (films) unlinked; 38 seasons skipped = true; 126 rows watched
-Compatibility copies:     season status = the approved projection for all 196 shows (normalized at the switch)
+Compatibility copies:     season status = the approved projection for all 196 shows at the start of final; no longer written
 
 Fingerprints:             not published here. Compute the current baseline read-only (SQL MD5, §16; or the
                           anon-key hash method, §11a). Unchanged by Phase 0–2; Phase 3 changed only 84 season status copies (normalization).
 
-Database:                 stage authoritative (§5, since 2026-10-05 14:02 UTC). user_id NOT NULL on all public tables, one
-                          bootstrap owner, owns every row; clients can't write user_id. tv_shows.status is authoritative for
-                          TV; season status = compatibility copy. public.restore_backup (= db/restore_backup.sql), private helpers (= db/tv_model.sql)
+Database:                 stage final (§5, since 2026-10-05 14:32 UTC). user_id NOT NULL on all public tables, one bootstrap
+                          owner, owns every row; clients can't write user_id. tv_shows.status is authoritative for TV;
+                          season status populated but unused; othertv_shows populated but unused. public.restore_backup (= db/restore_backup.sql), private helpers (= db/tv_model.sql)
                           and the TV functions (= db/rpc.sql), all verified by MD5. No production Auth users, no FK to auth.users.
                           RLS: 16 permissive anon policies (the original 12 + 4 on tv_shows).
 
@@ -1044,7 +1048,7 @@ Identity audit:           718 rows, 422 identified → 421 A / 1 B / 0 C / 0 D, 
                           B = one-day confirmed-date drift, expected review item (§13): The Traitors S5
 Collection consistency:   42 rows / 16 TMDB collections / 0 problems (last verified 2026-09-26)
 
-Backups:                  kept outside the repo. Pre-Phase-3: 2026-10-05 14:00 UTC (format 2). Current: 14:08 UTC (format 2, taken with 62b5b71), 718/196/64/1. Take and validate a fresh one before any approved write.
+Backups:                  kept outside the repo. Before final: 2026-10-05 14:30 UTC; after final: 14:37 UTC (format 2, 718/196/64/1, identical content).
 
 Tags:
   post-tmdb-migration-modularization → c5b592e
@@ -1052,8 +1056,9 @@ Tags:
   pre-derived-views                  → e2c1c16   (local only, not pushed)
   pre-tv-shows                       → b266a5b   (local only, not pushed)
 
-Supabase:                 the production project, plus a temporary TV-migration test project (kept for Phase 1 rehearsals;
-                          locked: owner-only authenticated access, no anonymous access).
+Supabase:                 the production project, plus the temporary TV-migration test project (locked: owner-only
+                          authenticated access, no anonymous access). It is no longer needed (all rehearsals run locally);
+                          the owner deletes it in the Supabase dashboard.
 ```
 
 ---
@@ -1121,11 +1126,20 @@ There is no fixed waiting period. Report Phase 3 as ready for approval only when
 - **Functional checks on production (owner-approved, ordinary reversible actions, net zero change):** on 1923 (Sheridan) — the show control ("Show: …", "Applies to all seasons of 1923") set Watching → the show joined Currently Watching with the projection exact; Mark watched advanced up next; Skip made it Up to date, Keep restored it; × on its built-in season skipped (no delete), Keep restored; back to On List → it left Currently Watching. On Dark Winds (Other TV) the grouped show control round-tripped. Every step made exactly one function call; afterwards the database was byte-identical to before. A real dynamic delete was not run on production (it would delete real data); it is covered by the local end-to-end run.
 - **Rollback (rehearsed, not needed):** app → `git revert 62b5b71 a182eae`; database → the "Rollback of Phase 3" block of `db/stages.sql` (stage → `shadow` + `tv_shadow_resync`, which rebuilds show statuses from the compatibility copies; every status is kept), then if needed `db/rollback/phase2_and_1c.sql` etc. Backups before (14:00) and after (14:08) the switch are kept.
 
-### Next: stabilization (needs separate approval)
+### Completed: stabilization exit test and the final stage (2026-10-05, approved)
 
-- Run normally on the new model and watch for problems; re-run the projection/compatibility, database-vs-JavaScript, Coming Soon and link checks after real activity (Refresh, adds, matches, deletes).
-- Cleanup candidates, **none started**: stage `final` (C1: stop writing compatibility copies), then drop the season `status` dependency for TV; remove `hasWatchableSoonSeason`/`WATCHABLE_SOON_DAYS`; the date-only Refresh PATCH doesn't re-project the Watching anchor (harmless: the copy is only for rollback); delete the temporary test project.
-- The future sign-in (Auth/RLS) project is separate and not started.
+Instead of a waiting period, an immediate exit test (owner decision), then `final`:
+- **Exit criteria, all green:** integrity (196 shows, 641 linked, 0 unlinked, 0 linked films, 0 owner/collection/TMDB mismatches, 0 duplicates, 0 unmapped; Clone Wars and films correct); projection exact 196/196; derived views (up next for all 196 = database = reference; Currently Watching 6 + 4; Coming Soon 13 + 21 identical to the old app; the scramble test proves no TV view reads season status); backup/restore (format-2 backups valid without `user_id`; format 1 refused; a format-2 restore of the production snapshot round-trips exactly, locally); rollback (full rehearsal green). Local checks ran on an exact replica of production (its own ids, through the real `restore_backup`) with the committed functions as `anon`: reopen (new season → On List in the same call; duplicate, date-only update, Match and a Skipped show don't reopen), add (mixed counts, invalid input fails the whole call, identity conflict rejected, repeats are no-ops), delete (non-final season keeps the show, last season removes it, Skip never deletes, films unchanged), Match (TV → TV, TV → film with show removal, conflicting status blocked, no reopen, no linked film).
+- **Refresh date-only edge case:** 206 date-only edits on every season of all 10 Watching shows changed no up next and left no compatibility copy stale: a Refresh date update only touches identified seasons (unique season numbers), and no Watching show's order depends on a date. Harmless; and at `final` the copies aren't written anyway (rollback re-projects, below).
+- **Found and fixed before `final`:** (1) a film match whose show kept other seasons showed a misleading error, because RESTRICT answers `23001`, not `23503` (`1127320`; data was never affected); (2) at `final` the functions stop keeping `othertv_shows`, which Refresh read — Refresh now reads the identified shows in `tv_shows` (`59dd6a1`); on production both gave the same 64 shows (61 Other TV + 3 True Crime / Docs; same TMDB ids, titles, collections), and the real Refresh preview offered exactly Tehran S4, as before.
+- **Final:** a validated backup (14:30 UTC) and projection 196/196 one last time; then the committed C1 block of `db/stages.sql` (guard: stage must be `authoritative`), hash-checked. No data changed (pre/post backups identical); stage `final`; database = JavaScript; Pages = `main`; Chrome smoke clean (Refresh reads only `tv_shows`); identity audit 421/1/0/0.
+- **Cleanup (`bc43e2c`):** removed the retired Caught Up helper and constant and the app's last writes to `othertv_shows`; the test harness defaults to stage `final`. Not done, by design: dropping the season `status` column or `othertv_shows`.
+- **Rollback from `final` (rehearsed locally from a production replica with drift):** keep the new app → `db/rollback/final.sql` (stage → `authoritative` + re-project every show). Revert the app to a version whose Refresh reads `othertv_shows` (before `59dd6a1`) → also `db/rollback/othertv_from_tv_shows.sql` first, then the Phase 3 rollback block, then `git revert`; further back as before. Every show status, the old app's status/up-next derivation and its Refresh list were verified after each step.
+- **The temporary test project** is no longer needed (all rehearsals run locally on PGlite). It must be deleted by the owner in the Supabase dashboard (Claude doesn't delete projects).
+
+### Next
+
+- **The TV-show migration is complete.** The only remaining related work is the separate **future sign-in (Auth/RLS) project** (`db/future/auth_switchover.sql`), which needs its own approval.
 - **Identity audit:** 421 A / 1 B / 0 C / 0 D is the baseline (unchanged through Phase 3). TMDB data can change upstream; a benign TMDB correction that changes A/B is explained and accepted as the new baseline, not treated as a regression. Any C or D, or an unexplained A→B, is a stop condition.
 - Other candidate follow-ups are listed in §14. For example: review the B-grade date drift.
 - **Any static-tab catalog refresh uses the `/refresh-catalogs` skill.** Startup no longer opens Disney+, so the skill opens the Disney+ tab explicitly.
@@ -1137,9 +1151,9 @@ There is no fixed waiting period. Report Phase 3 as ready for approval only when
 1. Inspect the actual repo (your local Git checkout of `jaredsclove/Watchlist`).
 2. Run `git status`.
 3. Confirm the branch is `main` and in sync with `origin/main`.
-4. Confirm `HEAD` is the documentation commit "Update handoff after Phase 3 of the TV-show migration", whose parent is `62b5b71`; the last app-code commit is `62b5b71`, "Accept any Map-like show collection in the derived views". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
+4. Confirm `HEAD` is the documentation commit "Update handoff after completing the TV-show migration", whose parent is `bc43e2c`; the last app-code commit is `bc43e2c`, "Cleanup after the final stage: retire Caught Up, stop writing Refresh tracking". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
 5. Inspect the file tree and compare it with §3: 65 tracked files, and roughly the listed line counts.
-6. Run the offline checks in §16: syntax, all 15 test suites (247 cases), and the handler sweep (55 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 421 A / 1 B / 0 C / 0 D).
+6. Run the offline checks in §16: syntax, all 15 test suites (248 cases), and the handler sweep (55 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 421 A / 1 B / 0 C / 0 D).
 7. **Do not modify anything:**
    - no code
    - no schema
