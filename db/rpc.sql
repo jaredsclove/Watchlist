@@ -46,9 +46,12 @@ $$;
 
 -- Adds seasons (legacy-keyed: item_key, label, dates) to an enriched built-in show
 -- as identified seasons: a plain "Season N" becomes TMDB season N of the show.
--- Per season: the same item_key already on that identity → existing (no-op); a
--- label that isn't a plain "Season N", or an item_key/identity held by another
--- row → rejected for review. Inserts nothing else and never creates a show.
+-- Per season: the same item_key already on that show with its identity → existing
+-- (no-op), whatever its label (an owner-approved nonstandard label such as
+-- "Volume 2" stays idempotent); otherwise a label that isn't a plain "Season N",
+-- or an item_key/identity held by another row → rejected for review. A new
+-- nonstandard label never gets a season number. Inserts nothing else and never
+-- creates a show.
 -- p_seasons items: {item_key, title, season, theme?, display_date?, date_sort, status?}.
 -- Returns {inserted uuid[], existing jsonb, rejected jsonb}.
 create or replace function private.tv_add_to_enriched_show(p_show_id uuid, p_seasons jsonb) returns jsonb
@@ -67,21 +70,26 @@ begin
   select * into p_show from public.tv_shows where id = p_show_id;
   for s in select * from jsonb_array_elements(p_seasons) loop
     v_num := private.tv_plain_season_number(s ->> 'season');
+    -- The row this item_key already names, if any: checked before the label rule,
+    -- so a season already on the show with its identity is a no-op even when its
+    -- label is nonstandard (it must carry the same label and a season number).
+    select * into v_row from public.watchlist_items
+    where user_id = p_show.user_id and collection = p_show.collection and item_key = s ->> 'item_key'
+    order by id limit 1;
+    if found and v_row.show_id = p_show.id and v_row.media_type = 'tv' and v_row.tmdb_id = p_show.tmdb_id
+       and v_row.season_number is not null
+       and (case when v_num is null then v_row.season = s ->> 'season' else v_row.season_number = v_num end) then
+      v_existing := v_existing || jsonb_build_object('season_number', v_row.season_number, 'item_key', v_row.item_key, 'id', v_row.id);
+      continue;
+    end if;
     if v_num is null then
       v_rejected := v_rejected || jsonb_build_object('item_key', s ->> 'item_key', 'season', s ->> 'season',
         'reason', 'enriched_show_label', 'show_id', p_show.id);
       continue;
     end if;
-    select * into v_row from public.watchlist_items
-    where user_id = p_show.user_id and collection = p_show.collection and item_key = s ->> 'item_key'
-    order by id limit 1;
     if found then
-      if v_row.show_id = p_show.id and v_row.media_type = 'tv' and v_row.tmdb_id = p_show.tmdb_id and v_row.season_number = v_num then
-        v_existing := v_existing || jsonb_build_object('season_number', v_num, 'item_key', v_row.item_key, 'id', v_row.id);
-      else
-        v_rejected := v_rejected || jsonb_build_object('item_key', s ->> 'item_key', 'season', s ->> 'season',
-          'reason', 'identity_conflict', 'conflicting_row_id', v_row.id);
-      end if;
+      v_rejected := v_rejected || jsonb_build_object('item_key', s ->> 'item_key', 'season', s ->> 'season',
+        'reason', 'identity_conflict', 'conflicting_row_id', v_row.id);
       continue;
     end if;
     select id into v_conflict from public.watchlist_items

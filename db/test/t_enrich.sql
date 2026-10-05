@@ -150,6 +150,81 @@ begin
      <> (select id from public.tv_shows where collection = 'sheridan' and title = 'Tulsa King') then raise exception 'unmatched show %', r; end if;
 end $$ $b$);
 
+-- Enriched show with owner-approved nonstandard labels (Star Wars: Visions, Volume N → TMDB N).
+create or replace function pg_temp.enrich_visions() returns uuid language plpgsql as $$
+declare v uuid;
+begin
+  select id into v from public.tv_shows where collection = 'disney' and title = 'Star Wars: Visions';
+  perform private.tv_enrich_show(v, 'Star Wars: Visions', 114478, (
+    select jsonb_agg(jsonb_build_object('row_id', w.id, 'season', w.season, 'season_number', substring(w.season from 8)::int))
+    from public.watchlist_items w where w.show_id = v), true);
+  return v;
+end $$;
+create or replace function pg_temp.vdef(p_key text, p_label text) returns jsonb language sql as $$
+  select jsonb_build_object('k', p_key, 't', 'Star Wars: Visions', 's', p_label, 'th', 'Star Wars', 'd', 'TBA', 'ds', '2099-01-01')
+$$;
+
+select pg_temp.t('guard: existing nonstandard-label seasons of an enriched show (Visions Volume 1–3) are a no-op, no conflict', $b$ do $$
+declare v uuid; r jsonb; n int; before text;
+begin
+  update private.migration_stage set stage = 'final';
+  v := pg_temp.enrich_visions();
+  if (select string_agg(season || '=' || season_number, ',' order by season_number) from public.watchlist_items where show_id = v)
+     <> 'Volume 1=1,Volume 2=2,Volume 3=3' then raise exception 'mapping not as approved'; end if;
+  n := (select count(*) from public.watchlist_items);
+  before := (select string_agg(to_jsonb(w)::text, '|' order by id) from public.watchlist_items w);
+  perform pg_temp.as_anon();
+  r := public.seed_tv_defaults('disney', jsonb_build_array(pg_temp.vdef('star wars: visions|volume 1', 'Volume 1'),
+    pg_temp.vdef('star wars: visions|volume 2', 'Volume 2'), pg_temp.vdef('star wars: visions|volume 3', 'Volume 3')));
+  if jsonb_array_length(r -> 'inserted') <> 0 or jsonb_array_length(r -> 'conflicts') <> 0 then raise exception 'seed %', r; end if;
+  r := public.add_tv_seasons('disney', '{"tmdb_id": null, "title": "Star Wars: Visions", "show_key": "star wars: visions"}',
+    '[{"item_key": "star wars: visions|volume 2", "title": "Star Wars: Visions", "season": "Volume 2", "date_sort": "2023-05-04"}]');
+  if jsonb_array_length(r -> 'existing') <> 1 or jsonb_array_length(r -> 'inserted') <> 0 or jsonb_array_length(r -> 'rejected') <> 0
+     or (r -> 'existing' -> 0 ->> 'season_number')::int <> 2 then raise exception 'manual %', r; end if;
+  perform pg_temp.as_postgres();
+  if (select count(*) from public.watchlist_items) <> n or (select string_agg(to_jsonb(w)::text, '|' order by id) from public.watchlist_items w) <> before
+     or (select count(*) from public.tv_shows where collection = 'disney' and show_key = 'star wars: visions') <> 1 then raise exception 'data or shows changed'; end if;
+end $$ $b$);
+
+select pg_temp.t('guard: a new nonstandard label on an enriched show (Visions "Volume 4") is held for review, nothing inserted', $b$ do $$
+declare v uuid; r jsonb; n int;
+begin
+  update private.migration_stage set stage = 'final';
+  v := pg_temp.enrich_visions();
+  n := (select count(*) from public.watchlist_items);
+  perform pg_temp.as_anon();
+  r := public.seed_tv_defaults('disney', jsonb_build_array(pg_temp.vdef('star wars: visions|volume 4', 'Volume 4')));
+  if jsonb_array_length(r -> 'inserted') <> 0 or r -> 'conflicts' -> 0 ->> 'reason' <> 'enriched_show_label' then raise exception 'seed %', r; end if;
+  r := public.add_tv_seasons('disney', '{"tmdb_id": null, "title": "Star Wars: Visions", "show_key": "star wars: visions"}',
+    '[{"item_key": "star wars: visions|volume 4", "title": "Star Wars: Visions", "season": "Volume 4", "date_sort": "2099-01-01"}]');
+  if jsonb_array_length(r -> 'inserted') <> 0 or r -> 'rejected' -> 0 ->> 'reason' <> 'enriched_show_label' then raise exception 'manual %', r; end if;
+  -- an existing key sent with a different nonstandard label is not "existing": held for review
+  r := public.seed_tv_defaults('disney', jsonb_build_array(pg_temp.vdef('star wars: visions|volume 1', 'Volume One')));
+  if jsonb_array_length(r -> 'inserted') <> 0 or r -> 'conflicts' -> 0 ->> 'reason' <> 'enriched_show_label' then raise exception 'relabel %', r; end if;
+  perform pg_temp.as_postgres();
+  if (select count(*) from public.watchlist_items) <> n or (select count(*) from public.tv_shows where collection = 'disney' and show_key = 'star wars: visions') <> 1
+    then raise exception 'rows or shows changed'; end if;
+end $$ $b$);
+
+select pg_temp.t('guard: enriched Visions + a new "Season 4" attaches as TMDB season 4; repeating it is a no-op; an identity held by another key is rejected', $b$ do $$
+declare v uuid; r jsonb; n int;
+begin
+  update private.migration_stage set stage = 'final';
+  v := pg_temp.enrich_visions();
+  perform pg_temp.as_anon();
+  r := public.seed_tv_defaults('disney', jsonb_build_array(pg_temp.vdef('star wars: visions|season 4', 'Season 4')));
+  if jsonb_array_length(r -> 'inserted') <> 1 or (r -> 'inserted' -> 0 ->> 'show_id')::uuid <> v or (r -> 'inserted' -> 0 ->> 'tmdb_id')::int <> 114478
+     or (r -> 'inserted' -> 0 ->> 'season_number')::int <> 4 or jsonb_array_length(r -> 'conflicts') <> 0 then raise exception 'season 4 %', r; end if;
+  n := (select count(*) from public.watchlist_items);
+  r := public.seed_tv_defaults('disney', jsonb_build_array(pg_temp.vdef('star wars: visions|season 4', 'Season 4')));
+  if jsonb_array_length(r -> 'inserted') <> 0 or jsonb_array_length(r -> 'conflicts') <> 0 then raise exception 'repeat %', r; end if;
+  r := public.seed_tv_defaults('disney', jsonb_build_array(pg_temp.vdef('star wars: visions|season 1', 'Season 1')));
+  if jsonb_array_length(r -> 'inserted') <> 0 or r -> 'conflicts' -> 0 ->> 'reason' <> 'identity_conflict' then raise exception 'conflict %', r; end if;
+  perform pg_temp.as_postgres();
+  if (select count(*) from public.watchlist_items) <> n or (select count(*) from public.tv_shows where collection = 'disney' and show_key = 'star wars: visions') <> 1
+    then raise exception 'rows or shows changed'; end if;
+end $$ $b$);
+
 select coalesce(json_agg(json_build_object('check', name, 'ok', ok, 'detail', detail) order by seq), '[]')::text as results,
        count(*) filter (where ok) || '/' || count(*) as passed
 from pg_temp._t;
