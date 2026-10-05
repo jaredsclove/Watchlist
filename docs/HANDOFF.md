@@ -584,7 +584,7 @@ The column lists below are the original columns; `user_id`, `show_id` and `skipp
   - The restore reproduced production **byte-for-byte**, matching the SQL fingerprints.
   - The safety-backup recovery drill passed.
   - All 22 failure-injection cases behaved as expected. After hardening, every data-level bad backup is rejected **before DELETE**.
-- **That rehearsal project has since been deleted.** A new temporary test project was created for the TV-show migration (§18); it is kept for Phase 1 rehearsals and locked to authenticated owner-only access.
+- **That rehearsal project has since been deleted.** A second temporary test project, created for the TV-show migration (§18), was deleted by the owner on 2026-10-05 once the migration was complete; rehearsals now run locally (PGlite).
 - The **browser UI smoke test** of restore (file picker and real download) was **intentionally skipped** by owner decision. The harness exercised the same functions.
 - **Never run a destructive restore on production just to test it.**
 
@@ -836,7 +836,7 @@ Other intentional behaviors:
 
 ## 15. Not recently re-tested — not known broken
 
-- **A full destructive restore on production:** never run. Rehearsed only in isolated test projects (the 2026-09-26 one, since deleted, and the 2026-10-04 TV-migration test project, where the transactional `restore_backup` ran over the real API as both the anonymous and signed-in roles).
+- **A full destructive restore on production:** never run. Rehearsed only in isolated test projects (the 2026-09-26 one, since deleted, and the 2026-10-04 TV-migration test project, deleted 2026-10-05, where the transactional `restore_backup` ran over the real API as both the anonymous and signed-in roles).
 - **The restore UI's browser plumbing** (the file picker and the real download).
 - **Behavior on a physical phone.** Layout was checked only at 375 px browser emulation.
 
@@ -1056,9 +1056,8 @@ Tags:
   pre-derived-views                  → e2c1c16   (local only, not pushed)
   pre-tv-shows                       → b266a5b   (local only, not pushed)
 
-Supabase:                 the production project, plus the temporary TV-migration test project (locked: owner-only
-                          authenticated access, no anonymous access). It is no longer needed (all rehearsals run locally);
-                          the owner deletes it in the Supabase dashboard.
+Supabase:                 the production project only. The temporary TV-migration test project was deleted by the owner
+                          on 2026-10-05; rehearsals run locally (tools/db-rehearsal.mjs on PGlite).
 ```
 
 ---
@@ -1135,7 +1134,7 @@ Instead of a waiting period, an immediate exit test (owner decision), then `fina
 - **Final:** a validated backup (14:30 UTC) and projection 196/196 one last time; then the committed C1 block of `db/stages.sql` (guard: stage must be `authoritative`), hash-checked. No data changed (pre/post backups identical); stage `final`; database = JavaScript; Pages = `main`; Chrome smoke clean (Refresh reads only `tv_shows`); identity audit 421/1/0/0.
 - **Cleanup (`bc43e2c`):** removed the retired Caught Up helper and constant and the app's last writes to `othertv_shows`; the test harness defaults to stage `final`. Not done, by design: dropping the season `status` column or `othertv_shows`.
 - **Rollback from `final` (rehearsed locally from a production replica with drift):** keep the new app → `db/rollback/final.sql` (stage → `authoritative` + re-project every show). Revert the app to a version whose Refresh reads `othertv_shows` (before `59dd6a1`) → also `db/rollback/othertv_from_tv_shows.sql` first, then the Phase 3 rollback block, then `git revert`; further back as before. Every show status, the old app's status/up-next derivation and its Refresh list were verified after each step.
-- **The temporary test project** is no longer needed (all rehearsals run locally on PGlite). It must be deleted by the owner in the Supabase dashboard (Claude doesn't delete projects).
+- **The temporary test project** was deleted by the owner on 2026-10-05 (no longer needed: all rehearsals run locally on PGlite). Its identifiers in older Git history and in the untracked local config files are now inert; `tools/auth-isolation-test.html` and `tools/db-rehearsal-rest.mjs` would need a new test project before reuse (e.g. for the future sign-in project).
 
 ### Next
 
