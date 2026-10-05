@@ -164,6 +164,25 @@ test('Refresh shows with a season added elsewhere meanwhile → the others are a
   assert.strictEqual(app.store.watchlist_items.filter(r => r.season_number === 2).length, 1, 'no duplicate');
 });
 
+test('Refresh shows checks the tab\'s identified shows from tv_shows (not the old tracking table); legacy shows are skipped', async () => {
+  const legacyShow = { id: 's200', collection: 'othertv', title: 'Legacy', show_key: 'legacy', tmdb_id: null, status: 'confirmed' };
+  const app = await createApp({ rows: [tv({ id: 'a' }), legacy({ id: 'l', title: 'Legacy', item_key: 'legacy|season 1', show_id: 's200' })],
+    tvShows: [show(), legacyShow], othertvShows: [],
+    tmdb: p => (p === '/tv/100' ? { id: 100, name: 'Show', networks: [{ name: 'HBO' }], seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-01-01' }] } : undefined) });
+  await openTab(app, 'othertv');
+  await app.ctx.refreshShows(); await settle();
+  const reads = app.requests.filter(r => r.method === 'GET').map(r => r.url.split('/rest/v1/')[1] || r.url);
+  assert.ok(reads.some(u => u.startsWith('tv_shows?collection=eq.othertv&select=id,title,tmdb_id')), reads.join(' | '));
+  assert.ok(!reads.some(u => u.startsWith('othertv_shows')), 'the old tracking table is not read');
+  const tmdbCalls = app.requests.filter(r => !r.url.includes('/rest/v1/')).map(r => r.url);
+  assert.ok(tmdbCalls.length === 1 && tmdbCalls[0].includes('/tv/100'), 'only the identified show is looked up');
+  const data = app.get('window.__refreshData');
+  assert.strictEqual(data.length, 1);
+  assert.deepStrictEqual(Array.from(data[0].newOnes, s => s.season_number), [2]);
+  assert.strictEqual(data[0].show.title, 'Show');
+  assert.deepStrictEqual(app.writes(), [], 'the preview writes nothing');
+});
+
 // ── TMDB search add ──
 test('TMDB search: a film on True Crime / Docs stays a direct insert with no tracking; a series uses add_tv_seasons', async () => {
   const app = await createApp();

@@ -17,7 +17,11 @@ async function refreshShows() {
   previewEl.innerHTML = `<div class="tmdb-loading">Checking for new seasons…</div>`;
 
   try {
-    const trackedShows = await sbFetch('GET', `othertv_shows?collection=eq.${encodeURIComponent(activeTabId)}&select=*`, null);
+    // The shows to check: this tab's TMDB-identified shows (tv_shows). The old
+    // tracking table (othertv_shows) is no longer maintained since the final
+    // migration stage; it stays in the database, unused.
+    const trackedShows = ((await sbFetch('GET', `tv_shows?collection=eq.${encodeURIComponent(activeTabId)}&select=id,title,tmdb_id&order=title.asc`, null)) || [])
+      .filter(s => s.tmdb_id != null);
     if (!trackedShows || trackedShows.length === 0) {
       previewEl.innerHTML = `<div class="tmdb-no-results">No shows added via search yet — nothing to refresh.</div>`;
       return;

@@ -28,7 +28,10 @@ function makeEnv({ tmdb, tracked = [], rows = [], tab = 'othertv', checkboxes = 
     tmdbShowSpecials: false,
     tmdbFetch: async p => { log.tmdbCalls++; return tmdb(p); },
     sbFetch: async (method, p, body) => {
-      if (method === 'GET' && p.startsWith('othertv_shows')) return tracked;
+      if (method === 'GET' && p.startsWith('tv_shows?')) {
+        if (!/collection=eq\.[^&]+&select=id,title,tmdb_id/.test(p)) throw new Error(`unexpected show read ${p}`);
+        return tracked;
+      }
       if (method === 'POST') { log.posts.push({ table: p, body: JSON.parse(JSON.stringify(body)) }); return body.map((r, i) => ({ id: `new-${i}`, ...r })); }
       throw new Error(`unexpected ${method} ${p}`);
     },
