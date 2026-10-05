@@ -68,7 +68,7 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
   - The **last app-code commit** is `4550060`, "Explain seasons of a TMDB-matched built-in show that need review".
   - The working tree is clean.
   - All 18 app files were verified byte-identical on GitHub Pages at `4550060` on 2026-10-05, and all 14 versioned assets returned 200 with the token `20261005-enrich1`.
-- **Tracked files:** 71.
+- **Tracked files:** 72.
   - 18 app files: 17 JS/CSS + `watchlist.html`.
   - 1 doc: `docs/HANDOFF.md` (this file).
   - 27 files in `db/` (including `db/admin/tv_enrich.sql` and `db/test/t_enrich.sql`): the migration scripts, rollbacks, stage switches, test-project-only scripts, SQL self-checks and a local-values template (`db/README.md` gives the run order).
@@ -186,6 +186,7 @@ That opens **TV → Currently Watching**. The boot makes only paginated GETs; it
 | `tmdb-match.js` | 296 | **Match to TMDB** (§7.3): `isTmdbMatchEligible`, `buildTmdbMatchPatch`, `findTmdbMatchConflict`, `tmdbMatchConflictMessage`, the UI (`openTmdbMatch`, `searchTmdbMatch`, `chooseTmdbMatchResult`, `chooseTmdbMatchSeason`, `renderTmdbMatchConfirm`, `cancelTmdbMatch`), and `confirmTmdbMatch` (finishes against `row.collection`; a TV-season match on a TV tab goes through `match_tv_row`; a film match on a row linked as a TV season also sets `show_id` to null, since films are never linked, then deletes the show if that emptied it (refused by ON DELETE RESTRICT — `23001` — otherwise, which is not an error); a blocked match (the target show has another status) explains itself and writes nothing). |
 | `derived-views.js` | 490 | **Currently Watching / Coming Soon** (§4a): `DERIVED_VIEWS`; pure rules (`isTvViewRow`, `isTbaRow`, `localTodayStr`, `isReleasedRow`, `seasonOrder`/`compareSeasons`, `deriveCurrentlyWatching(rows, shows, today)` = the Watching shows with up next and Up to date, `deriveComingSoon(rows, shows, today)`); the loader (`loadDerivedView`: TV rows + all shows, both paginated); the renderers (show control on every Watching card, Skip only in Coming Soon) and toggles. |
 | `docs/HANDOFF.md` | — | **This handoff**, the single canonical copy. Never loaded by the app. |
+| `tools/tmdb-enrich-candidates.mjs` | 119 | Read-only (GET-only) TMDB enrichment review for one built-in collection (`disney`/`90day`/`sheridan`): legacy shows, TMDB candidates with details, proposed `Season N` → N mappings and the audit grade each would get (§16, §18). Proposals only; never picks a match. |
 | `tools/identity-audit.mjs` | 261 | Read-only (GET-only) production identity audit with A/B/C/D grading (§16). Pure grading functions are separated from network access. |
 | `db/` | — | **TV-show migration** (§18): `phase0_restore_v1.sql` (installed in production), the Phase 1b/1c migrations, `tv_model.sql`, `rpc.sql`, `restore_backup.sql` (owner-scoped), `stages.sql`, `rollback/`, `future/auth_switchover.sql` (future sign-in project only) and `test/` (test-project-only scripts and self-checking SQL). Run order in `db/README.md`. On production: `phase0_restore_v1.sql` (Phase 0), then `phase1b_ownership.sql` + `restore_backup.sql` (1b), then `phase1c_tv_schema.sql` + `tv_model.sql` + `phase1c_backfill.sql` (1c). then `rpc.sql` + the Phase 2 block of `stages.sql` (Phase 2, 2026-10-05). The Phase 3 and later blocks of `stages.sql` have **not** run on production. |
 | `tools/db-rehearsal.mjs`, `db/test/rehearsal-steps.mjs` | 93, 229 | Local rehearsal of every `db/` script on PGlite against a production replica and a real backup (PGlite isn't a repo dependency). |
@@ -596,7 +597,7 @@ The column lists below are the original columns; `user_id`, `show_id` and `skipp
 ### Latest known-good backups
 
 - Backups are kept **outside the repo**, never committed. Ask the owner where current backups live.
-- **The latest validated backup matches the current production baseline:** format 2, 718 / 196 / 64 / 1 (`watchlist_items` / `tv_shows` / `othertv_shows` / `custom_collections`), taken 2026-10-04 22:26 UTC after Phase 1c with the deployed app's own backup code (`b266a5b`). The last format-1 backup (718 / 64 / 1) was taken 22:17 UTC, immediately before Phase 1b; the original-column content of the three tables was unchanged by Phase 1.
+- **The latest validated backup (2026-10-05 19:04 UTC, right after the Sheridan enrichment, §18):** format 2, 719 / 197 / 64 / 1 (`watchlist_items` / `tv_shows` / `othertv_shows` / `custom_collections`), taken with the deployed app's own backup code. Historical: the first format-2 backup (718 / 196 / 64 / 1) was taken 2026-10-04 22:26 UTC after Phase 1c (`b266a5b`). The last format-1 backup (718 / 64 / 1) was taken 22:17 UTC, immediately before Phase 1b; the original-column content of the three tables was unchanged by Phase 1.
 - Older backups are **historical** reference points, not the current operational backup. A future session must **take and validate a fresh backup before any approved production write**, rather than relying on an old file.
 - **Always take and validate a fresh backup before any destructive database work.**
 
@@ -936,10 +937,10 @@ grep -hoE '^(async )?function [A-Za-z0-9_]+' *.js \
 ```bash
 # from the repo root
 node tools/identity-audit.mjs
-# expect (2026-10-04): 718 rows fetched (422 identified, 296 legacy)
-#         A 421 / B 1 / C 0 / D 0, RESULT: PASS
-#         The B row is the known one-day date drift (§13): The Traitors S5. Avengers: Doomsday became A
-#         when TMDB's date moved to match the stored one (no production change).
+# last result (2026-10-05, after the Sheridan enrichment): 719 rows fetched (440 identified)
+#         A 438 / B 2 / C 0 / D 0, RESULT: PASS
+#         The two B rows are kept one-day date drifts: The Traitors S5 and Marshals S1 (§17).
+#         Counts change with normal use: compare against a fresh run, not these numbers.
 # exit codes: 0 = pass, 1 = C/D rows found, 2 = aborted (no result)
 ```
 
@@ -958,7 +959,8 @@ node tools/identity-audit.mjs
 ### Production fingerprints (read-only; SQL Editor)
 
 ```sql
--- Expected counts (2026-10-04, after Phase 1): 718 / 64 / 1, and 196 tv_shows.
+-- Last known counts (2026-10-05, after the Sheridan enrichment): 719 / 64 / 1, and 197 tv_shows.
+-- Normal use changes these; the baseline is whatever this returns at the start of the session.
 -- Run this read-only at the start of any session that might write, and use the result
 -- as that session's baseline; re-run it afterwards to prove nothing else changed.
 -- The o_* hashes use the ORIGINAL columns only, so they are comparable with
@@ -1012,7 +1014,7 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 - **Outage simulation:** Refresh shows and Refresh collections say "Couldn't check TMDB right now… Nothing was changed" (never "up to date").
 - **Mobile 375 px:** the "⋯" popover on a movie card opens inside that card.
 - **Derived views:** see the 2026-09-30 checklist in §15 (startup GET-only; TBA up-next season without Mark watched; Up to date section; Coming Soon today row and TBA section; no films; Movies → TV).
-- **After any temporary test:** all fingerprints equal the baseline, and the audit shows 421 A / 1 B / 0 C / 0 D.
+- **After any temporary test:** all fingerprints equal the session's starting baseline, and the audit equals the session's starting audit (438 A / 2 B / 0 C / 0 D as of 2026-10-05).
 
 ---
 
@@ -1023,7 +1025,7 @@ Repo:                     the local Git checkout of this repo (github.com/jareds
 Branch:                   main (in sync with origin/main), working tree clean
 HEAD:                     "Update handoff after the Sheridan TMDB enrichment" (docs-only; parent 4550060)
 Last app-code commit:     4550060  "Explain seasons of a TMDB-matched built-in show that need review"
-Tracked files:            71 (18 app, 1 doc, 27 in db/, 18 in tests/, 6 in tools/, .gitignore)
+Tracked files:            72 (18 app, 1 doc, 27 in db/, 18 in tests/, 7 in tools/, .gitignore)
                           all 18 app files byte-identical on GitHub Pages (verified at 4550060); 14 versioned assets 200
 Offline tests:            258/258 passing (15 suites); 55 inline handlers, none undefined; 176 functions, no duplicates
 Cache token:              ?v=20261005-enrich1 (13 JS files + styles.css); config.js unversioned
@@ -1047,7 +1049,7 @@ Database:                 stage final (§5, since 2026-10-05 14:32 UTC). user_id
                           RLS: 16 permissive anon policies (the original 12 + 4 on tv_shows).
 
 Rows per tab:             disney 182, 90day 72, sheridan 42, othertv 355, truecrime 7 (3 TV + 4 films), movies 61
-TV rows in derived views: 641
+TV rows in derived views: 642 (all linked to a show)
 Unidentified rows:        279 (static DEFAULTs not enriched; 0 manual dynamic rows)
 
 Identity audit:           719 rows, 440 identified → 438 A / 2 B / 0 C / 0 D, PASS (node tools/identity-audit.mjs, 2026-10-05)
@@ -1152,7 +1154,7 @@ A separate identity-only project for legacy shows in the built-in collections, s
 
 ### Next
 
-- **The TV-show migration is complete.** Enrichment continues only on approval: Disney+ next, then 90 Day (same process: read-only review → owner decisions → dry run → per-show apply). Recheck the waiting Sheridan shows when TMDB updates. The separate **future sign-in (Auth/RLS) project** (`db/future/auth_switchover.sql`) needs its own approval.
+- **The TV-show migration is complete.** Enrichment continues only on approval: Disney+ next, then 90 Day (same process: read-only review → owner decisions → dry run → per-show apply). **Approved next step (not started): a read-only Disney+ identity review** — `node tools/tmdb-enrich-candidates.mjs disney --out=<scratch file>` gives candidates, proposed `Season N` → N mappings and expected grades; the report to the owner gives, per show, the proposed match (or No match / needs decision), a mapping for every existing season, the expected field changes (only `tv_shows.tmdb_id` and the seasons' `media_type`/`tmdb_id`/`season_number`) and the expected audit effect. No production write, no schema change, no 90 Day until approved. Parts/volumes or any non-`Season N` label are never forced into a season number (as with Yellowstone). Recheck the waiting Sheridan shows when TMDB updates. The separate **future sign-in (Auth/RLS) project** (`db/future/auth_switchover.sql`) needs its own approval.
 - **Identity audit:** 438 A / 2 B / 0 C / 0 D is the baseline (after the Sheridan enrichment). TMDB data can change upstream; a benign TMDB correction that changes A/B is explained and accepted as the new baseline, not treated as a regression. Any C or D, or an unexplained A→B, is a stop condition.
 - Other candidate follow-ups are listed in §14. For example: review the B-grade date drift.
 - **Any static-tab catalog refresh uses the `/refresh-catalogs` skill.** Startup no longer opens Disney+, so the skill opens the Disney+ tab explicitly.
@@ -1164,8 +1166,8 @@ A separate identity-only project for legacy shows in the built-in collections, s
 1. Inspect the actual repo (your local Git checkout of `jaredsclove/Watchlist`).
 2. Run `git status`.
 3. Confirm the branch is `main` and in sync with `origin/main`.
-4. Confirm `HEAD` is the documentation commit "Update handoff after the Sheridan TMDB enrichment", whose parent is `4550060`; the last app-code commit is `4550060`, "Explain seasons of a TMDB-matched built-in show that need review". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
-5. Inspect the file tree and compare it with §3: 65 tracked files, and roughly the listed line counts.
+4. Confirm `HEAD` is the docs/tools commit "Add read-only TMDB enrichment review tool; refresh handoff state" (it follows `39c8919`, "Update handoff after the Sheridan TMDB enrichment"); the last app-code commit is `4550060`, "Explain seasons of a TMDB-matched built-in show that need review". If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
+5. Inspect the file tree and compare it with §3: 72 tracked files, and roughly the listed line counts.
 6. Run the offline checks in §16: syntax, all 15 test suites (258 cases), and the handler sweep (55 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 438 A / 2 B / 0 C / 0 D).
 7. **Do not modify anything:**
    - no code
