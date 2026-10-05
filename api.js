@@ -88,6 +88,9 @@ function tvShowKey(collectionId, itemKey) {
   const prefix = String(itemKey || '').split('|')[0];
   return SHOW_KEY_OVERRIDES[`${collectionId}|${prefix}`] || prefix;
 }
+// Why a season of a TMDB-matched built-in show wasn't added (db/rpc.sql).
+const TV_REVIEW_REASONS = ['enriched_show_label', 'identity_conflict'];
+
 function sbRpc(fn, args) {
   return sbFetch('POST', `rpc/${fn}`, args);
 }
@@ -97,7 +100,9 @@ function sbRpc(fn, args) {
 // reopens a Complete show that gets a genuinely new season (Refresh shows finds
 // identified shows in tv_shows). onInserted(rows) runs after each call, so rows
 // already added stay in the page if a later call fails. Returns
-// { inserted, alreadyListed, rejected, reopened: [show titles] }.
+// { inserted, alreadyListed, rejected, review: [{season, reason}], reopened: [show titles] }.
+// review lists seasons of a TMDB-matched built-in show that weren't added and need
+// a person to look at them (a label that isn't a plain "Season N", or a conflict).
 async function addTvSeasonRows(collectionId, rows, onInserted) {
   const groups = new Map();
   for (const r of rows) {
@@ -111,11 +116,14 @@ async function addTvSeasonRows(collectionId, rows, onInserted) {
       date_sort: r.date_sort, season_number: r.tmdb_id != null ? r.season_number : null
     });
   }
-  const outcome = { inserted: 0, alreadyListed: 0, rejected: 0, reopened: [] };
+  const outcome = { inserted: 0, alreadyListed: 0, rejected: 0, review: [], reopened: [] };
   for (const g of groups.values()) {
     const res = await sbRpc('add_tv_seasons', { p_collection: collectionId, p_show: g.show, p_seasons: g.seasons });
     outcome.alreadyListed += (res.existing || []).length;
-    outcome.rejected += (res.rejected || []).length;
+    for (const x of res.rejected || []) {
+      if (TV_REVIEW_REASONS.includes(x.reason)) outcome.review.push({ season: x.season || x.item_key, reason: x.reason, title: g.show.title });
+      else outcome.rejected++;
+    }
     const show = tvShowsById.get(res.show_id);
     if (show) show.status = res.show_status;
     else tvShowsById.set(res.show_id, { id: res.show_id, collection: collectionId, title: g.show.title, show_key: g.show.show_key,

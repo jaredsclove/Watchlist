@@ -128,6 +128,7 @@ async function loadTab(collectionId) {
     }
 
     let reopenedIds = [];
+    let reviewConflicts = [];
     if (toInsert.length > 0 && isTvCollection(collectionId)) {
       // Only the defaults found missing above, so the rule for "missing" stays
       // exactly this one; seed_tv_defaults links each new season to its show
@@ -136,6 +137,7 @@ async function loadTab(collectionId) {
       const res = await sbRpc('seed_tv_defaults', { p_collection: collectionId, p_defaults: col.defaults.filter(d => missing.has(d.k)) });
       rows.push(...(res.inserted || []));
       reopenedIds = res.reopened || [];
+      reviewConflicts = (res.conflicts || []).filter(c => TV_REVIEW_REASONS.includes(c.reason));
     } else if (toInsert.length > 0) {
       const inserted = await sbFetch('POST', TABLE, toInsert);
       if (inserted) rows.push(...inserted);
@@ -157,8 +159,12 @@ async function loadTab(collectionId) {
       const reopenedNote = reopened.length
         ? ` ${reopened.map(t => `"${esc(t)}"`).join(', ')} ${reopened.length === 1 ? 'was' : 'were'} Complete and got a new season, so ${reopened.length === 1 ? 'it is' : 'they are'} back On List.`
         : '';
+      const added = newKeys.length - reviewConflicts.length;
+      const reviewNote = reviewConflicts.length
+        ? ` ${esc(tvReviewMessage(reviewConflicts.map(c => ({ season: c.season || c.item_key, reason: c.reason, title: tvShowsById.get(c.show_id)?.title }))))}`
+        : '';
       document.getElementById('banner').innerHTML =
-        `<div class="banner">✦ ${newKeys.length} new entr${newKeys.length===1?'y':'ies'} added.${reopenedNote}</div>`;
+        `<div class="banner">✦ ${added} new entr${added===1?'y':'ies'} added.${reopenedNote}${reviewNote}</div>`;
     }
 
     renderFilters();

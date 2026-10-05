@@ -120,6 +120,35 @@ function tvFunctions(app, store, newId) {
       store.othertv_shows.push({ id: newId(), tmdb_id: tmdbId, title, network, collection });
     }
   }
+  // Enriched (TMDB-matched) built-in shows: later legacy-keyed seasons join them.
+  const BUILTIN = ['disney', '90day', 'sheridan'];
+  const plainSeason = l => (/^Season [1-9][0-9]{0,3}$/.test(l || '') ? Number(l.slice(7)) : null);
+  const enrichedFor = (coll, key) => {
+    if (!BUILTIN.includes(coll)) return null;
+    const m = shows().filter(s => s.collection === coll && s.show_key === key && s.tmdb_id != null);
+    if (m.length > 1) throw new DbError('23000', `integrity_fault: ${m.length} TMDB-matched shows share the key ${key}`);
+    return m[0] || null;
+  };
+  function addToEnriched(show, seasons) {
+    const inserted = [], existing = [], rejected = [];
+    for (const s of seasons) {
+      const n = plainSeason(s.season);
+      if (n == null) { rejected.push({ item_key: s.item_key, season: s.season, reason: 'enriched_show_label', show_id: show.id }); continue; }
+      const same = items().find(r => r.collection === show.collection && r.item_key === s.item_key);
+      if (same) {
+        if (same.show_id === show.id && same.media_type === 'tv' && same.tmdb_id === show.tmdb_id && same.season_number === n) existing.push({ season_number: n, item_key: same.item_key, id: same.id });
+        else rejected.push({ item_key: s.item_key, season: s.season, reason: 'identity_conflict', conflicting_row_id: same.id });
+        continue;
+      }
+      const held = items().find(r => r.collection === show.collection && r.media_type === 'tv' && r.tmdb_id === show.tmdb_id && r.season_number === n);
+      if (held) { rejected.push({ item_key: s.item_key, season: s.season, reason: 'identity_conflict', conflicting_row_id: held.id }); continue; }
+      inserted.push(insertRow({ collection: show.collection, item_key: s.item_key, title: s.title, season: s.season, theme: s.theme || '',
+        display_date: s.display_date || '', date_sort: s.date_sort, status: s.status || 'confirmed', show_id: show.id, media_type: 'tv', tmdb_id: show.tmdb_id, season_number: n }));
+    }
+    let reopened = false;
+    if (inserted.length && authoritative() && show.status === 'complete') { show.status = 'confirmed'; reopened = true; }
+    return { inserted, existing, rejected, reopened };
+  }
   const handlers = {
     add_tv_seasons({ p_collection: coll, p_show: show, p_seasons: seasons }) {
       const tmdb = show.tmdb_id ?? null;
@@ -146,6 +175,11 @@ function tvFunctions(app, store, newId) {
         }
         if (seen.has(ident)) throw new DbError('22023', `invalid_input: season ${ident} requested twice`);
         seen.add(ident);
+      }
+      const enriched = tmdb == null ? enrichedFor(coll, key) : null;
+      if (enriched) {
+        const r = addToEnriched(enriched, seasons);
+        return { show_id: enriched.id, show_created: false, inserted: clone(r.inserted), existing: r.existing, rejected: r.rejected, reopened: r.reopened, show_status: enriched.status };
       }
       const { show: target, created } = lockOrCreateShow(coll, tmdb, key, show.title.trim(), show.initial_status || 'confirmed');
       const inserted = [], existing = [], rejected = [];
@@ -195,7 +229,16 @@ function tvFunctions(app, store, newId) {
         if (!groups.has(k)) groups.set(k, []);
         groups.get(k).push(d);
       }
+      const conflicts = [];
+      const reopenedIds = [];
       for (const [k, ds] of groups) {
+        const enriched = enrichedFor(coll, k);
+        if (enriched) {
+          const r = addToEnriched(enriched, ds.map(d => ({ item_key: d.k, title: d.t, season: d.s, theme: d.th, display_date: d.d, date_sort: d.ds, status: d.p ? 'pending' : 'confirmed' })));
+          inserted.push(...r.inserted); conflicts.push(...r.rejected);
+          if (r.reopened) reopenedIds.push(enriched.id);
+          continue;
+        }
         const todo = ds.filter(missing);
         if (!todo.length) continue;
         const title = (ds.find(d => d.k.split('|')[0] === k) || ds[0]).t;
@@ -206,7 +249,7 @@ function tvFunctions(app, store, newId) {
       }
       for (const d of defs) if (d.s === 'Film' && missing(d)) inserted.push(insertRow(rowFields(d)));
       inserted.sort((a, b) => a.date_sort.localeCompare(b.date_sort) || a.item_key.localeCompare(b.item_key));
-      return { inserted: clone(inserted), shows_created: showsCreated, reopened, conflicts: [] };
+      return { inserted: clone(inserted), shows_created: showsCreated, reopened: [...reopened, ...reopenedIds], conflicts };
     },
     delete_tv_season({ p_row_id: id }) {
       const r = items().find(x => x.id === id && isTvRow(x));

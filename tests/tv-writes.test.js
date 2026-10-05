@@ -214,7 +214,7 @@ test('seeding sends only the defaults the old rule finds missing; a key held by 
   const [d0, d1] = defaults;
   const app = await createApp({ rows: [
     legacy({ id: 'l0', collection: '90day', item_key: d0.k, title: d0.t, season: d0.s, show_id: null }),
-    tv({ id: 'i1', collection: '90day', item_key: d1.k, title: d1.t, tmdb_id: 4242, season_number: 7, season: 'Season 7', show_id: null })
+    tv({ id: 'i1', collection: '90day', item_key: d1.k, title: d1.t, tmdb_id: 4242, season_number: Number(/\d+/.exec(d1.s)[0]), season: d1.s, show_id: null })
   ] });
   await openTab(app, '90day');
   const call = app.writes().find(r => r.url.endsWith('/rpc/seed_tv_defaults'));
@@ -230,6 +230,48 @@ test('a fully seeded tab makes no write at all on load', async () => {
   const app = await createApp({ rows: app0.store.watchlist_items });
   await openTab(app, 'sheridan');
   assert.deepStrictEqual(app.writes(), []);
+});
+
+// ── Enriched (TMDB-matched) built-in shows ──
+// A seeded Sheridan tab where Landman and Mayor of Kingstown have been matched to
+// TMDB (identity only) and one built-in season of each is missing again.
+async function enrichedSheridan() {
+  const app0 = await createApp();
+  await openTab(app0, 'sheridan');
+  const rows = app0.store.watchlist_items, shows = app0.store.tv_shows;
+  const enrich = (key, tmdb) => {
+    const show = shows.find(x => x.show_key === key);
+    show.tmdb_id = tmdb;
+    for (const r of rows.filter(x => x.show_id === show.id)) {
+      const m = /^Season (\d+)$/.exec(r.season);
+      if (m) Object.assign(r, { media_type: 'tv', tmdb_id: tmdb, season_number: Number(m[1]) });
+    }
+    return show;
+  };
+  const landman = enrich('landman', 157741), mayor = enrich('mayor of kingstown', 97951);
+  const drop = new Set([rows.find(r => r.item_key === 'landman|season 3').id, rows.find(r => r.show_id === mayor.id && r.media_type == null).id]);
+  const app = await createApp({ rows: rows.filter(r => !drop.has(r.id)), tvShows: shows });
+  return { app, landman, mayor, showCount: shows.length };
+}
+test('a missing built-in season of a TMDB-matched show rejoins it as that TMDB season; a non-"Season N" one is held for review', async () => {
+  const { app, landman, mayor, showCount } = await enrichedSheridan();
+  await openTab(app, 'sheridan');
+  const back = app.store.watchlist_items.find(r => r.item_key === 'landman|season 3');
+  assert.ok(back && back.show_id === landman.id && back.tmdb_id === 157741 && back.season_number === 3 && back.media_type === 'tv', JSON.stringify(back));
+  assert.ok(!app.store.watchlist_items.some(r => r.show_id === mayor.id && /Final/.test(r.season)), '"Season 5 (Final)" not added');
+  assert.strictEqual(app.store.tv_shows.length, showCount, 'no second show');
+  const b = app.el('banner').innerHTML;
+  assert.ok(/needs review/.test(b) && /Season 5 \(Final\)/.test(b) && /Mayor of Kingstown/.test(b), b);
+});
+test('manual Add entry on a built-in tab: a plain "Season N" of a matched show joins it; "Season 4 (Part 1)" is refused for review', async () => {
+  const { app, landman, showCount } = await enrichedSheridan();
+  await addManual(app, 'sheridan', 'Landman', 'Season 4');
+  const s4 = app.store.watchlist_items.find(r => r.item_key === 'landman|season 4');
+  assert.ok(s4 && s4.show_id === landman.id && s4.tmdb_id === 157741 && s4.season_number === 4, JSON.stringify(s4));
+  await addManual(app, 'sheridan', 'Landman', 'Season 4 (Part 1)');
+  assert.ok(!app.store.watchlist_items.some(r => r.item_key === 'landman|season 4 (part 1)'));
+  assert.ok(/needs review/.test(banner(app)) && /only a plain/.test(banner(app)), banner(app));
+  assert.strictEqual(app.store.tv_shows.length, showCount, 'no second show');
 });
 
 // ── Old season status stays authoritative ──

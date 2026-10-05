@@ -178,6 +178,7 @@ async function addEntry() {
     if (isTvSeasonRow(collectionId, null, season)) {
       // A TV season joins its show (by show key) through add_tv_seasons.
       const outcome = await addTvSeasonRows(collectionId, [newRow], rows => { inserted = rows; });
+      if (outcome.review.length) { showError(tvReviewMessage(outcome.review)); return; }
       if (outcome.inserted === 0) { showError('This title and season is already on your list.'); return; }
       if (outcome.reopened.length) showTvAddOutcome(outcome);
     } else {

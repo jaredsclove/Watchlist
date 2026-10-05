@@ -139,9 +139,11 @@ async function setSeasonSkipped(id, skipped) {
 // a Complete show that got a genuinely new season is back On List.
 function tvAddOutcomeMessages(outcome) {
   const { inserted, alreadyListed, rejected, reopened } = outcome;
+  const review = outcome.review || [];
   const notes = [];
-  if (inserted === 0 && alreadyListed > 0 && rejected === 0) notes.push('Already on your list.');
-  else if (alreadyListed > 0 || rejected > 0) {
+  if (review.length) notes.push(tvReviewMessage(review));
+  if (inserted === 0 && alreadyListed > 0 && rejected === 0 && !review.length) notes.push('Already on your list.');
+  else if ((alreadyListed > 0 || rejected > 0) && !(inserted === 0 && review.length)) {
     const parts = [`Added ${inserted} season${inserted === 1 ? '' : 's'}`];
     if (alreadyListed > 0) parts.push(`${alreadyListed} already on your list`);
     if (rejected > 0) parts.push(`${rejected} not added because an entry with the same title and season is already on your list`);
@@ -151,6 +153,14 @@ function tvAddOutcomeMessages(outcome) {
     ? `${reopened.map(t => `"${t}"`).join(', ')} ${reopened.length === 1 ? 'was' : 'were'} Complete and got a new season, so ${reopened.length === 1 ? 'it is' : 'they are'} back On List.`
     : '';
   return { warning: notes.join(' '), notice: reopenedNote };
+}
+
+// Seasons of a TMDB-matched built-in show that weren't added, for a person to review.
+function tvReviewMessage(review) {
+  const parts = review.map(x => x.reason === 'enriched_show_label'
+    ? `"${x.season}"${x.title ? ` of "${x.title}"` : ''} (the show is matched to TMDB, so only a plain "Season N" can be added automatically)`
+    : `"${x.season}"${x.title ? ` of "${x.title}"` : ''} (that TMDB season is already on your list under another entry)`);
+  return `Not added — needs review: ${parts.join('; ')}.`;
 }
 
 function showTvAddOutcome(outcome) {
