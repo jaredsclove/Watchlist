@@ -452,7 +452,8 @@ function renderBrowseFilters() {
         <option value="">All sources</option>${COLLECTIONS.map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
       </select>`;
   document.getElementById('viewHead').innerHTML = browseHeadHtml();
-  filtersRowEl.innerHTML = `${mediaToggle}${layoutToggles}
+  // .browse-controls scopes the larger phone touch targets to these views (All TV's toggle is unchanged).
+  filtersRowEl.innerHTML = `${dest ? `<div class="browse-controls">${mediaToggle}${layoutToggles}</div>` : ''}
     <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
       <span>🔍 Search &amp; Filter</span><span id="filterToggleChevron">▾</span>
     </button>

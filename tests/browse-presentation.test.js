@@ -126,6 +126,18 @@ test('first use is All media + Shows + Separate; Shows/Seasons hides with Movies
   assert.strictEqual(app.get('browseGrouping'), 'separate', 'kept while hidden');
 });
 
+test('the media, presentation and grouping controls sit in .browse-controls (larger phone targets there only); All TV’s toggle is not in it', async () => {
+  const app = await boot();
+  await open(app);
+  const f = filters(app);
+  const box = f.slice(f.indexOf('<div class="browse-controls">'), f.indexOf('class="filter-toggle-btn"'));
+  for (const s of ['data-media="all"', 'data-presentation="seasons"', 'data-grouping="combined"']) assert.ok(box.includes(s), s);
+  app.ctx.setBrowsePresentation('seasons');
+  assert.ok(html(app).includes('<button class="section-toggle"'));
+  app.ctx.switchView('alltv'); await settle();
+  assert.ok(!filters(app).includes('browse-controls') && filters(app).includes('setAllTvPresentation'));
+});
+
 // ─── The four presentations ───────────────────────────────────────────────────
 test('Shows + Separate: TV show groups A–Z, then films A–Z (Skipped hidden by default)', async () => {
   const app = await boot();

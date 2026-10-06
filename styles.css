@@ -483,6 +483,7 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .ro-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .ro-label { font-size: 11px; color: var(--text3); }
 .ro-label + .ro-label::before { content: '· '; }
+.browse-controls { display: contents; }
 .browse-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
 .browse-subsection-row td { padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .browse-subsection-card { padding: 8px 0 2px; }
@@ -507,6 +508,9 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   .view-toggle { display: flex; width: 100%; margin-bottom: 8px; }
   .browse-bar { padding: 8px 12px 0; }
   .browse-bar select { flex: 1; }
+  .browse-controls { display: block; width: 100%; }
+  .browse-controls .view-toggle-btn { min-height: 44px; }
+  .section-toggle { min-height: 44px; width: 100%; }
   .browse-toggles { width: 100%; margin-bottom: 8px; }
   .browse-toggles .view-toggle { flex: 1 1 150px; width: auto; margin-bottom: 0; }
   .browse-title { font-size: 16px; }
