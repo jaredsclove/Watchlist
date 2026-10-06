@@ -580,7 +580,9 @@ test('Match refused by a concurrent change (40001 re-check, deadlock victim, loc
     app.ctx.switchTab('truecrime'); await settle();
     app.rpcHandlers.match_tv_row = () => ({ ok: false, status: 409, text: async () => JSON.stringify({ code, message }), json: async () => ({ code, message }), headers: { get: () => null } });
     await matchAsTv(app, legacy.id, 4200);
-    assert.match(app.get('document.getElementById("errorBanner").innerHTML'), /Something else was changing the same show or collections at that moment, so nothing was matched\. Try again\./, code);
+    assert.match(app.get('document.getElementById("errorBanner").innerHTML'), ['55P03', '57014'].includes(code)
+      ? /The database didn’t finish the match in time, so it was cancelled and nothing was matched\. Another change may have been using the same rows; try again\./
+      : /Something else was changing the same show or collections at that moment, so nothing was matched\. Try again\./, code);
     assert.deepStrictEqual(writes(app).map(r => new URL(r.url).pathname.split('/').pop()), ['match_tv_row']);
   }
 });

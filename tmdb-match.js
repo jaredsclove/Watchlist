@@ -219,6 +219,11 @@ async function confirmTmdbMatch() {
   const patch = buildTmdbMatchPatch(row, m.target, isMoviesTab);
   if (!patch) return;
   const viaShowFunction = patch.media_type === 'tv' && isTvCollection(row.collection);
+  // How far the match got, so a failure is reported for what actually happened:
+  // 'check' (nothing sent yet), 'write' (the match was sent: match_tv_row or the
+  // guarded PATCH, each one database transaction), 'verify' (the database accepted
+  // the PATCH; the page is reading the row back to see what it now holds).
+  let stage = 'check';
   try {
     // Fresh check against the database (not just this page's copy): does another row
     // already hold this identity, or an unmatched row already use the new item_key?
@@ -235,6 +240,7 @@ async function confirmTmdbMatch() {
     // Only a row that is still unmatched is updated; the database's unique indexes
     // are the final guard against a match made elsewhere at the same moment.
     let fresh;
+    stage = 'write';
     if (viaShowFunction) {
       // match_tv_row moves the season to its identified show (checked by Refresh
       // shows from then on) and re-checks both conflicts in the database.
@@ -262,6 +268,7 @@ async function confirmTmdbMatch() {
       const formerShowId = row.show_id ?? null;
       const body = formerShowId != null ? { ...patch, show_id: null } : patch;
       await sbFetch('PATCH', `${TABLE}?id=eq.${row.id}&tmdb_id=is.null&media_type=is.null&season_number=is.null`, body);
+      stage = 'verify';
       [fresh] = await sbFetch('GET', `${TABLE}?id=eq.${row.id}&select=*`, null) || [];
       // A show left with no seasons is removed, like deleting its last season.
       // The season link's ON DELETE RESTRICT refuses this while any season remains
@@ -286,15 +293,34 @@ async function confirmTmdbMatch() {
       catch(e) { showError(`Matched, but couldn't reload the show list: ${e.message}`); }
     }
   } catch(e) {
-    showError(/not_found: unidentified row|match_conflict: the row changed/.test(String(e.message))
+    const msg = String(e && e.message);
+    // The PATCH was accepted (it changes the row only if it was still unmatched), but
+    // the read-back failed: the outcome is unknown, so it isn't reported either way.
+    if (stage === 'verify') {
+      showError(`The database accepted the match, but the page couldn't read the row back to confirm the result (${msg}). `
+        + 'It may already be matched: reload the page and check this row before matching it again.');
+      return;
+    }
+    // The match was sent but no database answer came back (a network failure, not an
+    // error from the database): it may or may not have been saved.
+    if (stage === 'write' && !/^Supabase error \d+:/.test(msg)) {
+      showError(`The match was sent, but no answer came back from the database (${msg}), so the page can't tell whether it was saved. `
+        + 'Reload the page and check this row before matching it again.');
+      return;
+    }
+    showError(/not_found: unidentified row|match_conflict: the row changed/.test(msg)
       ? 'This row changed somewhere else before the match was saved, so nothing was matched. Reload the page and try again.'
-      // Another change to the same collections or show at the same moment (the database
-      // refused or timed out the match as a whole, including the API role's statement time limit): nothing was applied, so trying again is safe.
-      : /match_conflict: the collections|40P01|55P03|57014|deadlock detected|lock timeout|statement timeout/.test(String(e.message))
+      // Another change to the same collections or show at the same moment: the
+      // database refused the match as a whole (re-check or deadlock), so nothing was applied.
+      : /match_conflict: the collections|40P01|deadlock detected/.test(msg)
         ? 'Something else was changing the same show or collections at that moment, so nothing was matched. Try again.'
+      // The database cancelled the match transaction for taking too long (its lock wait
+      // or the API's statement time limit): cancelled as a whole, nothing was applied.
+      : /55P03|57014|lock timeout|statement timeout/.test(msg)
+        ? 'The database didn’t finish the match in time, so it was cancelled and nothing was matched. Another change may have been using the same rows; try again.'
       : isDuplicateKeyError(e)
         ? 'That TMDB title was added to this list somewhere else just now, so nothing was changed. Reload the page to see it.'
-        : e.message);
+        : msg);
     return;
   }
 

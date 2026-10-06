@@ -343,6 +343,57 @@ test('row matched elsewhere first (guarded PATCH changes nothing) → reported, 
   assert.ok(env.banner().includes('changed somewhere else'), env.banner());
 });
 
+// ── Failures after the match was sent (hosted check H-1 and its review) ──
+const timeoutErr = () => new Error('Supabase error 500: {"code":"57014","details":null,"hint":null,"message":"canceling statement due to statement timeout"}');
+async function confirmDune(env) {
+  await openAndSearch(env);
+  await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
+  await env.ctx.confirmTmdbMatch();
+}
+test('film: PATCH accepted, then the read-back times out → outcome reported as unconfirmed (never "nothing was matched"), page row untouched, nothing else written', async () => {
+  const row = manual({ collection: 'truecrime', show_id: 'show-legacy' });
+  const env = makeEnv({ tab: 'truecrime', rows: [row], tmdb: searchStub });
+  const real = env.ctx.sbFetch;
+  env.ctx.sbFetch = async (m, p, b) => {
+    if (m === 'GET' && /^watchlist_items\?id=eq\.row-1&select/.test(p) && env.log.writes.some(w => w.method === 'PATCH')) throw timeoutErr();
+    return real(m, p, b);
+  };
+  await confirmDune(env);
+  assert.deepStrictEqual(env.log.writes.map(w => w.method), ['PATCH'], 'no DELETE of the former show on an unconfirmed result');
+  assert.strictEqual(row.tmdb_id, null);
+  assert.strictEqual(row.show_id, 'show-legacy');
+  assert.strictEqual(env.log.saved, 0);
+  assert.ok(!/nothing was matched|nothing was changed/.test(env.banner()), env.banner());
+  assert.ok(/accepted the match, but the page couldn't read the row back to confirm the result \(Supabase error 500: .*statement timeout.*\)\. It may already be matched: reload the page and check this row before matching it again\./.test(env.banner()), env.banner());
+});
+test('film: the PATCH itself times out (57014, one statement, cancelled) → "cancelled, nothing was matched", no read-back, row untouched', async () => {
+  const row = manual();
+  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: m => m === 'PATCH' ? timeoutErr() : null } });
+  await confirmDune(env);
+  assert.strictEqual(row.tmdb_id, null);
+  assert.strictEqual(env.log.saved, 0);
+  assert.ok(env.banner().includes('didn’t finish the match in time, so it was cancelled and nothing was matched'), env.banner());
+});
+test('film: the PATCH gets no answer (network failure) → "can\'t tell whether it was saved", row untouched', async () => {
+  const row = manual();
+  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: m => m === 'PATCH' ? new TypeError('Failed to fetch') : null } });
+  await confirmDune(env);
+  assert.strictEqual(row.tmdb_id, null);
+  assert.strictEqual(env.log.saved, 0);
+  assert.ok(/no answer came back from the database \(Failed to fetch\), so the page can't tell whether it was saved/.test(env.banner()), env.banner());
+});
+test('TV season: match_tv_row times out (57014, one transaction) → "cancelled, nothing was matched"', async () => {
+  const { row, env } = await matchSiloS1({ fail: (m, p) => p === 'rpc/match_tv_row' ? timeoutErr() : null });
+  assert.strictEqual(row.tmdb_id, null);
+  assert.strictEqual(env.log.saved, 0);
+  assert.ok(env.banner().includes('didn’t finish the match in time, so it was cancelled and nothing was matched'), env.banner());
+});
+test('TV season: match_tv_row gets no answer (network failure) → "can\'t tell whether it was saved"', async () => {
+  const { row, env } = await matchSiloS1({ fail: (m, p) => p === 'rpc/match_tv_row' ? new TypeError('Failed to fetch') : null });
+  assert.strictEqual(row.tmdb_id, null);
+  assert.ok(/can't tell whether it was saved/.test(env.banner()), env.banner());
+});
+
 (async () => {
   let passed = 0;
   for (const t of tests) {
