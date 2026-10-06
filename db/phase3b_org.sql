@@ -327,11 +327,14 @@ begin
     end if;
   end loop;
 
-  -- Concurrent writes wait (or time out) rather than interleave with the
-  -- replacement; other owners' rows are never touched.
+  -- EXCLUSIVE (reads continue): it waits for every transaction holding row locks
+  -- or writing on these tables to finish, in the same table order the app's
+  -- functions use (shows, then rows, then organization), before replacing
+  -- anything, so a restore never holds a table while waiting for a row that an
+  -- app call holds (5 s timeout; then nothing changes). Other owners' rows are never touched.
   perform set_config('lock_timeout', '5s', true);
   lock table public.tv_shows, public.watchlist_items, public.personal_collections, public.collection_memberships,
-    public.watch_with_choices, public.othertv_shows, public.custom_collections in share row exclusive mode;
+    public.watch_with_choices, public.othertv_shows, public.custom_collections in exclusive mode;
 
   -- Ids that belong to another owner.
   for v_table in select jsonb_object_keys(v_expected) loop
@@ -477,7 +480,12 @@ declare
   v_extra uuid[];
   v_token text;
   v_created boolean := false;
+  v_src_ids uuid[];
+  v_tgt_ids uuid[];
+  v_gone uuid[];
 begin
+  -- Every lock below waits at most 5 s (then this call fails and changes nothing).
+  perform set_config('lock_timeout', '5s', true);
   if p_expansion is not null and (jsonb_typeof(p_expansion) <> 'object'
      or (p_expansion ? 'confirm' and jsonb_typeof(p_expansion -> 'confirm') not in ('string', 'null'))) then
     raise exception 'invalid_input: p_expansion %', p_expansion using errcode = '22023';
@@ -512,28 +520,28 @@ begin
   end if;
   select * into v_t from public.tv_shows
   where user_id = v_owner and collection = r.collection and tmdb_id = v_tmdb for update;
-  -- Fix what the decision depends on for this transaction, in the usual order
-  -- (shows, then the row, then memberships): the row itself, and the memberships
-  -- (a short table lock: membership writes from other sessions wait until this
-  -- commits; a change committed before it is read below). So nothing removed
-  -- meanwhile is transferred, nothing added meanwhile is dropped, and the expansion
-  -- confirmed below is exactly the one applied. Reads are not blocked.
-  perform set_config('lock_timeout', '5s', true);
+  -- Lock order as everywhere else: shows (above), then the row. No table lock on
+  -- memberships: a membership added to the row or either show waits for these row
+  -- locks (its foreign-key check); one removed meanwhile is caught below, because
+  -- the exact membership rows read here must still exist when this call finishes
+  -- (otherwise match_conflict 40001: nothing is changed and the page can try again).
   select * into r from public.watchlist_items
   where id = r.id and tmdb_id is null and media_type is null and season_number is null for update;
   if r.id is null then raise exception 'match_conflict: the row changed; try again' using errcode = '40001'; end if;
-  lock table public.collection_memberships in share row exclusive mode;
 
-  -- The collections the row is visible in now: a film's own, or its show's.
+  -- The collections the row is visible in now (a film's own, or its show's), and
+  -- the target show's, by membership row.
   if r.is_film then
-    select coalesce(array_agg(collection_id order by collection_id), '{}') into v_visible
-    from public.collection_memberships where item_id = r.id;
+    select coalesce(array_agg(collection_id order by collection_id), '{}'), coalesce(array_agg(id order by id), '{}')
+      into v_visible, v_src_ids from public.collection_memberships where item_id = r.id;
   elsif v_l.id is not null then
-    select coalesce(array_agg(collection_id order by collection_id), '{}') into v_visible
-    from public.collection_memberships where show_id = v_l.id;
+    select coalesce(array_agg(collection_id order by collection_id), '{}'), coalesce(array_agg(id order by id), '{}')
+      into v_visible, v_src_ids from public.collection_memberships where show_id = v_l.id;
   else
     v_visible := '{}';
+    v_src_ids := '{}';
   end if;
+  select coalesce(array_agg(id order by id), '{}') into v_tgt_ids from public.collection_memberships where show_id = v_t.id;
 
   if v_t.id is not null then
     if v_l.id is not null and v_t.status <> v_l.status then
@@ -580,7 +588,19 @@ begin
     on conflict (collection_id, show_id) where (show_id is not null) do nothing;
   end if;
   if r.is_film then
-    delete from public.collection_memberships where item_id = r.id; -- before it stops being a film
+    -- Before it stops being a film; exactly the memberships read above must go.
+    with d as (delete from public.collection_memberships where item_id = r.id returning id)
+    select coalesce(array_agg(id order by id), '{}') into v_gone from d;
+    if v_gone is distinct from v_src_ids then
+      raise exception 'match_conflict: the collections of this row changed while matching; try again' using errcode = '40001';
+    end if;
+  else
+    if exists (select 1 from unnest(v_src_ids) i where not exists (select 1 from public.collection_memberships m where m.id = i)) then
+      raise exception 'match_conflict: the collections of this row changed while matching; try again' using errcode = '40001';
+    end if;
+  end if;
+  if exists (select 1 from unnest(v_tgt_ids) i where not exists (select 1 from public.collection_memberships m where m.id = i)) then
+    raise exception 'match_conflict: the collections of the matched show changed while matching; try again' using errcode = '40001';
   end if;
 
   update public.watchlist_items set

@@ -7,10 +7,11 @@
 --     (original names, order and sources, none archived, no others);
 --   * the memberships are exactly what each mapped tab stores (no removed,
 --     added or cross-tab membership);
---   * the watch-with choices are exactly the bootstrap set for each owner: every
---     configured choice plus the values found on rows at bootstrap, plain (token =
---     label, not archived), created with the collections, in the bootstrap order;
---     and every row value is a choice.
+--   * every configured watch-with value is a choice, every other choice is a value
+--     used on one of its owner's rows, all plain (token = label, not archived) and
+--     in the canonical order; and every row value is a choice. (An unused choice
+--     that isn't configured is refused even if it came from the bootstrap: nothing
+--     trustworthy distinguishes it from one added later.)
 -- The check covers every owner of anything, so removing all of an owner's
 -- organization rows is refused too.
 -- If the check fails, nothing is changed: keep the new schema, or take a
@@ -39,15 +40,14 @@ begin
     union select user_id from public.personal_collections union select user_id from public.watch_with_choices
     union select user_id from public.collection_memberships;
 
-  -- Collections: exactly the four bootstrap collections per owner, unchanged and unarchived,
-  -- all created by the one bootstrap transaction (one shared created_at).
+  -- Collections: exactly the four bootstrap collections per owner (by their immutable
+  -- legacy_source, unique per owner), unchanged and unarchived.
   if exists (
     select 1 from rb_owners o
     where (select count(*) from public.personal_collections c where c.user_id = o.user_id) <> 4
        or (select count(*) from public.personal_collections c where c.user_id = o.user_id and c.archived_at is null
              and (c.legacy_source, c.name, c.sort_order) in
                  (('disney', 'Disney+', 1), ('sheridan', 'Sheridan', 2), ('90day', '90 Day', 3), ('truecrime', 'True Crime / Docs', 4))) <> 4
-       or (select count(distinct c.created_at) from public.personal_collections c where c.user_id = o.user_id) <> 1
   ) then
     raise exception 'rollback 3b refused: collections were renamed, archived, reordered, added or removed';
   end if;
@@ -76,25 +76,29 @@ begin
     raise exception 'rollback 3b refused: memberships differ from what the tabs store';
   end if;
 
-  -- Watch-with: per owner, exactly the bootstrap set — every configured choice plus the
-  -- values found on rows at bootstrap (legitimate history, used or not since) — plain
-  -- (token = label, not archived), created with the collections, in the bootstrap order
-  -- (configured order, then A–Z).
+  -- Watch-with, judged only by what the old model can show (no creation timestamps:
+  -- created_at can be written on insert and is kept by restore, so it proves nothing):
+  -- every configured value present; every other choice is a value used on one of its
+  -- owner's rows (the rows keep it, and the old app shows it as before); all plain
+  -- (token = label, not archived) and in the canonical relative order (configured
+  -- order, then A–Z). A choice whose only trace is its definition is refused, whether
+  -- bootstrap history or added through the API: its origin can't be proved.
   if exists (
     select 1 from rb_owners o
     where (select count(*) from public.watch_with_choices c where c.user_id = o.user_id and c.token = any(v_config)) <> cardinality(v_config)
   ) or exists (
     select 1 from public.watch_with_choices c
     where c.token <> c.label or c.archived_at is not null
-       or c.created_at is distinct from (select min(p.created_at) from public.personal_collections p where p.user_id = c.user_id)
+       or not (c.token = any(v_config)
+               or exists (select 1 from public.watchlist_items w where w.user_id = c.user_id and c.token = any(w.watch_with)))
   ) or exists (
     select 1 from (
-      select c.sort_order, row_number() over (partition by c.user_id
-        order by array_position(v_config, c.token) nulls last, lower(c.token), c.token) rn
+      select row_number() over (partition by c.user_id order by c.sort_order, c.token) by_sort,
+             row_number() over (partition by c.user_id order by array_position(v_config, c.token) nulls last, lower(c.token), c.token) canonical
       from public.watch_with_choices c) x
-    where x.sort_order <> x.rn
+    where x.by_sort <> x.canonical
   ) then
-    raise exception 'rollback 3b refused: watch-with choices were renamed, archived, reordered, added or removed';
+    raise exception 'rollback 3b refused: watch-with choices were renamed, archived, reordered or removed, or one is defined but used nowhere';
   end if;
   if exists (select 1 from public.watchlist_items w, unnest(coalesce(w.watch_with, '{}'::text[])) t
              where not exists (select 1 from public.watch_with_choices c where c.user_id = w.user_id and c.token = t)) then

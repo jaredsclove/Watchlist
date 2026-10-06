@@ -146,7 +146,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) try {
       return () => db.exec(`update public.watch_with_choices set label = token where sort_order = 3`); }],
     ['an archived watch-with choice', async () => { await db.exec(`update public.watch_with_choices set archived_at = now() where sort_order = 4`);
       return () => db.exec(`update public.watch_with_choices set archived_at = null where sort_order = 4`); }],
-    // Well ordered and plain, so only its later creation shows it isn't part of the bootstrap.
+    // Well ordered, plain, and given the bootstrap timestamp: only "defined but used nowhere" refuses it.
+    ['an added unused choice with the bootstrap timestamp', async () => { await db.exec(`insert into public.watch_with_choices (id, user_id, token, label, sort_order, created_at)
+      select '0e000000-0000-4000-8000-0000000000ab', user_id, 'ZZ Zebra', 'ZZ Zebra', (select count(*) + 1 from public.watch_with_choices), created_at
+      from public.personal_collections limit 1`);
+      return () => db.exec(`delete from public.watch_with_choices where id = '0e000000-0000-4000-8000-0000000000ab'`); }],
     ['a watch-with choice added later', async () => { await db.exec(`insert into public.watch_with_choices (id, user_id, token, label, sort_order)
       select '0e000000-0000-4000-8000-0000000000aa', user_id, 'ZZ Later', 'ZZ Later',
         (select count(*) + 1 from public.watch_with_choices) from public.personal_collections limit 1`);

@@ -312,6 +312,82 @@ begin
   if (r ->> 'show_id')::uuid <> v_show or pg_temp.colls_of_show(v_show) <> '90 Day' then raise exception 'in place %', r; end if;
 end $$ $b$);
 
+-- A membership removed while Match runs (what another session's removal would do between Match's read
+-- and its writes), injected by a test-only trigger that deletes the row named in zz.victim the first time
+-- Match inserts a membership. Single-session simulation of the effect, not a concurrency test.
+create or replace function pg_temp.zz_remove_victim() returns trigger language plpgsql as $$
+declare v text := coalesce(current_setting('zz.victim', true), '');
+begin
+  if v <> '' then
+    perform set_config('zz.victim', '', true);
+    delete from public.collection_memberships where id = v::uuid;
+  end if;
+  return null;
+end $$;
+
+select pg_temp.t('Match re-check: a film membership removed mid-match → match_conflict (40001), nothing changed', $b$ do $$
+declare v_film uuid; v_before text;
+begin
+  perform pg_temp.as_admin();
+  create trigger zz_victim after insert on public.collection_memberships for each row execute function pg_temp.zz_remove_victim();
+  perform pg_temp.as_anon();
+  v_film := pg_temp.legacy_film('truecrime', 'ZZ Race Film');
+  insert into public.collection_memberships (collection_id, item_id) values (pg_temp.coll('disney'), v_film);
+  v_before := pg_temp.content();
+  perform set_config('zz.victim', (select id::text from public.collection_memberships where item_id = v_film and collection_id = pg_temp.coll('disney')), true);
+  begin
+    perform public.match_tv_row(v_film, '{"tmdb_id": 990003300}', pg_temp.match_patch('ZZ Race Film', 990003300, 1), '{}');
+    raise exception 'match applied despite a removed membership';
+  exception when serialization_failure then
+    if sqlerrm not like 'match_conflict: the collections of this row changed%' then raise exception '%', sqlerrm; end if;
+  end;
+  if pg_temp.content() <> v_before then raise exception 'changed'; end if;
+end $$ $b$);
+
+select pg_temp.t('Match re-check: a legacy show membership removed mid-match (split) → 40001, nothing changed', $b$ do $$
+declare r jsonb; v_show uuid; v_s1 uuid; v_before text;
+begin
+  perform pg_temp.as_admin();
+  create trigger zz_victim after insert on public.collection_memberships for each row execute function pg_temp.zz_remove_victim();
+  perform pg_temp.as_anon();
+  r := public.add_tv_seasons('truecrime', '{"title": "ZZ Race Split", "show_key": "zz race split"}',
+    '[{"item_key": "zz race split|season 1", "title": "ZZ Race Split", "season": "Season 1", "date_sort": "2020-01-01"},
+      {"item_key": "zz race split|season 2", "title": "ZZ Race Split", "season": "Season 2", "date_sort": "2021-01-01"}]');
+  v_show := (r ->> 'show_id')::uuid;
+  insert into public.collection_memberships (collection_id, show_id) values (pg_temp.coll('sheridan'), v_show);
+  select id into v_s1 from public.watchlist_items where item_key = 'zz race split|season 1';
+  v_before := pg_temp.content();
+  perform set_config('zz.victim', (select id::text from public.collection_memberships where show_id = v_show and collection_id = pg_temp.coll('sheridan')), true);
+  begin
+    perform public.match_tv_row(v_s1, '{"tmdb_id": 990003301}', pg_temp.match_patch('ZZ Race Split', 990003301, 1), '{}');
+    raise exception 'split applied despite a removed membership';
+  exception when serialization_failure then null; end;
+  if pg_temp.content() <> v_before then raise exception 'changed'; end if;
+end $$ $b$);
+
+select pg_temp.t('Match re-check: a target show membership removed mid-match → 40001, nothing changed (no resurrection)', $b$ do $$
+declare r jsonb; v_t uuid; v_film uuid; v_before text;
+begin
+  perform pg_temp.as_admin();
+  -- Fired by Match's removal of the film's own memberships, which comes before its target re-check.
+  create trigger zz_victim after delete on public.collection_memberships for each row execute function pg_temp.zz_remove_victim();
+  perform pg_temp.as_anon();
+  r := public.add_tv_seasons('truecrime', '{"tmdb_id": 990003302, "title": "ZZ Race T", "show_key": "zz race t"}', jsonb_build_array(pg_temp.tv_season('zz race t', 'ZZ Race T', 1)));
+  v_t := (r ->> 'show_id')::uuid;
+  insert into public.collection_memberships (collection_id, show_id) values (pg_temp.coll('disney'), v_t);
+  v_film := pg_temp.legacy_film('truecrime', 'ZZ Race T');
+  insert into public.collection_memberships (collection_id, item_id) values (pg_temp.coll('disney'), v_film);
+  v_before := pg_temp.content();
+  -- The victim is the target's own Disney+ membership.
+  perform set_config('zz.victim', (select id::text from public.collection_memberships where show_id = v_t and collection_id = pg_temp.coll('disney')), true);
+  -- The film's collections are a subset of the target's, so there is no expansion; Match inserts (on conflict) and then re-checks.
+  begin
+    perform public.match_tv_row(v_film, '{"tmdb_id": 990003302}', pg_temp.match_patch('ZZ Race T', 990003302, 2), '{}');
+    raise exception 'match applied despite a removed target membership';
+  exception when serialization_failure then null; end;
+  if pg_temp.content() <> v_before then raise exception 'changed'; end if;
+end $$ $b$);
+
 select pg_temp.t('Match: the show-status block is unchanged (old reply shape, nothing written)', $b$ do $$
 declare r jsonb; v_row uuid; v_before text;
 begin
