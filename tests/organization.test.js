@@ -572,9 +572,9 @@ test('views without watch-with controls aren’t redrawn when choices arrive or 
   }
 });
 
-test('Match refused by a concurrent change (40001 re-check, deadlock victim, lock timeout): one clear message, nothing else written', async () => {
+test('Match refused by a concurrent change (40001 re-check, deadlock victim, lock or statement timeout): one clear message, nothing else written', async () => {
   for (const [code, message] of [['40001', 'match_conflict: the collections of this row changed while matching; try again'],
-    ['40P01', 'deadlock detected'], ['55P03', 'canceling statement due to lock timeout']]) {
+    ['40P01', 'deadlock detected'], ['55P03', 'canceling statement due to lock timeout'], ['57014', 'canceling statement due to statement timeout']]) {
     const legacy = film({ title: 'Race Doc', collection: 'truecrime', media_type: null, tmdb_id: null, item_key: 'race doc|film' });
     const app = await boot(all(legacy));
     app.ctx.switchTab('truecrime'); await settle();
