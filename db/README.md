@@ -13,7 +13,9 @@ production step needs explicit approval and a fresh validated backup first.
 | Clean-up C1 | the C1 block in `stages.sql` | Stop writing compatibility values |
 | Rollbacks | `rollback/final.sql` (C1: stage final → authoritative + re-project every show), `rollback/othertv_from_tv_shows.sql` (before reverting the app to a version whose Refresh reads `othertv_shows`, i.e. before `59dd6a1`), `stages.sql` (Phase 3), `rollback/phase2_and_1c.sql`, `rollback/phase1b.sql` + `phase0_restore_v1.sql` | Undo each phase, newest first |
 | Admin enrichment | `admin/tv_enrich.sql` (`private.tv_enrich_show`) | Adds an approved TMDB identity to one legacy built-in show and its seasons (dry run by default; admin only). The guard in `rpc.sql` makes later seasons of an enriched built-in show join it |
-| Future sign-in | `future/auth_switchover.sql` | Not part of this migration |
+| Stage 3b-1 | `phase3b_org.sql` (stage `final`) | Personal collections, memberships and watch-with choices; generated `watchlist_items.is_film`; the temporary membership trigger; `restore_backup` for format 3 only; `match_tv_row` keeping memberships (adds `p_expansion`); bootstrap from what each tab stores; self-verifying, one transaction |
+| Rollback 3b-1 | `rollback/phase3b.sql` | Refuses unless the organization is exactly what the old model holds; then removes it and puts back the previous `restore_backup` and `match_tv_row` |
+| Future sign-in | `future/auth_switchover.sql` | Not part of this migration (covers the Stage 3b-1 tables) |
 
 `test/` is for test projects and local runs only: `replica_schema.sql` (the
 pre-migration production schema), `supabase_shim.sql` (PGlite only), and the
@@ -31,4 +33,6 @@ Rehearsals:
   (set `EXPECT_FINGERPRINT=w/o/c` to compare with production's fingerprints).
 - Test project API: `TEST_SUPABASE_URL=… TEST_SUPABASE_KEY=<publishable> node tools/db-rehearsal-rest.mjs <command>`
   (refuses the production URL).
+- Stage 3b-1, local: `PGLITE_DIR=<dir> node tools/db-rehearsal-3b.mjs <format-2 backup.json>` (replica at stage final,
+  migration, `test/t_3b_org.sql`, refused replay, guarded rollback back to the identical catalog, re-apply, sign-in script).
 - Model vs reference on a test project: `node tools/tv-model-expectations.mjs <backup.json>` prints a self-check script.
