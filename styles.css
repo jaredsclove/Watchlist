@@ -511,6 +511,7 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   .browse-controls { display: block; width: 100%; }
   .browse-controls .view-toggle-btn { min-height: 44px; }
   .section-toggle { min-height: 44px; width: 100%; }
+  .expand-btn { min-width: 44px; min-height: 44px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0; } /* Browse show cards; the chevron stays 20px */
   .browse-toggles { width: 100%; margin-bottom: 8px; }
   .browse-toggles .view-toggle { flex: 1 1 150px; width: auto; margin-bottom: 0; }
   .browse-title { font-size: 16px; }
