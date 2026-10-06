@@ -35,6 +35,12 @@ begin
     'items', (select count(*) from public.watchlist_items), 'shows', (select count(*) from public.tv_shows),
     'people', (select count(*) from public.custom_collections), 'owned_items', (select count(*) from public.watchlist_items where user_id = v_from));
 
+  -- Personal organization (Stage 3b): its links include the owner, so they are
+  -- checked once at the end, after every table has moved.
+  if to_regclass('public.collection_memberships') is not null then
+    set constraints public.collection_memberships_collection_fkey, public.collection_memberships_show_fkey,
+      public.collection_memberships_item_fkey deferred;
+  end if;
   -- Shows first: the season link cascades the new owner to every linked season.
   update public.tv_shows set user_id = p_to where user_id = v_from;
   -- Then everything without a show: movies, films, unlinked rows.
@@ -43,9 +49,18 @@ begin
   if to_regclass('public.othertv_shows') is not null then
     update public.othertv_shows set user_id = p_to where user_id = v_from;
   end if;
+  if to_regclass('public.personal_collections') is not null then
+    update public.personal_collections set user_id = p_to where user_id = v_from;
+    update public.collection_memberships set user_id = p_to where user_id = v_from;
+    update public.watch_with_choices set user_id = p_to where user_id = v_from;
+    -- Every table has moved: check the organization links now.
+    set constraints public.collection_memberships_collection_fkey, public.collection_memberships_show_fkey,
+      public.collection_memberships_item_fkey immediate;
+  end if;
   update private.app_owner set bootstrap_owner_id = p_to;
 
-  foreach t in array array['watchlist_items', 'tv_shows', 'custom_collections', 'othertv_shows'] loop
+  foreach t in array array['watchlist_items', 'tv_shows', 'custom_collections', 'othertv_shows',
+                           'personal_collections', 'collection_memberships', 'watch_with_choices'] loop
     if to_regclass('public.' || t) is null then continue; end if;
     execute format('alter table public.%I add constraint %I foreign key (user_id) references auth.users (id) on delete restrict',
                    t, t || '_user_id_fkey');
@@ -59,6 +74,13 @@ begin
      or exists (select 1 from public.custom_collections where user_id = v_from)
      or (to_regclass('public.othertv_shows') is not null and exists (select 1 from public.othertv_shows where user_id = v_from)) then
     raise exception 'auth_move_owner: rows left on the bootstrap owner';
+  end if;
+  if to_regclass('public.personal_collections') is not null then
+    if exists (select 1 from public.personal_collections where user_id = v_from)
+       or exists (select 1 from public.collection_memberships where user_id = v_from)
+       or exists (select 1 from public.watch_with_choices where user_id = v_from) then
+      raise exception 'auth_move_owner: organization rows left on the bootstrap owner';
+    end if;
   end if;
   return jsonb_build_object('from', v_from, 'to', p_to, 'counts', v_after);
 end $$;
@@ -79,7 +101,8 @@ begin
   grant execute on function private.current_owner_id() to authenticated;
   drop table private.app_owner;
 
-  foreach t in array array['watchlist_items', 'tv_shows', 'custom_collections', 'othertv_shows'] loop
+  foreach t in array array['watchlist_items', 'tv_shows', 'custom_collections', 'othertv_shows',
+                           'personal_collections', 'collection_memberships', 'watch_with_choices'] loop
     if to_regclass('public.' || t) is null then continue; end if;
     foreach p in array array['anon_select', 'anon_insert', 'anon_update', 'anon_delete'] loop
       execute format('drop policy if exists %I on public.%I', p, t);
