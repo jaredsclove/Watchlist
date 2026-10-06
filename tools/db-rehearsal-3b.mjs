@@ -108,21 +108,65 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) try {
   ok((await q(CONTENT))[0].c === contentBefore && JSON.stringify((await q(ORG))[0]) === JSON.stringify(org), 'self-checks left nothing behind');
 
   section('rollback');
-  await anon(`delete from public.collection_memberships where id = (select id from public.collection_memberships limit 1)`);
-  try { await db.exec(sql('db/rollback/phase3b.sql')); ok(false, 'rollback refused after a membership change'); }
-  catch (e) { ok(/rollback 3b refused/.test(e.message), 'rollback refuses after a removed membership; nothing changed', e.message); await db.exec('rollback').catch(() => {}); }
-  ok(!!(await q(`select to_regclass('public.personal_collections') r`))[0].r, 'organization tables still there after the refusal');
-  // Put the membership back the way the bootstrap would, then roll back for real.
-  await db.exec(`insert into public.collection_memberships (user_id, collection_id, show_id)
-    select s.user_id, c.id, s.id from public.tv_shows s join public.personal_collections c on c.user_id = s.user_id and c.legacy_source = s.collection
-    where not exists (select 1 from public.collection_memberships m where m.show_id = s.id and m.collection_id = c.id)`);
-  await db.exec(`insert into public.collection_memberships (user_id, collection_id, item_id)
-    select w.user_id, c.id, w.id from public.watchlist_items w join public.personal_collections c on c.user_id = w.user_id and c.legacy_source = w.collection
-    where w.is_film and not exists (select 1 from public.collection_memberships m where m.item_id = w.id and m.collection_id = c.id)`);
-  await anon(`update public.personal_collections set name = 'ZZ' where legacy_source = 'disney'`);
-  try { await db.exec(sql('db/rollback/phase3b.sql')); ok(false, 'rollback refused after a rename'); }
-  catch (e) { ok(/rollback 3b refused/.test(e.message), 'rollback refuses after a renamed collection', e.message); await db.exec('rollback').catch(() => {}); }
-  await anon(`update public.personal_collections set name = 'Disney+' where legacy_source = 'disney'`);
+  // Each change below can't be represented by the old model, so the rollback must refuse it and change
+  // nothing; the change is then undone exactly before the next case.
+  const ORG_STATE = `select concat_ws('/',
+    (select md5(coalesce(string_agg((to_jsonb(t))::text, '|' order by t.id), '')) from public.personal_collections t),
+    (select md5(coalesce(string_agg((to_jsonb(t) - 'item_is_film')::text, '|' order by t.id), '')) from public.collection_memberships t),
+    (select md5(coalesce(string_agg((to_jsonb(t))::text, '|' order by t.id), '')) from public.watch_with_choices t)) h`;
+  const orgBefore = (await q(ORG_STATE))[0].h;
+  const unusedConfig = (await q(`select token from public.watch_with_choices c where c.sort_order <= 4
+    and not exists (select 1 from public.watchlist_items w where c.token = any(w.watch_with)) order by sort_order limit 1`))[0]?.token;
+  const saved = async (t, cols, where = 'true') => (await q(`select ${cols} from public.${t} where ${where}`));
+  const reinsert = async (t, rows) => { for (const r of rows) {
+    const cols = Object.keys(r);
+    await db.query(`insert into public.${t} (${cols.join(', ')}) values (${cols.map((_, i) => `$${i + 1}`).join(', ')})`, cols.map(c => r[c])); } };
+  const MC = 'id, user_id, collection_id, show_id, item_id, created_at', PC = 'id, user_id, name, legacy_source, sort_order, archived_at, created_at',
+    WC = 'id, user_id, token, label, sort_order, archived_at, created_at';
+  const cases = [
+    ['a removed membership', async () => { const m = await saved('collection_memberships', MC, `id = (select id from public.collection_memberships order by id limit 1)`);
+      await db.query(`delete from public.collection_memberships where id = $1`, [m[0].id]); return () => reinsert('collection_memberships', m); }],
+    ['a membership in another tab’s collection', async () => { await db.exec(`insert into public.collection_memberships (id, user_id, collection_id, show_id)
+      select '0d000000-0000-4000-8000-0000000000aa', s.user_id, (select id from public.personal_collections where legacy_source = 'sheridan'), s.id
+      from public.tv_shows s where s.collection = 'othertv' order by s.id limit 1`);
+      return () => db.exec(`delete from public.collection_memberships where id = '0d000000-0000-4000-8000-0000000000aa'`); }],
+    ['a renamed collection', async () => { await db.exec(`update public.personal_collections set name = 'ZZ' where legacy_source = 'disney'`);
+      return () => db.exec(`update public.personal_collections set name = 'Disney+' where legacy_source = 'disney'`); }],
+    ['an archived collection', async () => { await db.exec(`update public.personal_collections set archived_at = now() where legacy_source = '90day'`);
+      return () => db.exec(`update public.personal_collections set archived_at = null where legacy_source = '90day'`); }],
+    ['an added collection', async () => { await db.exec(`insert into public.personal_collections (id, user_id, name, sort_order)
+      select '0c000000-0000-4000-8000-0000000000aa', user_id, 'ZZ Extra', 9 from public.personal_collections limit 1`);
+      return () => db.exec(`delete from public.personal_collections where id = '0c000000-0000-4000-8000-0000000000aa'`); }],
+    ['all of an owner’s collections removed', async () => { const m = await saved('collection_memberships', MC), c = await saved('personal_collections', PC);
+      await db.exec(`delete from public.collection_memberships; delete from public.personal_collections`);
+      return async () => { await reinsert('personal_collections', c); await reinsert('collection_memberships', m); }; }],
+    ['reordered watch-with choices', async () => { await db.exec(`update public.watch_with_choices set sort_order = case sort_order when 1 then 2 when 2 then 1 end where sort_order in (1, 2)`);
+      return () => db.exec(`update public.watch_with_choices set sort_order = case sort_order when 1 then 2 when 2 then 1 end where sort_order in (1, 2)`); }],
+    ['a relabelled watch-with choice', async () => { await db.exec(`update public.watch_with_choices set label = 'ZZ Label' where sort_order = 3`);
+      return () => db.exec(`update public.watch_with_choices set label = token where sort_order = 3`); }],
+    ['an archived watch-with choice', async () => { await db.exec(`update public.watch_with_choices set archived_at = now() where sort_order = 4`);
+      return () => db.exec(`update public.watch_with_choices set archived_at = null where sort_order = 4`); }],
+    // Well ordered and plain, so only its later creation shows it isn't part of the bootstrap.
+    ['a watch-with choice added later', async () => { await db.exec(`insert into public.watch_with_choices (id, user_id, token, label, sort_order)
+      select '0e000000-0000-4000-8000-0000000000aa', user_id, 'ZZ Later', 'ZZ Later',
+        (select count(*) + 1 from public.watch_with_choices) from public.personal_collections limit 1`);
+      return () => db.exec(`delete from public.watch_with_choices where id = '0e000000-0000-4000-8000-0000000000aa'`); }],
+    ['an owner with saved rows but no organization', async () => { await db.exec(`insert into public.watchlist_items
+      (id, user_id, collection, item_key, title, season, date_sort, media_type, tmdb_id)
+      values ('aa000000-0000-4000-8000-0000000000aa', '99999999-0000-4000-8000-000000000001', 'movies', 'zz o|film', 'ZZ O', 'Film', '2020-01-01', 'movie', 990004001)`);
+      return () => db.exec(`delete from public.watchlist_items where id = 'aa000000-0000-4000-8000-0000000000aa'`); }],
+    ...(unusedConfig ? [[`an unused configured choice (${unusedConfig}) deleted`, async () => { const w = await saved('watch_with_choices', WC, `token = '${unusedConfig}'`);
+      await db.exec(`delete from public.watch_with_choices where token = '${unusedConfig}'`); return () => reinsert('watch_with_choices', w); }]] : [])
+  ];
+  for (const [label, mutate] of cases) {
+    const undo = await mutate();
+    let refused = false, msg = '';
+    try { await db.exec(sql('db/rollback/phase3b.sql')); } catch (e) { refused = /rollback 3b refused/.test(e.message); msg = e.message; await db.exec('rollback').catch(() => {}); }
+    const stillThere = !!(await q(`select to_regclass('public.personal_collections') r`))[0].r;
+    await undo();
+    ok(refused && stillThere && (await q(ORG_STATE))[0].h === orgBefore, `rollback refuses ${label}; nothing changed`, msg);
+  }
+  ok((await q(CONTENT))[0].c === contentBefore && (await q(ORG_STATE))[0].h === orgBefore, 'after the refusal cases the data and organization equal the bootstrap');
   await db.exec(sql('db/rollback/phase3b.sql'));
   const catalogAfter = (await q(CATALOG))[0].c;
   if (catalogAfter !== catalogBefore) {

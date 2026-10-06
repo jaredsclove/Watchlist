@@ -7,8 +7,12 @@
 --     (original names, order and sources, none archived, no others);
 --   * the memberships are exactly what each mapped tab stores (no removed,
 --     added or cross-tab membership);
---   * every watch-with choice is a plain value (token = label, not archived)
---     that is configured or used on a row, and every row value is a choice.
+--   * the watch-with choices are exactly the bootstrap set for each owner: every
+--     configured choice plus the values found on rows at bootstrap, plain (token =
+--     label, not archived), created with the collections, in the bootstrap order;
+--     and every row value is a choice.
+-- The check covers every owner of anything, so removing all of an owner's
+-- organization rows is refused too.
 -- If the check fails, nothing is changed: keep the new schema, or take a
 -- format 3 backup and an explicit decision before any lossy rollback.
 --
@@ -29,37 +33,68 @@ lock table public.tv_shows, public.watchlist_items, public.personal_collections,
 do $$
 declare v_config text[] := array['Alone', 'Suzanne', 'Rina', 'Whole Family'];
 begin
+  -- Every owner of anything, including an owner whose organization rows were all removed.
+  create temporary table rb_owners on commit drop as
+    select user_id from public.watchlist_items union select user_id from public.tv_shows
+    union select user_id from public.personal_collections union select user_id from public.watch_with_choices
+    union select user_id from public.collection_memberships;
+
+  -- Collections: exactly the four bootstrap collections per owner, unchanged and unarchived,
+  -- all created by the one bootstrap transaction (one shared created_at).
   if exists (
-       select 1 from public.personal_collections c
-       where c.archived_at is not null or c.legacy_source is null
-          or (c.legacy_source, c.name, c.sort_order) not in
-             (('disney', 'Disney+', 1), ('sheridan', 'Sheridan', 2), ('90day', '90 Day', 3), ('truecrime', 'True Crime / Docs', 4)))
-     or exists (select user_id from public.personal_collections group by user_id having count(*) <> 4) then
-    raise exception 'rollback 3b refused: collections were renamed, archived, reordered or added';
+    select 1 from rb_owners o
+    where (select count(*) from public.personal_collections c where c.user_id = o.user_id) <> 4
+       or (select count(*) from public.personal_collections c where c.user_id = o.user_id and c.archived_at is null
+             and (c.legacy_source, c.name, c.sort_order) in
+                 (('disney', 'Disney+', 1), ('sheridan', 'Sheridan', 2), ('90day', '90 Day', 3), ('truecrime', 'True Crime / Docs', 4))) <> 4
+       or (select count(distinct c.created_at) from public.personal_collections c where c.user_id = o.user_id) <> 1
+  ) then
+    raise exception 'rollback 3b refused: collections were renamed, archived, reordered, added or removed';
   end if;
+
+  -- Memberships: exactly what each mapped tab stores, derived from the fixed tab mapping
+  -- (not from the remaining collection rows), in both directions.
   if exists (
-    (select c.id, s.id, null::uuid from public.tv_shows s join public.personal_collections c
-       on c.user_id = s.user_id and c.legacy_source = s.collection
+    (select s.user_id, s.collection, s.id, null::uuid from public.tv_shows s
+       where s.collection in ('disney', 'sheridan', '90day', 'truecrime')
      union all
-     select c.id, null::uuid, w.id from public.watchlist_items w join public.personal_collections c
-       on c.user_id = w.user_id and c.legacy_source = w.collection where w.is_film)
-    except select collection_id, show_id, item_id from public.collection_memberships
-  ) or exists (
-    select collection_id, show_id, item_id from public.collection_memberships
+     select w.user_id, w.collection, null::uuid, w.id from public.watchlist_items w
+       where w.is_film and w.collection in ('disney', 'sheridan', '90day', 'truecrime'))
     except
-    (select c.id, s.id, null::uuid from public.tv_shows s join public.personal_collections c
-       on c.user_id = s.user_id and c.legacy_source = s.collection
+    select m.user_id, c.legacy_source, m.show_id, m.item_id from public.collection_memberships m
+      join public.personal_collections c on c.id = m.collection_id
+  ) or exists (
+    select m.user_id, c.legacy_source, m.show_id, m.item_id from public.collection_memberships m
+      left join public.personal_collections c on c.id = m.collection_id
+    except
+    (select s.user_id, s.collection, s.id, null::uuid from public.tv_shows s
+       where s.collection in ('disney', 'sheridan', '90day', 'truecrime')
      union all
-     select c.id, null::uuid, w.id from public.watchlist_items w join public.personal_collections c
-       on c.user_id = w.user_id and c.legacy_source = w.collection where w.is_film)
+     select w.user_id, w.collection, null::uuid, w.id from public.watchlist_items w
+       where w.is_film and w.collection in ('disney', 'sheridan', '90day', 'truecrime'))
   ) then
     raise exception 'rollback 3b refused: memberships differ from what the tabs store';
   end if;
-  if exists (select 1 from public.watch_with_choices c
-             where c.token <> c.label or c.archived_at is not null
-                or not (c.token = any(v_config) or exists (select 1 from public.watchlist_items w
-                        where w.user_id = c.user_id and c.token = any(w.watch_with)))) then
-    raise exception 'rollback 3b refused: watch-with choices were renamed, archived or added';
+
+  -- Watch-with: per owner, exactly the bootstrap set — every configured choice plus the
+  -- values found on rows at bootstrap (legitimate history, used or not since) — plain
+  -- (token = label, not archived), created with the collections, in the bootstrap order
+  -- (configured order, then A–Z).
+  if exists (
+    select 1 from rb_owners o
+    where (select count(*) from public.watch_with_choices c where c.user_id = o.user_id and c.token = any(v_config)) <> cardinality(v_config)
+  ) or exists (
+    select 1 from public.watch_with_choices c
+    where c.token <> c.label or c.archived_at is not null
+       or c.created_at is distinct from (select min(p.created_at) from public.personal_collections p where p.user_id = c.user_id)
+  ) or exists (
+    select 1 from (
+      select c.sort_order, row_number() over (partition by c.user_id
+        order by array_position(v_config, c.token) nulls last, lower(c.token), c.token) rn
+      from public.watch_with_choices c) x
+    where x.sort_order <> x.rn
+  ) then
+    raise exception 'rollback 3b refused: watch-with choices were renamed, archived, reordered, added or removed';
   end if;
   if exists (select 1 from public.watchlist_items w, unnest(coalesce(w.watch_with, '{}'::text[])) t
              where not exists (select 1 from public.watch_with_choices c where c.user_id = w.user_id and c.token = t)) then
@@ -71,11 +106,13 @@ drop trigger org_auto_membership_show on public.tv_shows;
 drop trigger org_auto_membership_film on public.watchlist_items;
 drop trigger org_carry_membership_to_film on public.watchlist_items;
 drop trigger org_check_watch_with on public.watchlist_items;
+drop trigger org_guard_watch_with_choice on public.watch_with_choices;
 drop table public.collection_memberships;
 drop table public.personal_collections;
 drop table public.watch_with_choices;
 drop function private.org_auto_membership();
 drop function private.org_check_watch_with();
+drop function private.org_guard_watch_with_choice();
 drop function private.org_bootstrap(uuid);
 drop index public.watchlist_items_id_owner_film_key;
 alter table public.watchlist_items drop column is_film;

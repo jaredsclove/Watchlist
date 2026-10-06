@@ -160,22 +160,51 @@ create trigger org_carry_membership_to_film after update of show_id on public.wa
   for each row when (old.show_id is not null and new.show_id is null and new.is_film)
   execute function private.org_auto_membership();
 
--- Every watch-with token on a row must be one of its owner's choices.
+-- Every watch-with token on a row must be one of its owner's choices (no NULL
+-- element). The choices it relies on are locked FOR KEY SHARE, so a concurrent
+-- delete of one waits for this transaction and then sees the row that uses it
+-- (and refuses); a delete that committed first leaves fewer locked choices than
+-- tokens, and this write is refused.
 create function private.org_check_watch_with() returns trigger
 language plpgsql security invoker set search_path = '' as $$
-declare v_bad text;
+declare v_wanted int; v_found int; v_bad text;
 begin
-  select t into v_bad from unnest(coalesce(new.watch_with, '{}'::text[])) t
-  where not exists (select 1 from public.watch_with_choices c where c.user_id = new.user_id and c.token = t)
-  limit 1;
-  if v_bad is not null then
-    raise exception 'watch_with_invalid: "%" is not one of your watch-with choices', v_bad using errcode = '23514';
+  if new.watch_with is null or cardinality(new.watch_with) = 0 then return new; end if;
+  if array_position(new.watch_with, null) is not null then
+    raise exception 'watch_with_invalid: a watch-with value is empty' using errcode = '23514';
+  end if;
+  select count(distinct t) into v_wanted from unnest(new.watch_with) t;
+  select count(*) into v_found from (
+    select 1 from public.watch_with_choices c where c.user_id = new.user_id and c.token = any(new.watch_with) for key share
+  ) x;
+  if v_found <> v_wanted then
+    select t into v_bad from unnest(new.watch_with) t
+    where not exists (select 1 from public.watch_with_choices c where c.user_id = new.user_id and c.token = t) limit 1;
+    raise exception 'watch_with_invalid: "%" is not one of your watch-with choices', coalesce(v_bad, '?') using errcode = '23514';
   end if;
   return new;
 end $$;
 revoke all on function private.org_check_watch_with() from public;
 create trigger org_check_watch_with before insert or update of watch_with on public.watchlist_items
   for each row execute function private.org_check_watch_with();
+
+-- A choice still used on one of its owner's rows can't be deleted or have its
+-- token changed (the reverse of the check above; restore deletes rows first).
+create function private.org_guard_watch_with_choice() returns trigger
+language plpgsql security invoker set search_path = '' as $$
+declare v_n int;
+begin
+  if tg_op = 'UPDATE' and new.token = old.token then return new; end if;
+  select count(*) into v_n from public.watchlist_items w where w.user_id = old.user_id and old.token = any(w.watch_with);
+  if v_n > 0 then
+    raise exception 'watch_with_in_use: "%" is still used on % saved item(s); remove it from them first', old.token, v_n
+      using errcode = '23503';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end $$;
+revoke all on function private.org_guard_watch_with_choice() from public;
+create trigger org_guard_watch_with_choice before delete or update of token on public.watch_with_choices
+  for each row execute function private.org_guard_watch_with_choice();
 
 -- ── Bootstrap: the existing organization, for every owner with rows ──
 -- Collections and memberships come from what is stored in each tab, never from
@@ -483,6 +512,17 @@ begin
   end if;
   select * into v_t from public.tv_shows
   where user_id = v_owner and collection = r.collection and tmdb_id = v_tmdb for update;
+  -- Fix what the decision depends on for this transaction, in the usual order
+  -- (shows, then the row, then memberships): the row itself, and the memberships
+  -- (a short table lock: membership writes from other sessions wait until this
+  -- commits; a change committed before it is read below). So nothing removed
+  -- meanwhile is transferred, nothing added meanwhile is dropped, and the expansion
+  -- confirmed below is exactly the one applied. Reads are not blocked.
+  perform set_config('lock_timeout', '5s', true);
+  select * into r from public.watchlist_items
+  where id = r.id and tmdb_id is null and media_type is null and season_number is null for update;
+  if r.id is null then raise exception 'match_conflict: the row changed; try again' using errcode = '40001'; end if;
+  lock table public.collection_memberships in share row exclusive mode;
 
   -- The collections the row is visible in now: a film's own, or its show's.
   if r.is_film then

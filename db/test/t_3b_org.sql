@@ -415,6 +415,38 @@ begin
   if (select watch_with from public.watchlist_items where id = v) <> '{"Rina"}' then raise exception 'token'; end if;
 end $$ $b$);
 
+select pg_temp.t('watch-with: a NULL value in a row''s list is refused (on insert and update)', $b$ do $$
+declare v uuid;
+begin
+  perform pg_temp.as_anon();
+  begin
+    insert into public.watchlist_items (collection, item_key, title, season, date_sort, media_type, tmdb_id, watch_with)
+    values ('movies', 'zz n|film', 'ZZ N', 'Film', '2020-01-01', 'movie', 990003200, array['Rina', null]::text[]);
+    raise exception 'NULL accepted on insert';
+  exception when check_violation then null; end;
+  insert into public.watchlist_items (collection, item_key, title, season, date_sort, media_type, tmdb_id)
+  values ('movies', 'zz n2|film', 'ZZ N2', 'Film', '2020-01-01', 'movie', 990003201) returning id into v;
+  begin update public.watchlist_items set watch_with = array[null]::text[] where id = v; raise exception 'NULL accepted on update';
+  exception when check_violation then null; end;
+end $$ $b$);
+
+select pg_temp.t('watch-with: a choice still used on a row can''t be deleted (or have its token changed); an unused one can', $b$ do $$
+declare v uuid;
+begin
+  perform pg_temp.as_anon();
+  insert into public.watchlist_items (collection, item_key, title, season, date_sort, media_type, tmdb_id, watch_with)
+  values ('movies', 'zz u|film', 'ZZ U', 'Film', '2020-01-01', 'movie', 990003210, '{"Whole Family"}') returning id into v;
+  begin delete from public.watch_with_choices where token = 'Whole Family'; raise exception 'used choice deleted';
+  exception when foreign_key_violation then null; end;
+  perform pg_temp.as_admin();
+  begin update public.watch_with_choices set token = 'WF' where token = 'Whole Family'; raise exception 'used token changed';
+  exception when foreign_key_violation then null; end;
+  perform pg_temp.as_anon();
+  update public.watchlist_items set watch_with = '{}' where id = v;
+  delete from public.watch_with_choices where token = 'Whole Family';
+  if exists (select 1 from public.watch_with_choices where token = 'Whole Family') then raise exception 'unused choice not deleted'; end if;
+end $$ $b$);
+
 -- ── Restore ──
 select pg_temp.t('restore v3 round trip: exclusions, an archived collection, a renamed label and a cross-tab member come back exactly; the trigger''s additions are replaced', $b$ do $$
 declare b jsonb; v_show uuid; v_expected text;
