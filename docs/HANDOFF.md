@@ -6,7 +6,7 @@
 >
 > **This repo is public.** Keep this file free of personal details, machine-specific paths, backup locations and infrastructure identifiers that the app doesn't already publish.
 >
-> **Last updated 2026-10-05**, after **TMDB identity enrichment of 81 Disney+ shows** (after the 8 Sheridan shows) and the follow-up: owner-approved audit exceptions, the Tales of the Jedi S2 skip, the **Proud Family S2 date correction (completed)**, the **TMDB enrichment of 6 90 Day shows (completed)**, the **TMDB enrichment of The Proud Family: Louder and Prouder (completed)**, the Rebels / Acolyte / Visions enrichment, the **Love in Paradise S3 date correction (completed)** and the **TMDB enrichment of The Single Life and Love in Paradise (completed)** (§18) on the completed first-class TV-show model (stage `final`). A TV show's status lives on its show (`tv_shows.status`); seasons hold watched, skipped, identity, dates and metadata. Enrichment adds identity only. Further enrichment (Visions, Rebels, The Acolyte, The Single Life, held 90 Day/Disney+/Sheridan cases) and the future sign-in (Auth/RLS) project each need separate approval.
+> **Last updated 2026-10-05**, after **TMDB identity enrichment of 81 Disney+ shows** (after the 8 Sheridan shows) and the follow-up: owner-approved audit exceptions, the Tales of the Jedi S2 skip, the **Proud Family S2 date correction (completed)**, the **TMDB enrichment of 6 90 Day shows (completed)**, the **TMDB enrichment of The Proud Family: Louder and Prouder (completed)**, the Rebels / Acolyte / Visions enrichment, the **Love in Paradise S3 date correction (completed)** the **TMDB enrichment of The Single Life and Love in Paradise (completed)** and the **TMDB enrichment of Dutton Ranch (completed)** (§18) on the completed first-class TV-show model (stage `final`). A TV show's status lives on its show (`tv_shows.status`); seasons hold watched, skipped, identity, dates and metadata. Enrichment adds identity only. Further enrichment (Visions, Rebels, The Acolyte, The Single Life, held 90 Day/Disney+/Sheridan cases) and the future sign-in (Auth/RLS) project each need separate approval.
 
 ---
 
@@ -64,7 +64,7 @@ TV tab order: **Currently Watching · Coming Soon │ Disney+ · 90 Day · Sheri
 
 - **Working copy:** the local Git checkout of this repo. **Never work from loose copies outside the checkout** (such as files in a downloads folder).
 - **Branch:** `main` is the source of truth. The deployed Pages site must match it byte-for-byte.
-- **Current HEAD:** the documentation commit **"Update handoff after the Single Life and Love in Paradise TMDB enrichment"**, the commit that last updated this file. Its parent is `1e731e5` (handoff: Love in Paradise S3 date correction) ← `2186a11` (`config.js`: Love in Paradise S3 date, §18) ← `34b8150` (handoff: Rebels, Acolyte and Visions TMDB enrichment) ← `0c3c434` (database: enriched-show guard fix for existing nonstandard labels, `db/rpc.sql` + `db/test/t_enrich.sql`; no app files) ← `76016c1` (handoff: Proud Family TMDB enrichment) ← `35d7895` ← `71cc336` ← `c1893a1`. (A file can't contain its own commit hash; run `git log -1` to see it.)
+- **Current HEAD:** the documentation commit **"Update handoff after the Dutton Ranch TMDB enrichment"**, the commit that last updated this file. Its parent is `1abab86` (handoff: Single Life and Love in Paradise TMDB enrichment) ← `1e731e5` (handoff: Love in Paradise S3 date correction) ← `2186a11` (`config.js`: Love in Paradise S3 date, §18) ← `34b8150` (handoff: Rebels, Acolyte and Visions TMDB enrichment) ← `0c3c434` (database: enriched-show guard fix for existing nonstandard labels, `db/rpc.sql` + `db/test/t_enrich.sql`; no app files) ← `76016c1` (handoff: Proud Family TMDB enrichment) ← `35d7895` ← `71cc336` ← `c1893a1`. (A file can't contain its own commit hash; run `git log -1` to see it.)
   - The **last app-code commit** is `2186a11`, a one-line `config.js` change (Love in Paradise S3 date, §18), **deployed and verified** on 2026-10-05 (all 18 app files byte-identical on Pages; 14 versioned assets 200). The previous app-code commit is `24dc443`, a one-line `config.js` change (Proud Family S2 date), pushed with `1513aea` after the 2026-10-05 GitHub Actions outage; before that `4550060`, "Explain seasons of a TMDB-matched built-in show that need review". Check `git status` for this commit.
   - The working tree is clean.
   - All 18 app files were verified byte-identical on GitHub Pages at `4550060` on 2026-10-05, and all 14 versioned assets returned 200 with the token `20261005-enrich1`.
@@ -938,10 +938,10 @@ grep -hoE '^(async )?function [A-Za-z0-9_]+' *.js \
 ```bash
 # from the repo root
 node tools/identity-audit.mjs
-# last result (2026-10-05, after the Single Life / Love in Paradise enrichment): 719 rows fetched (642 identified)
-#         A 593 / B 49 / C 0 / D 0, RESULT: PASS
-#         B rows: kept date drifts within 31 days, title-suffix/punctuation drift, 7 provisional
-#         future Disney+ seasons and the 6 owner-approved exceptions, all "applied" (§16, §17, §18).
+# last result (2026-10-05, after the Dutton Ranch enrichment): 719 rows fetched (644 identified)
+#         A 594 / B 50 / C 0 / D 0, RESULT: PASS
+#         B rows: kept date drifts within 31 days, title-suffix/punctuation drift, 8 provisional
+#         future seasons (7 Disney+, Dutton Ranch S2) and the 6 owner-approved exceptions, all "applied" (§16, §17, §18).
 #         Counts change with normal use: compare against a fresh run, not these numbers.
 # exit codes: 0 = pass, 1 = C/D rows found, 2 = aborted (no result)
 ```
@@ -1018,7 +1018,7 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 - **Outage simulation:** Refresh shows and Refresh collections say "Couldn't check TMDB right now… Nothing was changed" (never "up to date").
 - **Mobile 375 px:** the "⋯" popover on a movie card opens inside that card.
 - **Derived views:** see the 2026-09-30 checklist in §15 (startup GET-only; TBA up-next season without Mark watched; Up to date section; Coming Soon today row and TBA section; no films; Movies → TV).
-- **After any temporary test:** all fingerprints equal the session's starting baseline, and the audit equals the session's starting audit (593 A / 49 B / 0 C / 0 D as of 2026-10-05).
+- **After any temporary test:** all fingerprints equal the session's starting baseline, and the audit equals the session's starting audit (594 A / 50 B / 0 C / 0 D as of 2026-10-05).
 
 ---
 
@@ -1027,7 +1027,7 @@ Use page memory, with writes blocked, unless a write is explicitly approved.
 ```text
 Repo:                     the local Git checkout of this repo (github.com/jaredsclove/Watchlist)
 Branch:                   main (in sync with origin/main), working tree clean
-HEAD:                     "Update handoff after the Single Life and Love in Paradise TMDB enrichment" (docs-only; parent 1e731e5 ← 2186a11)
+HEAD:                     "Update handoff after the Dutton Ranch TMDB enrichment" (docs-only; parent 1abab86 ← 1e731e5)
 Last database commit:     0c3c434  enriched-show guard fix (db/rpc.sql + db/test/t_enrich.sql), installed in production 2026-10-05
 Last app-code commit:     2186a11  config.js: Love in Paradise S3 date (deployed and verified on Pages, 2026-10-05)
 Tracked files:            73 (18 app, 1 doc, 27 in db/, 18 in tests/, 8 in tools/, .gitignore)
@@ -1038,8 +1038,8 @@ Cache token:              ?v=20261005-enrich1 (13 JS files + styles.css); config
 watchlist_items:          719 rows
 othertv_shows:             64 rows
 custom_collections:         1 row   ("Quentin Tarantino", tmdb_person_id 138, director)
-tv_shows:                 197 rows  (disney 103, othertv 62, 90day 15, sheridan 14, truecrime 3; 166 identified:
-                          disney 85, othertv 62, sheridan 8, 90day 8, truecrime 3)
+tv_shows:                 197 rows  (disney 103, othertv 62, 90day 15, sheridan 14, truecrime 3; 167 identified:
+                          disney 85, othertv 62, sheridan 9, 90day 8, truecrime 3)
                           show status (authoritative): confirmed (On List) 138, pending 35, watching 10, skipped 10,
                           complete 2, maybe 1, highpriority 0
 TV seasons linked:        642 of 642 TV rows; 77 non-TV rows (films) unlinked; 39 seasons skipped = true (Tales of the Jedi S2 added 2026-10-05); 126 rows watched
@@ -1057,15 +1057,15 @@ Database:                 stage final (§5, since 2026-10-05 14:32 UTC). user_id
 
 Rows per tab:             disney 182, 90day 72, sheridan 42, othertv 355, truecrime 7 (3 TV + 4 films), movies 61
 TV rows in derived views: 642 (all linked to a show)
-Unidentified rows:        77 (static DEFAULTs not enriched; 0 manual dynamic rows)
+Unidentified rows:        75 (static DEFAULTs not enriched; 0 manual dynamic rows)
 
-Identity audit:           719 rows, 642 identified → 593 A / 49 B / 0 C / 0 D, PASS (node tools/identity-audit.mjs, 2026-10-05)
+Identity audit:           719 rows, 644 identified → 594 A / 50 B / 0 C / 0 D, PASS (node tools/identity-audit.mjs, 2026-10-05)
                           B = The Traitors S5 and Marshals S1 (one-day drifts, kept) + 90 Day Fiancé S4 and The Last Resort S1
                           (stored dates kept, within 31 days) + Proud Family S1 and S3 (one-day differences, kept) + 35 Disney+ seasons: stored dates
                           within 31 days, title differences such as "(Netflix)"/"(2008)" suffixes or "–" vs "-", and 7
                           provisional future seasons (Alien: Earth S2, Daredevil: Born Again S3, Marvel Zombies S2,
                           Shōgun S2, Maul – Shadow Lord S2, X-Men '97 S3, Your Friendly Neighborhood Spider-Man S2)
-                          + Star Wars Rebels S1 (10-day difference, kept) + Love in Paradise S4 (7-day difference, kept)
+                          + Dutton Ranch S2 (provisional future season; Sheridan) + Star Wars Rebels S1 (10-day difference, kept) + Love in Paradise S4 (7-day difference, kept)
                           + 6 owner-approved exceptions (§16): Rebels S2, The Acolyte S1, Star Wars: Visions Volume 1/2/3,
                           The Single Life S1
 Collection consistency:   42 rows / 16 TMDB collections / 0 problems (last verified 2026-09-26)
@@ -1075,8 +1075,8 @@ Backups:                  kept outside the repo. Sheridan enrichment: before 18:
                           21:35 UTC, after 21:38 UTC. Proud Family S2 correction: before 21:47, after 21:48 UTC.
                           Proud Family enrichment: before 21:53, after 21:54 UTC. Guard-fix install: before 22:24, after 22:27 UTC.
                           Rebels/Acolyte/Visions enrichment: before 22:31, after 22:36 UTC. Love in Paradise S3 correction: before 23:05,
-                          after 23:07 UTC. Single Life / Love in Paradise enrichment: before 23:34, after 23:36 UTC
-                          (2026-10-05; format 2, 719/197/64/1, valid).
+                          after 23:07 UTC. Single Life / Love in Paradise enrichment: before 23:34, after 23:36 UTC.
+                          Dutton Ranch enrichment: before 23:55, after 23:58 UTC (2026-10-05; format 2, 719/197/64/1, valid).
 
 Tags:
   post-tmdb-migration-modularization → c5b592e
@@ -1275,12 +1275,31 @@ Baseline before the review: repo 3 commits ahead of `origin/main` (not pushed; G
 - **Checks:** post-verify 719 / 197 / 642 linked, 8 identified 90 Day shows (166 overall), 642 identified rows, 0 mismatches, 0 duplicate shows or seasons, 0 unlinked TV rows, 0 linked films. On replicas of the real pre/post backups: up next identical for all 197 shows; 90 Day, Disney+ and Sheridan tabs GET-only and byte-identical; Currently Watching and Coming Soon byte-identical; the post-run backup validates; seeding all 72 90 Day, 182 Disney+ and 42 Sheridan defaults → 0 inserts, 0 conflicts, 0 reopened, 0 changes. Deployed site in Chrome with writes blocked in page memory: the 90 Day tab loaded with GETs only (no seeding, no review note), both shows with their stored labels, dates and watched/skipped flags; Currently Watching 6 + 4, Coming Soon 13 dated / 21 TBA; 0 write attempts; no console errors. Production equal to the post-run backup afterwards.
 - **Rollback, if ever needed:** per-show identity-only guarded rollback scripts were generated and rehearsed; kept outside the repo with the run files (they contain row ids). Nothing has been rolled back.
 
+### Remaining legacy TV shows — read-only inventory (2026-10-05)
+
+All 31 legacy shows were reviewed against TMDB (and fresh web evidence where a hold depended on it). Other TV and True Crime / Docs have none. No clean candidate remained except Dutton Ranch, whose hold the owner lifted (below). After it, **30** remain:
+- **Intentionally held (8):** Happily Ever After? (no confirmed Season 10); the six Skipped 90 Day shows (each would match cleanly, kept unchanged by decision); Wonder Man (cancelled; S2 skipped; would grade B / provisional B, but the provisional rule does not read TMDB's "Canceled" status, so passing is not evidence).
+- **Structurally incompatible (4):** Yellowstone (`Season 5 (Part 1)` / `(Part 2)` are both TMDB season 5), Star Wars: Clone Wars (2003) (`Volume 1` = TMDB seasons 1+2), Limitless with Chris Hemsworth (S2 is a separate TMDB show, "Limitless: Live Better Now"), Star Wars: Tales of the Jedi (TMDB has no S2; the local S2 is Tales of the Empire, already its own enriched show). Each would need a schema extension or an owner-approved restructuring.
+- **TV-row → film reclassification candidates (14):** the Disney+ single-row `Special` shows, each a TMDB movie (separate future project).
+- **Waiting on TMDB (4):** Mayor of Kingstown (TMDB lists 4 seasons; S5 is confirmed final but unlisted, and the local label `Season 5 (Final)` would itself need explicit approval), The Madison (TMDB lists S1 and an empty S3, no S2; never map 2 → 3), 1944 and 6666 (not on TMDB).
+
+### Completed: TMDB identity enrichment — Dutton Ranch (2026-10-05, approved)
+
+- **Owner decision (option A):** Dutton Ranch → **299167**, `Season 1` → TMDB season 1, `Season 2` → **provisional** season 2 under the provisional-future-season rule (§16). Evidence for S2: the renewal announced by Paramount+ and reported by Variety, The Hollywood Reporter and TheWrap; S1 premiered May 15, 2026 and TMDB lists it. TMDB does not list S2 yet.
+- **Provisional rule checked:** the parent show matches (S1 A); the label is exactly `Season 2`; the stored date is `TBA (announced)`; TMDB's highest listed season is 1, so 2 is the next with no gap; no TMDB season is named `Season 2`. Simulated: once TMDB lists S2 the normal path grades it (A undated / B dated); released-but-unlisted, a `Season 2 (Part 1)` label or a gap would each be D.
+- **Rehearsal (local, exact replica of a fresh snapshot): 59/59** — pre-flight 2 rows, dry run = manifest, guards, atomicity, identity-only diff, both stored dates (incl. the TBA text and its guessed sort date) kept, up next unchanged for all 197 shows, duplicates refused, the 90 Day / Disney+ / Sheridan tabs GET-only and byte-identical, Currently Watching / Coming Soon byte-identical, seeding all defaults a no-op, the existing S1/S2 are no-ops through seeding and manual add, a later plain `Season 3` joins as season 3, `Season 3 (Part 1)` is held for review, no second Dutton Ranch show can be created (TMDB-keyed or legacy-key add), backup/restore and rollback exact. The unchanged audit, run against the replica's post-enrichment rows, predicted 644 identified, 594 A / 50 B / 0 C / 0 D. The production-run helpers were rehearsed on a simulated post-apply state first. Offline 303/303; the repo DB rehearsal passes.
+- **Production run:** baseline re-checked (repo clean at the previous handoff commit; stage `final`; 719 / 197 / 642 linked; 642 identified rows, 166 identified shows; audit 593 / 49 / 0 / 0; catalog unchanged: 31 functions, guard source `73478474…`); fresh validated backup (tables equal to the rehearsed snapshot; regenerated files byte-identical); read-only checks (299167 unused, 0 duplicate identities, 0 link mismatches); pre-flight 2 rows / 0 mismatches / 0 extra seasons; **admin dry run identical to the rehearsal (hash)**; one atomic self-verifying statement (hash-checked), verified read-only. The post-apply production state equalled the rehearsed simulation byte for byte.
+- **Written (only):** `tv_shows.tmdb_id` null → 299167; on Season 1 and Season 2: `media_type` → `tv`, `tmdb_id` → 299167, `season_number` → 1 / 2. **Field-level diff of validated pre/post backups: exactly those 7 fields, nothing else** — title, labels, item_keys, collection, show status (On List), dates (May 15, 2026; `TBA (announced)` with its sort date), watched/skipped (all false), links and created_at unchanged; other tables byte-identical.
+- **Grades and checks:** S1 **A**; S2 **B** only for "provisional future season not yet listed by TMDB (season 2)", no exception. **Audit 644 identified, 594 A / 50 B / 0 C / 0 D, PASS.** Post-verify 719 / 197 / 642 linked, 9 identified Sheridan shows (167 overall), 0 mismatches, 0 duplicate shows or seasons, 0 unlinked TV rows, 0 linked films. On replicas of the real backups: up next identical for all 197 shows; tabs and both views byte-identical; the post-run backup validates; seeding all 72 / 182 / 42 defaults → 0 inserts, 0 conflicts, 0 reopened, 0 changes. Deployed site in Chrome with writes blocked: the Sheridan tab loaded with GETs only (no seeding, no review note), Dutton Ranch once with `Season 1` May 15, 2026 and `Season 2` TBA (announced); S2 still in Coming Soon's TBA section; Currently Watching 6 + 4, Coming Soon 13 dated / 21 TBA; 0 write attempts; no console errors. Production equal to the post-run backup afterwards.
+- **Rollback, if ever needed:** a guarded identity-only rollback was generated and rehearsed; kept outside the repo with the run files (it contains row ids). Not run.
+- **With this, TV identity enrichment is effectively complete under the current schema and standing decisions.** Future work: recheck Mayor of Kingstown, The Madison and Happily Ever After? when TMDB or the evidence changes; the separate film-reclassification project for the 14 Specials; a schema extension only if the owner wants the structurally incompatible shows matched.
+
 ### Next
 
-- **Pending owner approval:** nothing is prepared. The Single Life and Love in Paradise are enriched (above); the remaining 90 Day legacy shows are Happily Ever After? (held) and the six Skipped shows (unchanged by decision).
-- **Held / unchanged:** Happily Ever After? (no confirmed renewal found), the six Skipped 90 Day shows, Wonder Man, Tales of the Jedi (S2 skipped), Clone Wars (2003), Limitless, the 14 Specials, the Sheridan held shows.
+- **Pending owner approval:** nothing is prepared. Under the current schema and standing decisions, TV identity enrichment is effectively complete: the 30 remaining legacy shows are all held, structurally incompatible, film-reclassification candidates or waiting on TMDB (inventory below).
+- **Held / unchanged:** Happily Ever After? (no confirmed renewal found), the six Skipped 90 Day shows, Wonder Man, Tales of the Jedi (S2 skipped), Clone Wars (2003), Limitless, the 14 Specials, the waiting Sheridan shows (Mayor of Kingstown, The Madison, 1944, 6666) and Yellowstone.
 - **The TV-show migration is complete.** Enrichment continues only on approval (same process: read-only review → owner decisions → rehearsal → dry run → per-show apply); the 90 Day review is done and its decisions are carried out. No production write or schema change without approval. Parts/volumes or any non-`Season N` label are never forced into a season number (as with Yellowstone; Star Wars: Visions' Volume N → N was mapped only by explicit owner approval, and a new Volume is still held for review). Recheck the waiting Sheridan shows and the held Disney+ cases (Wonder Man; the audit-blocked shows) when TMDB or the owner's decisions change. The separate **future sign-in (Auth/RLS) project** (`db/future/auth_switchover.sql`) needs its own approval.
-- **Identity audit:** 593 A / 49 B / 0 C / 0 D is the baseline (after the Single Life / Love in Paradise enrichment, 2026-10-05). TMDB data can change upstream; a benign TMDB correction that changes A/B is explained and accepted as the new baseline, not treated as a regression. A provisional B becomes normal grading once TMDB lists the season, or **D** if the season is released while TMDB still doesn't list it. Any C or D, or an unexplained A→B, is a stop condition.
+- **Identity audit:** 594 A / 50 B / 0 C / 0 D is the baseline (after the Dutton Ranch enrichment, 2026-10-05). TMDB data can change upstream; a benign TMDB correction that changes A/B is explained and accepted as the new baseline, not treated as a regression. A provisional B becomes normal grading once TMDB lists the season, or **D** if the season is released while TMDB still doesn't list it. Any C or D, or an unexplained A→B, is a stop condition.
 - Other candidate follow-ups are listed in §14. For example: review the B-grade date drift.
 - **Any static-tab catalog refresh uses the `/refresh-catalogs` skill.** Startup no longer opens Disney+, so the skill opens the Disney+ tab explicitly.
 
@@ -1291,9 +1310,9 @@ Baseline before the review: repo 3 commits ahead of `origin/main` (not pushed; G
 1. Inspect the actual repo (your local Git checkout of `jaredsclove/Watchlist`).
 2. Run `git status`.
 3. Confirm the branch is `main` and in sync with `origin/main`.
-4. Confirm `HEAD` is the docs commit "Update handoff after the Single Life and Love in Paradise TMDB enrichment" (it follows `1e731e5`, `2186a11` and `34b8150`); check that it is pushed (§2). The last app-code commit is `2186a11` (`config.js`: Love in Paradise S3 date). If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
+4. Confirm `HEAD` is the docs commit "Update handoff after the Dutton Ranch TMDB enrichment" (it follows `1abab86`, `1e731e5` and `2186a11`); check that it is pushed (§2). The last app-code commit is `2186a11` (`config.js`: Love in Paradise S3 date). If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
 5. Inspect the file tree and compare it with §3: 73 tracked files, and roughly the listed line counts.
-6. Run the offline checks in §16: syntax, all 15 test suites (303 cases), and the handler sweep (55 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 593 A / 49 B / 0 C / 0 D).
+6. Run the offline checks in §16: syntax, all 15 test suites (303 cases), and the handler sweep (55 handlers, none undefined, no duplicate functions). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 594 A / 50 B / 0 C / 0 D).
 7. **Do not modify anything:**
    - no code
    - no schema
