@@ -6,7 +6,7 @@
 >
 > **This repo is public.** Keep this file free of personal details, machine-specific paths, backup locations and infrastructure identifiers that the app doesn't already publish.
 >
-> **Last updated 2026-10-06**, after the **Stage 3b-1 personal organization release** (§18): the production database migration (`db/phase3b_org.sql`), the app release **`dde4079`** (cache token `20261006-org1`), the first validated **format-3** backup, and the updated `/refresh-catalogs` skill. Personal collections, collection memberships and watch-with choices are now stored in the database and drive Browse collections and the watch-with controls (§4c, §5, §10). **Stage 3b-2 (editing collections, memberships and watch-with choices) is not implemented**, so 3b-1 has no editing UI. **`/refresh-catalogs` is frozen until the owner explicitly lifts the freeze; no catalog refresh is authorized** (§18). Before it: the deployment of **44 px phone targets for the Browse show expand buttons** (`ca092dd`), which followed the **Browse collection presentation** (Shows / Seasons and Separate / Combined; `dec78d4`, `575e6c4`; §4c, §18), which followed **Stage 3a: read-only Browse collections and All Movies** (`e89a932`, `540f411`). Before it: the **The Bear consolidation** (one Disney+ show; production, 2026-10-06) and the deployment of **All TV** (Stage 1 of the post-enrichment architecture, `4331e81`) (§4a, §18), then the show status control's plain labels (`97ab608`) and All TV's **Shows / Seasons** presentation (`77ff0ab`). Before that (2026-10-05): TMDB identity enrichment of the built-in collections (Sheridan, Disney+, 90 Day and the follow-ups), which is effectively complete under the current schema and standing decisions. The first-class TV-show model is at stage `final`: a TV show's status lives on its show (`tv_shows.status`); seasons hold watched, skipped, identity, dates and metadata. Remaining held identity cases and the future sign-in (Auth/RLS) project each need separate approval.
+> **Last updated 2026-10-06**, after the **Stage 3b-1 personal organization release** (§18): the production database migration (`db/phase3b_org.sql`), the app release **`dde4079`** (cache token `20261006-org1`), the first validated **format-3** backup, and the updated `/refresh-catalogs` skill. Personal collections, collection memberships and watch-with choices are now stored in the database and drive Browse collections and the watch-with controls (§4c, §5, §10). **Stage 3b-2 (editing collections, memberships and watch-with choices) is not implemented**, so 3b-1 has no editing UI. The **`/refresh-catalogs` freeze**, kept from the database phase, was **lifted by the owner** after the release; the skill stays user-invoked only, and lifting the freeze authorized no refresh (§18). Before it: the deployment of **44 px phone targets for the Browse show expand buttons** (`ca092dd`), which followed the **Browse collection presentation** (Shows / Seasons and Separate / Combined; `dec78d4`, `575e6c4`; §4c, §18), which followed **Stage 3a: read-only Browse collections and All Movies** (`e89a932`, `540f411`). Before it: the **The Bear consolidation** (one Disney+ show; production, 2026-10-06) and the deployment of **All TV** (Stage 1 of the post-enrichment architecture, `4331e81`) (§4a, §18), then the show status control's plain labels (`97ab608`) and All TV's **Shows / Seasons** presentation (`77ff0ab`). Before that (2026-10-05): TMDB identity enrichment of the built-in collections (Sheridan, Disney+, 90 Day and the follow-ups), which is effectively complete under the current schema and standing decisions. The first-class TV-show model is at stage `final`: a TV show's status lives on its show (`tv_shows.status`); seasons hold watched, skipped, identity, dates and metadata. Remaining held identity cases and the future sign-in (Auth/RLS) project each need separate approval.
 
 ---
 
@@ -705,7 +705,7 @@ The column lists below are the original columns; `user_id`, `show_id` and `skipp
   - The restore reproduced production **byte-for-byte**, matching the SQL fingerprints.
   - The safety-backup recovery drill passed.
   - All 22 failure-injection cases behaved as expected. After hardening, every data-level bad backup is rejected **before DELETE**.
-- **That rehearsal project has since been deleted.** A second temporary test project, created for the TV-show migration (§18), was deleted by the owner on 2026-10-05 once the migration was complete; rehearsals now run locally (PGlite). A third temporary test project was created on 2026-10-06 for the Stage 3b-1 hosted checks (synthetic data only, §18); it **still exists** with test-only helpers until the owner's cleanup approval.
+- **That rehearsal project has since been deleted.** A second temporary test project, created for the TV-show migration (§18), was deleted by the owner on 2026-10-05 once the migration was complete; rehearsals now run locally (PGlite). A third temporary test project was created on 2026-10-06 for the Stage 3b-1 hosted checks (synthetic data only, §18); **the owner deleted it on 2026-10-06** after the release, and its local credentials and test app copies were removed.
 - The **browser UI smoke test** of restore (file picker and real download) was **intentionally skipped** by owner decision. The harness exercised the same functions.
 - **Never run a destructive restore on production just to test it.**
 
@@ -935,7 +935,6 @@ Other intentional behaviors:
   - A restore cancelled by the API's statement time limit shows "Restore failed — nothing was changed" followed by the raw timeout text (accurate, but could say "try again").
   - After an **unconfirmed** film match (PATCH accepted, read-back failed), the page doesn't remove a former show left with no seasons; a reload shows the true state.
   - The app's "last backup" reminder isn't updated by backups taken with the private script; a backup with the app's ⬇ Backup updates it.
-  - **Temporary test project cleanup:** the Stage 3b-1 hosted-check project, its local credentials, local test copies and a local test server remain until the owner approves cleanup and deletes the project.
 - **Review the two B-grade date drifts** (§13) and decide whether to update them (user decision; never auto-applied).
 - **Canonical SQL fingerprints** (§16) were last recorded on 2026-09-28. The 2026-09-30 check used the anon-key hash method (§11a) and showed no change across the deployment. Re-run the SQL form when convenient.
 - Possible derived-view enhancements, **not planned**: restore the last TV tab on Movies → TV; date-horizon filters in Coming Soon; ignoring a leading "The" when sorting.
@@ -969,6 +968,7 @@ Other intentional behaviors:
 - The cross-tab wrong-collection async race (`aa6e71a`)
 - The restore mixed-state window (transactional restore, `02f304f` + production function, 2026-10-04)
 - **Stage 3b-1 personal organization storage** (database, app `dde4079`, format-3 baseline, refresh-catalogs skill; 2026-10-06)
+- **Stage 3b-1 test environment cleanup** (2026-10-06): the owner deleted the temporary test project; the local test server was stopped and the local test credentials and generated test app copies were deleted (synthetic fixtures and review evidence kept privately)
 
 ---
 
@@ -1243,12 +1243,12 @@ Tags:
   pre-derived-views                  → e2c1c16   (local only, not pushed)
   pre-tv-shows                       → b266a5b   (local only, not pushed)
 
-Supabase:                 the production project, plus the temporary Stage 3b-1 test project (synthetic data, test-only helpers;
-                          created 2026-10-06, awaiting the owner's cleanup approval and deletion). The TV-migration test project was
-                          deleted by the owner on 2026-10-05. Local rehearsals: tools/db-rehearsal.mjs and tools/db-rehearsal-3b.mjs on PGlite.
+Supabase:                 the production project only. The temporary Stage 3b-1 test project (synthetic data) was deleted by the
+                          owner on 2026-10-06; the TV-migration test project was deleted by the owner on 2026-10-05. Local rehearsals: tools/db-rehearsal.mjs and tools/db-rehearsal-3b.mjs on PGlite.
 
 refresh-catalogs:         skill updated for Stage 3b-1 in both copies, identical, SHA-256
-                          b1035661202b4b9e4d6c85e989e35c815eebcf7a1845c4631cba6f6e650a1364; runs FROZEN until the owner explicitly lifts the freeze.
+                          b1035661202b4b9e4d6c85e989e35c815eebcf7a1845c4631cba6f6e650a1364; the release freeze was lifted by the owner on 2026-10-06;
+                          the skill is user-invoked only (no refresh has been run since).
 ```
 
 ---
@@ -1553,14 +1553,14 @@ All 31 legacy shows were reviewed against TMDB (and fresh web evidence where a h
 
 ### Next
 
-- **Refresh-catalogs is frozen** until the owner explicitly lifts the freeze. No catalog refresh is authorized by documentation work.
-- **Pending owner approvals:** lifting the freeze; cleanup of the temporary Stage 3b-1 test project and its local files (§14); any Stage 3b-2 plan revision (personal collection editing), which is **not implemented**. Stage 3b-1 is done.
+- **Refresh-catalogs freeze lifted** by the owner (2026-10-06). The skill stays user-invoked only; lifting the freeze authorized no refresh.
+- **Pending owner approval:** any Stage 3b-2 plan revision (personal collection editing), which is **not implemented** and not authorized. Stage 3b-1 is done, including the test-environment cleanup.
 - **Earlier status, still current:** nothing else is prepared. Later architecture stages (Stage 3b-2 personal organization controls, explicit catalog application (4a), tab retirement (4b), sign-in) each need their own plan and approval; Stage 3a (§4c) and Stage 3b-1 are done. Under the current schema and standing decisions, TV identity enrichment is effectively complete: the 30 remaining legacy shows are all held, structurally incompatible, film-reclassification candidates or waiting on TMDB (inventory below).
 - **Held / unchanged:** Happily Ever After? (no confirmed renewal found), the six Skipped 90 Day shows, Wonder Man, Tales of the Jedi (S2 skipped), Clone Wars (2003), Limitless, the 14 Specials, the waiting Sheridan shows (Mayor of Kingstown, The Madison, 1944, 6666) and Yellowstone.
 - **The TV-show migration is complete.** Enrichment continues only on approval (same process: read-only review → owner decisions → rehearsal → dry run → per-show apply); the 90 Day review is done and its decisions are carried out. No production write or schema change without approval. Parts/volumes or any non-`Season N` label are never forced into a season number (as with Yellowstone; Star Wars: Visions' Volume N → N was mapped only by explicit owner approval, and a new Volume is still held for review). Recheck the waiting Sheridan shows and the held Disney+ cases (Wonder Man; the audit-blocked shows) when TMDB or the owner's decisions change. The separate **future sign-in (Auth/RLS) project** (`db/future/auth_switchover.sql`) needs its own approval.
 - **Identity audit:** 590 A / 49 B / 0 C / 0 D is the baseline (2026-10-06, Stage 3b-1; Marshals S1 became A through a TMDB correction; 589 / 50 after The Bear consolidation). TMDB data can change upstream; a benign TMDB correction that changes A/B is explained and accepted as the new baseline, not treated as a regression. A provisional B becomes normal grading once TMDB lists the season, or **D** if the season is released while TMDB still doesn't list it. Any C or D, or an unexplained A→B, is a stop condition.
 - Other candidate follow-ups are listed in §14. For example: review the B-grade date drift.
-- **Any static-tab catalog refresh uses the `/refresh-catalogs` skill** — once the owner lifts the freeze. Startup no longer opens Disney+, so the skill opens the Disney+ tab explicitly. Since Stage 3b-1 a refresh needs a validated format-3 baseline and the organization checks the skill describes.
+- **Any static-tab catalog refresh uses the `/refresh-catalogs` skill**, which only the owner invokes. Startup no longer opens Disney+, so the skill opens the Disney+ tab explicitly. Since Stage 3b-1 a refresh needs a validated format-3 baseline and the organization checks the skill describes.
 
 ---
 
@@ -1571,7 +1571,7 @@ All 31 legacy shows were reviewed against TMDB (and fresh web evidence where a h
 3. Confirm the branch is `main` and in sync with `origin/main`.
 4. Confirm `HEAD` is the docs commit "Update handoff after the Stage 3b-1 release" (it follows `dde4079`, `b9b5376` and `c88ecd1`); check that it is pushed (§2). The last app-code commit is `dde4079` (the Stage 3b-1 release). If it isn't, report the difference. Later commits, such as catalog refreshes or handoff updates, may legitimately exist; list them.
 5. Inspect the file tree and compare it with §3: 85 tracked files, and roughly the listed line counts.
-6. Run the offline checks in §16: syntax, all 20 test suites (450 cases), and the handler sweep (65 handlers, none undefined, 263 functions, no duplicates). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 590 A / 49 B / 0 C / 0 D). **Don't run `/refresh-catalogs`: it is frozen until the owner lifts the freeze.**
+6. Run the offline checks in §16: syntax, all 20 test suites (450 cases), and the handler sweep (65 handlers, none undefined, 263 functions, no duplicates). Optionally, confirm GitHub Pages matches `main`. The identity audit is read-only and may also be run (expect 590 A / 49 B / 0 C / 0 D). **Don't run `/refresh-catalogs`: it is user-invoked only.**
 7. **Do not modify anything:**
    - no code
    - no schema
