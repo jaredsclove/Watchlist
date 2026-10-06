@@ -45,6 +45,7 @@ function switchTab(id) {
   activeTabId = id;
   browseOrigin = null;
   backNavFilters = null;
+  invalidateRestorePreparation();
   addOpen = false;
   tmdbSelectedShow = null;
   expandedShows = new Set();
@@ -73,6 +74,7 @@ function switchView(id) {
   else browseMedia = 'all';
   if (backNavFilters && backNavFilters.view !== id) backNavFilters = null;
   browseData = null;
+  invalidateRestorePreparation();
   addOpen = false;
   tmdbSelectedShow = null;
   expandedShows = new Set();

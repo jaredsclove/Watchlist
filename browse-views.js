@@ -175,18 +175,35 @@ function updateRestoreVisibility() {
   if (head) head.innerHTML = isBrowseView(activeViewId) ? browseHeadHtml() : '';
 }
 
+// Re-rendering replaces the controls, so keyboard focus is put back on the
+// matching control (same container) when it was in one of these containers.
+function focusedContainerOf(ids) {
+  const active = document.activeElement;
+  if (!active || typeof active.closest !== 'function') return null;
+  return ids.find(id => active.closest(`#${id}`)) || null;
+}
+
+function refocus(containerId, selector) {
+  const el = containerId ? document.getElementById(containerId)?.querySelector(selector) : null;
+  if (el && typeof el.focus === 'function') el.focus();
+}
+
 function setBrowseMedia(media) {
   if (!browseCollectionOf(activeViewId) || !BROWSE_MEDIA_LABELS[media] || media === browseMedia) return;
+  const container = focusedContainerOf(['filtersRow']);
   browseMedia = media;
   renderFilters();
   renderTable();
+  refocus(container, `[data-media="${media}"]`);
 }
 
 function toggleBrowseShow(key) {
   if (!isBrowseView(activeViewId)) return;
+  const container = focusedContainerOf(['tbody', 'cardList']);
   if (expandedShows.has(key)) expandedShows.delete(key);
   else expandedShows.add(key);
   renderTable();
+  refocus(container, `[data-show-key=${JSON.stringify(String(key))}]`);
 }
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
@@ -262,7 +279,7 @@ function renderBrowseFilters() {
   const dest = browseCollectionOf(activeViewId);
   const mediaToggle = dest
     ? `<div class="view-toggle" role="group" aria-label="Media">${Object.entries(BROWSE_MEDIA_LABELS).map(([media, label]) =>
-        `<button class="view-toggle-btn${browseMedia === media ? ' active' : ''}" aria-pressed="${browseMedia === media}" onclick="setBrowseMedia('${media}')">${label}</button>`).join('')}</div>`
+        `<button class="view-toggle-btn${browseMedia === media ? ' active' : ''}" data-media="${media}" aria-pressed="${browseMedia === media}" onclick="setBrowseMedia('${media}')">${label}</button>`).join('')}</div>`
     : '';
   // Source (All Movies only) is the tab a film is stored in, not where it streams.
   const sourceSelect = dest
@@ -433,7 +450,7 @@ function browseShowHtml(item, today) {
       : neutralNextLabel(upNext, item.upNextReleased);
   const statusHtml = browseStatusPillHtml(show.status, `Show status — applies to every season of ${show.title}`)
     + (upToDate ? ' <span class="status-pill s-caughtup">Up to date</span>' : '');
-  const expandBtn = `<button class="expand-btn" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Hide' : 'Show'} seasons of ${esc(item.title)}" onclick="toggleBrowseShow('${keyArg}')"><span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span></button>`;
+  const expandBtn = `<button class="expand-btn" data-show-key="${esc(key)}" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Hide' : 'Show'} seasons of ${esc(item.title)}" onclick="toggleBrowseShow('${keyArg}')"><span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span></button>`;
 
   let row = `<tr class="show-group-row browse-show-row${dimClass}">
       <td><div class="show-title-row"><div class="show-title-left"><span class="show-title">${esc(item.title)}</span></div>${expandBtn}</div></td>

@@ -300,16 +300,34 @@ function identityLossErrors(currentItems, backupItems) {
     '. It probably predates the TMDB identity migration, so it can\'t be used.'];
 }
 
+// A restore being prepared (file read, preview, safety backup) belongs to the
+// view it started in. Navigating abandons it (invalidateRestorePreparation), and
+// every step re-checks after each await, so a late step can't open a dialog or
+// download anything, least of all in a read-only browse view. Once restore_backup
+// has been sent, navigation no longer interrupts it.
+function restoreSessionLive(session) {
+  return session === restoreSessionSeq && !isBrowseView(activeViewId);
+}
+
+function invalidateRestorePreparation() {
+  if (restoreInFlight) return;
+  restoreSessionSeq++;
+  if (pendingRestoreData || document.getElementById('restoreModalOverlay')?.style.display === 'flex') closeRestoreModal();
+}
+
 async function handleRestoreFileSelected(event) {
   const file = event.target.files[0];
   event.target.value = ''; // allow re-selecting the same file later
   if (!file || isBrowseView(activeViewId)) return;
+  const session = ++restoreSessionSeq;
 
   let parsed;
   try {
     const text = await file.text();
+    if (!restoreSessionLive(session)) return;
     parsed = JSON.parse(text);
   } catch(e) {
+    if (!restoreSessionLive(session)) return;
     showRestoreModal(`<div class="modal-title">Invalid backup file</div>
       <div class="modal-error">Couldn't parse this file as JSON: ${esc(e.message)}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
@@ -325,10 +343,11 @@ async function handleRestoreFileSelected(event) {
   }
 
   pendingRestoreData = parsed;
-  await renderRestorePreview(parsed);
+  await renderRestorePreview(parsed, session);
 }
 
-async function renderRestorePreview(backup) {
+async function renderRestorePreview(backup, session = restoreSessionSeq) {
+  if (!restoreSessionLive(session)) return;
   showRestoreModal(`<div class="modal-title">Checking current data…</div><div class="modal-progress">Fetching current row counts for comparison…</div>`);
 
   let currentCounts = {};
@@ -336,12 +355,15 @@ async function renderRestorePreview(backup) {
   let dbFormat;
   try {
     dbFormat = await detectBackupFormat();
+    if (!restoreSessionLive(session)) return;
     for (const table of BACKUP_FORMATS[dbFormat].tables) {
       const rows = await fetchAllRows(table);
+      if (!restoreSessionLive(session)) return;
       currentCounts[table] = rows.length;
       if (table === 'watchlist_items') currentItems = rows;
     }
   } catch(e) {
+    if (!restoreSessionLive(session)) return;
     showRestoreModal(`<div class="modal-title">Couldn't check current data</div>
       <div class="modal-error">${esc(e.message)}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
@@ -399,11 +421,13 @@ function closeRestoreModal() {
   document.getElementById('restoreModalBox').innerHTML = '';
   pendingRestoreData = null;
   pendingRestoreAllowV1Reset = false;
+  restoreInFlight = false;
 }
 
 async function executeRestore() {
   const backup = pendingRestoreData;
-  if (!backup) { closeRestoreModal(); return; }
+  if (!backup || isBrowseView(activeViewId)) { closeRestoreModal(); return; }
+  const session = restoreSessionSeq;
 
   const confirmBtn = document.getElementById('confirmRestoreBtn');
   if (confirmBtn) confirmBtn.disabled = true;
@@ -417,7 +441,9 @@ async function executeRestore() {
   let preRestoreBackup;
   try {
     preRestoreBackup = await buildBackupObject();
+    if (!restoreSessionLive(session)) return;
   } catch(e) {
+    if (!restoreSessionLive(session)) return;
     showRestoreModal(`<div class="modal-title">Restore aborted</div>
       <div class="modal-error">Couldn't create a safety backup of your current data, so nothing was changed:\n${esc(e.message)}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
@@ -469,7 +495,7 @@ async function executeRestore() {
 
 async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
   const backup = pendingRestoreData;
-  if (!backup) { closeRestoreModal(); return; }
+  if (!backup || isBrowseView(activeViewId)) { closeRestoreModal(); return; }
 
   const setProgress = (msg) => {
     showRestoreModal(`<div class="modal-title">Restoring…</div><div class="modal-progress">${esc(msg)}</div>`);
@@ -480,6 +506,7 @@ async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
   // atomically: if anything fails, the database rolls back to exactly what it was.
   const restoredTables = BACKUP_FORMATS[backup.formatVersion].tables;
   setProgress(`Restoring ${restoredTables.length} tables…`);
+  restoreInFlight = true; // sent to the database: navigation no longer abandons it
   try {
     await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup, p_allow_v1_reset: pendingRestoreAllowV1Reset === true });
   } catch(e) {

@@ -179,6 +179,8 @@ let personCollectionNames = null; // custom_collections names: null = not loaded
 // ─── Restore flow ───────────────────────────────────────────────────────────
 let pendingRestoreData = null; // validated backup object, set once file passes checks
 let pendingRestoreAllowV1Reset = false; // true when a format-1 backup is restored into a format-2 database
+let restoreSessionSeq = 0; // the restore being prepared; navigation bumps it (backup-restore.js)
+let restoreInFlight = false; // restore_backup has been sent: navigation no longer abandons the restore
 
 
 // ─── Boot ────────────────────────────────────────────────────────────────────

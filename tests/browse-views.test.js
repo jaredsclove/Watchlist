@@ -262,6 +262,168 @@ test('every row action and Restore is inert while a read-only view is open; Rest
   assert.strictEqual(clicked, 1);
 });
 
+// A restore started before navigating: a valid backup file whose text arrives late.
+// A small library with real UUIDs and every column, so its backup is valid.
+function restoreLibrary() {
+  const u = i => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+  const at = '2026-01-01T00:00:00+00:00';
+  const showRow = { id: u(1), collection: 'disney', title: 'Andor', show_key: 'andor', tmdb_id: null, status: 'watching', created_at: at };
+  const base = { theme: 'Star Wars', watch_with: [], collections: [], tmdb_collection_id: null, tmdb_collection_name: null, created_at: at, skipped: false };
+  return {
+    shows: [showRow],
+    rows: [
+      { ...base, id: u(2), collection: 'disney', item_key: 'andor|season 1', title: 'Andor', season: 'Season 1', display_date: 'Sep 21, 2022', date_sort: '2022-09-21',
+        watched: true, status: 'confirmed', media_type: null, tmdb_id: null, season_number: null, show_id: u(1) },
+      { ...base, id: u(3), collection: 'movies', item_key: 'dune|film', title: 'Dune', season: 'Film', display_date: 'Oct 22, 2021', date_sort: '2021-10-22',
+        watched: false, status: 'confirmed', media_type: 'movie', tmdb_id: 438631, season_number: null, show_id: null }
+    ]
+  };
+}
+async function restoreSetup() {
+  const app = await boot(restoreLibrary());
+  const backup = await app.ctx.buildBackupObject();
+  const text = JSON.stringify(backup);
+  let release;
+  const file = { text: () => new Promise(r => { release = () => r(text); }) };
+  let downloads = 0;
+  app.ctx.downloadJSON = () => { downloads++; };
+  return { app, file, release: () => release(), downloads: () => downloads };
+}
+const modalOpen = app => app.el('restoreModalOverlay').style.display === 'flex';
+const restoreWrites = app => app.requests.filter(r => r.method !== 'GET');
+
+test('restore: without navigating, a late file still opens the restore dialog (control)', async () => {
+  const { app, file, release } = await restoreSetup();
+  app.ctx.switchView('alltv'); await settle();
+  const done = app.ctx.handleRestoreFileSelected({ target: { files: [file], value: 'x' } });
+  release(); await done; await settle();
+  assert.ok(modalOpen(app) && app.el('restoreModalBox').innerHTML.includes('executeRestore()'), 'the test is armed: ' + app.el('restoreModalBox').innerHTML.slice(0, 300));
+  assert.deepStrictEqual(restoreWrites(app), []);
+});
+
+for (const [name, when] of [
+  ['the file text arrives', 'text'],
+  ['the preview is reading current data', 'preview'],
+  ['the safety backup is being built', 'safety'],
+  ['the safety-backup confirmation is showing', 'confirm']
+]) {
+  test(`restore race: navigating to a browse view while ${name} leaves no restore action and writes nothing`, async () => {
+    const { app, file, release, downloads } = await restoreSetup();
+    app.ctx.switchView('alltv'); await settle();
+    const done = app.ctx.handleRestoreFileSelected({ target: { files: [file], value: 'x' } });
+    let tail = done;
+    if (when === 'text') {
+      await openCol(app, 'browse-disney');
+      release(); await done; await settle();
+    } else if (when === 'preview') {
+      const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows?select=id&limit=1'));
+      release(); await g.reached;
+      assert.ok(modalOpen(app) && app.el('restoreModalBox').innerHTML.includes('Checking current data'), 'reached the preview');
+      await openCol(app, 'browse-disney');
+      g.release(); await done; await settle();
+    } else {
+      release(); await done; await settle();
+      assert.ok(app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
+      if (when === 'safety') {
+        const g = app.hold(r => r.method === 'GET' && r.url.includes('/rest/v1/watchlist_items?'));
+        tail = app.ctx.executeRestore();
+        await g.reached;
+        assert.ok(app.el('restoreModalBox').innerHTML.includes('Backing up your current data first'), 'reached the safety backup');
+        await openCol(app, 'browse-disney');
+        g.release(); await tail; await settle();
+      } else {
+        await app.ctx.executeRestore(); await settle();
+        assert.ok(app.el('restoreModalBox').innerHTML.includes('continueRestoreAfterSafetyConfirm'));
+        assert.strictEqual(downloads(), 1);
+        await openCol(app, 'browse-disney');
+      }
+    }
+    assert.ok(!modalOpen(app), 'no restore dialog');
+    assert.ok(!/executeRestore|continueRestoreAfterSafetyConfirm/.test(app.el('restoreModalBox').innerHTML), 'no restore action available');
+    assert.strictEqual(app.get('pendingRestoreData'), null);
+    assert.strictEqual(downloads(), when === 'confirm' ? 1 : 0, 'no safety backup downloaded after leaving');
+    // Even a stale handler can't continue the restore.
+    await app.ctx.executeRestore();
+    await app.ctx.continueRestoreAfterSafetyConfirm('watchlist-pre-restore-x.json');
+    await settle();
+    assert.ok(!modalOpen(app));
+    assert.deepStrictEqual(restoreWrites(app), [], 'no POST/PATCH/DELETE/RPC');
+    assert.strictEqual(app.get('activeViewId'), 'browse-disney');
+  });
+}
+
+test('restore: the confirmation steps refuse to run in a browse view even if a prepared backup were left behind', async () => {
+  const { app, downloads } = await restoreSetup();
+  await openCol(app, 'browse-disney');
+  app.ctx.__b = await app.ctx.buildBackupObject();
+  app.run('pendingRestoreData = __b');
+  await app.ctx.executeRestore(); await settle();
+  assert.strictEqual(downloads(), 0, 'no safety backup');
+  app.run('pendingRestoreData = __b');
+  await app.ctx.continueRestoreAfterSafetyConfirm('f.json'); await settle();
+  assert.ok(!modalOpen(app));
+  assert.strictEqual(app.get('pendingRestoreData'), null);
+  assert.deepStrictEqual(restoreWrites(app), []);
+});
+
+test('restore: any navigation abandons a prepared restore; one already sent to the database is not interrupted', async () => {
+  const { app, file, release } = await restoreSetup();
+  app.ctx.switchView('alltv'); await settle();
+  const done = app.ctx.handleRestoreFileSelected({ target: { files: [file], value: 'x' } });
+  release(); await done; await settle();
+  app.ctx.switchView('comingsoon'); await settle();
+  assert.ok(!modalOpen(app) && app.get('pendingRestoreData') === null);
+  // Sent: the RPC is in flight when navigation happens.
+  const done2 = app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => JSON.stringify(await app.ctx.buildBackupObject()) }], value: 'x' } });
+  await done2; await settle();
+  await app.ctx.executeRestore(); await settle();
+  const g = app.hold(r => r.url.includes('rpc/restore_backup'));
+  const sent = app.ctx.continueRestoreAfterSafetyConfirm('f.json');
+  await g.reached;
+  app.ctx.switchView('alltv'); await settle();
+  assert.ok(modalOpen(app), 'the in-flight restore keeps its dialog');
+  g.release(); await sent; await settle();
+  assert.ok(app.el('restoreModalBox').innerHTML.includes('finishRestoreAndReload'));
+  app.ctx.finishRestoreAndReload(); await settle();
+  assert.strictEqual(app.get('restoreInFlight'), false);
+});
+
+// ─── Keyboard focus ───────────────────────────────────────────────────────────
+// The fake DOM has no focus: these give it a focused element and record refocusing.
+function focusRig(app, containerId) {
+  const focused = [];
+  app.ctx.document.activeElement = { closest: sel => (sel === `#${containerId}` ? {} : null) };
+  for (const id of ['tbody', 'cardList', 'filtersRow']) {
+    app.el(id).querySelector = sel => ({ focus: () => focused.push(`${id} ${sel}`) });
+  }
+  return focused;
+}
+
+test('expanding or collapsing a show keeps keyboard focus on that show’s button, in the table or the cards', async () => {
+  const app = await boot();
+  await openCol(app, 'browse-sheridan');
+  const id = app.get("[...browseData.showsById.values()].find(s => s.title === 'Yellowstone').id");
+  assert.ok(html(app).includes(`data-show-key="${id}"`) && cards(app).includes(`data-show-key="${id}"`));
+  let focused = focusRig(app, 'tbody');
+  app.ctx.toggleBrowseShow(id);
+  assert.deepStrictEqual(focused, [`tbody [data-show-key="${id}"]`]);
+  focused = focusRig(app, 'cardList');
+  app.ctx.toggleBrowseShow(id);
+  assert.deepStrictEqual(focused, [`cardList [data-show-key="${id}"]`]);
+  app.ctx.document.activeElement = null;
+  app.ctx.toggleBrowseShow(id); // focus elsewhere: nothing is focused
+});
+
+test('changing the media choice keeps keyboard focus on the chosen media button', async () => {
+  const app = await boot();
+  await openCol(app, 'browse-disney');
+  assert.ok(app.el('filtersRow').innerHTML.includes('data-media="tv"'));
+  const focused = focusRig(app, 'filtersRow');
+  app.ctx.setBrowseMedia('tv');
+  app.ctx.setBrowseMedia('all');
+  assert.deepStrictEqual(focused, ['filtersRow [data-media="tv"]', 'filtersRow [data-media="all"]']);
+});
+
 // ─── Membership and classification ───────────────────────────────────────────
 test('a collection lists its own TV shows and films only; Specials, Volumes, Parts and an explicit-TV "Film" label stay TV', async () => {
   const app = await boot();
