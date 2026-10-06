@@ -503,4 +503,86 @@ test('while the post-restore choices read is pending the controls say loading (n
   assert.ok(pickerOf(app, dune.id).includes('> Suzanne (restored)</label>'));
 });
 
+// ── unfinished work during a watch-with refresh; Retry beside the filter (third review) ──
+// The watch-with filter control (replaced in place; the fake DOM doesn't propagate that to its parent's markup).
+const wwFilter = app => (app.el('fWatchWithWrap') && app.el('fWatchWithWrap').innerHTML) || app.el('filtersRow').innerHTML;
+async function moviesWithUnfinishedWork(app) {
+  app.ctx.switchMediaType('movie'); await settle();
+  app.ctx.switchTab('movies'); await settle();
+  app.ctx.toggleAdd(); await settle();
+  app.el('nTitle').value = 'Unfinished title';
+  app.el('nDate').value = 'Jan 1, 2031';
+  app.el('tmdbQuery').value = 'dune part three';
+  app.el('tmdbResults').innerHTML = '<div class="tmdb-result">a chosen search result</div>';
+  app.el('tmdbPreview').innerHTML = '<div class="tmdb-preview">an open preview</div>';
+}
+function assertWorkKept(app, when) {
+  assert.strictEqual(app.el('nTitle') && app.el('nTitle').value, 'Unfinished title', `add-entry title kept (${when})`);
+  assert.strictEqual(app.el('nDate').value, 'Jan 1, 2031', `add-entry date kept (${when})`);
+  assert.strictEqual(app.el('tmdbQuery').value, 'dune part three', `TMDB query kept (${when})`);
+  assert.ok(app.el('tmdbResults').innerHTML.includes('a chosen search result'), `TMDB results kept (${when})`);
+  assert.ok(app.el('tmdbPreview').innerHTML.includes('an open preview'), `TMDB preview kept (${when})`);
+}
+
+test('a delayed startup choices read doesn’t erase an open Add entry form or TMDB search/preview', async () => {
+  const app = await boot();
+  app.run("watchWithChoices = null; watchWithState = 'loading'; orgChoicesSeq = 0");
+  const g = app.hold(r => r.url.includes('/watch_with_choices?'));
+  const loading = app.ctx.loadOrganization();
+  await moviesWithUnfinishedWork(app);
+  assert.match(wwFilter(app), /Watch-with choices are loading/);
+  g.release(); await loading; await settle();
+  assert.ok(/<option value="Rina">Rina<\/option>/.test(wwFilter(app)), 'the filter now offers the choices');
+  assertWorkKept(app, 'after the delayed read');
+});
+
+for (const emptyList of [false, true]) {
+  test(`a failed choices read shows Retry beside the Movies filter (${emptyList ? 'no rows visible' : 'rows visible'}); Retry recovers; unfinished work is kept`, async () => {
+    const app = await boot();
+    await moviesWithUnfinishedWork(app);
+    if (emptyList) { app.el('fSearch').value = 'no film has this title'; app.ctx.renderTable(); }
+    app.failNext(r => r.url.includes('/watch_with_choices?'));
+    app.run("invalidateOrganization()");
+    await app.ctx.loadOrganization(); await settle();
+    const filters = wwFilter(app);
+    assert.match(filters, /Watch-with choices couldn’t be loaded/);
+    assert.match(filters, /<button class="btn" onclick="loadOrganization\(\)" aria-label="Retry loading watch-with choices">Retry<\/button>/);
+    if (emptyList) assert.ok(!/class="ww-option"/.test(app.el('tbody').innerHTML) && !/more-popover/.test(app.el('tbody').innerHTML), 'no rows (so no row Retry) are visible');
+    assertWorkKept(app, 'after the failure');
+    await app.ctx.loadOrganization(); await settle();
+    assert.ok(/<option value="Rina">Rina<\/option>/.test(wwFilter(app)), 'recovered');
+    assert.ok(!/aria-label="Retry loading watch-with choices"/.test(wwFilter(app)));
+    if (emptyList) assert.strictEqual(app.el('fSearch').value, 'no film has this title', 'the filter search is kept');
+    assertWorkKept(app, 'after Retry');
+  });
+}
+
+test('views without watch-with controls aren’t redrawn when choices arrive or change', async () => {
+  const app = await boot();
+  for (const go of [() => app.ctx.switchView('watching'), () => app.ctx.switchTab('disney')]) {
+    go(); await settle();
+    let draws = 0;
+    const real = app.ctx.renderTable, realF = app.ctx.renderFilters;
+    app.ctx.renderTable = (...a) => { draws++; return real(...a); };
+    app.ctx.renderFilters = (...a) => { draws++; return realF(...a); };
+    app.store.watch_with_choices.find(c => c.token === 'Rina').label = `Rina ${Math.random()}`;
+    await app.ctx.loadOrganization(); await settle();
+    app.ctx.renderTable = real; app.ctx.renderFilters = realF;
+    assert.strictEqual(draws, 0, 'no redraw');
+  }
+});
+
+test('Match refused by a concurrent change (40001 re-check, deadlock victim, lock timeout): one clear message, nothing else written', async () => {
+  for (const [code, message] of [['40001', 'match_conflict: the collections of this row changed while matching; try again'],
+    ['40P01', 'deadlock detected'], ['55P03', 'canceling statement due to lock timeout']]) {
+    const legacy = film({ title: 'Race Doc', collection: 'truecrime', media_type: null, tmdb_id: null, item_key: 'race doc|film' });
+    const app = await boot(all(legacy));
+    app.ctx.switchTab('truecrime'); await settle();
+    app.rpcHandlers.match_tv_row = () => ({ ok: false, status: 409, text: async () => JSON.stringify({ code, message }), json: async () => ({ code, message }), headers: { get: () => null } });
+    await matchAsTv(app, legacy.id, 4200);
+    assert.match(app.get('document.getElementById("errorBanner").innerHTML'), /Something else was changing the same show or collections at that moment, so nothing was matched\. Try again\./, code);
+    assert.deepStrictEqual(writes(app).map(r => new URL(r.url).pathname.split('/').pop()), ['match_tv_row']);
+  }
+});
+
 T.run();

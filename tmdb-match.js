@@ -288,6 +288,10 @@ async function confirmTmdbMatch() {
   } catch(e) {
     showError(/not_found: unidentified row|match_conflict: the row changed/.test(String(e.message))
       ? 'This row changed somewhere else before the match was saved, so nothing was matched. Reload the page and try again.'
+      // Another change to the same collections or show at the same moment (the database
+      // refused or timed out the match as a whole): nothing was applied, so trying again is safe.
+      : /match_conflict: the collections|40P01|55P03|deadlock detected|lock timeout/.test(String(e.message))
+        ? 'Something else was changing the same show or collections at that moment, so nothing was matched. Try again.'
       : isDuplicateKeyError(e)
         ? 'That TMDB title was added to this list somewhere else just now, so nothing was changed. Reload the page to see it.'
         : e.message);

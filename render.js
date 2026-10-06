@@ -42,13 +42,8 @@ function renderFilters() {
       </select>
       <span id="collectionRefreshLink"></span>`;
     }
-    const watchWithOpts = watchWithUsable()
-      ? watchWithChoiceList().map(w => `<option value="${esc(w.token)}">${esc(w.label)}</option>`).join('')
-      : `<option value="" disabled>${watchWithState === 'loading' ? 'Watch-with choices are loading…' : 'Watch-with choices couldn’t be loaded'}</option>`;
-    watchWithFilterHtml = `
-      <select id="fWatchWith" onchange="renderTable()">
-        <option value="">Watch with: anyone</option>${watchWithOpts}
-      </select>`;
+    // In its own wrapper so a watch-with refresh can replace just this control.
+    watchWithFilterHtml = `<span id="fWatchWithWrap" class="ww-filter">${watchWithFilterControlHtml('')}</span>`;
   }
 
   document.getElementById('filtersRow').innerHTML = `
@@ -366,6 +361,23 @@ function upToDateShowIds(rows, today) {
     if (tvShowsById.get(id)?.status === 'watching' && isShowUpToDate(seasons, today)) out.add(id);
   }
   return out;
+}
+
+// The Movies watch-with filter: the loaded choices; while loading or after a
+// failed read it says so, and a failed read offers Retry right beside it, so
+// recovery doesn't depend on any row being visible. `selected` is kept when
+// still offered.
+function watchWithFilterControlHtml(selected) {
+  const usable = watchWithUsable();
+  const opts = usable
+    ? watchWithChoiceList().map(w => `<option value="${esc(w.token)}"${w.token === selected ? ' selected' : ''}>${esc(w.label)}</option>`).join('')
+    : `<option value="" disabled>${watchWithState === 'loading' ? 'Watch-with choices are loading…' : 'Watch-with choices couldn’t be loaded'}</option>`;
+  const retry = watchWithState === 'unavailable'
+    ? ` <button class="btn" onclick="loadOrganization()" aria-label="Retry loading watch-with choices">Retry</button>`
+    : '';
+  return `<select id="fWatchWith" onchange="renderTable()" aria-label="Watch with">
+        <option value="">Watch with: anyone</option>${opts}
+      </select>${retry}`;
 }
 
 // ─── Movies rendering (standalone films, with Watch With + Collections tags) ──

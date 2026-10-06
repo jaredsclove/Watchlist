@@ -68,10 +68,46 @@ function watchWithSignature() {
   return JSON.stringify([watchWithState, watchWithChoiceList(), (watchWithChoices || []).map(c => [c.token, c.label])]);
 }
 
+// Only what shows watch-with is redrawn, and nothing else is rebuilt: in the
+// Movies tab the watch-with filter is replaced in place (keeping its value when
+// still offered, and keyboard focus) and the rows are redrawn with any open
+// picker reopened — the Add entry form, the TMDB search, results and preview, and
+// the other filters are untouched. A browse view redraws its read-only rows (they
+// show watch-with labels). Other views have no watch-with controls.
 function redrawForWatchWith() {
-  const tabReady = activeTabId && tabData[activeTabId] && tabData[activeTabId].loaded;
-  const browseReady = isBrowseView(activeViewId) && browseData && browseData.loaded;
-  if (tabReady || browseReady) { renderFilters(); renderTable(); }
+  const col = activeTabId ? COLLECTIONS.find(c => c.id === activeTabId) : null;
+  if (col && col.isMovieTab && tabData[activeTabId] && tabData[activeTabId].loaded) {
+    const wrap = document.getElementById('fWatchWithWrap');
+    if (wrap) {
+      const prev = document.getElementById('fWatchWith');
+      const focused = document.activeElement && typeof document.activeElement.closest === 'function'
+        && document.activeElement.closest('#fWatchWithWrap');
+      wrap.innerHTML = watchWithFilterControlHtml(prev ? prev.value : '');
+      if (focused) { const el = document.getElementById('fWatchWith'); if (el && typeof el.focus === 'function') el.focus(); }
+    }
+    redrawRowsKeepingPicker();
+    return;
+  }
+  if (isBrowseView(activeViewId) && browseData && browseData.loaded) renderTable();
+}
+
+// Redraws the rows and reopens the watch-with picker that was open (same row, same
+// table or card list), with focus back on the same choice.
+function redrawRowsKeepingPicker() {
+  const open = [...document.querySelectorAll('.more-popover')].find(p => p.style.display && p.style.display !== 'none');
+  const listId = open && typeof open.closest === 'function' && open.closest('#cardList') ? 'cardList' : 'tbody';
+  const active = document.activeElement;
+  const focusedValue = open && active && typeof active.closest === 'function' && active.closest('.more-popover') === open ? active.value : null;
+  renderTable();
+  if (!open) return;
+  const list = document.getElementById(listId);
+  const again = list && list.querySelector(`[id="${open.id}"]`);
+  if (!again) return;
+  again.style.display = open.style.display;
+  if (focusedValue != null) {
+    const box = [...again.querySelectorAll('input')].find(i => i.value === focusedValue);
+    if (box && typeof box.focus === 'function') box.focus();
+  }
 }
 
 // After a restore: everything read before it is stale. The selector says it is
