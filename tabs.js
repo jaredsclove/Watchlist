@@ -65,7 +65,10 @@ function switchView(id) {
   addOpen = false;
   tmdbSelectedShow = null;
   expandedShows = new Set();
-  derivedSectionOpen = { uptodate: true, tba: false };
+  derivedSectionOpen = { uptodate: true, tba: false, alltvTba: false };
+  // All TV: the remembered Shows / Seasons choice; the Seasons visibility starts at All seasons.
+  if (id === 'alltv') allTvPresentation = readAllTvPresentation();
+  allTvSeasonVis = 'all';
   derivedData = null;
   document.getElementById('addForm').style.display = 'none';
   document.getElementById('banner').innerHTML = '';

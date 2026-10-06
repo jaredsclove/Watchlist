@@ -460,6 +460,13 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .skip-btn.kept:hover { border-color: var(--green-border); color: var(--green); }
 .card-actions .skip-btn { padding: 7px 10px; }
 
+/* All TV: Shows / Seasons switch and the "date needs review" tag */
+.view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.view-toggle-btn { background: var(--surface); border: 0; padding: 6px 14px; font-size: 13px; color: var(--text2); cursor: pointer; }
+.view-toggle-btn + .view-toggle-btn { border-left: 1px solid var(--border); }
+.view-toggle-btn.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+.review-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+
 /* ── Filter toggle (mobile) ── */
 .filter-toggle-btn { display: none; }
 .filters-inner { display: contents; }
@@ -475,6 +482,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 
   .add-form-grid { grid-template-columns: 1fr 1fr; }
 
+  .view-toggle { display: flex; width: 100%; margin-bottom: 8px; }
+  .view-toggle-btn { flex: 1; padding: 8px 12px; }
   .filter-toggle-btn {
     display: inline-flex; align-items: center; gap: 6px;
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);

@@ -169,6 +169,71 @@ function allTvStatusMatches(status, fStatus) {
   return status === fStatus;
 }
 
+// ─── All TV: Shows / Seasons presentation ────────────────────────────────────
+// Shows (one card per show) is the first-use default. The choice is remembered
+// on this device only (not in backups or the database); without usable storage
+// All TV simply opens in Shows.
+const ALLTV_PRESENTATION_KEY = 'watchlist_alltv_presentation';
+const ALLTV_SEASON_VIS = ['all', 'towatch', 'watched', 'skipped'];
+
+function readAllTvPresentation() {
+  try {
+    return localStorage.getItem(ALLTV_PRESENTATION_KEY) === 'seasons' ? 'seasons' : 'shows';
+  } catch (e) {
+    return 'shows';
+  }
+}
+
+// A real calendar date in YYYY-MM-DD form.
+function isValidDateSort(d) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d || '')) return false;
+  const [y, m, day] = d.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, day));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === day;
+}
+
+// Seasons-mode visibility. Watched and Skipped (the season's own flag) are
+// independent: a season with both flags is in both. To watch is neither, and
+// never a season of a Skipped show.
+function allTvSeasonVisible(r, show, vis) {
+  if (vis === 'towatch') return !r.watched && !r.skipped && show.status !== 'skipped';
+  if (vis === 'watched') return !!r.watched;
+  if (vis === 'skipped') return !!r.skipped;
+  return true;
+}
+
+// The seasons of the given All TV shows (deriveAllTv items, already filtered by
+// Search / Source / show Status), split before any sorting: genuine TBA (text or
+// sentinel; wins over a guessed date_sort), dates needing review (not TBA, no
+// valid date) and dated seasons, oldest first. Ties: title, season order,
+// collection, row id.
+function deriveAllTvSeasons(items, vis) {
+  const rows = items.flatMap(it => it.seasons.filter(r => allTvSeasonVisible(r, it.show, vis)));
+  const tieOrder = (a, b) => compareTitles(a.title, b.title)
+    || seasonOrder(a, b)
+    || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
+    || cmpStr(a.id, b.id);
+  const tba = rows.filter(isTbaRow).sort(tieOrder);
+  const review = rows.filter(r => !isTbaRow(r) && !isValidDateSort(r.date_sort)).sort(tieOrder);
+  const dated = rows.filter(r => !isTbaRow(r) && isValidDateSort(r.date_sort))
+    .sort((a, b) => cmpStr(a.date_sort, b.date_sort) || tieOrder(a, b));
+  return { dated, tba, review, total: rows.length, showCount: new Set(rows.map(r => r.show_id)).size };
+}
+
+function setAllTvPresentation(mode) {
+  if (activeViewId !== 'alltv' || (mode !== 'shows' && mode !== 'seasons') || mode === allTvPresentation) return;
+  allTvPresentation = mode;
+  try { localStorage.setItem(ALLTV_PRESENTATION_KEY, mode); } catch (e) { /* storage unavailable: this page only */ }
+  renderFilters();
+  renderTable();
+}
+
+function setAllTvSeasonVis(vis) {
+  if (!ALLTV_SEASON_VIS.includes(vis)) return;
+  allTvSeasonVis = vis;
+  renderTable();
+}
+
 // Linked, unwatched, non-skipped seasons of a show that isn't Skipped: those with
 // a confirmed date from today on, and those still TBA (whatever their guessed date_sort).
 function deriveComingSoon(rows, shows, today) {
@@ -249,8 +314,24 @@ function renderDerivedFilters() {
         ${TV_STATUS_ORDER.map(s => `<option value="${s}">${esc(statusOptionLabel(s))}${s === 'skipped' ? '' : ' only'}</option>`).join('')}
       </select>`
     : '';
+  // All TV only: the Shows / Seasons switch (outside the collapsible panel) and,
+  // in Seasons only, which seasons to list.
+  const presentationToggle = activeViewId === 'alltv'
+    ? `
+    <div class="view-toggle" role="group" aria-label="Presentation">${[['shows', 'Shows'], ['seasons', 'Seasons']].map(([mode, label]) =>
+      `<button class="view-toggle-btn${allTvPresentation === mode ? ' active' : ''}" aria-pressed="${allTvPresentation === mode}" onclick="setAllTvPresentation('${mode}')">${label}</button>`).join('')}</div>`
+    : '';
+  const seasonVisSelect = activeViewId === 'alltv' && allTvPresentation === 'seasons'
+    ? `
+      <select id="fSeasonVis" onchange="setAllTvSeasonVis(this.value)" title="Which seasons to list (Seasons only)">
+        <option value="all">All seasons</option>
+        <option value="towatch">To watch</option>
+        <option value="watched">Watched</option>
+        <option value="skipped">Skipped</option>
+      </select>`
+    : '';
 
-  filtersRowEl.innerHTML = `
+  filtersRowEl.innerHTML = `${presentationToggle}
     <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
       <span>🔍 Search &amp; Filter</span><span id="filterToggleChevron">▾</span>
     </button>
@@ -259,11 +340,13 @@ function renderDerivedFilters() {
       <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" oninput="renderTable()">
       <select id="fSource" onchange="renderTable()">
         <option value="">All TV sources</option>${sourceOpts}
-      </select>${statusSelect}
+      </select>${statusSelect}${seasonVisSelect}
     </div>
   `;
   filtersRowEl.dataset.tab = tag;
   if (window.innerWidth <= 700) filtersRowEl.classList.add('collapsed');
+  const seasonVisEl = document.getElementById('fSeasonVis');
+  if (seasonVisEl) seasonVisEl.value = allTvSeasonVis;
 
   const tmdbPanel = document.getElementById('tmdbPanel');
   tmdbPanel.style.display = 'none';
@@ -299,9 +382,11 @@ function updateDerivedTableHeader() {
   const heads = {
     comingsoon: `<tr><th>Show &amp; Season</th><th>Source</th><th>Theme</th><th>Premiere</th><th>Status</th><th></th></tr>`,
     alltv: `<tr><th>Show</th><th>Source</th><th>Next</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`,
+    alltvSeasons: `<tr><th>Show &amp; Season</th><th>Source</th><th>Premiere</th><th>Show status</th><th>Watched</th><th></th></tr>`,
     watching: `<tr><th>Show</th><th>Source</th><th>Up next</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`
   };
-  if (heads[activeViewId]) thead.innerHTML = heads[activeViewId];
+  const key = activeViewId === 'alltv' && allTvPresentation === 'seasons' ? 'alltvSeasons' : activeViewId;
+  if (heads[key]) thead.innerHTML = heads[key];
 }
 
 function sourceBadgeHtml(collectionId) {
@@ -380,6 +465,7 @@ function renderCurrentlyWatching(today, keep) {
 function renderAllTv(today, keep, fStatus) {
   const { items, unlinked, missingShow } = deriveAllTv(derivedData.rows, tvShowsById, today);
   const shown = items.filter(x => keep(x) && allTvStatusMatches(x.show.status, fStatus));
+  if (allTvPresentation === 'seasons') return renderAllTvSeasons(today, items, shown, unlinked + missingShow);
 
   document.getElementById('statsRow').innerHTML = derivedStatsHtml([
     [shown.length, shown.length === 1 ? 'Show' : 'Shows'],
@@ -407,6 +493,108 @@ function renderAllTv(today, keep, fStatus) {
 
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
+}
+
+// All TV, Seasons: the seasons of the shows that pass Search / Source / show
+// Status, narrowed by the Seasons-only visibility choice. Dated seasons oldest
+// first under year headers; genuine TBA and dates needing review in one
+// collapsed section, labelled and counted separately.
+function renderAllTvSeasons(today, items, shown, notListed) {
+  const { dated, tba, review, total, showCount } = deriveAllTvSeasons(shown, allTvSeasonVis);
+  const stats = [[total, total === 1 ? 'Season' : 'Seasons'], [showCount, showCount === 1 ? 'Show' : 'Shows'], [tba.length, 'TBA']];
+  if (review.length) stats.push([review.length, 'Date needs review']);
+  document.getElementById('statsRow').innerHTML = derivedStatsHtml(stats);
+
+  let html = '', cardHtml = '';
+  const note = msg => {
+    html += `<tr class="empty-row"><td colspan="6">${esc(msg)}</td></tr>`;
+    cardHtml += `<div class="empty-row" style="padding:1rem 0">${esc(msg)}</div>`;
+  };
+  if (notListed > 0) note(`⚠️ ${notListed} TV season${notListed === 1 ? ' isn’t' : 's aren’t'} linked to a loaded show, so ${notListed === 1 ? 'it isn’t' : 'they aren’t'} listed here.`);
+
+  if (total === 0) {
+    note(items.length === 0 ? 'No TV shows on your list yet.' : shown.length === 0 ? 'No shows match your filters.' : 'No seasons match your filters.');
+  } else if (dated.length === 0) {
+    note('No dated seasons; see TBA / no date below.');
+  }
+
+  let lastYear = '';
+  dated.forEach(r => {
+    const year = r.date_sort.substring(0, 4);
+    if (year !== lastYear) {
+      html += `<tr class="year-group"><td colspan="6">${esc(year)}</td></tr>`;
+      cardHtml += `<div class="card-year-group">${esc(year)}</div>`;
+      lastYear = year;
+    }
+    const out = allTvSeasonRowHtml(r, today, false);
+    html += out.row;
+    cardHtml += out.card;
+  });
+
+  if (tba.length + review.length > 0) {
+    const count = `${tba.length} TBA${review.length ? ` · ${review.length} date needs review` : ''}`;
+    const section = derivedSectionHtml('alltvTba', 'TBA / no date', count);
+    html += section.row;
+    cardHtml += section.card;
+    if (derivedSectionOpen.alltvTba) {
+      [['TBA', tba, false], ['Date needs review', review, true]].forEach(([label, list, needsReview]) => {
+        if (!list.length) return;
+        html += `<tr class="year-group"><td colspan="6">${esc(label)}</td></tr>`;
+        cardHtml += `<div class="card-year-group">${esc(label)}</div>`;
+        list.forEach(r => {
+          const out = allTvSeasonRowHtml(r, today, needsReview);
+          html += out.row;
+          cardHtml += out.card;
+        });
+      });
+    }
+  }
+
+  document.getElementById('tbody').innerHTML = html;
+  document.getElementById('cardList').innerHTML = cardHtml;
+}
+
+// One season in All TV's Seasons list: the show's status as a read-only label
+// (it applies to every season; it's changed in Shows), the existing Watched
+// control (release rule unchanged) and Skip / Keep. A date that isn't valid is
+// shown as stored and labelled "date needs review", never as aired.
+function allTvSeasonRowHtml(r, today, needsReview) {
+  const status = displayStatus(r);
+  const rowClass = isOffList(r) ? 'row-skipped' : status === 'maybe' ? 'row-maybe' : '';
+  const dated = !needsReview && !isTbaRow(r);
+  const todayTag = dated && r.date_sort === today ? '<span class="today-tag">Today</span>' : '';
+  const upcomingTag = dated && r.date_sort > today ? '<span class="upcoming-tag">Upcoming</span>' : '';
+  const reviewTag = needsReview ? '<span class="review-tag">date needs review</span>' : '';
+  const statusPill = `<span class="status-pill s-${status}" title="Show status — applies to every season of ${esc(r.title)}. Switch to Shows to change it.">${esc(statusOptionLabel(status))}</span>`;
+  const releaseOpts = { requireReleased: true, today };
+  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme)}`;
+  const row = `<tr class="${rowClass}">
+      <td>
+        <span class="show-title">${esc(r.title)}</span>
+        <span class="season-lbl"> · ${esc(r.season)}</span>
+        ${todayTag}
+      </td>
+      <td>${badges}</td>
+      <td class="date-cell">${esc(r.display_date)}${upcomingTag}${reviewTag}</td>
+      <td>${statusPill}</td>
+      <td>${seasonWatchControlHtml(r, releaseOpts, false)}</td>
+      <td>${seasonRowControlHtml(r)}</td>
+    </tr>`;
+  const card = `<div class="item-card ${rowClass}">
+      <div class="card-top">
+        <div class="card-title-block">
+          <span class="card-title">${esc(r.title)}</span>
+          <span class="card-season">${esc(r.season)}</span>
+          ${todayTag}
+        </div>
+      </div>
+      <div class="card-meta">
+        ${badges}
+        <span class="card-date">${esc(r.display_date)}</span>${upcomingTag}${reviewTag}
+      </div>
+      <div class="card-actions">${statusPill} ${seasonWatchControlHtml(r, releaseOpts, true)} ${seasonRowControlHtml(r)}</div>
+    </div>`;
+  return { row, card };
 }
 
 // A show that isn't in progress or Up to date (any status but a Watching one
