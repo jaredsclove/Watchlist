@@ -1,8 +1,9 @@
 // ─── Actions ──────────────────────────────────────────────────────────────────
 // The rows the visible controls came from: the open derived view's cross-TV rows,
 // or the active collection tab's rows. Row actions PATCH by the row's real id
-// either way.
+// either way. The read-only browse views have none, so no row action can act there.
 function actionRows() {
+  if (isBrowseView(activeViewId)) return [];
   if (activeViewId) return derivedData?.rows || [];
   return tabData[activeTabId]?.rows || [];
 }

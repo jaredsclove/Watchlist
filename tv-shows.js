@@ -101,6 +101,7 @@ function seasonSkipButtonHtml(r, opts = {}) {
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 async function setShowStatusById(showId, status) {
+  if (isBrowseView(activeViewId)) return; // read-only views never write
   const show = tvShowsById.get(showId);
   if (!show || show.status === status) return;
   const old = show.status;

@@ -467,6 +467,23 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .view-toggle-btn.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
 .review-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
 
+/* ── Browse collections / All Movies (read-only views) ── */
+.browse-bar { background: var(--bg); padding: 10px 24px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.browse-bar-label { font-size: 12px; font-weight: 600; color: var(--text2); }
+.browse-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 12px; }
+.browse-title { font-size: 18px; font-weight: 600; margin: 0; }
+.browse-note { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--text3); }
+.browse-back { padding: 4px 10px; font-size: 12px; }
+.browse-section-row th { text-align: left; background: var(--surface); padding: 7px 12px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.browse-section-card { margin: 0; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; padding: 12px 4px 4px; }
+.expand-btn { background: none; border: 0; padding: 4px; cursor: pointer; }
+.expand-btn:hover .expand-chevron, .expand-btn:focus-visible .expand-chevron { border-color: var(--accent); color: var(--accent); }
+.ro-watched { font-size: 12px; color: var(--green); }
+.ro-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+.ro-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.ro-label { font-size: 11px; color: var(--text3); }
+.ro-label + .ro-label::before { content: '· '; }
+
 /* ── Filter toggle (mobile) ── */
 .filter-toggle-btn { display: none; }
 .filters-inner { display: contents; }
@@ -483,6 +500,9 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   .add-form-grid { grid-template-columns: 1fr 1fr; }
 
   .view-toggle { display: flex; width: 100%; margin-bottom: 8px; }
+  .browse-bar { padding: 8px 12px 0; }
+  .browse-bar select { flex: 1; }
+  .browse-title { font-size: 16px; }
   .view-toggle-btn { flex: 1; padding: 8px 12px; }
   .filter-toggle-btn {
     display: inline-flex; align-items: center; gap: 6px;

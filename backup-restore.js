@@ -89,7 +89,9 @@ async function handleBackupClick() {
   }
 }
 
+// Restore isn't offered in the read-only browse views (browse-views.js).
 function handleRestoreClick() {
+  if (isBrowseView(activeViewId)) return;
   document.getElementById('restoreFileInput').click();
 }
 
@@ -301,7 +303,7 @@ function identityLossErrors(currentItems, backupItems) {
 async function handleRestoreFileSelected(event) {
   const file = event.target.files[0];
   event.target.value = ''; // allow re-selecting the same file later
-  if (!file) return;
+  if (!file || isBrowseView(activeViewId)) return;
 
   let parsed;
   try {
@@ -555,7 +557,8 @@ ${esc(preRestoreFilename)}</div>
 function finishRestoreAndReload() {
   closeRestoreModal();
   tabData = {};
-  if (activeViewId) loadDerivedView();
+  if (isBrowseView(activeViewId)) loadBrowseView();
+  else if (activeViewId) loadDerivedView();
   else loadTab(activeTabId);
 }
 

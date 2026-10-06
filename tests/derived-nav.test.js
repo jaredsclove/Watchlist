@@ -35,7 +35,8 @@ const tmdbMovie = p => {
   return m ? { id: +m[1], title: `Film ${m[1]}`, genres: [{ name: 'Drama' }], release_date: '2001-01-01', production_companies: [] } : undefined;
 };
 async function openTab(app, id) { app.ctx.switchTab(id); await settle(); }
-async function openMovies(app) { app.ctx.switchMediaType('movie'); await settle(); }
+// Movies opens on All Movies (read-only); the legacy Movies tab is one click away.
+async function openMovies(app) { app.ctx.switchMediaType('movie'); await settle(); app.ctx.switchTab('movies'); await settle(); }
 // While a view is showing, nothing about a collection tab was redrawn over it.
 function assertViewIntact(app, viewId = 'watching') {
   assert.strictEqual(app.get('activeViewId'), viewId);
@@ -112,10 +113,13 @@ test('no request ever uses watching/comingsoon/null as a collection', async () =
 });
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
-test('Movies → TV always lands on Currently Watching; Movies loads as before', async () => {
+test('Movies → TV always lands on Currently Watching; Movies opens on All Movies and the legacy Movies tab loads as before', async () => {
   const app = await createApp({ rows: [movie({ id: 'm1' })] });
   await openTab(app, 'othertv');
-  await openMovies(app);
+  app.ctx.switchMediaType('movie'); await settle();
+  assert.strictEqual(app.get('activeViewId'), 'allmovies');
+  assert.strictEqual(app.get('activeTabId'), null);
+  app.ctx.switchTab('movies'); await settle();
   assert.strictEqual(app.get('activeTabId'), 'movies');
   assert.strictEqual(app.get('activeViewId'), null);
   assert.ok(app.requests.some(r => r.method === 'GET' && r.url.includes('collection=eq.movies')));

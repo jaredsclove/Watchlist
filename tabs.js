@@ -1,8 +1,8 @@
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 function buildTabs() {
   const bar = document.getElementById('tabBar');
-  // Derived views (Currently Watching, Coming Soon) come first; they aren't collections.
-  const viewTabs = DERIVED_VIEWS.filter(v => v.mediaType === activeMediaType).map(v =>
+  // Views (Currently Watching, All TV, Coming Soon; All Movies) come first; they aren't collections.
+  const viewTabs = tabViewsFor(activeMediaType).map(v =>
     `<div class="tab${v.id===activeViewId?' active':''}" onclick="switchView('${v.id}')">
       <span class="tab-icon">${v.icon}</span>${esc(v.label)}
     </div>`
@@ -10,9 +10,11 @@ function buildTabs() {
   const visibleCollections = COLLECTIONS.filter(c => c.mediaType === activeMediaType);
   bar.innerHTML = viewTabs + (viewTabs ? '<div class="tab-sep"></div>' : '') + visibleCollections.map(c =>
     `<div class="tab${!activeViewId && c.id===activeTabId?' active':''}" onclick="switchTab('${c.id}')">
-      <span class="tab-icon">${c.icon}</span>${esc(c.label)}
+      <span class="tab-icon">${c.icon}</span>${esc(legacyTabLabel(c))}
     </div>`
   ).join('');
+  buildBrowseBar();
+  updateRestoreVisibility();
 }
 
 function buildMediaSwitch() {
@@ -25,10 +27,10 @@ function buildMediaSwitch() {
 }
 
 function switchMediaType(type) {
-  if (type === activeMediaType) return;
+  if (type === activeMediaType && !browseCollectionOf(activeViewId)) return;
   activeMediaType = type;
-  // TV always lands on its first derived view (Currently Watching).
-  const firstView = DERIVED_VIEWS.find(v => v.mediaType === type);
+  // Each area lands on its first view: TV → Currently Watching, Movies → All Movies.
+  const firstView = landingViewFor(type);
   const firstInMode = COLLECTIONS.find(c => c.mediaType === type);
   if (firstView) {
     switchView(firstView.id);
@@ -41,6 +43,8 @@ function switchMediaType(type) {
 function switchTab(id) {
   activeViewId = null;
   activeTabId = id;
+  browseOrigin = null;
+  backNavFilters = null;
   addOpen = false;
   tmdbSelectedShow = null;
   expandedShows = new Set();
@@ -56,12 +60,19 @@ function switchTab(id) {
   }
 }
 
-// Opens a derived view. activeTabId becomes null, so no collection is active:
-// anything that would write `collection: activeTabId` is refused by the DB's
-// NOT NULL, and a late loadTab() never paints over the view.
+// Opens a derived view, or a read-only browse view (browse-views.js).
+// activeTabId becomes null, so no collection is active: anything that would
+// write `collection: activeTabId` is refused by the DB's NOT NULL, and a late
+// loadTab() never paints over the view.
 function switchView(id) {
   activeViewId = id;
   activeTabId = null;
+  // Back from a collection keeps its origin only while collections are open,
+  // and its saved filters only for the view it returns to.
+  if (!browseCollectionOf(id)) browseOrigin = null;
+  else browseMedia = 'all';
+  if (backNavFilters && backNavFilters.view !== id) backNavFilters = null;
+  browseData = null;
   addOpen = false;
   tmdbSelectedShow = null;
   expandedShows = new Set();
@@ -76,7 +87,8 @@ function switchView(id) {
   tmdbPanel.style.display = 'none';
   tmdbPanel.innerHTML = '';
   buildTabs();
-  loadDerivedView();
+  if (isBrowseView(id)) loadBrowseView();
+  else loadDerivedView();
 }
 
 // ─── Load tab data from Supabase ─────────────────────────────────────────────

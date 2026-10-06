@@ -72,6 +72,60 @@ async function fetchAllRows(table, filter, select = '*') {
   return allRows;
 }
 
+// Every row of a table, for views that must never show a partial result
+// (browse-views.js). Stricter than fetchAllRows, whose callers are unchanged:
+// every page must report an exact total in Content-Range, start where the last
+// one ended, keep the same total, and repeat no row id; the rows read must equal
+// the total. Anything else throws, so the caller can offer Retry. GET only.
+async function fetchAllRowsStrict(table, filter, pageSize = BACKUP_PAGE_SIZE) {
+  const rows = [];
+  const ids = new Set();
+  let total = null;
+  for (;;) {
+    const offset = rows.length;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*${filter ? `&${filter}` : ''}&order=id.asc`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Range-Unit': 'items',
+        'Range': `${offset}-${offset + pageSize - 1}`,
+        'Prefer': 'count=exact'
+      }
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Failed reading ${table} (offset ${offset}): ${res.status} ${err}`);
+    }
+    const contentRange = (res.headers.get('content-range') || '').trim();
+    const m = /^(?:(\d+)-(\d+)|\*)\/(\d+)$/.exec(contentRange);
+    if (!m || !Number.isSafeInteger(Number(m[3]))) {
+      throw new Error(`Incomplete read of ${table}: no exact row count was reported (Content-Range "${contentRange}").`);
+    }
+    const pageTotal = Number(m[3]);
+    if (total !== null && pageTotal !== total) {
+      throw new Error(`Incomplete read of ${table}: the row count changed during the read (${total} → ${pageTotal}). Try again.`);
+    }
+    total = pageTotal;
+    const page = await res.json();
+    if (!Array.isArray(page) || page.length > pageSize) throw new Error(`Incomplete read of ${table}: unexpected page at offset ${offset}.`);
+    if (page.length === 0) {
+      if (m[1] !== undefined || offset < total) throw new Error(`Incomplete read of ${table}: ${offset} of ${total} rows, then an empty page.`);
+      break;
+    }
+    if (m[1] === undefined || Number(m[1]) !== offset || Number(m[2]) !== offset + page.length - 1) {
+      throw new Error(`Incomplete read of ${table}: the page at offset ${offset} doesn't line up (Content-Range "${contentRange}").`);
+    }
+    for (const r of page) {
+      if (!r || r.id == null || ids.has(r.id)) throw new Error(`Incomplete read of ${table}: a row was missing an id or repeated (offset ${offset}).`);
+      ids.add(r.id);
+      rows.push(r);
+    }
+    if (rows.length > total) throw new Error(`Incomplete read of ${table}: ${rows.length} rows read but ${total} reported.`);
+    if (rows.length === total) break;
+  }
+  return rows;
+}
+
 // ─── TV structural writes (TV-show migration) ────────────────────────────────
 // TV seasons are added, matched and deleted through database functions that
 // keep every season linked to its show in tv_shows (show status: tv-shows.js).

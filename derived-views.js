@@ -294,9 +294,11 @@ function paintDerivedMessage(text, withRetry) {
 function renderDerivedFilters() {
   const filtersRowEl = document.getElementById('filtersRow');
   const tag = `view:${activeViewId}`;
-  const keepState = filtersRowEl.dataset.tab === tag;
-  const savedValues = {};
-  if (keepState) {
+  // Back from a collection (browse-views.js) puts this view's filters back once.
+  const restored = takeBackNavFilters(activeViewId);
+  const keepState = filtersRowEl.dataset.tab === tag || !!restored;
+  const savedValues = restored ? { ...restored } : {};
+  if (keepState && !restored) {
     ['fSearch', 'fSource', 'fStatus'].forEach(id => {
       const el = document.getElementById(id);
       if (el) savedValues[id] = el.value;
@@ -359,7 +361,7 @@ function renderDerivedFilters() {
       if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === value)) continue;
       el.value = value;
     }
-    if (filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
+    if (!restored && filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
   }
 }
 

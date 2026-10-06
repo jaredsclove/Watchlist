@@ -115,6 +115,7 @@ test('deleting a movie is a plain DELETE; × on a built-in TV season skips it (s
   const film = tv({ id: 'm', collection: 'movies', media_type: 'movie', season: 'Film', season_number: null, show_id: null, item_key: 'film|film' });
   const app = await createApp({ rows: [film] });
   app.ctx.switchMediaType('movie'); await settle();
+  app.ctx.switchTab('movies'); await settle(); // Movies opens on the read-only All Movies
   await app.ctx.delRow('m'); await settle();
   assert.deepStrictEqual(writes(app), ['DELETE watchlist_items']);
   const app2 = await createApp();

@@ -1,5 +1,6 @@
 // ─── Filters ──────────────────────────────────────────────────────────────────
 function renderFilters() {
+  if (isBrowseView(activeViewId)) { renderBrowseFilters(); return; }
   if (activeViewId) { renderDerivedFilters(); return; }
   const col = COLLECTIONS.find(c => c.id === activeTabId);
   const td = tabData[activeTabId];
@@ -152,6 +153,7 @@ function renderFilters() {
 
 // ─── Render table ─────────────────────────────────────────────────────────────
 function renderTable() {
+  if (isBrowseView(activeViewId)) { renderBrowseTable(); return; }
   if (activeViewId) { renderDerivedTable(); return; }
   const td = tabData[activeTabId];
   if (!td) return;
