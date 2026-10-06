@@ -433,6 +433,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   const writeProblem = (table, list) => {
     if (!orgOn || table !== 'watchlist_items') return null;
     if (list.some(b => b && 'is_film' in b)) return pgError(400, '428C9', 'cannot insert a non-DEFAULT value into column "is_film"');
+    if (list.some(b => b && Array.isArray(b.watch_with) && b.watch_with.some(t => t == null))) return pgError(400, '23514', 'watch_with_invalid: a watch-with value is empty');
     const tokens = new Set(store.watch_with_choices.map(c => c.token));
     const bad = list.flatMap(b => (b && b.watch_with) || []).find(t => !tokens.has(t));
     if (bad !== undefined) return pgError(400, '23514', `watch_with_invalid: "${bad}" is not one of your watch-with choices`);
@@ -591,6 +592,9 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     if (method === 'DELETE') {
       const gone = rowsOf.filter(r => matches(r, params));
       // ON DELETE RESTRICT: a show that still has seasons can't be deleted.
+      // A watch-with choice still used on a row can't be deleted (db/phase3b_org.sql).
+      const used = orgOn && table === 'watch_with_choices' && gone.find(c => store.watchlist_items.some(r => (r.watch_with || []).includes(c.token)));
+      if (used) return pgError(409, '23503', `watch_with_in_use: "${used.token}" is still used on saved items; remove it from them first`);
       if (table === 'tv_shows' && gone.some(sh => store.watchlist_items.some(r => r.show_id === sh.id))) {
         return pgError(409, '23001', 'update or delete on table "tv_shows" violates RESTRICT setting of foreign key constraint "watchlist_items_show_fkey" on table "watchlist_items"');
       }

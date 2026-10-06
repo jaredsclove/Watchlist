@@ -394,14 +394,13 @@ async function loadBrowseView() {
   paintBrowseMessage('Loading…', false);
   try {
     const isCollection = isBrowseCollectionView(viewId);
+    const orgRead = orgReadStart();
     const [rows, shows, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
       ...(isCollection ? [fetchAllRowsStrict('personal_collections'), fetchAllRowsStrict('collection_memberships')] : [])]);
     if (seq !== browseLoadSeq || activeViewId !== viewId) return;
     let dest = null, members = null;
     if (isCollection) {
-      personalCollections = collections;
-      if (orgState !== 'ready') { orgState = 'ready'; }
-      buildBrowseBar();
+      if (publishCollections(collections, orgRead)) buildBrowseBar();
       const c = collections.find(x => BROWSE_VIEW_PREFIX + x.id === viewId);
       if (!c || c.archived_at) {
         document.getElementById('viewHead').innerHTML = `<div class="browse-head"><button class="btn browse-back" onclick="browseBack()">← Back</button></div>`;
@@ -442,9 +441,9 @@ function browseHeadHtml() {
   const backTo = (browseOrigin ? browseOrigin.mediaType : activeMediaType) === 'movie' ? 'Movies' : 'TV';
   if (!dest) return `<div class="browse-head"><button class="btn browse-back" onclick="browseBack()">← Back to ${backTo}</button></div>`;
   const icon = COLLECTIONS.find(c => c.id === dest.legacySource)?.icon || '';
-  const notes = [dest.note, dest.legacySource
-    ? `Read-only: what's saved in the ${dest.label} tab. Make changes there.`
-    : 'Read-only. Make changes in the tabs where these are saved.'].filter(Boolean);
+  // A collection lists its members, which can be saved in any tab (each shows its
+  // tab as its source), so the note never points at a same-named tab.
+  const notes = [dest.note, `Read-only: the shows and films in your ${dest.label} collection. Make changes in the tab each one is saved in (shown as its source).`].filter(Boolean);
   return `<div class="browse-head">
       <button class="btn browse-back" onclick="browseBack()">← Back to ${backTo}</button>
       <h2 class="browse-title">${icon} ${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
@@ -572,7 +571,9 @@ function renderBrowseCollection(dest, today, textMatches, fStatus) {
   let html = '', cardHtml = '';
   const add = out => { html += out.row; cardHtml += out.card; };
   if (base.badLinks > 0) {
-    add(browseNoteHtml(`⚠️ ${plural(base.badLinks, 'member of this collection wasn’t', 'members of this collection weren’t')} found in this read, so ${base.badLinks === 1 ? 'it isn’t' : 'they aren’t'} listed. Nothing was changed.`,
+    // Describes this read, not the data: a show or film can be missing from it because the read was
+    // incomplete or something changed meanwhile.
+    add(browseNoteHtml(`⚠️ This read didn’t include ${plural(base.badLinks, 'member', 'members')} of this collection, so ${base.badLinks === 1 ? 'it isn’t' : 'they aren’t'} listed. That usually means the read was incomplete or something changed meanwhile; it doesn’t mean anything was deleted. Nothing was changed.`,
       ` <button class="btn" onclick="loadBrowseView()">Read again</button>`));
   }
   if (base.unclassified > 0) {
@@ -611,10 +612,10 @@ function renderBrowseCollection(dest, today, textMatches, fStatus) {
     }
     if (section.entries.length === 0) {
       const msg = section.key === 'tv'
-        ? (v.baseShows === 0 ? `No TV shows saved in ${dest.label}.` : v.seasons ? 'No TV seasons match these filters.' : 'No TV shows match these filters.')
+        ? (v.baseShows === 0 ? `No TV shows in ${dest.label}.` : v.seasons ? 'No TV seasons match these filters.' : 'No TV shows match these filters.')
         : section.key === 'film'
-          ? (v.baseFilms === 0 ? 'No films saved in this collection.' : 'No films match these filters.')
-          : (v.baseShows + v.baseFilms === 0 ? `Nothing saved in ${dest.label}.` : 'Nothing matches these filters.');
+          ? (v.baseFilms === 0 ? 'No films in this collection.' : 'No films match these filters.')
+          : (v.baseShows + v.baseFilms === 0 ? `Nothing in ${dest.label}.` : 'Nothing matches these filters.');
       add(browseNoteHtml(msg));
     }
   });

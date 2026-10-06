@@ -29,18 +29,66 @@ function isMissingTableError(e) {
   return /: 404 /.test(msg) && msg.includes('PGRST205');
 }
 
-async function loadOrganization() {
-  const seq = ++orgLoadSeq;
+// Every read of these tables (startup, Retry, a collection view, after a restore)
+// takes a token when it starts. Only a read that started after the data now shown
+// may replace it, and nothing read before a restore is published after it
+// (invalidateOrganization), so an older read that finishes last can't bring back
+// stale collections or labels.
+function orgReadStart() {
+  return { seq: ++orgReadSeq, epoch: orgEpoch };
+}
+
+function publishCollections(rows, read) {
+  if (read.epoch !== orgEpoch || read.seq < orgCollectionsSeq) return false;
+  orgCollectionsSeq = read.seq;
+  personalCollections = rows;
+  orgState = 'ready';
+  return true;
+}
+
+// New watch-with labels redraw the open tab or browse view if they change what it
+// shows (filter options, tags, pickers); otherwise nothing is redrawn.
+function publishChoices(rows, read) {
+  if (read.epoch !== orgEpoch || read.seq < orgChoicesSeq) return false;
+  const before = watchWithSignature();
+  orgChoicesSeq = read.seq;
+  watchWithChoices = rows;
+  if (watchWithSignature() !== before) redrawForWatchWith();
+  return true;
+}
+
+function watchWithSignature() {
+  return JSON.stringify([watchWithChoiceList(), (watchWithChoices || []).map(c => [c.token, c.label])]);
+}
+
+function redrawForWatchWith() {
+  const tabReady = activeTabId && tabData[activeTabId] && tabData[activeTabId].loaded;
+  const browseReady = isBrowseView(activeViewId) && browseData && browseData.loaded;
+  if (tabReady || browseReady) { renderFilters(); renderTable(); }
+}
+
+// After a restore: everything read before it is stale. The selector says it is
+// loading until the post-restore read arrives.
+function invalidateOrganization() {
+  orgEpoch++;
+  orgCollectionsSeq = 0;
+  orgChoicesSeq = 0;
+  personalCollections = null;
   orgState = 'loading';
   buildBrowseBar();
+}
+
+async function loadOrganization() {
+  const read = orgReadStart();
+  orgLoadSeq = read.seq;
+  if (orgState !== 'ready') { orgState = 'loading'; buildBrowseBar(); }
   try {
     const [collections, choices] = await Promise.all([fetchAllRowsStrict('personal_collections'), fetchAllRowsStrict('watch_with_choices')]);
-    if (seq !== orgLoadSeq) return;
-    personalCollections = collections;
-    watchWithChoices = choices;
-    orgState = 'ready';
+    publishCollections(collections, read);
+    publishChoices(choices, read);
   } catch (e) {
-    if (seq !== orgLoadSeq) return;
+    // A failure matters only for the latest load, and only if nothing newer was shown since.
+    if (read.seq !== orgLoadSeq || read.epoch !== orgEpoch || orgCollectionsSeq > read.seq) return;
     orgState = isMissingTableError(e) ? 'absent' : 'unavailable';
     if (orgState === 'unavailable') console.error(e);
   }

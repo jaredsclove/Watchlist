@@ -317,7 +317,7 @@ test('empty states: no films saved (Separate) and nothing matching (Combined); a
   const app = await boot(data);
   await open(app, B['90day']);
   app.ctx.setBrowsePresentation('seasons');
-  assert.ok(html(app).includes('No films saved in this collection.'));
+  assert.ok(html(app).includes('No films in this collection.'));
   app.ctx.setBrowseGrouping('combined');
   assert.deepStrictEqual(stats(app), ['1 Show', '1 Season entry', '0 Films']);
   assert.ok(!html(app).includes('[film]') && !html(app).includes('browse-film-row'));

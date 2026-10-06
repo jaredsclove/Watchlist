@@ -614,13 +614,13 @@ test('order is deterministic: shuffled storage gives byte-identical views', asyn
 test('empty and no-match states are told apart: no films saved, no TV saved, nothing matches', async () => {
   const app = await boot();
   await openCol(app, B['90day']);
-  assert.ok(html(app).includes('No films saved in this collection.'));
+  assert.ok(html(app).includes('No films in this collection.'));
   assert.deepStrictEqual(stats(app), ['1 Show', '2 Season entries', '0 Films']);
   setFilter(app, 'fSearch', 'zzz');
-  assert.ok(html(app).includes('No TV shows match these filters.') && html(app).includes('No films saved in this collection.'));
+  assert.ok(html(app).includes('No TV shows match these filters.') && html(app).includes('No films in this collection.'));
   const app2 = await boot(all(film({ title: 'Only Film' })));
   await openCol(app2, B['sheridan']);
-  assert.ok(html(app2).includes('No TV shows saved in Sheridan.') && html(app2).includes('No films saved in this collection.'));
+  assert.ok(html(app2).includes('No TV shows in Sheridan.') && html(app2).includes('No films in this collection.'));
   await openCol(app2, B['disney']);
   app2.ctx.switchMediaType('movie'); await settle();
   setFilter(app2, 'fSearch', 'zzz');
@@ -641,7 +641,7 @@ test('membership decides: unlinked or other-tab seasons aren’t members; a memb
     { id: 'cm-gone-film', collection_id: B['disney'].slice(7), show_id: null, item_id: 'no-such-film', created_at: '2026-10-06T00:00:00+00:00' });
   await openCol(app, B['disney']);
   assert.ok(!html(app).includes('Ghost Show') && !html(app).includes('Season 9'), 'not members, not listed');
-  assert.ok(html(app).includes('2 members of this collection weren’t found in this read, so they aren’t listed. Nothing was changed.'));
+  assert.ok(html(app).includes('This read didn’t include 2 members of this collection, so they aren’t listed. That usually means the read was incomplete or something changed meanwhile; it doesn’t mean anything was deleted. Nothing was changed.'));
   assert.ok(html(app).includes('onclick="loadBrowseView()">Read again'));
   assert.ok(!app.get("deriveAllMovies(browseData.rows).films.some(r => r.id === 'cross-1' || r.title === 'Ghost Show')"));
   assert.deepStrictEqual(mutating(app), []);

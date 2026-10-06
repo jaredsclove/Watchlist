@@ -190,7 +190,10 @@ test('restore reload re-reads the active view (no loadTab(null))', async () => {
   const before = app.requests.length;
   app.ctx.finishRestoreAndReload(); await settle();
   const after = app.requests.slice(before);
-  assert.strictEqual(after.length, 2, 'the TV rows and the shows');
+  // Stage 3b-1: the restored collections and watch-with choices are read again too (GET only).
+  assert.deepStrictEqual(after.map(r => new URL(r.url).pathname.split('/').pop()).sort(),
+    ['personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items'], 'the TV rows, the shows and the organization');
+  assert.ok(after.every(r => r.method === 'GET'));
   assert.ok(after.some(isDerivedRead) && after.some(r => r.url.includes('/rest/v1/tv_shows')));
   assertViewIntact(app);
 });

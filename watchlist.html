@@ -133,7 +133,11 @@ let backNavFilters = null; // { view, values }: filters Back puts back on the vi
 let personalCollections = null; // personal_collections rows (organization.js); null until loaded
 let watchWithChoices = null; // watch_with_choices rows; null until loaded (the configured list is offered meanwhile)
 let orgState = 'loading'; // 'loading' | 'ready' | 'unavailable' (failed: Retry) | 'absent' (database without personal collections)
-let orgLoadSeq = 0; // lets a late organization load see that it's been superseded
+let orgLoadSeq = 0; // the latest organization load (its failure matters only if it is still the latest)
+let orgReadSeq = 0; // every read of the organization tables takes the next number when it starts
+let orgCollectionsSeq = 0; // the start number of the read whose collections are shown (an older read never replaces them)
+let orgChoicesSeq = 0; // the same for the watch-with choices
+let orgEpoch = 0; // bumped by a restore: reads started before it never publish
 
 
 

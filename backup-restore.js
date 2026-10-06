@@ -575,6 +575,8 @@ async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
   restoreInFlight = true; // sent to the database: navigation no longer abandons it
   try {
     await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup, p_allow_v1_reset: pendingRestoreAllowV1Reset === true });
+    // Collections and watch-with choices read before this point are stale now.
+    if (orgState !== 'absent') invalidateOrganization();
   } catch(e) {
     showRestoreModal(`<div class="modal-title">Restore failed — nothing was changed</div>
       <div class="modal-error">${esc(e.message)}
@@ -650,6 +652,7 @@ ${esc(preRestoreFilename)}</div>
 function finishRestoreAndReload() {
   closeRestoreModal();
   tabData = {};
+  loadOrganization(); // the restored collections and watch-with choices (in the background)
   if (isBrowseView(activeViewId)) loadBrowseView();
   else if (activeViewId) loadDerivedView();
   else loadTab(activeTabId);

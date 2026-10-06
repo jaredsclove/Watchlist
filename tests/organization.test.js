@@ -75,6 +75,7 @@ test('startup: the TV landing view comes first; the selector then lists your col
 
 test('while collections load the selector says so; the current view keeps working; a failed load says unavailable with Retry, never an empty list', async () => {
   const app = await boot();
+  app.run("orgState = 'loading'; personalCollections = null"); // as at startup (a refresh while ready keeps the list)
   const g = app.hold(r => r.url.includes('/personal_collections?'));
   const loading = app.ctx.loadOrganization();
   await g.reached;
@@ -110,7 +111,7 @@ test('archived collections are hidden; a renamed collection shows its new name a
   await open(app, `browse:${uuid('0c', 9)}`);
   app.ctx.setBrowsePresentation('seasons'); await settle();
   assert.deepStrictEqual(store.writes, ['watchlist_browse_layout_disney', `watchlist_browse_layout_id_${uuid('0c', 9)}`]);
-  assert.ok(html(app).includes('No TV shows saved in Anime.'), 'an empty collection says so');
+  assert.ok(html(app).includes('No TV shows in Anime.'), 'an empty collection says so');
 });
 
 test('a collection archived after the selector loaded: entering it says it isn’t available, with Back; nothing is written', async () => {
@@ -299,6 +300,139 @@ test('without personal collections: the selector is unavailable (never the stora
   await matchAsTv(app2, legacy.id, 4100);
   const call = writes(app2).find(r => r.url.includes('match_tv_row'));
   assert.ok(call && !('p_expansion' in call.body));
+});
+
+// ── organization refresh (review finding 1) ──
+// A format 3 backup whose collections and watch-with labels differ from what the page has loaded.
+async function restoredBackup(app) {
+  const b = JSON.parse(JSON.stringify(await app.run('buildBackupObject()')));
+  const old = b.tables.personal_collections.find(c => c.legacy_source === 'disney');
+  const fresh = uuid('0c', 77);
+  b.tables.personal_collections = b.tables.personal_collections.map(c => c.id === old.id ? { ...c, id: fresh, name: 'Disney+ (restored)' } : c);
+  b.tables.collection_memberships = b.tables.collection_memberships.map(m => m.collection_id === old.id ? { ...m, collection_id: fresh } : m);
+  b.tables.watch_with_choices = b.tables.watch_with_choices.map(c => c.token === 'Rina' ? { ...c, label: 'Rina (restored)' } : c);
+  return { b, oldId: old.id, freshId: fresh };
+}
+async function restoreThrough(app, b) {
+  app.ctx.__b = b;
+  await app.run('pendingRestoreData = __b');
+  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
+  assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
+  app.ctx.finishRestoreAndReload(); await settle();
+}
+
+test('after a restore the selector and watch-with labels come from the restored data (changed ids, names, labels)', async () => {
+  const app = await boot();
+  app.ctx.switchMediaType('movie'); await settle();
+  app.ctx.switchTab('movies'); await settle();
+  const { b, oldId, freshId } = await restoredBackup(app);
+  await restoreThrough(app, b);
+  assert.ok(options(app).some(([v, t]) => v === `browse:${freshId}` && t === 'Disney+ (restored)'), JSON.stringify(options(app)));
+  assert.ok(!options(app).some(([v]) => v === `browse:${oldId}`), 'the restored-away collection is gone from the selector');
+  assert.ok(app.el('tbody').innerHTML.includes('>Rina (restored)</button>'), 'the open Movies tab shows the restored label');
+  assert.ok(/<option value="Rina">Rina \(restored\)<\/option>/.test(app.el('filtersRow').innerHTML));
+});
+
+test('a restored-away collection that is still open (or chosen from a stale selector) says it isn’t available, with Back', async () => {
+  const app = await boot();
+  const { b, oldId } = await restoredBackup(app);
+  app.ctx.__b = b;
+  await app.run('pendingRestoreData = __b');
+  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
+  // Simulate the view being a collection when the page reloads its data.
+  app.run(`activeViewId = 'browse:${oldId}'`);
+  app.ctx.finishRestoreAndReload(); await settle();
+  assert.ok(html(app).includes('This collection isn’t available any more.'));
+  assert.ok(app.el('viewHead').innerHTML.includes('browseBack()'));
+  assert.strictEqual(writes(app).filter(r => !r.url.includes('restore_backup')).length, 0);
+});
+
+test('watch-with controls drawn before the choices load are redrawn when the loaded labels differ (slow startup)', async () => {
+  const data = library();
+  const app = await boot(data);
+  app.store.watch_with_choices.find(c => c.token === 'Suzanne').label = 'Suzanne B.';
+  app.run('watchWithChoices = null'); // as if the startup read hadn't finished yet
+  const g = app.hold(r => r.url.includes('/watch_with_choices?'));
+  const loading = app.ctx.loadOrganization();
+  app.ctx.switchMediaType('movie'); await settle();
+  app.ctx.switchTab('movies'); await settle();
+  assert.ok(app.el('tbody').innerHTML.includes('>Suzanne</button>'), 'fallback before the choices arrive');
+  g.release(); await loading; await settle();
+  assert.ok(app.el('tbody').innerHTML.includes('>Suzanne B.</button>'), 'redrawn with the loaded label');
+});
+
+test('an older organization read that finishes last never replaces newer data (Retry, a collection view, a restore)', async () => {
+  const app = await boot();
+  // 1. An older load is still pending when a newer one (Retry) finishes.
+  const g = app.hold(r => r.url.includes('/personal_collections?'));
+  const older = app.ctx.loadOrganization();
+  await g.reached;
+  coll(app, 'sheridan').name = 'Sheridan (newer)';
+  await app.ctx.loadOrganization(); await settle();
+  coll(app, 'sheridan').name = 'Sheridan (newest db)'; // the held read answers with whatever the store holds when released
+  g.release(); await older; await settle();
+  assert.ok(options(app).some(([, t]) => t === 'Sheridan (newer)'), JSON.stringify(options(app)));
+  // 2. A collection view's fresher read is not overwritten by an older startup-style read.
+  const g2 = app.hold(r => r.url.includes('/personal_collections?'));
+  const older2 = app.ctx.loadOrganization();
+  await g2.reached;
+  coll(app, 'disney').name = 'Disney+ v2';
+  await open(app, B.disney);
+  assert.ok(options(app).some(([, t]) => t === 'Disney+ v2'));
+  coll(app, 'disney').name = 'Disney+ v1 (stale)';
+  g2.release(); await older2; await settle();
+  assert.ok(options(app).some(([, t]) => t === 'Disney+ v2'), 'the older read was dropped: ' + JSON.stringify(options(app)));
+});
+
+test('a startup read pending across a restore is discarded; the post-restore read wins', async () => {
+  const app = await boot();
+  const { b, freshId } = await restoredBackup(app);
+  const g = app.hold(r => r.url.includes('/personal_collections?'));
+  const pending = app.ctx.loadOrganization();
+  await g.reached;
+  const preRestore = JSON.parse(JSON.stringify(app.store.personal_collections));
+  await restoreThrough(app, b);
+  // The held (pre-restore) read now answers with the old rows.
+  app.store.personal_collections_hold = app.store.personal_collections;
+  app.store.personal_collections = preRestore;
+  g.release(); await pending; await settle();
+  app.store.personal_collections = app.store.personal_collections_hold;
+  assert.ok(options(app).some(([v]) => v === `browse:${freshId}`), 'still the restored collections: ' + JSON.stringify(options(app)));
+});
+
+test('a pre-restore read that finishes before the post-restore read publishes nothing; the selector waits for the restored data', async () => {
+  const app = await boot();
+  const { b, freshId, oldId } = await restoredBackup(app);
+  const g = app.hold(r => r.url.includes('/personal_collections?'));
+  const pending = app.ctx.loadOrganization();
+  await g.reached;
+  const preRestore = JSON.parse(JSON.stringify(app.store.personal_collections));
+  app.ctx.__b = b;
+  await app.run('pendingRestoreData = __b');
+  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
+  const g2 = app.hold(r => r.url.includes('/personal_collections?')); // hold the post-restore read
+  app.ctx.finishRestoreAndReload();
+  await g2.reached;
+  const restored = app.store.personal_collections;
+  app.store.personal_collections = preRestore; // the pre-restore read answers with the old rows
+  g.release(); await pending; await settle();
+  app.store.personal_collections = restored;
+  assert.ok(!options(app).some(([v]) => v === `browse:${oldId}`), 'the pre-restore read did not publish: ' + JSON.stringify(options(app)));
+  assert.match(app.el('browseBar').innerHTML, /Loading collections…/);
+  g2.release(); await settle();
+  assert.ok(options(app).some(([v]) => v === `browse:${freshId}`));
+});
+
+test('the database model refuses a NULL watch-with value and deleting a choice in use; the app reports it and keeps the row', async () => {
+  const data = library();
+  const app = await boot(data);
+  const dune = data.rows.find(r => r.title === 'Dune');
+  const res = await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/watch_with_choices?token=eq.Suzanne`, { method: 'DELETE', headers: {} });
+  assert.strictEqual(res.status, 409);
+  assert.ok(app.store.watch_with_choices.some(c => c.token === 'Suzanne'));
+  const res2 = await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/watchlist_items?id=eq.${dune.id}`, { method: 'PATCH', headers: {}, body: JSON.stringify({ watch_with: [null] }) });
+  assert.strictEqual(res2.status, 400);
+  assert.deepStrictEqual(Array.from(app.store.watchlist_items.find(r => r.id === dune.id).watch_with), ['Suzanne']);
 });
 
 T.run();
