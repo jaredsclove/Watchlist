@@ -12,6 +12,8 @@ const { createApp, runner, settle } = require('./app-harness');
 
 const T = runner('browse-presentation');
 const test = T.test;
+// Browse views are personal collections (Stage 3b-1); the harness bootstraps the four with fixed ids.
+const B = Object.fromEntries(['disney', 'sheridan', '90day', 'truecrime'].map((k, i) => [k, `browse:0c000000-0000-4000-8000-00000000000${i + 1}`]));
 
 function day(offset) {
   const d = new Date();
@@ -75,7 +77,7 @@ async function boot(data = library(), opts = {}) {
   app.ctx.localStorage = app.store_;
   return app;
 }
-async function open(app, id = 'browse-disney') { app.ctx.openBrowseCollection(id); await settle(); }
+async function open(app, id = B['disney']) { app.ctx.openBrowseCollection(id); await settle(); }
 const html = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 const filters = app => app.el('filtersRow').innerHTML;
@@ -248,7 +250,7 @@ test('all 12 combinations: grouping never changes counts or members; counts keep
   const app = await boot();
   await open(app);
   setFilter(app, 'fStatus', 'all');
-  const members = () => app.get(`(() => { const v = deriveBrowsePresentation(deriveBrowseCollection(browseData.rows, browseData.showsById, 'disney', localTodayStr()),
+  const members = () => app.get(`(() => { const v = deriveBrowsePresentation(deriveBrowseCollection(browseData.rows, browseData.showsById, browseData.members, localTodayStr()),
     { media: browseMedia, presentation: browsePresentation, grouping: browseGrouping, seasonVis: browseSeasonVis, textMatches: () => true, fStatus: 'all' });
     return v.sections.flatMap(s => s.entries).map(e => e.kind + ':' + (e.kind === 'show' ? e.item.key : e.row.id)).sort().join(','); })()`);
   const expected = {
@@ -293,7 +295,7 @@ test('TV seasons narrows season entries only (never films), with the note; it is
   app.ctx.setBrowseSeasonVis('all');
   assert.ok(!html(app).includes('Films aren’t filtered'));
   app.ctx.setBrowseSeasonVis('watched');
-  await open(app, 'browse-sheridan'); await open(app);
+  await open(app, B['sheridan']); await open(app);
   assert.strictEqual(app.get('browseSeasonVis'), 'all');
 });
 
@@ -313,7 +315,7 @@ test('Status and Search apply to the show (TV) and the film; they survive presen
 test('empty states: no films saved (Separate) and nothing matching (Combined); a TV-only collection never gets made-up films', async () => {
   const data = all(show({ title: 'Fiance', collection: '90day' }, [{ label: 'Season 1', date: '2014-01-12' }]));
   const app = await boot(data);
-  await open(app, 'browse-90day');
+  await open(app, B['90day']);
   app.ctx.setBrowsePresentation('seasons');
   assert.ok(html(app).includes('No films saved in this collection.'));
   app.ctx.setBrowseGrouping('combined');
@@ -351,7 +353,7 @@ test('shuffled storage gives byte-identical output in every presentation', async
 test('the layout is remembered per collection, written only when changed, apart from All TV; Search/Status/media/TV seasons still reset on entry', async () => {
   const app = await boot();
   await open(app);
-  await open(app, 'browse-sheridan');
+  await open(app, B['sheridan']);
   assert.deepStrictEqual(app.store_.writes, [], 'nothing is written on entry');
   await open(app);
   app.ctx.setBrowsePresentation('seasons');
@@ -361,7 +363,7 @@ test('the layout is remembered per collection, written only when changed, apart 
   app.ctx.setBrowseMedia('tv');
   assert.deepStrictEqual(app.store_.writes.map(w => w[0]), ['watchlist_browse_layout_disney', 'watchlist_browse_layout_disney']);
   assert.deepStrictEqual(JSON.parse(app.store_.data.watchlist_browse_layout_disney), { presentation: 'seasons', grouping: 'combined' });
-  await open(app, 'browse-sheridan');
+  await open(app, B['sheridan']);
   assert.deepStrictEqual(J(app, '[browsePresentation, browseGrouping]'), ['shows', 'separate'], 'per collection');
   await open(app);
   assert.deepStrictEqual(J(app, '[browseMedia, browsePresentation, browseGrouping, browseSeasonVis]'), ['all', 'seasons', 'combined', 'all']);
@@ -418,7 +420,7 @@ test('expanded shows stay expanded across presentation and grouping changes in a
   app.ctx.toggleBrowseShow(id);
   app.ctx.setBrowsePresentation('seasons'); app.ctx.setBrowseGrouping('combined'); app.ctx.setBrowsePresentation('shows');
   assert.ok(html(app).includes(`data-show-key="${id}" aria-expanded="true"`));
-  await open(app, 'browse-sheridan'); await open(app);
+  await open(app, B['sheridan']); await open(app);
   assert.ok(html(app).includes(`data-show-key="${id}" aria-expanded="false"`));
 });
 

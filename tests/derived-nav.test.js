@@ -50,7 +50,7 @@ const noNullCollection = app => app.writes().forEach(r => {
 });
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
-test('startup: Currently Watching opens with one paginated GET of the TV collections, one of the shows, and no writes', async () => {
+test('startup: Currently Watching opens with one paginated GET of the TV collections, one of the shows, the personal-organization reads, and no writes', async () => {
   const app = await createApp({ rows: [tv({ status: 'watching' })] });
   assert.strictEqual(app.get('activeViewId'), 'watching');
   assert.strictEqual(app.get('activeTabId'), null);
@@ -60,7 +60,10 @@ test('startup: Currently Watching opens with one paginated GET of the TV collect
   const showReads = app.requests.filter(r => r.url.includes('/rest/v1/tv_shows'));
   assert.strictEqual(showReads.length, 1);
   assert.strictEqual(showReads[0].headers['Prefer'], 'count=exact', 'shows are paginated and count-checked too');
-  assert.strictEqual(app.requests.length, 2, 'no per-tab loads, no seeding reads');
+  // Stage 3b-1: the Browse selector's collections and the watch-with choices load alongside, GET only.
+  const orgReads = app.requests.filter(r => /\/rest\/v1\/(personal_collections|watch_with_choices)\?/.test(r.url));
+  assert.deepStrictEqual(orgReads.map(r => r.headers['Prefer']), ['count=exact', 'count=exact']);
+  assert.strictEqual(app.requests.length, 4, 'no per-tab loads, no seeding reads');
   const list = decodeURIComponent(reads[0].url.match(/collection=in\.\(([^)]*)\)/)[1]).split(',').map(x => x.replace(/"/g, ''));
   assert.deepStrictEqual(list, TV_IDS);
   assert.strictEqual(reads[0].headers['Prefer'], 'count=exact');

@@ -92,7 +92,7 @@ function linkFixtureRows(store, newId) {
   }
 }
 
-function tvFunctions(app, store, newId) {
+function tvFunctions(app, store, newId, org = NO_ORG) {
   const shows = () => store.tv_shows;
   const authoritative = () => ['authoritative', 'final'].includes(app.stage);
   const requireAuthoritative = fn => {
@@ -105,11 +105,13 @@ function tvFunctions(app, store, newId) {
     if (s) return { show: s, created: false };
     s = { id: newId(), collection, title, show_key: showKey, tmdb_id: tmdbId, status };
     shows().push(s);
+    org.newShow(s);
     return { show: s, created: true };
   }
   function insertRow(fields) {
     const r = { id: newId(), watched: false, media_type: null, tmdb_id: null, season_number: null, show_id: null, skipped: false, ...fields };
     items().push(r);
+    org.newItem(r);
     return r;
   }
   // Refresh tracking (othertv_shows) is kept only in the shadow and authoritative stages.
@@ -259,12 +261,13 @@ function tvFunctions(app, store, newId) {
       let showDeleted = false;
       if (show && !items().some(x => x.show_id === show.id)) {
         shows().splice(shows().indexOf(show), 1);
+        org.dropShow(show.id);
         showDeleted = true;
         if (show.tmdb_id != null && keepsTracking()) store.othertv_shows = store.othertv_shows.filter(o => !(o.collection === show.collection && o.tmdb_id === show.tmdb_id));
       }
       return { deleted_row_id: id, show_id: show ? show.id : null, show_deleted: showDeleted };
     },
-    match_tv_row({ p_row_id: id, p_target: target, p_patch: patch }) {
+    match_tv_row({ p_row_id: id, p_target: target, p_patch: patch, p_expansion: expansion }) {
       const tmdb = target.tmdb_id, n = patch.season_number;
       const key = String(patch.title || '').trim().toLowerCase();
       if (!Number.isInteger(tmdb) || !Number.isInteger(n) || n < 0 || !key || patch.media_type !== 'tv' || patch.tmdb_id !== tmdb
@@ -282,18 +285,40 @@ function tvFunctions(app, store, newId) {
       if (t && legacy && authoritative() && t.status !== legacy.status) {
         return { blocked: true, legacy_status: legacy.status, target_status: t.status, legacy_show_id: legacy.id, target_show_id: t.id };
       }
+      // Personal collections (db/phase3b_org.sql): the row's collections move with it,
+      // and a show joining new collections needs a matching confirmation.
+      const visible = org.enabled ? (org.isFilm(r) ? org.collectionsOfItem(r.id) : legacy ? org.collectionsOfShow(legacy.id) : []) : [];
+      if (t && org.enabled) {
+        const extra = visible.filter(c => !org.collectionsOfShow(t.id).includes(c)).sort();
+        if (extra.length) {
+          const seasonIds = items().filter(x => x.show_id === t.id).map(x => x.id).sort();
+          const token = `${t.id}|${extra.join(',')}|${seasonIds.join(',')}`;
+          if (expansion == null) throw new DbError('P0001', `match_needs_confirmation: matching this row would also show all ${seasonIds.length} stored seasons of "${t.title}" in ${extra.map(org.collectionName).join(', ')}. This page can't confirm that; reload it and match again. Nothing was changed.`);
+          if (expansion.confirm !== token) {
+            return { blocked: true, reason: 'membership_expansion', target_show_id: t.id, show_title: t.title, seasons: seasonIds.length,
+              collections: extra.map(c => ({ id: c, name: org.collectionName(c) })), confirmation: token, changed: expansion.confirm != null };
+          }
+        }
+      }
       let targetId;
+      let created = false;
       if (t) targetId = t.id;
       else if (legacy && !items().some(x => x.show_id === legacy.id && x.id !== r.id)) {
         Object.assign(legacy, { tmdb_id: tmdb, title: patch.title.trim(), show_key: key });
         targetId = legacy.id;
       } else {
         targetId = newId();
+        created = true;
         shows().push({ id: targetId, collection: r.collection, title: patch.title.trim(), show_key: key, tmdb_id: tmdb, status: legacy ? legacy.status : 'confirmed' });
       }
+      if (org.enabled && (!legacy || targetId !== legacy.id)) {
+        if (created) org.dropShow(targetId);
+        visible.forEach(c => org.add(c, { show_id: targetId }));
+      }
+      if (org.enabled && org.isFilm(r)) org.dropItem(r.id);
       Object.assign(r, { title: patch.title, season: patch.season, item_key: patch.item_key, theme: patch.theme ?? r.theme,
         display_date: patch.display_date ?? r.display_date, date_sort: patch.date_sort, media_type: 'tv', tmdb_id: tmdb, season_number: n, show_id: targetId });
-      if (legacy && legacy.id !== targetId && !items().some(x => x.show_id === legacy.id)) shows().splice(shows().indexOf(legacy), 1);
+      if (legacy && legacy.id !== targetId && !items().some(x => x.show_id === legacy.id)) { shows().splice(shows().indexOf(legacy), 1); org.dropShow(legacy.id); }
       track(r.collection, tmdb, patch.title.trim(), target.network ?? patch.theme ?? '');
       return { blocked: false, row: clone(r), show_id: targetId };
     },
@@ -331,7 +356,20 @@ function tvFunctions(app, store, newId) {
   }]));
 }
 
+const NO_ORG = { enabled: false, newShow() {}, newItem() {}, dropShow() {}, dropItem() {}, isFilm: () => false,
+  collectionsOfItem: () => [], collectionsOfShow: () => [], add() {}, collectionName: c => c };
+const LEGACY_SOURCES = [['disney', 'Disney+'], ['sheridan', 'Sheridan'], ['90day', '90 Day'], ['truecrime', 'True Crime / Docs']];
+const CONFIG_WATCH_WITH = ['Alone', 'Suzanne', 'Rina', 'Whole Family']; // WATCH_WITH_OPTIONS (tests/organization.test.js keeps them equal)
+const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.season === 'Film');
+
 // options:
+//   org:     false for a database without personal collections (before Stage 3b-1);
+//            otherwise personal_collections, collection_memberships and
+//            watch_with_choices exist, bootstrapped like db/phase3b_org.sql
+//            (fixed uuids; app.browseId(source) names a view) unless given as personalCollections / memberships /
+//            watchWithChoices, and the database behaves like it: the membership
+//            trigger, cascades, Match keeping memberships, watch-with checks,
+//            is_film on reads, format 3 only in restore_backup
 //   rows:    initial watchlist_items rows (the fake database)
 //   tmdb:    path => response body for TMDB requests (default: 404)
 //   width:   window.innerWidth (default 1200)
@@ -342,7 +380,7 @@ function tvFunctions(app, store, newId) {
 //   format1: true for a database without the TV-show schema (no tv_shows)
 //   stage:   migration stage the TV functions behave by (default 'final')
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
-  format1 = false, stage = 'final' } = {}) {
+  format1 = false, stage = 'final', org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null } = {}) {
   const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
   if (!format1) store.tv_shows = clone(tvShows || []);
   const requests = [];
@@ -353,6 +391,54 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   let nextId = 1;
   const app = { store, requests, selectors, consoleErrors, countOverride, stage };
   if (store.tv_shows) linkFixtureRows(store, () => `new-${nextId++}`);
+
+  // ── personal organization (db/phase3b_org.sql) ──
+  const orgOn = !format1 && org !== false;
+  const ORG = { ...NO_ORG };
+  if (orgOn) {
+    const ts = '2026-10-06T00:00:00+00:00';
+    store.personal_collections = personalCollections ? clone(personalCollections)
+      : LEGACY_SOURCES.map(([src, name], i) => ({ id: `0c000000-0000-4000-8000-00000000000${i + 1}`, name, legacy_source: src, sort_order: i + 1, archived_at: null, created_at: ts }));
+    const used = [...new Set(store.watchlist_items.flatMap(r => r.watch_with || []))].filter(t => !CONFIG_WATCH_WITH.includes(t)).sort();
+    store.watch_with_choices = watchWithChoices ? clone(watchWithChoices)
+      : CONFIG_WATCH_WITH.concat(used).map((t, i) => ({ id: `0e000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`, token: t, label: t, sort_order: i + 1, archived_at: null, created_at: ts }));
+    const mapped = coll => (store.personal_collections.find(c => c.legacy_source === coll) || {}).id || null;
+    if (memberships) store.collection_memberships = clone(memberships);
+    else {
+      store.collection_memberships = [];
+      let n = 1;
+      store.tv_shows.forEach(sh => { const c = mapped(sh.collection); if (c) store.collection_memberships.push({ id: `0d000000-0000-4000-8000-${String(n++).padStart(12, '0')}`, collection_id: c, show_id: sh.id, item_id: null, created_at: ts }); });
+      store.watchlist_items.forEach(r => { const c = mapped(r.collection); if (c && isFilmRow(r)) store.collection_memberships.push({ id: `0d000000-0000-4000-8000-${String(n++).padStart(12, '0')}`, collection_id: c, show_id: null, item_id: r.id, created_at: ts }); });
+    }
+    const M = () => store.collection_memberships;
+    Object.assign(ORG, {
+      enabled: true,
+      isFilm: isFilmRow,
+      collectionName: id => (store.personal_collections.find(c => c.id === id) || {}).name || id,
+      collectionsOfShow: id => M().filter(m => m.show_id === id).map(m => m.collection_id),
+      collectionsOfItem: id => M().filter(m => m.item_id === id).map(m => m.collection_id),
+      add(collectionId, target) {
+        const key = target.show_id != null ? 'show_id' : 'item_id';
+        if (M().some(m => m.collection_id === collectionId && m[key] === target[key])) return;
+        M().push({ id: `new-${nextId++}`, collection_id: collectionId, show_id: target.show_id ?? null, item_id: target.item_id ?? null, created_at: new Date().toISOString() });
+      },
+      newShow(sh) { const c = mapped(sh.collection); if (c) ORG.add(c, { show_id: sh.id }); },
+      newItem(r) { const c = mapped(r.collection); if (c && isFilmRow(r)) ORG.add(c, { item_id: r.id }); },
+      dropShow(id) { store.collection_memberships = M().filter(m => m.show_id !== id); },
+      dropItem(id) { store.collection_memberships = M().filter(m => m.item_id !== id); }
+    });
+  }
+  // Row-level database rules the API would enforce with personal collections.
+  const pgError = (status, code, message) => response(status, { code, details: null, hint: null, message });
+  const writeProblem = (table, list) => {
+    if (!orgOn || table !== 'watchlist_items') return null;
+    if (list.some(b => b && 'is_film' in b)) return pgError(400, '428C9', 'cannot insert a non-DEFAULT value into column "is_film"');
+    const tokens = new Set(store.watch_with_choices.map(c => c.token));
+    const bad = list.flatMap(b => (b && b.watch_with) || []).find(t => !tokens.has(t));
+    if (bad !== undefined) return pgError(400, '23514', `watch_with_invalid: "${bad}" is not one of your watch-with choices`);
+    return null;
+  };
+  app.browseId = source => `browse:${store.personal_collections.find(c => c.legacy_source === source).id}`;
 
   // ── fake DOM ──
   const registry = new Map();
@@ -408,11 +494,14 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   // table with the backup's rows in one step, as the real function does.
   app.rpcHandlers = {
     restore_backup: body => {
+      if (orgOn && body.p_backup.formatVersion !== 3) {
+        return pgError(400, '22023', `restore_invalid: format ${body.p_backup.formatVersion} backups ${body.p_backup.formatVersion === 2 ? 'predate personal collections' : 'predate TV shows'} and can't be restored here`);
+      }
       const tables = body.p_backup.tables;
       for (const t of Object.keys(tables)) store[t] = clone(tables[t]);
       return response(200, { restored: Object.fromEntries(Object.keys(tables).map(t => [t, tables[t].length])) });
     },
-    ...tvFunctions(app, store, () => `new-${nextId++}`)
+    ...tvFunctions(app, store, () => `new-${nextId++}`, ORG)
   };
 
   async function fetchStub(url, opts = {}) {
@@ -449,6 +538,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
 
     if (method === 'GET') {
       let found = rowsOf.filter(r => matches(r, params));
+      if (orgOn && table === 'watchlist_items') found = found.map(r => ({ ...r, is_film: isFilmRow(r) })); // generated column
       const select = u.searchParams.get('select');
       if (select && select !== '*' && select !== 'id') {
         const cols = select.split(',');
@@ -468,16 +558,45 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       return response(200, clone(found));
     }
     if (method === 'POST') {
+      const problem = writeProblem(table, body);
+      if (problem) return problem;
       const inserted = body.map(r => ({ id: `new-${nextId++}`, ...r }));
       rowsOf.push(...clone(inserted));
-      return response(201, inserted);
+      if (table === 'tv_shows') inserted.forEach(r => ORG.newShow(r));
+      if (table === 'watchlist_items') inserted.forEach(r => ORG.newItem(r));
+      return response(201, orgOn && table === 'watchlist_items' ? inserted.map(r => ({ ...r, is_film: isFilmRow(r) })) : inserted);
     }
     if (method === 'PATCH') {
-      rowsOf.filter(r => matches(r, params)).forEach(r => Object.assign(r, clone(body)));
+      const problem = writeProblem(table, [body]);
+      if (problem) return problem;
+      const targets = rowsOf.filter(r => matches(r, params));
+      if (orgOn && table === 'watchlist_items') {
+        for (const r of targets) {
+          const after = { ...r, ...body };
+          if (isFilmRow(r) && !isFilmRow(after) && ORG.collectionsOfItem(r.id).length) {
+            return pgError(409, '23503', 'update or delete on table "watchlist_items" violates foreign key constraint "collection_memberships_item_fkey"');
+          }
+        }
+      }
+      targets.forEach(r => {
+        const before = { ...r };
+        Object.assign(r, clone(body));
+        // The trigger: a TV season matched as a film keeps its show's collections.
+        if (orgOn && table === 'watchlist_items' && before.show_id != null && r.show_id == null && isFilmRow(r)) {
+          ORG.collectionsOfShow(before.show_id).forEach(c => ORG.add(c, { item_id: r.id }));
+        }
+      });
       return response(204, null);
     }
     if (method === 'DELETE') {
+      const gone = rowsOf.filter(r => matches(r, params));
+      // ON DELETE RESTRICT: a show that still has seasons can't be deleted.
+      if (table === 'tv_shows' && gone.some(sh => store.watchlist_items.some(r => r.show_id === sh.id))) {
+        return pgError(409, '23001', 'update or delete on table "tv_shows" violates RESTRICT setting of foreign key constraint "watchlist_items_show_fkey" on table "watchlist_items"');
+      }
       store[table] = rowsOf.filter(r => !matches(r, params));
+      if (table === 'tv_shows') gone.forEach(sh => ORG.dropShow(sh.id));
+      if (table === 'watchlist_items') gone.forEach(r => ORG.dropItem(r.id));
       return response(204, null);
     }
     throw new Error(`harness: unsupported ${method}`);
@@ -487,7 +606,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     console: { log() {}, warn() {}, error: (...a) => consoleErrors.push(a.map(String).join(' ')) },
     document,
     fetch: fetchStub,
-    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    localStorage: storage || { getItem: () => null, setItem() {}, removeItem() {} },
     confirm: () => true,
     alert() {},
     setTimeout: () => 0,

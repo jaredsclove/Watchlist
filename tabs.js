@@ -27,7 +27,7 @@ function buildMediaSwitch() {
 }
 
 function switchMediaType(type) {
-  if (type === activeMediaType && !browseCollectionOf(activeViewId)) return;
+  if (type === activeMediaType && !isBrowseCollectionView(activeViewId)) return;
   activeMediaType = type;
   // Each area lands on its first view: TV → Currently Watching, Movies → All Movies.
   const firstView = landingViewFor(type);
@@ -70,7 +70,7 @@ function switchView(id) {
   activeTabId = null;
   // Back from a collection keeps its origin only while collections are open,
   // and its saved filters only for the view it returns to.
-  if (!browseCollectionOf(id)) browseOrigin = null;
+  if (!isBrowseCollectionView(id)) browseOrigin = null;
   else enterBrowseCollection(id);
   if (backNavFilters && backNavFilters.view !== id) backNavFilters = null;
   browseData = null;

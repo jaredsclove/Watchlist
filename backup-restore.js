@@ -15,16 +15,21 @@ function compareRowFields(expected, restored) {
   return diffFields;
 }
 
-// Which backup format the database holds: 2 once the TV-show schema exists
-// (tv_shows readable), otherwise 1. A read-only probe; any other answer is an error.
+// Which backup format the database holds: 3 once personal collections exist
+// (personal_collections readable), 2 with the TV-show schema (tv_shows readable),
+// otherwise 1. Read-only probes; any other answer is an error.
 async function detectBackupFormat() {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/tv_shows?select=id&limit=1`, {
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
-  });
-  if (res.ok) return 2;
-  const body = await res.text();
-  if (res.status === 404 && body.includes('PGRST205')) return 1;
-  throw new Error(`Couldn't tell which backup format this database uses: ${res.status} ${body}`);
+  const probe = async table => {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=id&limit=1`, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    });
+    if (res.ok) return true;
+    const body = await res.text();
+    if (res.status === 404 && body.includes('PGRST205')) return false;
+    throw new Error(`Couldn't tell which backup format this database uses: ${res.status} ${body}`);
+  };
+  if (await probe('personal_collections')) return 3;
+  return (await probe('tv_shows')) ? 2 : 1;
 }
 
 // Fetches every row of every table in the database's backup format, asking for the
@@ -156,11 +161,24 @@ const RESTORE_COLUMNS_V2 = {
   tv_shows: { id: 'uuid', collection: 'text', title: 'text', show_key: 'text', tmdb_id: 'int?', status: 'text', created_at: 'timestamp' }
 };
 
+// Format 3 (once personal collections exist): adds your collections, which shows
+// and films are in each, and your watch-with choices. Like formats 1 and 2, never
+// user_id (nor the generated is_film / item_is_film).
+const RESTORE_COLUMNS_V3 = {
+  ...RESTORE_COLUMNS_V2,
+  personal_collections: { id: 'uuid', name: 'text', legacy_source: 'text?', sort_order: 'int', archived_at: 'timestamp?', created_at: 'timestamp' },
+  collection_memberships: { id: 'uuid', collection_id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', created_at: 'timestamp' },
+  watch_with_choices: { id: 'uuid', token: 'text', label: 'text', sort_order: 'int', archived_at: 'timestamp?', created_at: 'timestamp' }
+};
+
 // The backup formats this app reads and writes, by formatVersion.
 const BACKUP_FORMATS = {
   1: { tables: ['watchlist_items', 'othertv_shows', 'custom_collections'], columns: RESTORE_COLUMNS },
-  2: { tables: ['watchlist_items', 'tv_shows', 'othertv_shows', 'custom_collections'], columns: RESTORE_COLUMNS_V2 }
+  2: { tables: ['watchlist_items', 'tv_shows', 'othertv_shows', 'custom_collections'], columns: RESTORE_COLUMNS_V2 },
+  3: { tables: ['watchlist_items', 'tv_shows', 'othertv_shows', 'custom_collections', 'personal_collections', 'collection_memberships', 'watch_with_choices'],
+       columns: RESTORE_COLUMNS_V3 }
 };
+const LEGACY_SOURCES = ['disney', 'sheridan', '90day', 'truecrime'];
 const TV_SHOW_STATUSES = ['confirmed', 'highpriority', 'watching', 'complete', 'pending', 'maybe', 'skipped'];
 
 // Returns why a value doesn't fit a RESTORE_COLUMNS type, or null if it does.
@@ -249,7 +267,51 @@ function validateBackupRows(tables, formatVersion = 1) {
   report('custom_collections duplicate name', findDuplicates(tables.custom_collections.filter(r => r && typeof r === 'object'),
     r => typeof r.name === 'string' ? r.name : null, r => `"${r.name}"`));
   if (formatVersion >= 2) validateTvShowRows(tables, items, report, rowLabel);
+  if (formatVersion >= 3) validateOrganizationRows(tables, items, report, rowLabel);
   return errors;
+}
+
+// Format 3 only: collections, memberships and watch-with choices, mirroring the
+// database's rules (exactly one target that is in the backup and of the right
+// kind, one membership per collection and target, names and labels unique
+// ignoring case, every watch-with value on a row is a choice).
+function validateOrganizationRows(tables, items, report, rowLabel) {
+  const colls = tables.personal_collections.filter(r => r && typeof r === 'object');
+  const members = tables.collection_memberships.filter(r => r && typeof r === 'object');
+  const choices = tables.watch_with_choices.filter(r => r && typeof r === 'object');
+  const showIds = new Set(tables.tv_shows.filter(r => r && typeof r === 'object').map(s => s.id));
+  const itemsById = new Map(items.map(r => [r.id, r]));
+  const collIds = new Set(colls.map(c => c.id));
+  const trimmedText = v => typeof v === 'string' && v.trim() === v && v !== '';
+  const dupBy = (rows, keyOf, describe) => {
+    const seen = new Map(), dups = [];
+    rows.forEach((r, i) => { const k = keyOf(r); if (k === null) return; if (seen.has(k)) dups.push(`${describe(r)} on ${rowLabel(rows[seen.get(k)], seen.get(k))} and ${rowLabel(r, i)}`); else seen.set(k, i); });
+    return dups;
+  };
+  report('personal_collections name', colls.map((c, i) => trimmedText(c.name) && c.name.length <= 100 ? null : `${rowLabel(c, i)} has name ${JSON.stringify(c.name)}`).filter(Boolean));
+  report('personal_collections legacy source', colls.map((c, i) => c.legacy_source == null || LEGACY_SOURCES.includes(c.legacy_source) ? null : `${rowLabel(c, i)} has legacy_source ${JSON.stringify(c.legacy_source)}`).filter(Boolean));
+  report('personal_collections duplicate name (ignoring case)', dupBy(colls, c => typeof c.name === 'string' ? c.name.toLowerCase() : null, c => `"${c.name}"`));
+  report('personal_collections duplicate legacy source', dupBy(colls, c => c.legacy_source ?? null, c => `"${c.legacy_source}"`));
+  const memberProblems = [];
+  members.forEach((m, i) => {
+    if ((m.show_id == null) === (m.item_id == null)) { memberProblems.push(`${rowLabel(m, i)} must have exactly one of show_id and item_id`); return; }
+    if (!collIds.has(m.collection_id)) memberProblems.push(`${rowLabel(m, i)} is in collection ${m.collection_id}, which isn't in the backup`);
+    if (m.show_id != null && !showIds.has(m.show_id)) memberProblems.push(`${rowLabel(m, i)} points at show ${m.show_id}, which isn't in the backup`);
+    if (m.item_id != null) {
+      const r = itemsById.get(m.item_id);
+      if (!r) memberProblems.push(`${rowLabel(m, i)} points at row ${m.item_id}, which isn't in the backup`);
+      else if (!(r.media_type === 'movie' || (r.media_type == null && r.season === 'Film'))) memberProblems.push(`${rowLabel(m, i)} points at row ${m.item_id}, which isn't a film`);
+    }
+  });
+  report('collection_memberships', memberProblems);
+  report('collection_memberships duplicate', dupBy(members, m => JSON.stringify([m.collection_id, m.show_id ?? null, m.item_id ?? null]),
+    m => `(collection ${m.collection_id}, ${m.show_id != null ? `show ${m.show_id}` : `film ${m.item_id}`})`));
+  report('watch_with_choices token or label', choices.map((c, i) => trimmedText(c.token) && trimmedText(c.label) && c.label.length <= 100 ? null : rowLabel(c, i)).filter(Boolean));
+  report('watch_with_choices duplicate token', dupBy(choices, c => typeof c.token === 'string' ? c.token : null, c => `"${c.token}"`));
+  report('watch_with_choices duplicate label (ignoring case)', dupBy(choices, c => typeof c.label === 'string' ? c.label.toLowerCase() : null, c => `"${c.label}"`));
+  const tokens = new Set(choices.map(c => c.token));
+  report('watchlist_items watch_with', items.flatMap((r, i) => (r.watch_with || []).filter(t => !tokens.has(t))
+    .map(t => `${rowLabel(r, i)} uses "${t}", which isn't one of the backup's watch-with choices`)));
 }
 
 // Format 2 only: the shows and the season → show links, mirroring the database's
@@ -373,10 +435,14 @@ async function renderRestorePreview(backup, session = restoreSessionSeq) {
   // A format-2 backup needs the TV-show schema. Since the switch to show-level
   // status, a TV show's status lives only in tv_shows, so a format-1 backup (which
   // has none) can't be restored into a format-2 database; the database refuses it too.
+  // A format-3 database (personal collections) takes format 3 only: an older file
+  // has none of your collections or watch-with choices; the database refuses it too.
   const formatErrors = backup.formatVersion > dbFormat
-    ? [`This backup is format ${backup.formatVersion}, which needs the TV-show database; this database is still format ${dbFormat}.`]
+    ? [`This backup is format ${backup.formatVersion}, which this database doesn't support yet (it is format ${dbFormat}).`]
     : backup.formatVersion < dbFormat
-      ? [`This backup predates TV shows (format ${backup.formatVersion}). TV show status is now stored per show, so only format ${dbFormat} backups can be restored.`]
+      ? [dbFormat === 3 && backup.formatVersion === 2
+        ? 'This backup is format 2, from before personal collections: it has none of your collections or watch-with choices, so it can\'t be restored here. Restore a format 3 backup (made after the personal-collections update) instead. Nothing was changed.'
+        : `This backup predates TV shows (format ${backup.formatVersion}). TV show status is now stored per show, so only format ${dbFormat} backups can be restored.`]
       : [];
   const lossErrors = formatErrors.concat(identityLossErrors(currentItems, backup.tables.watchlist_items));
   if (lossErrors.length > 0) {

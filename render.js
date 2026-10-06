@@ -42,7 +42,7 @@ function renderFilters() {
       </select>
       <span id="collectionRefreshLink"></span>`;
     }
-    const watchWithOpts = WATCH_WITH_OPTIONS.map(w => `<option value="${esc(w)}">${esc(w)}</option>`).join('');
+    const watchWithOpts = watchWithChoiceList().map(w => `<option value="${esc(w.token)}">${esc(w.label)}</option>`).join('');
     watchWithFilterHtml = `
       <select id="fWatchWith" onchange="renderTable()">
         <option value="">Watch with: anyone</option>${watchWithOpts}
@@ -367,11 +367,16 @@ function upToDateShowIds(rows, today) {
 }
 
 // ─── Movies rendering (standalone films, with Watch With + Collections tags) ──
+// The choices on offer, plus any value the row already has that isn't offered
+// (an archived choice), so it can still be seen and unticked. Values are tokens;
+// what's shown is the choice's label.
 function watchWithPickerHtml(rowId, current) {
   current = current || [];
-  return WATCH_WITH_OPTIONS.map(opt => {
-    const checked = current.includes(opt) ? 'checked' : '';
-    return `<label class="ww-option"><input type="checkbox" value="${esc(opt)}" ${checked} onchange="toggleWatchWith('${rowId}', '${esc(opt).replace(/'/g,"\\'")}', this.checked)"> ${esc(opt)}</label>`;
+  const offered = watchWithChoiceList();
+  const extra = current.filter(t => !offered.some(o => o.token === t)).map(t => ({ token: t, label: watchWithLabel(t) }));
+  return offered.concat(extra).map(opt => {
+    const checked = current.includes(opt.token) ? 'checked' : '';
+    return `<label class="ww-option"><input type="checkbox" value="${esc(opt.token)}" ${checked} onchange="toggleWatchWith('${rowId}', '${esc(opt.token).replace(/'/g,"\\'")}', this.checked)"> ${esc(opt.label)}</label>`;
   }).join('');
 }
 
@@ -390,7 +395,7 @@ function renderMoviesTable(list, td) {
     const watchWith = r.watch_with || [];
     const collections = (r.collections || []).map(cleanCollectionName);
     const collectionTagsHtml = collections.map(c => `<button class="collection-tag collection-tag-clickable" onclick="event.stopPropagation(); toggleCollectionFilterFromTag('${esc(c).replace(/'/g,"\\'")}')" title="Filter by this collection">${esc(c)}</button>`).join('');
-    const watchWithTagsHtml = watchWith.map(w => `<button class="ww-tag ww-tag-clickable" onclick="event.stopPropagation(); toggleWatchWithFilterFromTag('${esc(w).replace(/'/g,"\\'")}')" title="Filter by this person">${esc(w)}</button>`).join('');
+    const watchWithTagsHtml = watchWith.map(w => `<button class="ww-tag ww-tag-clickable" onclick="event.stopPropagation(); toggleWatchWithFilterFromTag('${esc(w).replace(/'/g,"\\'")}')" title="Filter by this person">${esc(watchWithLabel(w))}</button>`).join('');
     // mobile card view keeps tags combined near the title — no column grid to align there anyway
     const inlineTagsHtml = collectionTagsHtml + watchWithTagsHtml;
     const cleanCollectionDisplayName = cleanCollectionName(r.tmdb_collection_name || '');

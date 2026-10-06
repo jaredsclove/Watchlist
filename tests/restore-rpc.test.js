@@ -20,7 +20,7 @@ const row = (name, o = {}) => ({
 
 // A backup of different content than the app's current database.
 async function setup() {
-  const app = await createApp({ rows: [row('a1'), row('a2')] });
+  const app = await createApp({ rows: [row('a1'), row('a2')], format1: true });
   const backup = {
     format: 'watchlist-tracker-backup', formatVersion: 1, exportedAt: '2026-10-04T00:00:00.000Z',
     rowCounts: { watchlist_items: 1, othertv_shows: 0, custom_collections: 0 },

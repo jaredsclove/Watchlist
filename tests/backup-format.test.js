@@ -1,4 +1,4 @@
-// Offline tests for backup formats 1 and 2 (backup-restore.js): the database's
+// Offline tests for backup formats 1 and 2 (backup-restore.js; format 3 is in tests/organization.test.js): the database's
 // format is detected with a read-only probe, backups request exact columns and
 // never contain user_id, format 2 adds tv_shows/show_id/skipped and is validated
 // against the database's show rules, and restore handles the format combinations.
@@ -39,7 +39,7 @@ test('format 1 database: backup is format 1, exact columns, no user_id', async (
 });
 
 test('format 2 database: backup is format 2 with tv_shows, show_id and skipped, still no user_id', async () => {
-  const app = await createApp({ rows: v2Rows(), tvShows: v2Shows() });
+  const app = await createApp({ rows: v2Rows(), tvShows: v2Shows(), org: false });
   const b = await app.run('buildBackupObject()');
   assert.strictEqual(b.formatVersion, 2);
   assert.deepStrictEqual(Array.from(Object.keys(b.tables)).sort(), ['custom_collections', 'othertv_shows', 'tv_shows', 'watchlist_items']);
@@ -51,7 +51,7 @@ test('format 2 database: backup is format 2 with tv_shows, show_id and skipped, 
 });
 
 test('format 2 validation refuses user_id, dangling or cross-collection links, linked films, unlinked skips, bad shows', async () => {
-  const app = await createApp({ rows: v2Rows(), tvShows: v2Shows() });
+  const app = await createApp({ rows: v2Rows(), tvShows: v2Shows(), org: false });
   const good = await app.run('buildBackupObject()');
   const validate = o => Array.from(app.get('validateBackupObject')(o)).join(' | ');
   const variant = fn => { const b = JSON.parse(JSON.stringify(good)); fn(b); return validate(b); };
@@ -63,17 +63,18 @@ test('format 2 validation refuses user_id, dangling or cross-collection links, l
   assert.match(variant(b => { b.tables.tv_shows[0].status = 'caughtup'; }), /tv_shows status/);
   assert.match(variant(b => { b.tables.tv_shows.push({ ...b.tables.tv_shows[0], id: uuid('c2') }); b.rowCounts.tv_shows = 2; }), /duplicate identified show/);
   assert.match(variant(b => { delete b.tables.tv_shows; }), /Missing or invalid data for table "tv_shows"/);
-  assert.match(variant(b => { b.formatVersion = 3; }), /Unsupported backup format version \(3\)/);
+  assert.match(variant(b => { b.formatVersion = 4; }), /Unsupported backup format version \(4\)/);
+  assert.match(variant(b => { b.formatVersion = 3; }), /Missing or invalid data for table "personal_collections"/);
   assert.match(variant(b => { b.formatVersion = 1; }), /Unexpected table\(s\) for format 1: tv_shows/);
 });
 
 test('restore: a format 2 file into a format 1 database is refused before anything changes', async () => {
-  const src = await createApp({ rows: v2Rows(), tvShows: v2Shows() });
+  const src = await createApp({ rows: v2Rows(), tvShows: v2Shows(), org: false });
   const v2 = await src.run('buildBackupObject()');
   const app = await createApp({ rows: v1Rows(), format1: true });
   app.ctx.__b = v2;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
-  assert.match(app.el('restoreModalBox').innerHTML, /needs the TV-show database/);
+  assert.match(app.el('restoreModalBox').innerHTML, /format 2, which this database doesn't support yet \(it is format 1\)/);
   assert.strictEqual(app.get('pendingRestoreData'), null);
   assert.ok(app.requests.every(r => r.method === 'GET'));
 });
@@ -81,7 +82,7 @@ test('restore: a format 2 file into a format 1 database is refused before anythi
 test('restore: a format 1 file into a format 2 database is refused before anything changes (show status lives in tv_shows)', async () => {
   const src = await createApp({ rows: v1Rows(), format1: true });
   const v1 = await src.run('buildBackupObject()');
-  const app = await createApp({ rows: v2Rows(), tvShows: v2Shows() });
+  const app = await createApp({ rows: v2Rows(), tvShows: v2Shows(), org: false });
   app.ctx.__b = v1;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
   assert.match(app.el('restoreModalBox').innerHTML, /predates TV shows \(format 1\)/);
@@ -93,7 +94,7 @@ test('restore: a format 1 file into a format 2 database is refused before anythi
 
 test('restore: same-format restores send the flag as false', async () => {
   for (const [rows, tvShows, format1] of [[v1Rows(), [], true], [v2Rows(), v2Shows(), false]]) {
-    const app = await createApp({ rows, tvShows, format1 });
+    const app = await createApp({ rows, tvShows, format1, org: false });
     const b = await app.run('buildBackupObject()');
     app.ctx.__b = b;
     await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');

@@ -238,7 +238,17 @@ async function confirmTmdbMatch() {
     if (viaShowFunction) {
       // match_tv_row moves the season to its identified show (checked by Refresh
       // shows from then on) and re-checks both conflicts in the database.
-      const res = await sbRpc('match_tv_row', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: patch });
+      // p_expansion asks the database to refuse (and describe) a match that would
+      // show a target show's other seasons in more collections; the previous
+      // schema has no such parameter, so it's sent only with personal collections.
+      const res = await sbRpc('match_tv_row', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: patch,
+        ...(typeof orgState !== 'undefined' && orgState === 'absent' ? {} : { p_expansion: {} }) });
+      if (res && res.blocked && res.reason === 'membership_expansion') {
+        const names = (res.collections || []).map(c => c.name).join(', ');
+        showError(`Not matched: "${patch.title}" is already on this list, and matching would also show all ${res.seasons} of its saved seasons in ${names}. `
+          + 'Confirming that isn’t available yet, so nothing was changed.');
+        return;
+      }
       if (res && res.blocked) {
         // The identified show is already on this list with a different status;
         // nothing was written. Matching never changes a show's status.
