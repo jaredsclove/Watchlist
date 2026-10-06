@@ -82,11 +82,12 @@ function statusOptionLabel(status) {
     pending: '⏳ Pending', maybe: '? Maybe Later', skipped: '✕ Skipped' }[status] || status;
 }
 
-// The show-level status control: clearly scoped to the whole show.
+// The show-level status control. Options show the plain status; the tooltip and the
+// option group say it applies to every season of the show.
 function showStatusSelectHtml(show, opts = {}) {
   if (!show) return '<span class="confirmed-lbl">—</span>';
   const stop = opts.stopPropagation;
-  const options = TV_STATUS_ORDER.map(s => `<option value="${s}"${s === show.status ? ' selected' : ''}>Show: ${statusOptionLabel(s)}</option>`).join('');
+  const options = TV_STATUS_ORDER.map(s => `<option value="${s}"${s === show.status ? ' selected' : ''}>${statusOptionLabel(s)}</option>`).join('');
   return `<select class="status-select show-status-select s-${show.status}" title="Show status — applies to every season of ${esc(show.title)}"${stop ? ' onclick="event.stopPropagation()"' : ''} onchange="${stop ? 'event.stopPropagation(); ' : ''}setShowStatusById('${show.id}', this.value)"><optgroup label="Applies to all seasons of ${esc(show.title)}">${options}</optgroup></select>`;
 }
 

@@ -181,10 +181,12 @@ test('render: both kinds of Watching cards carry the show-level status control; 
   assert.ok(!tbody(app).includes(`toggleWatch('${u.rows[1].id}')`), 'up to date: no watch control for the future season');
 });
 
-test('render: the show control is clearly show-scoped (label and "applies to all seasons")', async () => {
+test('render: the show control shows the plain status and stays show-scoped (tooltip and "applies to all seasons")', async () => {
   const p = show({ title: 'Scoped', status: 'watching' }, [{ num: 1 }]);
   const app = await viewApp(all(p));
-  assert.ok(tbody(app).includes('Show: ▶ Watching'));
+  assert.ok(tbody(app).includes('<option value="watching" selected>▶ Watching</option>'));
+  assert.ok(!tbody(app).includes('Show: '), 'no "Show:" prefix on the options');
+  assert.ok(tbody(app).includes('title="Show status — applies to every season of Scoped"'));
   assert.ok(tbody(app).includes('Applies to all seasons of Scoped'));
 });
 
