@@ -209,6 +209,7 @@ async function addEntry() {
 async function toggleWatchWith(rowId, tag, checked) {
   const row = actionRows().find(r => r.id === rowId);
   if (!row) return;
+  if (!watchWithUsable()) { showError('Watch-with choices aren’t loaded, so nothing was changed. Try again once they are.'); renderTable(); return; }
   const current = new Set(row.watch_with || []);
   if (checked) current.add(tag); else current.delete(tag);
   const updated = [...current];

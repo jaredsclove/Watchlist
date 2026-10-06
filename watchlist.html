@@ -138,6 +138,7 @@ let orgReadSeq = 0; // every read of the organization tables takes the next numb
 let orgCollectionsSeq = 0; // the start number of the read whose collections are shown (an older read never replaces them)
 let orgChoicesSeq = 0; // the same for the watch-with choices
 let orgEpoch = 0; // bumped by a restore: reads started before it never publish
+let watchWithState = 'loading'; // 'loading' | 'ready' | 'unavailable' (failed: Retry) | 'absent' (database without watch-with choices)
 
 
 

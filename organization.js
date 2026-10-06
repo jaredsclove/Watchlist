@@ -5,7 +5,10 @@
 // choices (watch_with_choices: a row keeps a choice's token; its label is what is
 // shown). This file only reads them. They load at startup without holding up the
 // first view; until then, or if loading fails, the Browse collections selector
-// says so and offers Retry, never an empty list. A database without these tables
+// says so and offers Retry, never an empty list. Watch-with choices have their own
+// state: they are offered only once read (never the configured list or an older
+// read in their place); while loading or after a failed read the controls say so
+// (with Retry) and no watch-with change is sent. A database without these tables
 // (the previous schema) gets "Collections unavailable" and the configured
 // watch-with choices; nothing falls back to the storage tabs.
 
@@ -50,15 +53,19 @@ function publishCollections(rows, read) {
 // shows (filter options, tags, pickers); otherwise nothing is redrawn.
 function publishChoices(rows, read) {
   if (read.epoch !== orgEpoch || read.seq < orgChoicesSeq) return false;
-  const before = watchWithSignature();
-  orgChoicesSeq = read.seq;
-  watchWithChoices = rows;
-  if (watchWithSignature() !== before) redrawForWatchWith();
+  setWatchWith(() => { orgChoicesSeq = read.seq; watchWithChoices = rows; watchWithState = 'ready'; });
   return true;
 }
 
+// Changes the watch-with state and redraws the open view if what it shows changed.
+function setWatchWith(change) {
+  const before = watchWithSignature();
+  change();
+  if (watchWithSignature() !== before) redrawForWatchWith();
+}
+
 function watchWithSignature() {
-  return JSON.stringify([watchWithChoiceList(), (watchWithChoices || []).map(c => [c.token, c.label])]);
+  return JSON.stringify([watchWithState, watchWithChoiceList(), (watchWithChoices || []).map(c => [c.token, c.label])]);
 }
 
 function redrawForWatchWith() {
@@ -75,6 +82,7 @@ function invalidateOrganization() {
   orgChoicesSeq = 0;
   personalCollections = null;
   orgState = 'loading';
+  setWatchWith(() => { watchWithChoices = null; watchWithState = 'loading'; });
   buildBrowseBar();
 }
 
@@ -82,17 +90,39 @@ async function loadOrganization() {
   const read = orgReadStart();
   orgLoadSeq = read.seq;
   if (orgState !== 'ready') { orgState = 'loading'; buildBrowseBar(); }
-  try {
-    const [collections, choices] = await Promise.all([fetchAllRowsStrict('personal_collections'), fetchAllRowsStrict('watch_with_choices')]);
-    publishCollections(collections, read);
-    publishChoices(choices, read);
-  } catch (e) {
-    // A failure matters only for the latest load, and only if nothing newer was shown since.
-    if (read.seq !== orgLoadSeq || read.epoch !== orgEpoch || orgCollectionsSeq > read.seq) return;
-    orgState = isMissingTableError(e) ? 'absent' : 'unavailable';
-    if (orgState === 'unavailable') console.error(e);
-  }
-  buildBrowseBar();
+  if (watchWithState !== 'ready') setWatchWith(() => { watchWithState = 'loading'; });
+  // Each kind is published as soon as it arrives (the selector never waits for the
+  // watch-with choices) and fails on its own: a failure matters only for the latest
+  // load, in the same restore epoch, when nothing of that kind was read since (so a
+  // collection view's newer collections read never hides a failed choices read).
+  const current = () => read.seq === orgLoadSeq && read.epoch === orgEpoch;
+  const schemaAbsent = () => {
+    orgState = 'absent';
+    setWatchWith(() => { watchWithState = 'absent'; });
+    buildBrowseBar();
+  };
+  const collections = fetchAllRowsStrict('personal_collections').then(rows => {
+    if (publishCollections(rows, read)) buildBrowseBar();
+  }, e => {
+    if (!current()) return;
+    if (isMissingTableError(e)) { schemaAbsent(); return; }
+    if (orgCollectionsSeq > read.seq) return;
+    orgState = 'unavailable';
+    console.error(e);
+    buildBrowseBar();
+  });
+  const choices = fetchAllRowsStrict('watch_with_choices').then(rows => { publishChoices(rows, read); }, e => {
+    if (!current()) return;
+    if (isMissingTableError(e)) { schemaAbsent(); return; }
+    if (orgChoicesSeq === 0) {
+      // Nothing read in this epoch: say so, never fall back to the configured list.
+      setWatchWith(() => { watchWithState = 'unavailable'; });
+      console.error(e);
+    } else if (watchWithState === 'loading') {
+      setWatchWith(() => { watchWithState = 'ready'; }); // keep this epoch's earlier successful read
+    }
+  });
+  await Promise.all([collections, choices]);
 }
 
 function compareCollections(a, b) {
@@ -134,12 +164,25 @@ function membersOf(memberships, collectionId) {
 }
 
 // Watch-with: the choices to offer (not archived, in your order) and a token's
-// label. Before the choices load, or without the table, the configured list.
+// label. Only read choices are offered; the configured list only on a database
+// without the table; nothing while loading or after a failed read.
 function watchWithChoiceList() {
-  if (!watchWithChoices) return WATCH_WITH_OPTIONS.map(w => ({ token: w, label: w }));
+  if (watchWithState === 'absent') return WATCH_WITH_OPTIONS.map(w => ({ token: w, label: w }));
+  if (watchWithState !== 'ready' || !watchWithChoices) return [];
   return watchWithChoices.filter(c => !c.archived_at)
     .sort((a, b) => (a.sort_order - b.sort_order) || cmpStr(a.token, b.token))
     .map(c => ({ token: c.token, label: c.label }));
+}
+
+function watchWithUsable() {
+  return watchWithState === 'ready' || watchWithState === 'absent';
+}
+
+// What the watch-with controls show instead of choices while they can't be used.
+function watchWithStatusHtml() {
+  if (watchWithState === 'loading') return 'Watch-with choices are loading…';
+  if (watchWithState === 'unavailable') return `Watch-with choices couldn’t be loaded. <button class="btn" onclick="loadOrganization()">Retry</button>`;
+  return '';
 }
 
 function watchWithLabel(token) {

@@ -42,7 +42,9 @@ function renderFilters() {
       </select>
       <span id="collectionRefreshLink"></span>`;
     }
-    const watchWithOpts = watchWithChoiceList().map(w => `<option value="${esc(w.token)}">${esc(w.label)}</option>`).join('');
+    const watchWithOpts = watchWithUsable()
+      ? watchWithChoiceList().map(w => `<option value="${esc(w.token)}">${esc(w.label)}</option>`).join('')
+      : `<option value="" disabled>${watchWithState === 'loading' ? 'Watch-with choices are loading…' : 'Watch-with choices couldn’t be loaded'}</option>`;
     watchWithFilterHtml = `
       <select id="fWatchWith" onchange="renderTable()">
         <option value="">Watch with: anyone</option>${watchWithOpts}
@@ -372,6 +374,7 @@ function upToDateShowIds(rows, today) {
 // what's shown is the choice's label.
 function watchWithPickerHtml(rowId, current) {
   current = current || [];
+  if (!watchWithUsable()) return `<span class="ww-status">${watchWithStatusHtml()}</span>`;
   const offered = watchWithChoiceList();
   const extra = current.filter(t => !offered.some(o => o.token === t)).map(t => ({ token: t, label: watchWithLabel(t) }));
   return offered.concat(extra).map(opt => {

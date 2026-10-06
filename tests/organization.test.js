@@ -435,4 +435,72 @@ test('the database model refuses a NULL watch-with value and deleting a choice i
   assert.deepStrictEqual(Array.from(app.store.watchlist_items.find(r => r.id === dune.id).watch_with), ['Suzanne']);
 });
 
+// ── failed post-restore choices read (second review, finding 2) ──
+async function restoreChangedChoices(app) {
+  const b = JSON.parse(JSON.stringify(await app.run('buildBackupObject()')));
+  b.tables.watch_with_choices = b.tables.watch_with_choices.filter(c => c.token !== 'Alone') // a removed choice
+    .map(c => c.token === 'Suzanne' ? { ...c, label: 'Suzanne (restored)' } : c);
+  b.rowCounts.watch_with_choices = b.tables.watch_with_choices.length;
+  app.ctx.__b = b;
+  await app.run('pendingRestoreData = __b');
+  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
+  assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
+}
+const pickerOf = (app, id) => app.get(`watchWithPickerHtml('${id}', [])`);
+
+for (const withBrowse of [false, true]) {
+  test(`post-restore choices read fails${withBrowse ? ' while a collection view reads successfully' : ''}: no stale or default choices are offered; unavailable + Retry; Retry recovers`, async () => {
+    const data = library();
+    const app = await boot(data);
+    const dune = data.rows.find(r => r.title === 'Dune');
+    app.ctx.switchMediaType('movie'); await settle();
+    app.ctx.switchTab('movies'); await settle();
+    await restoreChangedChoices(app);
+    if (withBrowse) {
+      // The choices read is still in flight when a collection view reads collections successfully; then it fails.
+      const g = app.hold(r => r.url.includes('/watch_with_choices?'));
+      app.ctx.finishRestoreAndReload();
+      await g.reached; await settle(); // the collections arrive first
+      const loadSeq = app.get('orgLoadSeq');
+      await open(app, B.sheridan);
+      assert.ok(app.get('orgCollectionsSeq') > loadSeq, 'the collection view published newer collections than the failing load');
+      g.fail(); await settle();
+      app.ctx.switchTab('movies'); await settle();
+    } else {
+      app.failNext(r => r.url.includes('/watch_with_choices?'));
+      app.ctx.finishRestoreAndReload(); await settle();
+    }
+    const picker = pickerOf(app, dune.id);
+    assert.ok(!/value="Alone"/.test(picker), 'the removed choice is not offered: ' + picker);
+    assert.ok(!/> Suzanne<\/label>/.test(picker), 'no stale label');
+    assert.ok(!/<input type="checkbox"/.test(picker), 'no choices offered while unavailable');
+    assert.match(picker, /Watch-with choices couldn’t be loaded/);
+    assert.match(picker, /onclick="loadOrganization\(\)">Retry/);
+    assert.ok(!/<option value="Alone">/.test(app.el('filtersRow').innerHTML), 'the filter offers no stale choice');
+    assert.strictEqual(app.get('watchWithState'), 'unavailable');
+    assert.strictEqual(app.get('watchWithChoiceList().length'), 0, 'no choice list at all (not the configured one)');
+    const writesBefore = writes(app).length;
+    await app.ctx.toggleWatchWith(dune.id, 'Rina', true); await settle();
+    assert.strictEqual(writes(app).length, writesBefore, 'no watch-with write while choices are unavailable');
+    await app.ctx.loadOrganization(); await settle();
+    assert.strictEqual(app.get('watchWithState'), 'ready');
+    const after = pickerOf(app, dune.id);
+    assert.ok(after.includes('> Suzanne (restored)</label>') && !after.includes('value="Alone"'), after);
+  });
+}
+
+test('while the post-restore choices read is pending the controls say loading (no defaults, no stale values)', async () => {
+  const data = library();
+  const app = await boot(data);
+  const dune = data.rows.find(r => r.title === 'Dune');
+  await restoreChangedChoices(app);
+  const g = app.hold(r => r.url.includes('/watch_with_choices?'));
+  app.ctx.finishRestoreAndReload();
+  await g.reached;
+  const picker = pickerOf(app, dune.id);
+  assert.ok(!/<input type="checkbox"/.test(picker) && /Watch-with choices are loading/.test(picker), picker);
+  g.release(); await settle();
+  assert.ok(pickerOf(app, dune.id).includes('> Suzanne (restored)</label>'));
+});
+
 T.run();
