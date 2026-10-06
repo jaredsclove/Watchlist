@@ -71,7 +71,7 @@ function switchView(id) {
   // Back from a collection keeps its origin only while collections are open,
   // and its saved filters only for the view it returns to.
   if (!browseCollectionOf(id)) browseOrigin = null;
-  else browseMedia = 'all';
+  else enterBrowseCollection(id);
   if (backNavFilters && backNavFilters.view !== id) backNavFilters = null;
   browseData = null;
   invalidateRestorePreparation();

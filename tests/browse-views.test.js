@@ -90,7 +90,7 @@ const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"
   .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1]))
   .filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
 const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'renderTable', 'toggleFilters', 'browseBack', 'openBrowseCollection',
-  'loadBrowseView', 'switchView', 'switchTab', 'switchMediaType']);
+  'loadBrowseView', 'switchView', 'switchTab', 'switchMediaType', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection']);
 function assertReadOnlyDom(app) {
   for (const id of ['tbody', 'cardList', 'filtersRow', 'statsRow', 'browseBar', 'viewHead']) {
     const bad = handlersIn(app.el(id).innerHTML).filter(h => !READ_ONLY_HANDLERS.has(h));
@@ -818,7 +818,7 @@ test('Currently Watching, All TV (Shows and Seasons) and Coming Soon render iden
   for (const id of ['browse-disney', 'browse-sheridan', 'browse-90day', 'browse-truecrime']) await openCol(b, id);
   b.ctx.switchMediaType('movie'); await settle();
   b.ctx.switchMediaType('tv'); await settle();
-  assert.deepStrictEqual(stored, [], 'the browse views store nothing on the device');
+  assert.deepStrictEqual(stored, [], 'entering the browse views stores nothing on the device (only changing a collection layout does)');
   assert.strictEqual(await render(b), before);
 });
 

@@ -6,7 +6,10 @@
 // and a film saved in Movies doesn't join Sheridan. Nothing here writes: the
 // loader only reads (it never calls loadTab, which can seed defaults and PATCH
 // TBA dates), and the controls only search, filter, expand and navigate.
-// Changes are made in the existing tabs and views. While one of these is open,
+// Changes are made in the existing tabs and views. A collection can list TV as
+// Shows or Seasons and show TV and films Separate or Combined (remembered per
+// collection on this device); Shows and Movies only are A–Z, Seasons is oldest
+// first. While one of these is open,
 // activeViewId holds its id and activeTabId is null; its rows live in
 // browseData, apart from tabData and derivedData. Defined here rather than in
 // config.js so the catalog-refresh workflow's config.js cache handling is unaffected.
@@ -21,6 +24,14 @@ const ALL_MOVIES_VIEW = { id: 'allmovies', label: 'All Movies', icon: '🎞️',
 // The existing Movies tab keeps its tools; its tab says it's the legacy place to edit.
 const LEGACY_TAB_LABELS = { movies: 'Movies (legacy)' };
 const BROWSE_MEDIA_LABELS = { all: 'All media', tv: 'TV', movie: 'Movies' };
+// A collection's TV presentation and grouping, remembered on this device per
+// collection (never on entry, only when changed); separate from All TV's choice.
+const BROWSE_LAYOUT_KEY_PREFIX = 'watchlist_browse_layout_';
+const BROWSE_PRESENTATIONS = { shows: 'Shows', seasons: 'Seasons' };
+const BROWSE_GROUPINGS = { separate: 'Separate', combined: 'Combined' };
+const BROWSE_SEASON_VIS_LABELS = { all: 'All', towatch: 'To watch', watched: 'Watched', skipped: 'Skipped' };
+// Collapsible date sections: TBA starts collapsed, Date needs review expanded.
+const BROWSE_SECTION_DEFAULTS = { tvTba: false, filmTba: false, allTba: false, tvReview: true, filmReview: true, allReview: true };
 
 function browseCollectionOf(id) {
   return BROWSE_COLLECTIONS.find(c => c.id === id) || null;
@@ -118,6 +129,80 @@ function deriveAllMovies(rows) {
   return { films: films.sort(compareFilms), unclassified };
 }
 
+// ─── Presentation (pure) ──────────────────────────────────────────────────────
+// Entries of a collection view: { kind: 'show', item } (a show group), { kind:
+// 'season', row, show } or { kind: 'film', row }. A season is titled by its
+// parent show, so it sorts and reads like the show it belongs to; its row is not
+// changed. TV comes before a film with the same title.
+function browseEntryTitle(e) {
+  return e.kind === 'film' ? e.row.title : e.kind === 'show' ? e.item.title : e.show.title;
+}
+function browseEntryId(e) {
+  return e.kind === 'show' ? e.item.key : e.row.id;
+}
+function browseEntrySource(e) {
+  return collectionLabel(e.kind === 'show' ? e.item.collection : e.row.collection);
+}
+// A–Z: title, TV before film, source, id.
+function compareBrowseAz(a, b) {
+  return compareTitles(browseEntryTitle(a), browseEntryTitle(b))
+    || (a.kind === 'film') - (b.kind === 'film')
+    || compareTitles(browseEntrySource(a), browseEntrySource(b))
+    || cmpStr(browseEntryId(a), browseEntryId(b));
+}
+// Undated and equal-date ties: title, TV before film, season order (two
+// seasons), source, row id.
+function compareBrowseTie(a, b) {
+  return compareTitles(browseEntryTitle(a), browseEntryTitle(b))
+    || (a.kind === 'film') - (b.kind === 'film')
+    || (a.kind === 'season' && b.kind === 'season' ? seasonOrder(a.row, b.row) : 0)
+    || compareTitles(browseEntrySource(a), browseEntrySource(b))
+    || cmpStr(a.row.id, b.row.id);
+}
+// Chronological: classified before sorting. Genuine TBA (text or sentinel, whatever
+// a guessed date_sort says), date needs review (no valid date), and dated entries
+// oldest first.
+function chronoBuckets(entries) {
+  const tba = entries.filter(e => isTbaRow(e.row)).sort(compareBrowseTie);
+  const review = entries.filter(e => !isTbaRow(e.row) && !isValidDateSort(e.row.date_sort)).sort(compareBrowseTie);
+  const dated = entries.filter(e => !isTbaRow(e.row) && isValidDateSort(e.row.date_sort))
+    .sort((a, b) => cmpStr(a.row.date_sort, b.row.date_sort) || compareBrowseTie(a, b));
+  return { dated, tba, review };
+}
+
+// A collection as shown: the filtered shows and films (Search on the show or film
+// title, Status on the show or the film's own row), counts, and the sections to
+// draw. opts: { media, presentation, grouping, seasonVis, textMatches, fStatus }.
+// Seasons lists TV season entries (narrowed by seasonVis, never films) and puts
+// everything chronological; Shows and Movies-only are A–Z. Grouping only chooses
+// one interleaved section or one per media: it never changes counts or members.
+function deriveBrowsePresentation(base, opts) {
+  const withTv = opts.media !== 'movie', withFilms = opts.media !== 'tv';
+  const seasons = withTv && opts.presentation === 'seasons';
+  const combined = opts.media === 'all' && opts.grouping === 'combined';
+  const shows = base.shows.filter(x => opts.textMatches(x.title) && allTvStatusMatches(x.show.status, opts.fStatus));
+  const films = base.films.filter(r => opts.textMatches(r.title) && allTvStatusMatches(r.status, opts.fStatus));
+  const tv = !withTv ? []
+    : seasons
+      ? shows.flatMap(item => item.seasons.filter(r => allTvSeasonVisible(r, item.show, opts.seasonVis)).map(row => ({ kind: 'season', row, show: item.show })))
+      : shows.map(item => ({ kind: 'show', item }));
+  const filmEntries = withFilms ? films.map(row => ({ kind: 'film', row })) : [];
+  const counts = {
+    shows: !withTv ? 0 : seasons ? new Set(tv.map(e => e.show.id)).size : shows.length,
+    entries: !withTv ? 0 : seasons ? tv.length : shows.reduce((n, x) => n + x.seasons.length, 0),
+    films: filmEntries.length
+  };
+  const chrono = seasons; // Seasons is chronological for films too; Shows and Movies-only are A–Z
+  const arrange = list => (chrono ? { chrono: true, ...chronoBuckets(list) } : { chrono: false, az: list.slice().sort(compareBrowseAz) });
+  const sections = combined
+    ? [{ key: 'all', label: 'All media', entries: tv.concat(filmEntries), ...arrange(tv.concat(filmEntries)) }]
+    : [
+      ...(withTv ? [{ key: 'tv', label: 'TV', entries: tv, ...arrange(tv) }] : []),
+      ...(withFilms ? [{ key: 'film', label: 'Movies', entries: filmEntries, ...arrange(filmEntries) }] : [])
+    ];
+  return { withTv, withFilms, seasons, combined, counts, sections, baseShows: base.shows.length, baseFilms: base.films.length };
+}
+
 // ─── Navigation ───────────────────────────────────────────────────────────────
 // Opens a collection. Back returns to where it was opened from: the same view
 // with its filters, or the area's first view when that was a legacy tab (whose
@@ -195,6 +280,73 @@ function setBrowseMedia(media) {
   renderFilters();
   renderTable();
   refocus(container, `[data-media="${media}"]`);
+}
+
+// Every fresh entry to a collection: All media, All TV seasons, date sections at
+// their defaults, and this collection's remembered Shows/Seasons and grouping.
+function enterBrowseCollection(id) {
+  const dest = browseCollectionOf(id);
+  browseMedia = 'all';
+  browseSeasonVis = 'all';
+  browseSectionOpen = { ...BROWSE_SECTION_DEFAULTS };
+  const layout = readBrowseLayout(dest ? dest.storage : '');
+  browsePresentation = layout.presentation;
+  browseGrouping = layout.grouping;
+}
+
+// Anything missing, unknown or unreadable falls back to Shows + Separate.
+function readBrowseLayout(storage) {
+  const layout = { presentation: 'shows', grouping: 'separate' };
+  try {
+    const saved = JSON.parse(localStorage.getItem(BROWSE_LAYOUT_KEY_PREFIX + storage));
+    if (saved && saved.presentation === 'seasons') layout.presentation = 'seasons';
+    if (saved && saved.grouping === 'combined') layout.grouping = 'combined';
+  } catch (e) { /* storage unavailable or unreadable: defaults */ }
+  return layout;
+}
+
+function saveBrowseLayout() {
+  const dest = browseCollectionOf(activeViewId);
+  if (!dest) return;
+  try {
+    localStorage.setItem(BROWSE_LAYOUT_KEY_PREFIX + dest.storage, JSON.stringify({ presentation: browsePresentation, grouping: browseGrouping }));
+  } catch (e) { /* storage unavailable: this visit only */ }
+}
+
+function setBrowsePresentation(mode) {
+  if (!browseCollectionOf(activeViewId) || !BROWSE_PRESENTATIONS[mode] || mode === browsePresentation) return;
+  const container = focusedContainerOf(['filtersRow']);
+  browsePresentation = mode;
+  saveBrowseLayout();
+  renderFilters();
+  renderTable();
+  refocus(container, `[data-presentation="${mode}"]`);
+}
+
+function setBrowseGrouping(grouping) {
+  if (!browseCollectionOf(activeViewId) || !BROWSE_GROUPINGS[grouping] || grouping === browseGrouping) return;
+  const container = focusedContainerOf(['filtersRow']);
+  browseGrouping = grouping;
+  saveBrowseLayout();
+  renderFilters();
+  renderTable();
+  refocus(container, `[data-grouping="${grouping}"]`);
+}
+
+// TV seasons (Seasons only): which season entries to list; never films. Kept for
+// the visit across Shows/Seasons and media changes; All on every fresh entry.
+function setBrowseSeasonVis(vis) {
+  if (!browseCollectionOf(activeViewId) || !BROWSE_SEASON_VIS_LABELS[vis]) return;
+  browseSeasonVis = vis;
+  renderTable();
+}
+
+function toggleBrowseSection(name) {
+  if (!browseCollectionOf(activeViewId) || !(name in BROWSE_SECTION_DEFAULTS)) return;
+  const container = focusedContainerOf(['tbody', 'cardList']);
+  browseSectionOpen[name] = !browseSectionOpen[name];
+  renderTable();
+  refocus(container, `[data-section="${name}"]`);
 }
 
 function toggleBrowseShow(key) {
@@ -281,6 +433,18 @@ function renderBrowseFilters() {
     ? `<div class="view-toggle" role="group" aria-label="Media">${Object.entries(BROWSE_MEDIA_LABELS).map(([media, label]) =>
         `<button class="view-toggle-btn${browseMedia === media ? ' active' : ''}" data-media="${media}" aria-pressed="${browseMedia === media}" onclick="setBrowseMedia('${media}')">${label}</button>`).join('')}</div>`
     : '';
+  // Shows/Seasons (not for Movies only) and Separate/Combined (All media only),
+  // outside the collapsible panel; TV seasons (Seasons only) inside it.
+  const toggleGroup = (label, attr, setter, options, current) =>
+    `<div class="view-toggle" role="group" aria-label="${label}">${Object.entries(options).map(([value, text]) =>
+      `<button class="view-toggle-btn${current === value ? ' active' : ''}" data-${attr}="${value}" aria-pressed="${current === value}" onclick="${setter}('${value}')">${text}</button>`).join('')}</div>`;
+  const layoutToggles = dest && browseMedia !== 'movie'
+    ? `<div class="browse-toggles">${browseMedia !== 'movie' ? toggleGroup('TV presentation', 'presentation', 'setBrowsePresentation', BROWSE_PRESENTATIONS, browsePresentation) : ''}${browseMedia === 'all' ? toggleGroup('Grouping', 'grouping', 'setBrowseGrouping', BROWSE_GROUPINGS, browseGrouping) : ''}</div>`
+    : '';
+  const seasonVisSelect = dest && browseMedia !== 'movie' && browsePresentation === 'seasons'
+    ? `<select id="fSeasonVis" onchange="setBrowseSeasonVis(this.value)" aria-label="TV seasons">${Object.entries(BROWSE_SEASON_VIS_LABELS).map(([value, text]) =>
+        `<option value="${value}"${browseSeasonVis === value ? ' selected' : ''}>TV seasons: ${text}</option>`).join('')}</select>`
+    : '';
   // Source (All Movies only) is the tab a film is stored in, not where it streams.
   const sourceSelect = dest
     ? ''
@@ -288,7 +452,7 @@ function renderBrowseFilters() {
         <option value="">All sources</option>${COLLECTIONS.map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
       </select>`;
   document.getElementById('viewHead').innerHTML = browseHeadHtml();
-  filtersRowEl.innerHTML = `${mediaToggle}
+  filtersRowEl.innerHTML = `${mediaToggle}${layoutToggles}
     <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
       <span>🔍 Search &amp; Filter</span><span id="filterToggleChevron">▾</span>
     </button>
@@ -300,7 +464,7 @@ function renderBrowseFilters() {
         <option value="">All (except Skipped)</option>
         <option value="all">All statuses</option>
         ${TV_STATUS_ORDER.map(s => `<option value="${s}">${esc(statusOptionLabel(s))}${s === 'skipped' ? '' : ' only'}</option>`).join('')}
-      </select>
+      </select>${seasonVisSelect}
     </div>
   `;
   filtersRowEl.dataset.tab = tag;
@@ -351,42 +515,87 @@ function browseSectionHtml(label, count) {
   };
 }
 
-// One collection: a TV section (shows) then a Movies section (films), each with
-// its own filtered count; the media choice hides a section, never changes what
-// belongs to the collection. Status is the show's for TV and the film's own.
+// One collection, as chosen by media, TV presentation and grouping: a TV and a
+// Movies section (Separate) or one interleaved section (Combined), each A–Z
+// (Shows; Movies only) or chronological (Seasons) with TBA and Date needs review
+// apart. Counts keep shows, season entries and films apart and don't depend on
+// grouping. Status is the show's for TV and the film's own.
 function renderBrowseCollection(dest, today, textMatches, fStatus) {
-  const { shows, films, badLinks, unclassified } = deriveBrowseCollection(browseData.rows, browseData.showsById, dest.storage, today);
-  const withTv = browseMedia !== 'movie', withFilms = browseMedia !== 'tv';
-  const tvShown = shows.filter(x => textMatches(x.title) && allTvStatusMatches(x.show.status, fStatus));
-  const filmsShown = films.filter(r => textMatches(r.title) && allTvStatusMatches(r.status, fStatus));
-  const entries = tvShown.reduce((n, x) => n + x.seasons.length, 0);
+  const base = deriveBrowseCollection(browseData.rows, browseData.showsById, dest.storage, today);
+  const v = deriveBrowsePresentation(base, { media: browseMedia, presentation: browsePresentation, grouping: browseGrouping,
+    seasonVis: browseSeasonVis, textMatches, fStatus });
+  const { counts } = v;
 
   const stats = [];
-  if (withTv) stats.push([tvShown.length, tvShown.length === 1 ? 'Show' : 'Shows'], [entries, entries === 1 ? 'Season entry' : 'Season entries']);
-  if (withFilms) stats.push([filmsShown.length, filmsShown.length === 1 ? 'Film' : 'Films']);
+  if (v.withTv) stats.push([counts.shows, counts.shows === 1 ? 'Show' : 'Shows'], [counts.entries, counts.entries === 1 ? 'Season entry' : 'Season entries']);
+  if (v.withFilms) stats.push([counts.films, counts.films === 1 ? 'Film' : 'Films']);
   document.getElementById('statsRow').innerHTML = derivedStatsHtml(stats);
 
   let html = '', cardHtml = '';
   const add = out => { html += out.row; cardHtml += out.card; };
-  if (withTv && badLinks > 0) {
-    add(browseNoteHtml(`⚠️ ${plural(badLinks, 'TV season entry isn’t', 'TV season entries aren’t')} linked to a show saved in ${dest.label}, so ${badLinks === 1 ? 'it isn’t' : 'they aren’t'} listed. Nothing was changed.`,
+  if (v.withTv && base.badLinks > 0) {
+    add(browseNoteHtml(`⚠️ ${plural(base.badLinks, 'TV season entry isn’t', 'TV season entries aren’t')} linked to a show saved in ${dest.label}, so ${base.badLinks === 1 ? 'it isn’t' : 'they aren’t'} listed. Nothing was changed.`,
       ` <button class="btn" onclick="loadBrowseView()">Read again</button>`));
   }
-  if (unclassified > 0) {
-    add(browseNoteHtml(`⚠️ ${plural(unclassified, 'saved entry here is', 'saved entries here are')} neither a TV season nor a film, so ${unclassified === 1 ? 'it isn’t' : 'they aren’t'} listed.`));
+  if (base.unclassified > 0) {
+    add(browseNoteHtml(`⚠️ ${plural(base.unclassified, 'saved entry here is', 'saved entries here are')} neither a TV season nor a film, so ${base.unclassified === 1 ? 'it isn’t' : 'they aren’t'} listed.`));
   }
-  if (withTv) {
-    add(browseSectionHtml('TV', `${plural(tvShown.length, 'show', 'shows')} · ${plural(entries, 'season entry', 'season entries')}`));
-    tvShown.forEach(item => add(browseShowHtml(item, today)));
-    if (tvShown.length === 0) add(browseNoteHtml(shows.length === 0 ? `No TV shows saved in ${dest.label}.` : 'No TV shows match these filters.'));
+  if (v.seasons && v.withFilms && browseSeasonVis !== 'all') {
+    add(browseNoteHtml(`TV seasons: ${BROWSE_SEASON_VIS_LABELS[browseSeasonVis]}. Films aren’t filtered by this.`));
   }
-  if (withFilms) {
-    add(browseSectionHtml('Movies', plural(filmsShown.length, 'film', 'films')));
-    filmsShown.forEach(r => add(browseFilmHtml(r, today)));
-    if (filmsShown.length === 0) add(browseNoteHtml(films.length === 0 ? 'No films saved in this collection.' : 'No films match these filters.'));
-  }
+  const countLabel = {
+    tv: `${plural(counts.shows, 'show', 'shows')} · ${plural(counts.entries, 'season entry', 'season entries')}`,
+    film: plural(counts.films, 'film', 'films'),
+    all: `${plural(counts.shows, 'show', 'shows')} · ${plural(counts.entries, 'season entry', 'season entries')} · ${plural(counts.films, 'film', 'films')}`
+  };
+  v.sections.forEach(section => {
+    add(browseSectionHtml(section.label, countLabel[section.key]));
+    const entryHtml = (e, needsReview) => browseEntryHtml(e, today, v.combined, needsReview);
+    if (!section.chrono) {
+      section.az.forEach(e => add(entryHtml(e, false)));
+    } else {
+      let lastYear = '';
+      section.dated.forEach(e => {
+        const year = e.row.date_sort.substring(0, 4);
+        if (year !== lastYear) {
+          add({ row: `<tr class="year-group"><td colspan="6">${esc(year)}</td></tr>`, card: `<div class="card-year-group">${esc(year)}</div>` });
+          lastYear = year;
+        }
+        add(entryHtml(e, false));
+      });
+      if (section.entries.length > 0 && section.dated.length === 0) add(browseNoteHtml('No dated entries; see below.'));
+      [['Tba', 'TBA', section.tba, false], ['Review', 'Date needs review', section.review, true]].forEach(([suffix, label, list, needsReview]) => {
+        if (!list.length) return;
+        const name = section.key + suffix;
+        add(browseSubsectionHtml(name, label, list.length));
+        if (browseSectionOpen[name]) list.forEach(e => add(entryHtml(e, needsReview)));
+      });
+    }
+    if (section.entries.length === 0) {
+      const msg = section.key === 'tv'
+        ? (v.baseShows === 0 ? `No TV shows saved in ${dest.label}.` : v.seasons ? 'No TV seasons match these filters.' : 'No TV shows match these filters.')
+        : section.key === 'film'
+          ? (v.baseFilms === 0 ? 'No films saved in this collection.' : 'No films match these filters.')
+          : (v.baseShows + v.baseFilms === 0 ? `Nothing saved in ${dest.label}.` : 'Nothing matches these filters.');
+      add(browseNoteHtml(msg));
+    }
+  });
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
+}
+
+function browseEntryHtml(e, today, combined, needsReview) {
+  if (e.kind === 'show') return browseShowHtml(e.item, today, combined);
+  if (e.kind === 'film') return browseFilmHtml(e.row, today);
+  return browseSeasonEntryHtml(e, today, combined);
+}
+
+// A collapsible date section (TBA, Date needs review): a real button, so it can
+// be reached and toggled by keyboard; focus returns to it after redrawing.
+function browseSubsectionHtml(name, label, count) {
+  const open = !!browseSectionOpen[name];
+  const btn = `<button class="section-toggle" data-section="${name}" aria-expanded="${open}" onclick="toggleBrowseSection('${name}')"><span class="expand-chevron">${open ? '▾' : '▸'}</span> ${esc(label)} <span class="section-count">${count}</span></button>`;
+  return { row: `<tr class="browse-subsection-row"><td colspan="6">${btn}</td></tr>`, card: `<div class="browse-subsection-card">${btn}</div>` };
 }
 
 function renderAllMovies(today, textMatches, fStatus, fSource) {
@@ -427,7 +636,7 @@ function browseWatchedHtml(watched) {
 // A show: its status, progress and what's next, as text; a labelled button
 // expands every stored season (watched and skipped shown separately). Nothing
 // on it changes anything.
-function browseShowHtml(item, today) {
+function browseShowHtml(item, today, combined) {
   const { key, show, seasons, upNext, upToDate } = item;
   const inProgress = !upToDate && show.status === 'watching' && !!upNext;
   const dimClass = show.status === 'skipped' ? ' row-skipped' : show.status === 'maybe' ? ' row-maybe' : '';
@@ -453,7 +662,7 @@ function browseShowHtml(item, today) {
   const expandBtn = `<button class="expand-btn" data-show-key="${esc(key)}" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Hide' : 'Show'} seasons of ${esc(item.title)}" onclick="toggleBrowseShow('${keyArg}')"><span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span></button>`;
 
   let row = `<tr class="show-group-row browse-show-row${dimClass}">
-      <td><div class="show-title-row"><div class="show-title-left"><span class="show-title">${esc(item.title)}</span></div>${expandBtn}</div></td>
+      <td><div class="show-title-row"><div class="show-title-left"><span class="show-title">${esc(item.title)}</span>${combined ? '<span class="ro-tag">TV show</span>' : ''}</div>${expandBtn}</div></td>
       <td>${badges}</td>
       <td class="date-cell">${nextLabel}</td>
       <td>${statusHtml}</td>
@@ -472,7 +681,7 @@ function browseShowHtml(item, today) {
   const card = `<div class="item-card show-group-card${dimClass}">
       <div class="card-top">
         <div class="card-title-block">
-          <span class="card-title">${esc(item.title)}</span>
+          <span class="card-title">${esc(item.title)}</span>${combined ? '<span class="ro-tag">TV show</span>' : ''}
           <span class="card-season">${nextLabel}</span>
         </div>
         ${expandBtn}
@@ -487,6 +696,39 @@ function browseShowHtml(item, today) {
           <span class="card-season">${esc(r.season)} · ${browseDateHtml(r, today)}</span>
           <div class="card-actions">${browseWatchedHtml(r.watched)}${r.skipped ? ' <span class="ro-tag">Season skipped</span>' : ''}</div>
         </div>`).join('')}</div>` : ''}
+    </div>`;
+  return { row, card };
+}
+
+// One TV season entry (Seasons): titled by its show, then its stored label; the
+// show's status, the season's watched and skipped flags, all as text.
+function browseSeasonEntryHtml(e, today, combined) {
+  const { row: r, show } = e;
+  const dimClass = show.status === 'skipped' || r.skipped ? 'row-skipped' : show.status === 'maybe' ? 'row-maybe' : '';
+  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme)}`;
+  const kindTag = combined ? '<span class="ro-tag">TV</span>' : '';
+  const statusHtml = browseStatusPillHtml(show.status, `Show status — applies to every season of ${show.title}`);
+  const skippedHtml = r.skipped ? '<span class="ro-tag">Season skipped</span>' : '';
+  const row = `<tr class="browse-season-row ${dimClass}">
+      <td><span class="show-title">${esc(show.title)}</span><span class="season-lbl"> · ${esc(r.season)}</span>${kindTag}</td>
+      <td>${badges}</td>
+      <td class="date-cell">${browseDateHtml(r, today)}</td>
+      <td>${statusHtml}</td>
+      <td>${browseWatchedHtml(r.watched)}</td>
+      <td>${skippedHtml}</td>
+    </tr>`;
+  const card = `<div class="item-card ${dimClass}">
+      <div class="card-top">
+        <div class="card-title-block">
+          <span class="card-title">${esc(show.title)}</span>
+          <span class="card-season">${esc(r.season)}${kindTag}</span>
+        </div>
+      </div>
+      <div class="card-meta">
+        ${badges}
+        <span class="card-date">${browseDateHtml(r, today)}</span>
+      </div>
+      <div class="card-actions">${statusHtml} ${browseWatchedHtml(r.watched)}${skippedHtml ? ` ${skippedHtml}` : ''}</div>
     </div>`;
   return { row, card };
 }

@@ -483,6 +483,11 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .ro-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .ro-label { font-size: 11px; color: var(--text3); }
 .ro-label + .ro-label::before { content: '· '; }
+.browse-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+.browse-subsection-row td { padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.browse-subsection-card { padding: 8px 0 2px; }
+.section-toggle { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 4px 0; min-height: 32px; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; }
+.section-toggle:hover .expand-chevron, .section-toggle:focus-visible .expand-chevron { border-color: var(--accent); color: var(--accent); }
 
 /* ── Filter toggle (mobile) ── */
 .filter-toggle-btn { display: none; }
@@ -502,6 +507,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   .view-toggle { display: flex; width: 100%; margin-bottom: 8px; }
   .browse-bar { padding: 8px 12px 0; }
   .browse-bar select { flex: 1; }
+  .browse-toggles { width: 100%; margin-bottom: 8px; }
+  .browse-toggles .view-toggle { flex: 1 1 150px; width: auto; margin-bottom: 0; }
   .browse-title { font-size: 16px; }
   .view-toggle-btn { flex: 1; padding: 8px 12px; }
   .filter-toggle-btn {
