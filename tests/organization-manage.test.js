@@ -757,3 +757,27 @@ test('closing returns to the page: the Browse bar is rebuilt and an open collect
 });
 
 T.run();
+
+test('keyboard focus stays in the dialog when the focused control is redrawn away (Add, Undo); Escape still reaches the dialog (found in real Chrome)', async () => {
+  const app = await boot();
+  const d = coll(app, 'disney');
+  const sev = showByTitle(app, 'Severance');
+  await open(app, 'members', d.id);
+  typeInto(app, 'manageMemberSearch', 'Severance'); await settle();
+  // The dialog box and an id-less button inside it that has keyboard focus (as in the browser).
+  const dialog = app.el('manageModalBox');
+  const button = { tagName: 'BUTTON', id: '' };
+  let boxFocused = 0;
+  dialog.contains = el => el === button || el === dialog;
+  dialog.focus = () => { boxFocused++; app.ctx.document.activeElement = dialog; };
+  app.ctx.document.activeElement = button;
+  app.ctx.manageAddMember('s', sev.id); await settle();
+  assert.ok(app.store.collection_memberships.some(m => m.collection_id === d.id && m.show_id === sev.id));
+  assert.strictEqual(app.ctx.document.activeElement, dialog, 'focus moved to the dialog, not left on a removed button');
+  assert.ok(boxFocused >= 1);
+  app.ctx.document.activeElement = button;                                 // the Undo button now has focus
+  app.ctx.manageUndo(0); await settle();
+  assert.strictEqual(app.ctx.document.activeElement, dialog, 'after Undo, focus is still in the dialog');
+  app.ctx.manageKeydown({ key: 'Escape', preventDefault() {} });         // the dialog's key handler (focus is inside it)
+  assert.strictEqual(app.get('manage'), null, 'Escape closes the dialog');
+});

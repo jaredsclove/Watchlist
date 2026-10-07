@@ -607,12 +607,14 @@ function manageRemoveMember(membershipId) {
 
 // ── Rendering ──
 // The whole dialog is redrawn from state; typed text lives in manage.drafts, and
-// keyboard focus, the caret and the list's scroll position are put back.
+// keyboard focus, the caret and the list's scroll position are put back (focus on a
+// control that no longer exists, such as a used Undo button, moves to the dialog).
 function renderManage() {
   const box = document.getElementById('manageModalBox');
   if (!box || !manage) return;
   const active = document.activeElement;
-  const focusId = active && active.id && typeof box.contains === 'function' && box.contains(active) ? active.id : null;
+  const inside = !!active && typeof box.contains === 'function' && box.contains(active);
+  const focusId = inside && active.id ? active.id : null;
   const caret = focusId && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   const body = document.getElementById('manageBody');
   const scroll = body ? body.scrollTop : 0;
@@ -621,7 +623,7 @@ function renderManage() {
   if (again && typeof again.focus === 'function') {
     again.focus();
     if (caret && typeof again.setSelectionRange === 'function') try { again.setSelectionRange(caret[0], caret[1]); } catch (e) { /* not a text field */ }
-  } else if (focusId && typeof box.focus === 'function') box.focus();
+  } else if (inside && typeof box.focus === 'function') box.focus(); // the focused control was redrawn away: keep focus in the dialog
   const body2 = document.getElementById('manageBody');
   if (body2 && scroll) body2.scrollTop = scroll;
 }
