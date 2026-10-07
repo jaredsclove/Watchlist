@@ -624,4 +624,32 @@ test('round 3: a real loadTab that fails (after the own read also failed) — th
   assert.match(notice(app), /Refreshed\./);
 });
 
+test('round 3: an older tab read that finishes after a Match was applied to the page doesn’t overwrite the matched row', async () => {
+  const { app, f } = await boot();
+  const older = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  const tabRead = app.hold(tabGet);
+  const tp = app.run('loadTab("truecrime")');                            // a tab read starts first …
+  assert.ok(await within(tabRead.reached));
+  select(app, f.legacy.id, 1, 5000);
+  app.ctx.__tmdbMatch.target.details.name = 'Target Show';
+  await within(app.ctx.confirmTmdbMatch()); await settle();               // … then a Match is applied to the page
+  assert.strictEqual(pageRow(app, f.legacy.id).tmdb_id, 5000);
+  await releaseWithOlder(app, tabRead, 'watchlist_items', older, tp);     // the older tab read finishes last
+  assert.strictEqual(pageRow(app, f.legacy.id).tmdb_id, 5000, 'the matched row was not overwritten');
+});
+
+test('round 3: an older derived-view show read that finishes after a newer show read doesn’t overwrite it', async () => {
+  const { app, f } = await boot();
+  const older = JSON.parse(JSON.stringify(app.store.tv_shows));
+  older.find(s => s.id === f.tvShow.id).status = 'watching';
+  const allShows = app.hold(r => r.method === 'GET' && /\/tv_shows\?select=/.test(r.url));
+  app.ctx.switchView('alltv');                                           // the derived views read every show
+  assert.ok(await within(allShows.reached));
+  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'complete';
+  await app.run('loadTvShows("truecrime")'); await settle();              // a newer show read
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
+  const now = app.store.tv_shows; app.store.tv_shows = older; allShows.release(); await settle(); await settle(); app.store.tv_shows = now;
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete', 'the older full read did not replace it');
+});
+
 T.run();
