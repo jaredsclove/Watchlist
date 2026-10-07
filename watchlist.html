@@ -156,11 +156,10 @@ let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.j
 let matchLatestByRow = {}; // row id → the latest Match call's number for that row
 let matchRefreshSeq = 0; // the latest refresh after a Match whose result couldn't be put into the page
 let matchRefreshStamp = null; // what that refresh is for (Retry reads it again)
-let tvShowsReadSeq = 0; // bumped when a read of the shows starts (tv-shows.js), so an older Match refresh never publishes over a newer one
-let matchLatestStamp = {}; // row id → the latest Match call's stamp (settled / applied when it ends; tmdb-match.js)
-let matchRefreshProgress = null; // the refresh after a Match that owns the notice: its parts and who completes them (tmdb-match.js)
-let matchShowReads = []; // recent show reads (tv-shows.js) with their outcome; a newer one can complete a refresh's shows part
-let matchShowReadSeq = 0; // numbers those show reads
+let matchRefreshProgress = null; // the refresh after Matches: its outcomes and its open obligations (rows, shows) (tmdb-match.js)
+let matchReadSeq = 0; // every tracked read (tab, row, shows) and every Match call takes the next number when it starts
+let matchReads = []; // recent tracked reads with their epoch and outcome; any of them can satisfy a refresh obligation
+let matchPublished = { epoch: 0, tabs: {}, rows: {}, shows: {} }; // newest read that published each tab, row and show list (per restore epoch)
 
 
 

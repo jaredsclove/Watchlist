@@ -138,6 +138,7 @@ function invalidateOrganization() {
   orgCollectionsStale = 0;
   orgChoicesStale = 0;
   if (typeof manageInvalidate === 'function') manageInvalidate();
+  if (typeof matchRefreshReevaluate === 'function') matchRefreshReevaluate(); // old-epoch refresh work is void: read again
   personalCollections = null;
   orgState = 'loading';
   setWatchWith(() => { watchWithChoices = null; watchWithState = 'loading'; });

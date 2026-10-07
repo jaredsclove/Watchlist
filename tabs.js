@@ -105,6 +105,9 @@ async function loadTab(collectionId) {
     showError('');
   }
 
+  // Tracked (tmdb-match.js): it publishes only if no newer read of this tab published
+  // first and no restore happened meanwhile, and it can satisfy a refresh after a Match.
+  const read = typeof matchReadStart === 'function' ? matchReadStart('tab', collectionId) : null;
   try {
     const rows = await sbFetch('GET',
       `${TABLE}?collection=eq.${encodeURIComponent(collectionId)}&order=date_sort.asc&select=*`,
@@ -164,9 +167,22 @@ async function loadTab(collectionId) {
 
     rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
 
+    if (read) {
+      if (!matchMayPublishTab(read)) { matchReadSettle(read, null); return; } // retired: a newer read (or a restore) came first
+      // A row a newer read already published keeps that newer version.
+      const current = tabData[collectionId];
+      for (let i = 0; i < rows.length; i++) {
+        if ((matchPublished.rows[rows[i].id] || 0) > read.id) {
+          const newer = current && current.rows.find(r => r.id === rows[i].id);
+          if (newer) rows[i] = newer;
+        }
+      }
+      matchNotePublished('tabs', collectionId, read);
+    }
     // Always cache the result, even if the user has navigated away — this keeps
     // tabData correct and avoids redundant reloads when they switch back.
     tabData[collectionId] = { rows, loaded: true, newKeys };
+    if (read) matchReadSettle(read, null);
 
     // But only touch the visible DOM if this tab is still the one being viewed.
     if (activeTabId !== collectionId) return;
@@ -187,6 +203,7 @@ async function loadTab(collectionId) {
     renderFilters();
     renderTable();
   } catch(e) {
+    if (read && read.state === 'pending') matchReadSettle(read, e);
     if (activeTabId !== collectionId) { console.error(e); return; }
     showError(e.message);
     document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">Failed to load. Check console for details.</td></tr>`;

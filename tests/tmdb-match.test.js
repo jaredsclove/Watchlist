@@ -36,7 +36,7 @@ function makeEnv({ rows = [], tab = 'movies', tmdb = () => ({}), db = {} } = {})
     tvShowsById: new Map(),
     activeTabId: tab,
     // page state the Match flow reads (watchlist.html): request stamps and the restore epoch
-    matchRequestSeq: 0, matchLatestByRow: {}, matchRefreshSeq: 0, matchRefreshStamp: null, orgEpoch: 0, tvShowsReadSeq: 0, matchLatestStamp: {}, matchRefreshProgress: null, matchShowReads: [], matchShowReadSeq: 0,
+    matchRequestSeq: 0, matchLatestByRow: {}, matchRefreshSeq: 0, matchRefreshStamp: null, orgEpoch: 0, matchRefreshProgress: null, matchReadSeq: 0, matchReads: [], matchPublished: { epoch: 0, tabs: {}, rows: {}, shows: {} },
     tmdbFetch: async p => tmdb(p),
     sbFetch: async (method, p, body) => {
       if (method === 'GET') {

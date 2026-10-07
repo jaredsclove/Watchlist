@@ -37,32 +37,51 @@ function noteTvShows(shows) {
 }
 
 // Replaces one collection's shows (after its rows were read or seeded).
+// Show reads are tracked (tmdb-match.js): each publishes only if it is the newest
+// read of that list in the current restore epoch, so a read that finishes late
+// never replaces newer shows, and each can satisfy a refresh after a Match.
 async function loadTvShows(collectionId) {
-  tvShowsReadSeq++; // a show read started: an older refresh after a Match won't publish over it (tmdb-match.js)
-  const read = typeof matchShowReadStarted === 'function' ? matchShowReadStarted(collectionId) : null;
+  const read = typeof matchReadStart === 'function' ? matchReadStart('shows', collectionId) : null;
   try {
     const shows = await sbFetch('GET', `tv_shows?collection=eq.${encodeURIComponent(collectionId)}&select=*`, null);
-    for (const [id, s] of tvShowsById) if (s.collection === collectionId) tvShowsById.delete(id);
-    noteTvShows(shows);
-    if (read) matchShowReadSettled(read, null);
+    if (!read || matchMayPublishShows(read, collectionId)) {
+      for (const [id, s] of tvShowsById) if (s.collection === collectionId) tvShowsById.delete(id);
+      noteTvShows(shows);
+      if (read) matchNotePublished('shows', collectionId, read);
+    }
+    if (read) matchReadSettle(read, null);
   } catch (e) {
-    if (read) matchShowReadSettled(read, e);
+    if (read) matchReadSettle(read, e);
     throw e;
   }
 }
 
 // Every show, paginated and exact-count checked (the derived views).
 async function loadAllTvShows() {
-  tvShowsReadSeq++;
-  const read = typeof matchShowReadStarted === 'function' ? matchShowReadStarted('*') : null;
+  const read = typeof matchReadStart === 'function' ? matchReadStart('shows', '*') : null;
   try {
     const shows = await fetchAllRows('tv_shows');
-    tvShowsById = new Map(shows.map(s => [s.id, s]));
-    if (read) matchShowReadSettled(read, null);
+    publishAllTvShows(read, shows);
+    if (read) matchReadSettle(read, null);
   } catch (e) {
-    if (read) matchShowReadSettled(read, e);
+    if (read) matchReadSettle(read, e);
     throw e;
   }
+}
+
+// Replaces the whole show list, except collections a newer read already published;
+// nothing if a newer full read published or the epoch changed.
+function publishAllTvShows(read, shows) {
+  if (read && !matchMayPublishShows(read, '*')) return false;
+  const next = new Map(shows.map(s => [s.id, s]));
+  if (read) {
+    const newer = new Set(Object.keys(matchPublished.shows).filter(c => c !== '*' && matchPublished.shows[c] > read.id));
+    for (const [id, s] of next) if (newer.has(s.collection)) next.delete(id);
+    for (const s of tvShowsById.values()) if (newer.has(s.collection)) next.set(s.id, s);
+    matchNotePublished('shows', '*', read);
+  }
+  tvShowsById = next;
+  return true;
 }
 
 // ─── Up next and Up to date (the approved rules; tests/tv-model-reference.js) ─

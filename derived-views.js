@@ -271,15 +271,18 @@ async function loadDerivedView() {
   document.getElementById('filtersRow').innerHTML = '';
   showError('');
   paintDerivedMessage('Loading…', false);
+  const showsRead = typeof matchReadStart === 'function' ? matchReadStart('shows', '*') : null; // tracked (tmdb-match.js)
   try {
     const [rows, shows] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows')]);
+    publishAllTvShows(showsRead, shows);
+    if (showsRead) matchReadSettle(showsRead, null);
     if (seq !== derivedLoadSeq || activeViewId !== viewId) return;
-    tvShowsById = new Map(shows.map(s => [s.id, s]));
     derivedData = { rows: rows.filter(isTvViewRow), loaded: true };
     renderFilters();
     renderTable();
   } catch(e) {
     console.error(e);
+    if (showsRead && showsRead.state === 'pending') matchReadSettle(showsRead, e);
     if (seq !== derivedLoadSeq || activeViewId !== viewId) return;
     showError(`Couldn't load every TV row, so nothing is shown rather than an incomplete list. ${e.message}`);
     paintDerivedMessage('Failed to load.', true);
