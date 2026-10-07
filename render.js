@@ -372,12 +372,20 @@ function watchWithFilterControlHtml(selected) {
   const opts = usable
     ? watchWithChoiceList().map(w => `<option value="${esc(w.token)}"${w.token === selected ? ' selected' : ''}>${esc(w.label)}</option>`).join('')
     : `<option value="" disabled>${watchWithState === 'loading' ? 'Watch-with choices are loading…' : 'Watch-with choices couldn’t be loaded'}</option>`;
+  // Archived choices still used in this list: for filtering only, never offered for assignment.
+  const archived = usable ? archivedWatchWithInUse((tabData[activeTabId] || {}).rows) : [];
+  const archivedOpts = archived.length
+    ? `<optgroup label="Archived">${archived.map(w => `<option value="${esc(w.token)}"${w.token === selected ? ' selected' : ''}>${esc(w.label)}</option>`).join('')}</optgroup>`
+    : '';
   const retry = watchWithState === 'unavailable'
     ? ` <button class="btn" onclick="loadOrganization()" aria-label="Retry loading watch-with choices">Retry</button>`
     : '';
+  const stale = watchWithState === 'ready' && orgChoicesStale
+    ? ` <span class="ww-stale">Choices may be out of date · <button class="btn" onclick="retryOrgRefresh()">Retry</button></span>` : '';
+  const manageLink = watchWithState === 'ready' ? ` <button class="btn btn-link" onclick="openManage('choices')">Manage choices…</button>` : '';
   return `<select id="fWatchWith" onchange="renderTable()" aria-label="Watch with">
-        <option value="">Watch with: anyone</option>${opts}
-      </select>${retry}`;
+        <option value="">Watch with: anyone</option>${opts}${archivedOpts}
+      </select>${retry}${stale}${manageLink}`;
 }
 
 // ─── Movies rendering (standalone films, with Watch With + Collections tags) ──
@@ -388,8 +396,11 @@ function watchWithPickerHtml(rowId, current) {
   current = current || [];
   if (!watchWithUsable()) return `<span class="ww-status">${watchWithStatusHtml()}</span>`;
   const offered = watchWithChoiceList();
-  const extra = current.filter(t => !offered.some(o => o.token === t)).map(t => ({ token: t, label: watchWithLabel(t) }));
-  return offered.concat(extra).map(opt => {
+  // Archived choices are listed only on rows that have them, marked, and can only be unticked.
+  const extra = current.filter(t => !offered.some(o => o.token === t))
+    .map(t => ({ token: t, label: watchWithArchived(t) ? `${watchWithLabel(t)} (archived)` : watchWithLabel(t) }));
+  const stale = orgChoicesStale ? `<span class="ww-stale">Choices may be out of date · <button class="btn" onclick="retryOrgRefresh()">Retry</button></span>` : '';
+  return stale + offered.concat(extra).map(opt => {
     const checked = current.includes(opt.token) ? 'checked' : '';
     return `<label class="ww-option"><input type="checkbox" value="${esc(opt.token)}" ${checked} onchange="toggleWatchWith('${rowId}', '${esc(opt.token).replace(/'/g,"\\'")}', this.checked)"> ${esc(opt.label)}</label>`;
   }).join('');

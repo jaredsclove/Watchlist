@@ -538,3 +538,38 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   .tmdb-search-row { flex-direction: column; }
   .tmdb-search-row input, .tmdb-search-row button { width: 100%; }
 }
+
+/* ─── Manage collections (Stage 3b-2) ─────────────────────────────────────── */
+.btn-link { background: none; border: none; color: var(--accent); padding: 4px 6px; font-size: 13px; cursor: pointer; text-decoration: underline; }
+.btn-link:hover { color: var(--text); }
+.browse-stale, .ww-stale { font-size: 12px; color: var(--text3); }
+.notice-banner { background: var(--accent-dim); border: 1px solid var(--accent); border-radius: var(--radius); padding: 8px 12px; font-size: 13px; color: var(--text); margin-bottom: 12px; }
+.manage-box { max-width: 560px; }
+.manage-box:focus { outline: none; }
+.manage-switch { display: flex; gap: 8px; margin-bottom: 12px; }
+.manage-switch .btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.manage-status { font-size: 13px; color: var(--text2); background: var(--surface2, transparent); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 10px; }
+.manage-warning { font-size: 13px; color: var(--red); background: var(--red-bg); border: 1px solid var(--red); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 10px; }
+.manage-message { font-size: 14px; color: var(--text2); }
+.manage-hint { font-size: 12px; color: var(--text3); margin: 6px 0; }
+.manage-subtitle { font-size: 15px; margin: 10px 0 6px; color: var(--text); }
+.manage-create { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 12px; }
+.manage-create label { width: 100%; font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; }
+.manage-create input { flex: 1 1 200px; min-width: 0; }
+.manage-list { list-style: none; margin: 0 0 10px; padding: 0; }
+.manage-item { border-bottom: 1px solid var(--border); padding: 8px 0; }
+.manage-line { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.manage-name { font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.manage-meta { font-size: 12px; color: var(--text3); }
+.manage-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.manage-confirm { font-size: 13px; color: var(--text2); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.manage-rename { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
+.manage-rename input { flex: 1 1 180px; min-width: 0; }
+.manage-note { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.manage-in { font-size: 12px; color: var(--text3); }
+.manage-empty { font-size: 13px; color: var(--text3); padding: 6px 0; }
+.manage-archived-toggle { margin: 4px 0 8px; }
+.tmdb-expansion { font-size: 13px; color: var(--text); margin: 8px 0; }
+@media (max-width: 700px) {
+  .manage-box .btn, .manage-box .btn-danger, .manage-box input, .browse-manage, .browse-stale .btn, .browse-edit-members, .ww-filter .btn-link, .ww-stale .btn { min-height: 44px; }
+}

@@ -258,11 +258,14 @@ function buildBrowseBar() {
   }
   const list = activeBrowseCollections();
   const activeId = isBrowseCollectionView(activeViewId) ? activeViewId : null;
+  // Stage 3b-2: Manage opens the organization editor (organization-manage.js); after a
+  // failed refresh the list is kept and marked as possibly out of date.
+  const stale = orgCollectionsStale ? ` <span class="browse-stale">Collections may be out of date · <button class="btn" onclick="retryOrgRefresh()">Retry</button></span>` : '';
   bar.innerHTML = `${label}
     <select id="browseSelect" onchange="openBrowseCollection(this.value)"${list.length ? '' : ' disabled'}>
       <option value=""${activeId ? '' : ' selected'}>${list.length ? 'Choose a collection…' : 'No collections yet'}</option>${list.map(c =>
         `<option value="${esc(c.id)}"${activeId === c.id ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}
-    </select>`;
+    </select> <button class="btn browse-manage" onclick="openManage('collections')">Manage</button>${stale}`;
 }
 
 // Restore is hidden (and its entry points do nothing) while a read-only view is
@@ -446,6 +449,7 @@ function browseHeadHtml() {
   const notes = [dest.note, `Read-only: the shows and films in your ${dest.label} collection. Make changes in the tab each one is saved in (shown as its source).`].filter(Boolean);
   return `<div class="browse-head">
       <button class="btn browse-back" onclick="browseBack()">← Back to ${backTo}</button>
+      <button class="btn btn-link browse-edit-members" onclick="openManage('members', '${esc(dest.collectionId)}')">Edit members</button>
       <h2 class="browse-title">${icon} ${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
       ${notes.map(n => `<p class="browse-note">${esc(n)}</p>`).join('')}
     </div>`;

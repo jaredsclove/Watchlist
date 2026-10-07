@@ -3,7 +3,7 @@
 // shows and films belong to each are stored apart from the tab a row is saved in
 // (personal_collections, collection_memberships), and so are your watch-with
 // choices (watch_with_choices: a row keeps a choice's token; its label is what is
-// shown). This file only reads them. They load at startup without holding up the
+// shown). This file only reads them; organization-manage.js changes them. They load at startup without holding up the
 // first view; until then, or if loading fails, the Browse collections selector
 // says so and offers Retry, never an empty list. Watch-with choices have their own
 // state: they are offered only once read (never the configured list or an older
@@ -41,20 +41,39 @@ function orgReadStart() {
   return { seq: ++orgReadSeq, epoch: orgEpoch };
 }
 
+// Stage 3b-2: a read that started before a confirmed organization change (the
+// write barrier, organization-manage.js) never publishes either, so a pre-write
+// read that finishes late can't bring back what the change replaced. A published
+// read clears that kind's "may be out of date" flag if it is newer than the
+// failed read that set it.
 function publishCollections(rows, read) {
-  if (read.epoch !== orgEpoch || read.seq < orgCollectionsSeq) return false;
+  if (read.epoch !== orgEpoch || read.seq < orgCollectionsSeq || read.seq <= orgWriteBarrier) return false;
   orgCollectionsSeq = read.seq;
   personalCollections = rows;
   orgState = 'ready';
+  if (orgCollectionsStale && read.seq > orgCollectionsStale) orgCollectionsStale = 0;
   return true;
 }
 
 // New watch-with labels redraw the open tab or browse view if they change what it
 // shows (filter options, tags, pickers); otherwise nothing is redrawn.
 function publishChoices(rows, read) {
-  if (read.epoch !== orgEpoch || read.seq < orgChoicesSeq) return false;
-  setWatchWith(() => { orgChoicesSeq = read.seq; watchWithChoices = rows; watchWithState = 'ready'; });
+  if (read.epoch !== orgEpoch || read.seq < orgChoicesSeq || read.seq <= orgWriteBarrier) return false;
+  setWatchWith(() => {
+    orgChoicesSeq = read.seq; watchWithChoices = rows; watchWithState = 'ready';
+    if (orgChoicesStale && read.seq > orgChoicesStale) orgChoicesStale = 0;
+  });
   return true;
+}
+
+// A refresh after a confirmed change failed: the kinds it couldn't read may be
+// out of date (the data shown stays, marked so, with Retry). Only a read newer
+// than the last published one of that kind can mark it, so an older failure never
+// marks newer data stale.
+function markOrgStale(kind, read) {
+  if (read.epoch !== orgEpoch) return;
+  if (kind === 'collections' && read.seq > orgCollectionsSeq && read.seq > orgCollectionsStale) { orgCollectionsStale = read.seq; buildBrowseBar(); }
+  if (kind === 'choices' && read.seq > orgChoicesSeq && read.seq > orgChoicesStale) setWatchWith(() => { orgChoicesStale = read.seq; });
 }
 
 // Changes the watch-with state and redraws the open view if what it shows changed.
@@ -65,7 +84,7 @@ function setWatchWith(change) {
 }
 
 function watchWithSignature() {
-  return JSON.stringify([watchWithState, watchWithChoiceList(), (watchWithChoices || []).map(c => [c.token, c.label])]);
+  return JSON.stringify([watchWithState, !!orgChoicesStale, watchWithChoiceList(), (watchWithChoices || []).map(c => [c.token, c.label, !!c.archived_at])]);
 }
 
 // Only what shows watch-with is redrawn, and nothing else is rebuilt: in the
@@ -116,6 +135,9 @@ function invalidateOrganization() {
   orgEpoch++;
   orgCollectionsSeq = 0;
   orgChoicesSeq = 0;
+  orgCollectionsStale = 0;
+  orgChoicesStale = 0;
+  if (typeof manageInvalidate === 'function') manageInvalidate();
   personalCollections = null;
   orgState = 'loading';
   setWatchWith(() => { watchWithChoices = null; watchWithState = 'loading'; });
@@ -224,4 +246,19 @@ function watchWithStatusHtml() {
 function watchWithLabel(token) {
   const c = (watchWithChoices || []).find(x => x.token === token);
   return c ? c.label : token;
+}
+
+// Whether a token is one of your archived choices (as last read).
+function watchWithArchived(token) {
+  const c = (watchWithChoices || []).find(x => x.token === token);
+  return !!(c && c.archived_at);
+}
+
+// Archived choices still used on a row in the list, for filtering only (in your order).
+function archivedWatchWithInUse(rows) {
+  if (watchWithState !== 'ready' || !watchWithChoices) return [];
+  const used = new Set((rows || []).flatMap(r => r.watch_with || []));
+  return watchWithChoices.filter(c => c.archived_at && used.has(c.token))
+    .sort((a, b) => (a.sort_order - b.sort_order) || cmpStr(a.token, b.token))
+    .map(c => ({ token: c.token, label: c.label }));
 }

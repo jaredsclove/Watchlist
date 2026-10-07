@@ -79,7 +79,11 @@ function tmdbMatchConflictMessage(conflict) {
 
 // ─── UI ───────────────────────────────────────────────────────────────────────
 // State lives in window.__tmdbMatch while the panel is open:
-// { rowId, results, target: { mediaType, details, seasonNumber } }
+// { rowId, results, target: { mediaType, details, seasonNumber }, proposal, inFlight }
+// proposal (Stage 3b-2): a collection expansion the database described, bound to
+// this row, TMDB id and season and to the reply's token; anything that changes
+// what is being matched discards it. inFlight: the request number of a match call
+// in progress (Confirm, the seasons and Back wait for it; Cancel doesn't).
 
 function tmdbMatchRow() {
   const m = window.__tmdbMatch;
@@ -110,6 +114,7 @@ function openTmdbMatch(rowId) {
 }
 
 function cancelTmdbMatch() {
+  if (window.__tmdbMatch) window.__tmdbMatch.proposal = null;
   window.__tmdbMatch = null;
   cancelTMDBPreview();
 }
@@ -118,9 +123,10 @@ async function searchTmdbMatch() {
   const m = window.__tmdbMatch;
   const body = document.getElementById('tmdbMatchBody');
   const query = document.getElementById('tmdbMatchQuery')?.value.trim();
-  if (!m || !body) return;
+  if (!m || !body || m.inFlight) return;
   if (!query) { body.innerHTML = ''; return; }
   m.target = null;
+  m.proposal = null;
   body.innerHTML = `<div class="tmdb-loading">Searching…</div>`;
   try {
     const [tvData, movieData] = await Promise.all([
@@ -151,7 +157,8 @@ async function chooseTmdbMatchResult(idx) {
   const m = window.__tmdbMatch;
   const body = document.getElementById('tmdbMatchBody');
   const picked = m?.results[idx];
-  if (!picked || !body) return;
+  if (!picked || !body || m.inFlight) return;
+  m.proposal = null;
   body.innerHTML = `<div class="tmdb-loading">Loading details…</div>`;
   try {
     const details = await tmdbFetch(`/${picked.mediaType}/${picked.id}`);
@@ -165,7 +172,8 @@ async function chooseTmdbMatchResult(idx) {
 
 function chooseTmdbMatchSeason(num) {
   const m = window.__tmdbMatch;
-  if (!m?.target) return;
+  if (!m?.target || m.inFlight) return;
+  m.proposal = null;
   m.target.seasonNumber = num;
   renderTmdbMatchConfirm();
 }
@@ -174,7 +182,8 @@ function renderTmdbMatchConfirm() {
   const m = window.__tmdbMatch;
   const row = tmdbMatchRow();
   const body = document.getElementById('tmdbMatchBody');
-  if (!m?.target || !row || !body) return;
+  if (!m?.target || !row || !body || m.inFlight) return;
+  m.proposal = null; // Back from a collection expansion: it no longer applies
   const { mediaType, details } = m.target;
   const isMoviesTab = !!COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
   let html = `<div class="tmdb-result-title" style="margin-top:10px">${esc(mediaType === 'movie' ? details.title : details.name)}
@@ -211,13 +220,27 @@ function renderTmdbMatchConfirm() {
   body.innerHTML = html;
 }
 
-async function confirmTmdbMatch() {
+// withConfirmation: the user confirmed the collection expansion shown in the panel;
+// it is sent only while the panel still shows that proposal for this row, TMDB id
+// and season.
+async function confirmTmdbMatch(withConfirmation) {
   const m = window.__tmdbMatch;
   const row = tmdbMatchRow();
-  if (!m?.target || !row) return;
+  if (!m?.target || !row || m.inFlight) return;
   const isMoviesTab = !!COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
   const patch = buildTmdbMatchPatch(row, m.target, isMoviesTab);
   if (!patch) return;
+  let expansion = {};
+  if (withConfirmation === true) {
+    const p = m.proposal;
+    if (!p || p.rowId !== row.id || p.tmdbId !== patch.tmdb_id || p.seasonNumber !== patch.season_number) return;
+    expansion = { confirm: p.token };
+  }
+  // Each call's stamp: a delayed answer is checked against what the page shows now.
+  const stamp = { seq: ++matchRequestSeq, rowId: row.id, epoch: orgEpoch, rowObj: row, collection: row.collection, title: patch.title };
+  matchLatestByRow[row.id] = stamp.seq;
+  m.inFlight = stamp.seq;
+  if (m.proposal) renderMatchProposal(m);
   const viaShowFunction = patch.media_type === 'tv' && isTvCollection(row.collection);
   // How far the match got, so a failure is reported for what actually happened:
   // 'check' (nothing sent yet), 'write' (the match was sent: match_tv_row or the
@@ -248,13 +271,16 @@ async function confirmTmdbMatch() {
       // show a target show's other seasons in more collections; the previous
       // schema has no such parameter, so it's sent only with personal collections.
       const res = await sbRpc('match_tv_row', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: patch,
-        ...(typeof orgState !== 'undefined' && orgState === 'absent' ? {} : { p_expansion: {} }) });
+        ...(typeof orgState !== 'undefined' && orgState === 'absent' ? {} : { p_expansion: expansion }) });
+      if (m.inFlight === stamp.seq) m.inFlight = 0;
+      // A blocked answer wrote nothing: it's shown only if the panel still shows this request.
+      const panelCurrent = window.__tmdbMatch === m && matchLatestByRow[row.id] === stamp.seq && stamp.epoch === orgEpoch;
       if (res && res.blocked && res.reason === 'membership_expansion') {
-        const names = (res.collections || []).map(c => c.name).join(', ');
-        showError(`Not matched: "${patch.title}" is already on this list, and matching would also show all ${res.seasons} of its saved seasons in ${names}. `
-          + 'Confirming that isn’t available yet, so nothing was changed.');
+        if (!panelCurrent || m.target?.details?.id !== patch.tmdb_id || (m.target.seasonNumber ?? null) !== patch.season_number) return;
+        await showMatchProposal(m, res, row, patch);
         return;
       }
+      if (res && res.blocked && !panelCurrent) return;
       if (res && res.blocked) {
         // The identified show is already on this list with a different status;
         // nothing was written. Matching never changes a show's status.
@@ -282,8 +308,20 @@ async function confirmTmdbMatch() {
         }
       }
     }
+    if (m.inFlight === stamp.seq) m.inFlight = 0;
     if (!fresh || fresh.tmdb_id !== patch.tmdb_id || fresh.media_type !== patch.media_type || fresh.season_number !== patch.season_number) {
       showError('This row changed somewhere else before the match was saved, so nothing was matched. Reload the page and try again.');
+      return;
+    }
+    // A confirmed success is always reported; its row is put into the page only
+    // while it is still current (same restore epoch, the page's copy of the row not
+    // replaced by a newer read, no newer match of this row). Otherwise a fresh read,
+    // under the current guards, shows what is saved now.
+    const stillCurrent = stamp.epoch === orgEpoch && matchLatestByRow[row.id] === stamp.seq
+      && (tabData[stamp.collection]?.rows || []).includes(stamp.rowObj);
+    if (!stillCurrent) {
+      if (window.__tmdbMatch === m) { window.__tmdbMatch = null; cancelTMDBPreview(); }
+      refreshAfterMatch(stamp, stamp.epoch !== orgEpoch);
       return;
     }
     Object.assign(row, fresh);
@@ -293,7 +331,11 @@ async function confirmTmdbMatch() {
       catch(e) { showError(`Matched, but couldn't reload the show list: ${e.message}`); }
     }
   } catch(e) {
+    if (m.inFlight === stamp.seq) m.inFlight = 0;
     const msg = String(e && e.message);
+    // After a restore in this page, an earlier attempt's error is labelled as such.
+    const earlier = stamp.epoch !== orgEpoch ? `An earlier match attempt for “${patch.title}”: ` : '';
+    const showError = text => window.showError(earlier + text);
     // The PATCH was accepted (it changes the row only if it was still unmatched), but
     // the read-back failed: the outcome is unknown, so it isn't reported either way.
     if (stage === 'verify') {
@@ -322,6 +364,11 @@ async function confirmTmdbMatch() {
         ? 'That TMDB title was added to this list somewhere else just now, so nothing was changed. Reload the page to see it.'
         : msg);
     return;
+  } finally {
+    if (m.inFlight === stamp.seq) {
+      m.inFlight = 0;
+      if (window.__tmdbMatch === m && m.proposal) renderMatchProposal(m);
+    }
   }
 
   // row.collection is where the row lives; the user may have switched tabs or
@@ -333,4 +380,101 @@ async function confirmTmdbMatch() {
   cancelTMDBPreview();
   renderFilters();
   renderTable();
+}
+
+// ─── Collection expansion confirmation (Stage 3b-2) ──────────────────────────
+// The database described an expansion (matching this row into a show already on
+// the list would show all of that show's stored seasons in more collections). The
+// names come from that reply; whether a collection is archived comes only from a
+// fresh read made now (never the page's older list); if that read fails, the
+// panel says it couldn't check. Nothing is applied until the user confirms, and a
+// changed proposal is shown again, never confirmed automatically.
+async function showMatchProposal(m, res, row, patch) {
+  const p = { rowId: row.id, tmdbId: patch.tmdb_id, seasonNumber: patch.season_number, seasonLabel: patch.season,
+    targetShowId: res.target_show_id, token: res.confirmation, reply: res, archived: null, checkFailed: false };
+  m.proposal = p;
+  renderMatchProposal(m);
+  const read = orgReadStart();
+  try {
+    const colls = await fetchAllRowsStrict('personal_collections');
+    if (publishCollections(colls, read)) buildBrowseBar();
+    p.archived = new Set(colls.filter(c => c.archived_at).map(c => c.id));
+  } catch (e) {
+    p.checkFailed = true;
+  }
+  if (window.__tmdbMatch !== m || m.proposal !== p) return;
+  renderMatchProposal(m);
+}
+
+function renderMatchProposal(m) {
+  const body = document.getElementById('tmdbMatchBody');
+  const p = m && m.proposal;
+  if (!body || !p) return;
+  const res = p.reply;
+  const checking = !p.archived && !p.checkFailed;
+  const names = (res.collections || []).map(c => `<strong>${esc(c.name)}</strong>${p.archived && p.archived.has(c.id) ? ' (archived: not shown in Browse)' : ''}`).join(', ');
+  const busy = !!m.inFlight;
+  body.innerHTML = `<div class="tmdb-refresh-summary" style="margin-top:12px"><strong>Matching also adds a show to collections.</strong></div>
+    ${res.changed ? '<div class="tmdb-refresh-summary">This changed since you looked. Check and confirm again.</div>' : ''}
+    <p class="tmdb-expansion">“${esc(res.show_title)}” is already on your list. Matching this row as ${esc(p.seasonLabel)} also shows
+      <strong>all ${Number(res.seasons) || 0} stored season${Number(res.seasons) === 1 ? '' : 's'}</strong> of “${esc(res.show_title)}” (and any added later) in: ${names}.</p>
+    ${checking ? '<div class="tmdb-refresh-summary">Checking which of these collections are archived…</div>' : ''}
+    ${p.checkFailed ? '<div class="tmdb-refresh-summary">Couldn’t check which of these collections are archived.</div>' : ''}
+    <div class="tmdb-refresh-summary">Removing “${esc(res.show_title)}” from one of these collections later also removes this season from it.</div>
+    <div class="tmdb-preview-actions" style="flex-wrap:wrap">
+      <button class="btn btn-accent" onclick="confirmTmdbMatch(true)"${busy || checking ? ' disabled' : ''}>${busy ? 'Matching…' : 'Match and add to these collections'}</button>
+      <button class="btn" onclick="renderTmdbMatchConfirm()"${busy ? ' disabled' : ''}>Back</button>
+      <button class="btn" onclick="cancelTmdbMatch()">Cancel</button>
+    </div>`;
+}
+
+// ─── After a match that couldn't be put into the page ─────────────────────────
+// The match is reported as saved; the refresh is reported separately: "Refreshed."
+// only once a fresh read (newer than anything shown) is accepted under the current
+// restore epoch. A failed read keeps the Match outcome and offers Retry, which only
+// reads. A read retired by a newer one (or by a restore) says nothing; a restore
+// while it runs starts the read again under the new epoch.
+function setMatchNotice(text, withRetry) {
+  const el = document.getElementById('noticeBanner');
+  if (!el) return;
+  el.innerHTML = text ? `<div class="notice-banner" role="status">${esc(text)}${withRetry
+    ? ' <button class="btn" onclick="retryMatchRefresh()">Retry</button>' : ''}</div>` : '';
+}
+
+function refreshAfterMatch(stamp, restored) {
+  const seq = ++matchRefreshSeq;
+  const epoch = orgEpoch;
+  matchRefreshStamp = stamp;
+  const outcome = `Matched “${stamp.title}”.${restored ? ' Your data was also restored while this match was in progress.' : ''}`;
+  setMatchNotice(`${outcome} Refreshing to show what is saved now…`);
+  const read = orgReadStart();
+  return Promise.all([
+    sbFetch('GET', `${TABLE}?id=eq.${stamp.rowId}&select=*`, null),
+    isTvCollection(stamp.collection) ? loadTvShows(stamp.collection) : Promise.resolve(),
+    orgState === 'absent' ? Promise.resolve(null) : fetchAllRowsStrict('personal_collections')
+  ]).then(([rows, , colls]) => {
+    if (seq !== matchRefreshSeq) return; // superseded: no "Refreshed"
+    if (epoch !== orgEpoch) { refreshAfterMatch(stamp, true); return; }
+    const td = tabData[stamp.collection];
+    if (td && td.loaded) {
+      const i = td.rows.findIndex(r => r.id === stamp.rowId);
+      const now = (rows || [])[0];
+      if (now && i >= 0) td.rows[i] = now;
+      else if (now) td.rows.push(now);
+      else if (i >= 0) td.rows.splice(i, 1);
+      td.rows.sort((a, b) => String(a.date_sort).localeCompare(String(b.date_sort)));
+    }
+    if (colls && publishCollections(colls, read)) buildBrowseBar();
+    setMatchNotice(`${outcome} Refreshed.`);
+    if (activeTabId === stamp.collection) { renderFilters(); renderTable(); }
+  }, e => {
+    if (seq !== matchRefreshSeq) return;
+    if (epoch !== orgEpoch) { refreshAfterMatch(stamp, true); return; }
+    if (orgState !== 'absent') markOrgStale('collections', read);
+    setMatchNotice(`Matched “${stamp.title}”, but the current data couldn’t be refreshed (${String(e && e.message || e)}).`, true);
+  });
+}
+
+function retryMatchRefresh() {
+  if (matchRefreshStamp) refreshAfterMatch(matchRefreshStamp, false);
 }

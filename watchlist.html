@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261006-badge1">
+<link rel="stylesheet" href="styles.css?v=20261007-manage1">
 </head>
 <body>
 
@@ -26,6 +26,10 @@
   <div class="modal-box" id="restoreModalBox"></div>
 </div>
 
+<div id="manageModalOverlay" class="modal-overlay" style="display:none">
+  <div class="modal-box manage-box" id="manageModalBox" role="dialog" aria-modal="true" aria-labelledby="manageTitle" tabindex="-1" onkeydown="manageKeydown(event)"></div>
+</div>
+
 <div class="media-switch" id="mediaSwitch"></div>
 
 <div class="tabs" id="tabBar"></div>
@@ -33,6 +37,7 @@
 <div class="browse-bar" id="browseBar"></div>
 
 <div class="main">
+  <div id="noticeBanner"></div>
   <div id="banner"></div>
   <div id="errorBanner"></div>
   <div id="viewHead"></div>
@@ -70,22 +75,23 @@
      deliberately unversioned (the catalog-refresh workflow reloads it by plain URL). -->
 <script src="config.js"></script>
 <script src="identity.js"></script>
-<script src="api.js?v=20261006-badge1"></script>
+<script src="api.js?v=20261007-manage1"></script>
 <script src="ui-helpers.js"></script>
-<script src="backup-restore.js?v=20261006-badge1"></script>
-<script src="tabs.js?v=20261006-badge1"></script>
-<script src="render.js?v=20261006-badge1"></script>
-<script src="row-actions.js?v=20261006-badge1"></script>
-<script src="tmdb-search.js?v=20261006-badge1"></script>
-<script src="collections-pull.js?v=20261006-badge1"></script>
-<script src="universe-pull.js?v=20261006-badge1"></script>
-<script src="person-pull.js?v=20261006-badge1"></script>
-<script src="refresh-shows.js?v=20261006-badge1"></script>
-<script src="tmdb-match.js?v=20261006-badge1"></script>
-<script src="derived-views.js?v=20261006-badge1"></script>
-<script src="tv-shows.js?v=20261006-badge1"></script>
-<script src="organization.js?v=20261006-badge1"></script>
-<script src="browse-views.js?v=20261006-badge1"></script>
+<script src="backup-restore.js?v=20261007-manage1"></script>
+<script src="tabs.js?v=20261007-manage1"></script>
+<script src="render.js?v=20261007-manage1"></script>
+<script src="row-actions.js?v=20261007-manage1"></script>
+<script src="tmdb-search.js?v=20261007-manage1"></script>
+<script src="collections-pull.js?v=20261007-manage1"></script>
+<script src="universe-pull.js?v=20261007-manage1"></script>
+<script src="person-pull.js?v=20261007-manage1"></script>
+<script src="refresh-shows.js?v=20261007-manage1"></script>
+<script src="tmdb-match.js?v=20261007-manage1"></script>
+<script src="derived-views.js?v=20261007-manage1"></script>
+<script src="tv-shows.js?v=20261007-manage1"></script>
+<script src="organization.js?v=20261007-manage1"></script>
+<script src="organization-manage.js?v=20261007-manage1"></script>
+<script src="browse-views.js?v=20261007-manage1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -139,6 +145,17 @@ let orgCollectionsSeq = 0; // the start number of the read whose collections are
 let orgChoicesSeq = 0; // the same for the watch-with choices
 let orgEpoch = 0; // bumped by a restore: reads started before it never publish
 let watchWithState = 'loading'; // 'loading' | 'ready' | 'unavailable' (failed: Retry) | 'absent' (database without watch-with choices)
+let orgWriteBarrier = 0; // organization reads started at or before this number never publish (set after a confirmed change; organization-manage.js)
+let orgCollectionsStale = 0; // the read number of a failed refresh newer than the collections shown (0: not stale); a newer published read clears it
+let orgChoicesStale = 0; // the same for the watch-with choices
+let orgOpSeq = 0; // every organization change the Manage dialog sends takes the next number
+let manageSession = 0; // bumped each time the Manage dialog opens; replies for an earlier opening never touch it
+let manage = null; // the open Manage dialog's state (organization-manage.js); null while closed
+let orgWriteCapability = null; // { value: 'yes', epoch }: this database has the Stage 3b-2 functions (checked when Manage opens)
+let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.js)
+let matchLatestByRow = {}; // row id → the latest Match call's number for that row
+let matchRefreshSeq = 0; // the latest refresh after a Match whose result couldn't be put into the page
+let matchRefreshStamp = null; // what that refresh is for (Retry reads it again)
 
 
 

@@ -223,6 +223,14 @@ async function toggleWatchWith(rowId, tag, checked) {
   } catch(e) {
     row.watch_with = previous;
     renderTable();
+    // An archived choice (archived since this page read the choices): say so and read them again.
+    const dbMessage = typeof orgErrorInfo === 'function' ? (orgErrorInfo(e).message || String(e.message)) : String(e.message);
+    if (/watch_with_archived/.test(dbMessage)) {
+      const label = (dbMessage.match(/watch_with_archived: "([^"]*)"/) || [])[1] || 'That choice';
+      showError(`“${label}” is archived, so it can’t be added. Nothing was changed; the watch-with choices are being read again.`);
+      if (typeof retryOrgRefresh === 'function') retryOrgRefresh();
+      return;
+    }
     showError(e.message);
   }
 }
