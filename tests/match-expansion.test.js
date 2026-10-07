@@ -776,3 +776,63 @@ test('round 4 (control): a current tab load failure still shows the error and th
 });
 
 T.run();
+
+// Coverage found by deliberate breaks (round 4): a failed delete, rows and show lists kept because of an edit.
+test('round 4 (coverage): a delete that fails puts the row back; an older tab response that finishes afterwards keeps it', async () => {
+  const { app, f } = await boot();
+  const tabRead = app.hold(tabGet);
+  const tp = app.run('loadTab("truecrime")');
+  assert.ok(await within(tabRead.reached));
+  app.failNext(r => r.method === 'DELETE' || r.url.includes('/rpc/delete_tv_season'));
+  await within(app.ctx.delRow(f.legacy.id)); await settle();
+  assert.ok(pageRow(app, f.legacy.id), 'put back (the delete failed)');
+  assert.match(app.el('errorBanner').innerHTML, /simulated failure/);
+  tabRead.release(); await within(tp); await settle();
+  assert.ok(pageRow(app, f.legacy.id), 'kept in the cache');
+  assert.ok(tabHtml(app).includes(f.legacy.id), 'still displayed');
+});
+
+test('round 4 (coverage): a tab read that keeps a row because of a pending edit doesn’t complete that row’s refresh', async () => {
+  const { app, f } = await boot();
+  const x = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const own = app.hold(rowGet(f.legacy.id));
+  x.g.release(); assert.ok(await within(own.reached));
+  const tabRead = app.hold(tabGet);
+  const tp = app.run('loadTab("truecrime")');
+  assert.ok(await within(tabRead.reached));
+  const wasWatched = pageRow(app, f.legacy.id).watched;
+  const patch = app.hold(r => r.method === 'PATCH' && r.url.includes(`id=eq.${f.legacy.id}`));
+  const ep = app.ctx.toggleWatch(f.legacy.id);
+  assert.ok(await within(patch.reached));
+  own.release(); await within(x.p); await settle();                     // retired by the edit
+  tabRead.release(); await within(tp); await settle();                   // keeps the edited row
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !wasWatched, 'the optimistic value is kept');
+  assert.notStrictEqual(pageRow(app, f.legacy.id).tmdb_id, 5000, 'the page row doesn’t show the match yet');
+  assert.ok(!/Refreshed\./.test(notice(app)), 'not completed by a read that kept the row');
+  patch.release(); await within(ep); await settle(); await settle();
+  assert.strictEqual(pageRow(app, f.legacy.id).tmdb_id, 5000);
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !wasWatched);
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('round 4 (coverage): during a pending show-status edit, an older show read doesn’t replace it and an all-shows read that keeps it doesn’t complete the refresh', async () => {
+  const { app, f } = await boot();
+  const ownShows = app.hold(showsGet);
+  const x = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  x.g.release(); assert.ok(await within(ownShows.reached));
+  const allShows = app.hold(r => r.method === 'GET' && /\/tv_shows\?select=/.test(r.url));
+  const ap = app.run('loadAllTvShows()');
+  assert.ok(await within(allShows.reached));
+  const rpc = app.hold(r => r.url.includes('/rpc/set_show_status'));
+  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  assert.ok(await within(rpc.reached));
+  ownShows.release(); await within(x.p); await settle();                 // older than the edit
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete', 'the edit is not replaced by an older show read');
+  allShows.release(); await within(ap); await settle();
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
+  assert.ok(!/Refreshed\./.test(notice(app)), 'not completed by a read that kept the edited show list');
+  rpc.release(); await within(ep); await settle(); await settle();
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'complete');
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
