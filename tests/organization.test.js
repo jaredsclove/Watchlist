@@ -167,10 +167,14 @@ test('watch-with: labels from your choices, tokens in the data; an archived choi
   const body = app.el('tbody').innerHTML;
   assert.ok(body.includes('>Rina S.</button>') && !body.includes('>Rina</button>'), 'the tag shows the label');
   assert.ok(/<option value="Rina">Rina S\.<\/option>/.test(app.el('filtersRow').innerHTML), 'the filter offers the label and filters by token');
-  assert.ok(!/<option value="Kids">/.test(app.el('filtersRow').innerHTML), 'an archived choice isn’t offered');
+  // Stage 3b-2: an archived choice still used in the list can be filtered on (Archived group), never assigned.
+  const [activeOpts, archivedGroup = ''] = app.el('filtersRow').innerHTML.split('<optgroup label="Archived">');
+  assert.ok(!/<option value="Kids">/.test(activeOpts), 'an archived choice isn’t offered among the choices');
+  assert.ok(/<option value="Kids">Kids<\/option>/.test(archivedGroup), 'an archived choice in use is listed under Archived for filtering');
   const wind = data.rows.find(r => r.title === 'Wind River');
   const picker = app.get(`watchWithPickerHtml('${wind.id}', ['Rina', 'Kids'])`);
-  assert.ok(picker.includes('value="Kids" checked') && picker.includes('> Kids</label>'), 'still visible (and untickable) where it is used');
+  assert.ok(picker.includes('value="Kids" checked') && picker.includes('> Kids (archived)</label>'), 'still visible (marked, untickable) where it is used');
+  assert.ok(!app.get(`watchWithPickerHtml('${wind.id}', ['Rina'])`).includes('value="Kids"'), 'not offered on a row that doesn’t have it');
   await app.ctx.toggleWatchWith(wind.id, 'Suzanne', true); await settle();
   const patch = writes(app).at(-1);
   assert.deepStrictEqual(patch.body, { watch_with: ['Rina', 'Kids', 'Suzanne'] }, 'tokens are written');
@@ -251,7 +255,7 @@ async function matchAsTv(app, rowId, tmdb) {
   await app.ctx.confirmTmdbMatch(); await settle();
 }
 
-test('Match asks the database to refuse a collection expansion; the refusal is explained and nothing else is written', async () => {
+test('Match asks the database to refuse a collection expansion; the expansion is shown for confirmation and nothing else is written', async () => {
   const target = show({ title: 'Target Show', collection: 'truecrime', tmdb_id: 4000 }, ['Season 2']);
   target.rows[0].media_type = 'tv'; target.rows[0].tmdb_id = 4000; target.rows[0].season_number = 2; target.rows[0].season = 'Season 2';
   target.rows[0].item_key = 'target show|season 2';
@@ -260,11 +264,16 @@ test('Match asks the database to refuse a collection expansion; the refusal is e
   app.store.collection_memberships.push({ id: uuid('0d', 950), collection_id: coll(app, 'disney').id, show_id: null, item_id: legacy.id, created_at: TS });
   app.ctx.switchTab('truecrime'); await settle();
   const before = JSON.stringify([app.store.watchlist_items, app.store.collection_memberships, app.store.tv_shows]);
+  app.addEl('tmdbMatchBody');
   await matchAsTv(app, legacy.id, 4000);
   const calls = writes(app);
   assert.deepStrictEqual(calls.map(r => new URL(r.url).pathname.split('/').pop()), ['match_tv_row']);
   assert.deepStrictEqual(calls[0].body.p_expansion, {});
-  assert.match(app.get('document.getElementById("errorBanner").innerHTML'), /would also show all 1 of its saved seasons in Disney\+/);
+  // Stage 3b-2: the expansion is described for confirmation (tests/match-expansion.test.js covers the flow).
+  const panel = app.el('tmdbMatchBody').innerHTML;
+  assert.match(panel, /all 1 stored season<\/strong> of “Target Show”/);
+  assert.match(panel, /<strong>Disney\+<\/strong>/);
+  assert.match(panel, /Match and add to these collections/);
   assert.strictEqual(JSON.stringify([app.store.watchlist_items, app.store.collection_memberships, app.store.tv_shows]), before, 'nothing changed');
 });
 

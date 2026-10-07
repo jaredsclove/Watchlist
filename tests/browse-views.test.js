@@ -92,7 +92,9 @@ const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"
   .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1]))
   .filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
 const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'renderTable', 'toggleFilters', 'browseBack', 'openBrowseCollection',
-  'loadBrowseView', 'switchView', 'switchTab', 'switchMediaType', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection']);
+  'loadBrowseView', 'switchView', 'switchTab', 'switchMediaType', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
+  // Stage 3b-2: opens the Manage collections dialog (organization only; it never changes tracking — tests/organization-manage.test.js)
+  'openManage']);
 function assertReadOnlyDom(app) {
   for (const id of ['tbody', 'cardList', 'filtersRow', 'statsRow', 'browseBar', 'viewHead']) {
     const bad = handlersIn(app.el(id).innerHTML).filter(h => !READ_ONLY_HANDLERS.has(h));

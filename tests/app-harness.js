@@ -356,6 +356,111 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
   }]));
 }
 
+// The Stage 3b-2 functions of db/phase3b2_org_write.sql, written independently of
+// the app: owner-scoped writes to collections, memberships and watch-with choices,
+// guarded by the values the page sent; refusals answer like PostgREST (400, P0001,
+// "code: sentence", details as JSON). org_capabilities is read-only.
+const ORG_WRITE_FUNCTIONS = ['org_capabilities', 'org_create_collection', 'org_rename_collection', 'org_set_collection_archived',
+  'org_add_membership', 'org_remove_membership', 'org_create_choice', 'org_rename_choice', 'org_set_choice_archived'];
+class OrgRefusal extends Error {
+  constructor(code, sentence, detail) { super(`${code}: ${sentence}`); this.detail = detail || null; }
+}
+function orgWriteFunctions(store, newId, isFilm) {
+  const C = () => store.personal_collections, M = () => store.collection_memberships, W = () => store.watch_with_choices;
+  const now = () => new Date().toISOString();
+  const strip = r => clone(r);
+  const clean = (t, what) => {
+    const v = String(t == null ? '' : t).trim();
+    if (!v) throw new OrgRefusal(`org_invalid_${what}`, `the ${what} is empty. Nothing was changed.`);
+    if (v.length > 100) throw new OrgRefusal(`org_invalid_${what}`, `the ${what} is longer than 100 characters. Nothing was changed.`);
+    return v;
+  };
+  const taken = (list, field, value, exceptId, code, noun) => {
+    const x = list.find(r => r.id !== exceptId && String(r[field]).toLowerCase() === value.toLowerCase());
+    if (x) throw new OrgRefusal(code, `${x.archived_at ? 'an archived' : 'another'} ${noun} is already called "${x[field]}". Nothing was changed.`,
+      { conflict_id: x.id, archived: !!x.archived_at, [field]: x[field] });
+  };
+  const nextOrder = list => list.reduce((m, r) => Math.max(m, r.sort_order || 0), 0) + 1;
+  function create(list, field, noun, code, p_id, value, extra) {
+    if (!p_id) throw new OrgRefusal('invalid_input', `a new ${noun} needs an id. Nothing was changed.`);
+    const v = clean(value, field === 'name' ? 'name' : 'label');
+    const same = list.find(r => r.id === p_id);
+    if (same) return { [noun === 'collection' ? 'collection' : 'choice']: strip(same), existing: true };
+    taken(list, field, v, null, code, noun);
+    const rec = { id: p_id, [field]: v, ...extra(p_id), sort_order: nextOrder(list), archived_at: null, created_at: now() };
+    list.push(rec);
+    return { [noun === 'collection' ? 'collection' : 'choice']: strip(rec), existing: false };
+  }
+  function rename(list, field, noun, code, p_id, expected, value) {
+    const v = clean(value, field === 'name' ? 'name' : 'label');
+    const rec = list.find(r => r.id === p_id);
+    if (!rec) throw new OrgRefusal('org_not_found', `this ${noun} is no longer available. Nothing was changed.`);
+    if (rec[field] !== expected) throw new OrgRefusal('org_conflict', `this ${noun} was renamed elsewhere to "${rec[field]}". Nothing was changed.`, { current: strip(rec) });
+    if (rec[field] !== v) { taken(list, field, v, rec.id, code, noun); rec[field] = v; }
+    return { [noun === 'collection' ? 'collection' : 'choice']: strip(rec) };
+  }
+  function archive(list, noun, p_id, archived) {
+    const rec = list.find(r => r.id === p_id);
+    if (!rec) throw new OrgRefusal('org_not_found', `this ${noun} is no longer available. Nothing was changed.`);
+    if (!!rec.archived_at === !!archived) throw new OrgRefusal('org_conflict', `this ${noun} is already ${archived ? 'archived' : 'active'}. Nothing was changed.`, { current: strip(rec) });
+    rec.archived_at = archived ? now() : null;
+    return { [noun === 'collection' ? 'collection' : 'choice']: strip(rec) };
+  }
+  function target(showId, itemId) {
+    if ((showId == null) === (itemId == null)) throw new OrgRefusal('invalid_input', 'add exactly one show or film. Nothing was changed.');
+    if (showId != null) return store.tv_shows.some(s => s.id === showId) ? { ok: true } : { missing: true };
+    const r = store.watchlist_items.find(x => x.id === itemId);
+    if (!r) return { missing: true };
+    if (!isFilm(r)) return { notFilm: true, show_id: r.show_id, show_title: (store.tv_shows.find(s => s.id === r.show_id) || {}).title || null };
+    return { ok: true };
+  }
+  const activeCollection = id => {
+    const c = C().find(x => x.id === id);
+    if (!c) throw new OrgRefusal('org_not_found', 'this collection is no longer available. Nothing was changed.');
+    if (c.archived_at) throw new OrgRefusal('org_archived', 'this collection is archived; unarchive it to change its members. Nothing was changed.');
+    return c;
+  };
+  const fns = {
+    org_capabilities: () => ({ org_write: 1 }),
+    org_create_collection: ({ p_id, p_name }) => create(C(), 'name', 'collection', 'org_name_taken', p_id, p_name, () => ({ legacy_source: null })),
+    org_rename_collection: ({ p_id, p_expected_name, p_name }) => rename(C(), 'name', 'collection', 'org_name_taken', p_id, p_expected_name, p_name),
+    org_set_collection_archived: ({ p_id, p_archived }) => archive(C(), 'collection', p_id, p_archived),
+    org_create_choice: ({ p_id, p_label }) => create(W(), 'label', 'watch-with choice', 'org_label_taken', p_id, p_label, id => ({ token: `ww:${id}` })),
+    org_rename_choice: ({ p_id, p_expected_label, p_label }) => rename(W(), 'label', 'watch-with choice', 'org_label_taken', p_id, p_expected_label, p_label),
+    org_set_choice_archived: ({ p_id, p_archived }) => archive(W(), 'watch-with choice', p_id, p_archived),
+    org_add_membership: ({ p_collection_id, p_show_id = null, p_item_id = null }) => {
+      const t = target(p_show_id, p_item_id);
+      if (t.missing) throw new OrgRefusal('org_target_missing', 'that show or film is no longer saved. Nothing was changed.');
+      if (t.notFilm) throw new OrgRefusal('org_not_film', 'that row is no longer a film. Nothing was changed.', { show_id: t.show_id, show_title: t.show_title });
+      const c = activeCollection(p_collection_id);
+      const key = p_show_id != null ? 'show_id' : 'item_id', val = p_show_id != null ? p_show_id : p_item_id;
+      const existing = M().find(m => m.collection_id === c.id && m[key] === val);
+      if (existing) return { membership: strip(existing), added: false };
+      const m = { id: newId(), collection_id: c.id, show_id: p_show_id, item_id: p_item_id, created_at: now() };
+      M().push(m);
+      return { membership: strip(m), added: true };
+    },
+    org_remove_membership: ({ p_membership_id, p_collection_id, p_show_id = null, p_item_id = null }) => {
+      if (!p_membership_id) throw new OrgRefusal('invalid_input', 'name the membership. Nothing was changed.');
+      const t = target(p_show_id, p_item_id);
+      if (t.missing) return { removed: false, reason: 'target_missing' };
+      if (t.notFilm) return { removed: false, reason: 'not_film', show_id: t.show_id, show_title: t.show_title };
+      const c = activeCollection(p_collection_id);
+      const i = M().findIndex(m => m.id === p_membership_id && m.collection_id === c.id && (m.show_id ?? null) === p_show_id && (m.item_id ?? null) === p_item_id);
+      if (i < 0) return { removed: false, reason: 'not_found' };
+      M().splice(i, 1);
+      return { removed: true, membership_id: p_membership_id };
+    }
+  };
+  return Object.fromEntries(Object.entries(fns).map(([name, fn]) => [name, body => {
+    try { return response(200, fn(body || {})); }
+    catch (e) {
+      if (!(e instanceof OrgRefusal)) throw e;
+      return response(400, { code: 'P0001', details: e.detail ? JSON.stringify(e.detail) : '', hint: null, message: e.message });
+    }
+  }]));
+}
+
 const NO_ORG = { enabled: false, newShow() {}, newItem() {}, dropShow() {}, dropItem() {}, isFilm: () => false,
   collectionsOfItem: () => [], collectionsOfShow: () => [], add() {}, collectionName: c => c };
 const LEGACY_SOURCES = [['disney', 'Disney+'], ['sheridan', 'Sheridan'], ['90day', '90 Day'], ['truecrime', 'True Crime / Docs']];
@@ -379,8 +484,11 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            Phase 1c backfill would (see linkFixtureRows)
 //   format1: true for a database without the TV-show schema (no tv_shows)
 //   stage:   migration stage the TV functions behave by (default 'final')
+//   orgWrite: false for a database with Stage 3b-1 but not the Stage 3b-2 functions
+//            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
-  format1 = false, stage = 'final', org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null } = {}) {
+  format1 = false, stage = 'final', org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
+  orgWrite = true } = {}) {
   const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
   if (!format1) store.tv_shows = clone(tvShows || []);
   const requests = [];
@@ -502,7 +610,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       for (const t of Object.keys(tables)) store[t] = clone(tables[t]);
       return response(200, { restored: Object.fromEntries(Object.keys(tables).map(t => [t, tables[t].length])) });
     },
-    ...tvFunctions(app, store, () => `new-${nextId++}`, ORG)
+    ...tvFunctions(app, store, () => `new-${nextId++}`, ORG),
+    ...(orgOn && orgWrite ? orgWriteFunctions(store, () => `0d3b2000-0000-4000-8000-${String(nextId++).padStart(12, '0')}`, isFilmRow) : {})
   };
 
   async function fetchStub(url, opts = {}) {
@@ -530,6 +639,9 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const params = [...u.searchParams.entries()];
     if (u.pathname.includes('/rpc/')) {
       const handler = app.rpcHandlers[table];
+      if (!handler && ORG_WRITE_FUNCTIONS.includes(table)) {
+        return response(404, { code: 'PGRST202', details: null, hint: null, message: `Could not find the function public.${table} in the schema cache` });
+      }
       if (!handler) throw new Error(`harness: unknown rpc ${table}`);
       return handler(body);
     }
@@ -571,6 +683,14 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       const problem = writeProblem(table, [body]);
       if (problem) return problem;
       const targets = rowsOf.filter(r => matches(r, params));
+      // Stage 3b-2: an UPDATE may not newly add an archived choice (rows keep the ones they have).
+      if (orgOn && orgWrite && table === 'watchlist_items' && body && Array.isArray(body.watch_with)) {
+        for (const r of targets) {
+          const added = body.watch_with.filter(t => !(r.watch_with || []).includes(t));
+          const arch = store.watch_with_choices.find(c => c.archived_at && added.includes(c.token));
+          if (arch) return pgError(400, '23514', `watch_with_archived: "${arch.label}" is archived; reload the page to see your current choices. Nothing was changed.`);
+        }
+      }
       if (orgOn && table === 'watchlist_items') {
         for (const r of targets) {
           const after = { ...r, ...body };
