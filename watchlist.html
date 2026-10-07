@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261006-org1">
+<link rel="stylesheet" href="styles.css?v=20261006-skipped1">
 </head>
 <body>
 
@@ -70,22 +70,22 @@
      deliberately unversioned (the catalog-refresh workflow reloads it by plain URL). -->
 <script src="config.js"></script>
 <script src="identity.js"></script>
-<script src="api.js?v=20261006-org1"></script>
+<script src="api.js?v=20261006-skipped1"></script>
 <script src="ui-helpers.js"></script>
-<script src="backup-restore.js?v=20261006-org1"></script>
-<script src="tabs.js?v=20261006-org1"></script>
-<script src="render.js?v=20261006-org1"></script>
-<script src="row-actions.js?v=20261006-org1"></script>
-<script src="tmdb-search.js?v=20261006-org1"></script>
-<script src="collections-pull.js?v=20261006-org1"></script>
-<script src="universe-pull.js?v=20261006-org1"></script>
-<script src="person-pull.js?v=20261006-org1"></script>
-<script src="refresh-shows.js?v=20261006-org1"></script>
-<script src="tmdb-match.js?v=20261006-org1"></script>
-<script src="derived-views.js?v=20261006-org1"></script>
-<script src="tv-shows.js?v=20261006-org1"></script>
-<script src="organization.js?v=20261006-org1"></script>
-<script src="browse-views.js?v=20261006-org1"></script>
+<script src="backup-restore.js?v=20261006-skipped1"></script>
+<script src="tabs.js?v=20261006-skipped1"></script>
+<script src="render.js?v=20261006-skipped1"></script>
+<script src="row-actions.js?v=20261006-skipped1"></script>
+<script src="tmdb-search.js?v=20261006-skipped1"></script>
+<script src="collections-pull.js?v=20261006-skipped1"></script>
+<script src="universe-pull.js?v=20261006-skipped1"></script>
+<script src="person-pull.js?v=20261006-skipped1"></script>
+<script src="refresh-shows.js?v=20261006-skipped1"></script>
+<script src="tmdb-match.js?v=20261006-skipped1"></script>
+<script src="derived-views.js?v=20261006-skipped1"></script>
+<script src="tv-shows.js?v=20261006-skipped1"></script>
+<script src="organization.js?v=20261006-skipped1"></script>
+<script src="browse-views.js?v=20261006-skipped1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -115,7 +115,7 @@ let derivedData = null; // { rows, loaded } — cross-TV rows for the derived vi
 let derivedLoadSeq = 0; // lets a late derived-view load see that it's been superseded
 let derivedSectionOpen = { uptodate: true, tba: false, alltvTba: false }; // collapsible sections in the derived views (Up to date starts open, TBA sections closed)
 let allTvPresentation = 'shows'; // All TV: 'shows' | 'seasons'; remembered on this device (derived-views.js)
-let allTvSeasonVis = 'all'; // All TV Seasons: 'all' | 'towatch' | 'watched' | 'skipped'; kept across Shows/Seasons, reset when the view is entered
+let allTvSeasonVis = 'notskipped'; // All TV Seasons: 'notskipped' (All (except Skipped), the default) | 'all' | 'towatch' | 'watched' | 'skipped'; kept across Shows/Seasons, reset when the view is entered
 let addOpen = false;
 let tmdbSelectedShow = null; // { id, name } — currently previewed TMDB show
 let tmdbShowSpecials = false;
@@ -126,7 +126,7 @@ let browseLoadSeq = 0; // lets a late browse-view load see that it's been supers
 let browseMedia = 'all'; // a collection's media choice: 'all' | 'tv' | 'movie'; All media on every entry
 let browsePresentation = 'shows'; // a collection's TV presentation: 'shows' | 'seasons'; remembered per collection on this device (browse-views.js)
 let browseGrouping = 'separate'; // a collection's grouping: 'separate' | 'combined'; remembered per collection on this device
-let browseSeasonVis = 'all'; // TV seasons (Seasons only): 'all' | 'towatch' | 'watched' | 'skipped'; All on every entry, never stored
+let browseSeasonVis = 'notskipped'; // TV seasons (Seasons only): 'notskipped' (All (except Skipped)) | 'all' | 'towatch' | 'watched' | 'skipped'; All (except Skipped) on every entry, never stored
 let browseSectionOpen = {}; // a collection's TBA / Date needs review sections (BROWSE_SECTION_DEFAULTS on every entry)
 let browseOrigin = null; // where Back returns from a collection: { mediaType, viewId (null for a legacy tab), filters }
 let backNavFilters = null; // { view, values }: filters Back puts back on the view it returns to

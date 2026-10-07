@@ -110,7 +110,7 @@ const J = (app, expr) => JSON.parse(JSON.stringify(app.get(expr)));
 test('first use is All media + Shows + Separate; Shows/Seasons hides with Movies only, Separate/Combined shows with All media only', async () => {
   const app = await boot();
   await open(app);
-  assert.deepStrictEqual(J(app, '[browseMedia, browsePresentation, browseGrouping, browseSeasonVis]'), ['all', 'shows', 'separate', 'all']);
+  assert.deepStrictEqual(J(app, '[browseMedia, browsePresentation, browseGrouping, browseSeasonVis]'), ['all', 'shows', 'separate', 'notskipped']);
   const inner = () => filters(app).indexOf('class="filters-inner"');
   const at = s => filters(app).indexOf(s);
   assert.ok(at('data-presentation="shows"') > -1 && at('data-presentation="shows"') < inner() && at('data-grouping="combined"') < inner(), 'outside the collapsible panel');
@@ -124,7 +124,8 @@ test('first use is All media + Shows + Separate; Shows/Seasons hides with Movies
   app.ctx.setBrowsePresentation('seasons');
   assert.ok(at('id="fSeasonVis"') > inner(), 'TV seasons sits inside the panel');
   assert.deepStrictEqual([...filters(app).matchAll(/<option value="(\w+)"[^>]*>(TV seasons: [^<]*)</g)].map(m => m[2]),
-    ['TV seasons: All', 'TV seasons: To watch', 'TV seasons: Watched', 'TV seasons: Skipped']);
+    ['TV seasons: All (except Skipped)', 'TV seasons: All', 'TV seasons: To watch', 'TV seasons: Watched', 'TV seasons: Skipped']);
+  assert.ok(filters(app).includes('<option value="notskipped" selected>TV seasons: All (except Skipped)'), 'the default is selected');
   assert.strictEqual(app.get('browseGrouping'), 'separate', 'kept while hidden');
 });
 
@@ -171,7 +172,6 @@ test('Seasons + Separate: TV seasons oldest first, then films oldest first; year
   assert.deepStrictEqual(listed(app), ['== TV',
     '# 2008', 'Star Wars: The Clone Wars (2008) · Season 1',
     '# 2009', 'Star Wars: The Clone Wars (2008) · Season 2',
-    '# 2022', 'Andor · Season 1',
     '# 2023', 'Star Wars: Visions · Volume 1', 'Star Wars: Visions · Volume 2', 'Star Wars: Visions · Specials',
     '# 2025', 'Andor · Season 2',
     '> TBA', '> Date needs review', 'Bad Date Show · Season 1',
@@ -185,6 +185,11 @@ test('Seasons + Separate: TV seasons oldest first, then films oldest first; year
   app.ctx.toggleBrowseSection('tvTba');
   assert.ok(listed(app).includes('Andor · Season 3'));
   assert.ok(html(app).includes('date needs review'), 'labelled, never Upcoming');
+  // Andor Season 1 is skipped on its own: left out by the default, back in its place under All.
+  assert.ok(!listed(app).includes('Andor · Season 1'));
+  app.ctx.setBrowseSeasonVis('all');
+  const all = listed(app);
+  assert.deepStrictEqual(all.slice(all.indexOf('# 2009'), all.indexOf('# 2023')), ['# 2009', 'Star Wars: The Clone Wars (2008) · Season 2', '# 2022', 'Andor · Season 1']);
 });
 
 test('Seasons + Combined: TV seasons and films interleaved oldest first; equal dates by show title, TV before film, season order; one shared TBA and review section', async () => {
@@ -196,7 +201,7 @@ test('Seasons + Combined: TV seasons and films interleaved oldest first; equal d
   assert.deepStrictEqual(listed(app), ['== All',
     '# 2008', 'Star Wars: The Clone Wars (2008) [film]', 'Star Wars: The Clone Wars (2008) · Season 1', 'Star Wars: The Clone Wars (2008) [film]',
     '# 2009', 'Star Wars: The Clone Wars (2008) · Season 2',
-    '# 2022', 'Andor · Season 1', 'Andor [film]',
+    '# 2022', 'Andor [film]',
     '# 2023', 'Star Wars: Visions · Volume 1', 'Star Wars: Visions · Volume 2', 'Star Wars: Visions · Specials',
     '# 2025', 'Andor · Season 2',
     '# 2026', 'The Mandalorian &amp; Grogu [film]',
@@ -254,8 +259,9 @@ test('all 12 combinations: grouping never changes counts or members; counts keep
     { media: browseMedia, presentation: browsePresentation, grouping: browseGrouping, seasonVis: browseSeasonVis, textMatches: () => true, fStatus: 'all' });
     return v.sections.flatMap(s => s.entries).map(e => e.kind + ':' + (e.kind === 'show' ? e.item.key : e.row.id)).sort().join(','); })()`);
   const expected = {
-    'all/shows': ['5 Shows', '10 Season entries', '7 Films'], 'all/seasons': ['5 Shows', '10 Season entries', '7 Films'],
-    'tv/shows': ['5 Shows', '10 Season entries'], 'tv/seasons': ['5 Shows', '10 Season entries'],
+    // Seasons lists one season fewer: Andor Season 1, skipped on its own, under the default TV seasons choice.
+    'all/shows': ['5 Shows', '10 Season entries', '7 Films'], 'all/seasons': ['5 Shows', '9 Season entries', '7 Films'],
+    'tv/shows': ['5 Shows', '10 Season entries'], 'tv/seasons': ['5 Shows', '9 Season entries'],
     'movie/shows': ['7 Films'], 'movie/seasons': ['7 Films']
   };
   for (const media of ['all', 'tv', 'movie']) {
@@ -296,7 +302,34 @@ test('TV seasons narrows season entries only (never films), with the note; it is
   assert.ok(!html(app).includes('Films aren’t filtered'));
   app.ctx.setBrowseSeasonVis('watched');
   await open(app, B['sheridan']); await open(app);
-  assert.strictEqual(app.get('browseSeasonVis'), 'all');
+  assert.strictEqual(app.get('browseSeasonVis'), 'notskipped');
+});
+
+test('TV seasons defaults to All (except Skipped): a season skipped on its own is hidden and uncounted; All lists it, labelled; Status still decides shows and films', async () => {
+  const data = library();
+  const allSkipped = show({ title: 'All Skipped Show', status: 'confirmed' }, [{ id: 'as1', label: 'Season 1', date: '2020-01-01', s: true }]);
+  data.rows.push(...allSkipped.rows); data.shows.push(allSkipped.show);
+  const app = await boot(data);
+  await open(app);
+  app.ctx.setBrowsePresentation('seasons');
+  assert.strictEqual(app.get('browseSeasonVis'), 'notskipped');
+  // Default Status hides the Skipped show (Wonder Man) and film (Ewoks); the default TV seasons choice
+  // hides Andor Season 1 and the only season of All Skipped Show, which then isn't counted as a show.
+  assert.deepStrictEqual(stats(app), ['4 Shows', '8 Season entries', '6 Films']);
+  assert.ok(!listed(app).includes('Andor · Season 1') && !listed(app).some(x => x.startsWith('All Skipped Show')));
+  assert.ok(!html(app).includes('Season skipped') && !html(app).includes('Films aren’t filtered'), 'no skipped season and no note under the default');
+  app.ctx.setBrowseSeasonVis('all');
+  assert.deepStrictEqual(stats(app), ['5 Shows', '10 Season entries', '6 Films']);
+  assert.ok(listed(app).includes('Andor · Season 1') && listed(app).includes('All Skipped Show · Season 1'));
+  assert.ok(html(app).includes('<span class="ro-tag">Season skipped</span>'), 'skipped seasons are labelled under All');
+  assert.ok(!html(app).includes('Films aren’t filtered'), 'no note under All');
+  app.ctx.setBrowseSeasonVis('notskipped');
+  setFilter(app, 'fStatus', 'all');
+  assert.deepStrictEqual(stats(app), ['5 Shows', '9 Season entries', '7 Films'], 'All statuses brings back Wonder Man and Ewoks; skipped seasons stay out');
+  app.ctx.setBrowsePresentation('shows');
+  app.ctx.toggleBrowseShow(app.get("[...browseData.showsById.values()].find(s => s.title === 'Andor').id"));
+  assert.ok(listed(app).includes('  - Season 1'), 'Shows: an expanded show still lists every stored season');
+  assert.strictEqual(mutating(app).length, 0);
 });
 
 test('Status and Search apply to the show (TV) and the film; they survive presentation, grouping and media changes', async () => {
@@ -307,7 +340,7 @@ test('Status and Search apply to the show (TV) and the film; they survive presen
     step();
     assert.deepStrictEqual([app.el('fSearch').value, app.el('fStatus').value], ['andor', 'all']);
   }
-  assert.deepStrictEqual(listed(app).filter(x => !x.startsWith('#') && !x.startsWith('==') && !x.startsWith('>')), ['Andor · Season 1', 'Andor [film]', 'Andor · Season 2']);
+  assert.deepStrictEqual(listed(app).filter(x => !x.startsWith('#') && !x.startsWith('==') && !x.startsWith('>')), ['Andor [film]', 'Andor · Season 2'], 'Season 1 is skipped on its own: TV seasons, not Status, leaves it out');
   setFilter(app, 'fSearch', ''); setFilter(app, 'fStatus', 'skipped');
   assert.deepStrictEqual(stats(app), ['1 Show', '1 Season entry', '1 Film'], 'Wonder Man and Ewoks');
 });
@@ -366,7 +399,7 @@ test('the layout is remembered per collection, written only when changed, apart 
   await open(app, B['sheridan']);
   assert.deepStrictEqual(J(app, '[browsePresentation, browseGrouping]'), ['shows', 'separate'], 'per collection');
   await open(app);
-  assert.deepStrictEqual(J(app, '[browseMedia, browsePresentation, browseGrouping, browseSeasonVis]'), ['all', 'seasons', 'combined', 'all']);
+  assert.deepStrictEqual(J(app, '[browseMedia, browsePresentation, browseGrouping, browseSeasonVis]'), ['all', 'seasons', 'combined', 'notskipped']);
   assert.deepStrictEqual([app.el('fSearch').value, app.el('fStatus').value], ['', '']);
   app.ctx.switchView('alltv'); await settle();
   assert.strictEqual(app.get('allTvPresentation'), 'shows', 'All TV is independent');

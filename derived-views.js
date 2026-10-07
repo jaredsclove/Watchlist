@@ -174,7 +174,7 @@ function allTvStatusMatches(status, fStatus) {
 // on this device only (not in backups or the database); without usable storage
 // All TV simply opens in Shows.
 const ALLTV_PRESENTATION_KEY = 'watchlist_alltv_presentation';
-const ALLTV_SEASON_VIS = ['all', 'towatch', 'watched', 'skipped'];
+const ALLTV_SEASON_VIS = ['notskipped', 'all', 'towatch', 'watched', 'skipped'];
 
 function readAllTvPresentation() {
   try {
@@ -194,8 +194,10 @@ function isValidDateSort(d) {
 
 // Seasons-mode visibility. Watched and Skipped (the season's own flag) are
 // independent: a season with both flags is in both. To watch is neither, and
-// never a season of a Skipped show.
+// never a season of a Skipped show. All (except Skipped), the default, leaves out
+// seasons skipped on their own; All lists every season. (Status filters shows.)
 function allTvSeasonVisible(r, show, vis) {
+  if (vis === 'notskipped') return !r.skipped;
   if (vis === 'towatch') return !r.watched && !r.skipped && show.status !== 'skipped';
   if (vis === 'watched') return !!r.watched;
   if (vis === 'skipped') return !!r.skipped;
@@ -326,6 +328,7 @@ function renderDerivedFilters() {
   const seasonVisSelect = activeViewId === 'alltv' && allTvPresentation === 'seasons'
     ? `
       <select id="fSeasonVis" onchange="setAllTvSeasonVis(this.value)" title="Which seasons to list (Seasons only)">
+        <option value="notskipped">All (except Skipped)</option>
         <option value="all">All seasons</option>
         <option value="towatch">To watch</option>
         <option value="watched">Watched</option>

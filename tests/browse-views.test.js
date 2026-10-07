@@ -180,7 +180,7 @@ test('Back returns to the view it came from with its filters; from a legacy tab 
   assert.strictEqual(app.get('activeViewId'), 'alltv');
   assert.deepStrictEqual(['fSearch', 'fSource', 'fStatus'].map(f => app.el(f).value), ['bear', 'disney', 'all']);
   assert.strictEqual(html(app), allTvHtml, 'All TV shows exactly what it showed');
-  assert.strictEqual(app.get('allTvSeasonVis'), 'all');
+  assert.strictEqual(app.get('allTvSeasonVis'), 'notskipped');
 
   app.ctx.switchMediaType('movie'); await settle();
   setFilter(app, 'fSource', 'sheridan');

@@ -24,7 +24,7 @@ const BROWSE_MEDIA_LABELS = { all: 'All media', tv: 'TV', movie: 'Movies' };
 // (organization.js); separate from All TV's choice.
 const BROWSE_PRESENTATIONS = { shows: 'Shows', seasons: 'Seasons' };
 const BROWSE_GROUPINGS = { separate: 'Separate', combined: 'Combined' };
-const BROWSE_SEASON_VIS_LABELS = { all: 'All', towatch: 'To watch', watched: 'Watched', skipped: 'Skipped' };
+const BROWSE_SEASON_VIS_LABELS = { notskipped: 'All (except Skipped)', all: 'All', towatch: 'To watch', watched: 'Watched', skipped: 'Skipped' };
 // Collapsible date sections: TBA starts collapsed, Date needs review expanded.
 const BROWSE_SECTION_DEFAULTS = { tvTba: false, filmTba: false, allTba: false, tvReview: true, filmReview: true, allReview: true };
 
@@ -296,12 +296,12 @@ function setBrowseMedia(media) {
   refocus(container, `[data-media="${media}"]`);
 }
 
-// Every fresh entry to a collection: All media, All TV seasons, date sections at
+// Every fresh entry to a collection: All media, TV seasons All (except Skipped), date sections at
 // their defaults, and this collection's remembered Shows/Seasons and grouping.
 function enterBrowseCollection(id) {
   const dest = browseCollectionOf(id);
   browseMedia = 'all';
-  browseSeasonVis = 'all';
+  browseSeasonVis = 'notskipped';
   browseSectionOpen = { ...BROWSE_SECTION_DEFAULTS };
   const layout = readBrowseLayout(dest ? dest.layoutKey : null);
   browsePresentation = layout.presentation;
@@ -579,7 +579,8 @@ function renderBrowseCollection(dest, today, textMatches, fStatus) {
   if (base.unclassified > 0) {
     add(browseNoteHtml(`⚠️ ${plural(base.unclassified, 'saved entry here is', 'saved entries here are')} neither a TV season nor a film, so ${base.unclassified === 1 ? 'it isn’t' : 'they aren’t'} listed.`));
   }
-  if (v.seasons && v.withFilms && browseSeasonVis !== 'all') {
+  // Only a choice that narrows by watched or skipped state; the default and All don't need it.
+  if (v.seasons && v.withFilms && ['towatch', 'watched', 'skipped'].includes(browseSeasonVis)) {
     add(browseNoteHtml(`TV seasons: ${BROWSE_SEASON_VIS_LABELS[browseSeasonVis]}. Films aren’t filtered by this.`));
   }
   const countLabel = {

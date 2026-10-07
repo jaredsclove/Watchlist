@@ -79,9 +79,9 @@ function switchView(id) {
   tmdbSelectedShow = null;
   expandedShows = new Set();
   derivedSectionOpen = { uptodate: true, tba: false, alltvTba: false };
-  // All TV: the remembered Shows / Seasons choice; the Seasons visibility starts at All seasons.
+  // All TV: the remembered Shows / Seasons choice; the Seasons visibility starts at All (except Skipped).
   if (id === 'alltv') allTvPresentation = readAllTvPresentation();
-  allTvSeasonVis = 'all';
+  allTvSeasonVis = 'notskipped';
   derivedData = null;
   document.getElementById('addForm').style.display = 'none';
   document.getElementById('banner').innerHTML = '';

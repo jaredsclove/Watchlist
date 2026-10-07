@@ -3,7 +3,7 @@
 // the shows that pass Search / Source / show Status, oldest first with year
 // headers and deterministic ties; genuine TBA and dates needing review go to one
 // collapsed section, labelled and counted separately; the Seasons-only
-// visibility choice (All seasons / To watch / Watched / Skipped) survives layout
+// visibility choice (All (except Skipped), the default / All seasons / To watch / Watched / Skipped) survives layout
 // toggles and resets on re-entry; season rows show the show status read-only and
 // keep the existing Watched and Skip / Keep controls; the presentation is
 // remembered on the device and storage failures fall back to Shows.
@@ -79,13 +79,15 @@ test('first use opens All TV in Shows: the switch shows Shows active, no season-
   assert.ok(f.indexOf('view-toggle') < f.indexOf('filterToggleBtn'), 'the switch sits outside the collapsible panel');
 });
 
-test('switching to Seasons: header, visibility select at All seasons, no request and no write', async () => {
+test('switching to Seasons: header, visibility select at All (except Skipped), no request and no write', async () => {
   const a = show({ title: 'Alpha' }, [{ num: 1 }]);
   const app = await openAllTv(all(a));
   const before = app.requests.length;
   await seasons(app);
   assert.strictEqual(app.requests.length, before, 'toggling makes no request');
-  assert.strictEqual(app.el('fSeasonVis').value, 'all');
+  assert.strictEqual(app.el('fSeasonVis').value, 'notskipped');
+  assert.deepStrictEqual([...app.el('filtersRow').innerHTML.matchAll(/<option value="(\w+)">([^<]*)</g)].filter(m => m[1] !== '').map(m => m[2]).slice(-5),
+    ['All (except Skipped)', 'All seasons', 'To watch', 'Watched', 'Skipped']);
   assert.ok(app.el('filtersRow').innerHTML.includes('onchange="setAllTvSeasonVis(this.value)"'));
   assert.ok(app.el('tableHead').innerHTML.includes('<th>Show &amp; Season</th><th>Source</th><th>Premiere</th><th>Show status</th>'));
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 1']);
@@ -151,7 +153,7 @@ test('the visibility choice survives Seasons → Shows → Seasons and never cha
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 2']);
 });
 
-test('leaving All TV or reloading resets visibility to All seasons; the Shows/Seasons choice is remembered on the device', async () => {
+test('leaving All TV or reloading resets visibility to All (except Skipped); the Shows/Seasons choice is remembered on the device', async () => {
   const a = show({ title: 'Alpha' }, [{ num: 1, w: true }, { num: 2 }]);
   const storage = memoryStorage();
   const app = await createApp({ rows: a.rows, tvShows: [a.show] });
@@ -163,15 +165,15 @@ test('leaving All TV or reloading resets visibility to All seasons; the Shows/Se
   app.ctx.switchView('watching'); await settle();
   app.ctx.switchView('alltv'); await settle();
   assert.strictEqual(app.get('allTvPresentation'), 'seasons');
-  assert.strictEqual(app.el('fSeasonVis').value, 'all');
+  assert.strictEqual(app.el('fSeasonVis').value, 'notskipped');
   assert.strictEqual(seasonRows(app).length, 2);
   // A reload: a fresh page with the same device storage.
   const reloaded = await createApp({ rows: a.rows, tvShows: [a.show] });
   reloaded.ctx.localStorage = storage;
   reloaded.ctx.switchView('alltv'); await settle();
   assert.strictEqual(reloaded.get('allTvPresentation'), 'seasons');
-  assert.strictEqual(reloaded.get('allTvSeasonVis'), 'all');
-  assert.strictEqual(reloaded.el('fSeasonVis').value, 'all');
+  assert.strictEqual(reloaded.get('allTvSeasonVis'), 'notskipped');
+  assert.strictEqual(reloaded.el('fSeasonVis').value, 'notskipped');
   assert.ok(![...storage.m.keys()].some(k => /vis/i.test(k)), 'the visibility choice is never stored');
 });
 
@@ -180,7 +182,7 @@ test('an invalid visibility value is ignored', async () => {
   const app = await openAllTv(all(a));
   await seasons(app);
   app.ctx.setAllTvSeasonVis('bogus'); await settle();
-  assert.strictEqual(app.get('allTvSeasonVis'), 'all');
+  assert.strictEqual(app.get('allTvSeasonVis'), 'notskipped');
   app.ctx.setAllTvPresentation('cards'); await settle();
   assert.strictEqual(app.get('allTvPresentation'), 'seasons');
 });
@@ -206,11 +208,31 @@ test('predicates: To watch = unwatched, not season-skipped, not a Skipped show; 
   assert.deepStrictEqual(await list('towatch'), ['Alpha · Season 4'], 'never a watched, skipped or Skipped-show season');
   assert.deepStrictEqual(await list('watched'), ['Alpha · Season 1', 'Alpha · Season 3', 'Zed · Season 1']);
   assert.deepStrictEqual(await list('skipped'), ['Alpha · Season 2', 'Alpha · Season 3', 'Zed · Season 2']);
+  assert.deepStrictEqual(await list('notskipped'), ['Alpha · Season 1', 'Alpha · Season 4', 'Zed · Season 1', 'Zed · Season 3'],
+    'All (except Skipped): every season not skipped on its own, whatever the show status (Status decides the shows)');
   // The pure function agrees, and a both-flag season is in Watched and Skipped.
   const items = app.ctx.deriveAllTv(app.get('derivedData').rows, app.get('tvShowsById'), day(0)).items;
   const ids = vis => Array.from(app.ctx.deriveAllTvSeasons(items, vis).dated, r => r.id);
   const both = a.rows[2].id;
   assert.ok(ids('watched').includes(both) && ids('skipped').includes(both) && !ids('towatch').includes(both));
+});
+
+test('the default All (except Skipped) hides seasons skipped on their own and leaves them out of the counts; All seasons lists them; Status still decides the shows', async () => {
+  const a = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, w: true, date: '2020-01-01' }, { num: 2, s: true, date: '2020-02-01' }, { num: 3, date: '2020-03-01' }]);
+  const b = show({ title: 'Beta', status: 'confirmed' }, [{ num: 1, s: true, date: '2020-04-01' }]); // every season skipped on its own
+  const z = show({ title: 'Zed', status: 'skipped' }, [{ num: 1, date: '2021-01-01' }]);
+  const app = await openAllTv(all(a, b, z));
+  await seasons(app);
+  assert.strictEqual(app.get('allTvSeasonVis'), 'notskipped');
+  assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 1', 'Alpha · Season 3']);
+  assert.deepStrictEqual(statNums(app).slice(0, 2), ['2 Seasons', '1 Show'], 'Beta has no listed season, so it is not counted');
+  app.ctx.setAllTvSeasonVis('all'); await settle();
+  assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 1', 'Alpha · Season 2', 'Alpha · Season 3', 'Beta · Season 1']);
+  assert.deepStrictEqual(statNums(app).slice(0, 2), ['4 Seasons', '2 Shows']);
+  app.ctx.setAllTvSeasonVis('notskipped'); await settle();
+  setF(app, 'fStatus', 'all');
+  assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 1', 'Alpha · Season 3', 'Zed · Season 1'], 'All statuses brings back the Skipped show; skipped seasons stay out');
+  assert.strictEqual(app.writes().length, 0);
 });
 
 test('with the default Status and no both-flag season, To watch, Watched and Skipped partition All seasons', async () => {
