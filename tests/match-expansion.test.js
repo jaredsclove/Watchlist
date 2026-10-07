@@ -836,3 +836,228 @@ test('round 4 (coverage): during a pending show-status edit, an older show read 
   assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'complete');
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
 });
+
+// ── Edits that start before the read (review round 5): the whole edit lifecycle ──
+const shownWatched = (app, id) => {
+  const m = app.el('tbody').innerHTML.match(new RegExp(`<button class="watch-btn( watched)?" onclick="toggleWatch\\('${id}'\\)">`));
+  assert.ok(m, 'the row is displayed');
+  return !!m[1];
+};
+const shownShowStatus = (app, showId) => {
+  const m = app.el('tbody').innerHTML.match(new RegExp(`show-status-select s-([a-z_]+)"[^>]*setShowStatusById\\('${showId}'`));
+  assert.ok(m, 'the show status is displayed');
+  return m[1];
+};
+const patchOf = id => r => r.method === 'PATCH' && r.url.includes(`id=eq.${id}`);
+const showRpc = r => r.url.includes('/rpc/set_show_status');
+const idx = (app, pred, from = 0) => app.requests.findIndex((r, i) => i >= from && pred(r));
+const cachedShowStatus = (app, id) => app.get('tvShowsById').get(id).status;
+// The row is shown inside its show group: expand it so its watch button is displayed.
+const boot5 = async () => { const b = await boot(); b.app.ctx.toggleShowExpand(`row:${b.f.legacy.id}`); await settle(); return b; };
+
+test('round 5: a watched edit starts, then a refresh read starts and returns while the edit is pending — the optimistic value stays; "Refreshed." only from a read after the save', async () => {
+  const { app, f } = await boot5();
+  const was = pageRow(app, f.legacy.id).watched;
+  const patch = app.hold(patchOf(f.legacy.id));
+  const ep = app.ctx.toggleWatch(f.legacy.id);
+  assert.ok(await within(patch.reached));
+  const own = app.hold(rowGet(f.legacy.id));
+  const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  assert.ok(await within(own.reached));
+  assert.ok(idx(app, patchOf(f.legacy.id)) < idx(app, rowGet(f.legacy.id)), 'the edit started before the read');
+  own.release(); await within(rp); await settle();                         // returns the unwatched value, edit still pending
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !was, 'cached: optimistic value kept');
+  assert.strictEqual(shownWatched(app, f.legacy.id), !was, 'displayed: optimistic value kept');
+  assert.match(notice(app), /Refreshing to show what is saved now…/);
+  assert.ok(!/Refreshed\./.test(notice(app)), 'the overlapping read does not complete the refresh');
+  const saved = app.requests.length;
+  patch.release(); await within(ep); await settle(); await settle();
+  assert.ok(idx(app, rowGet(f.legacy.id), saved) >= 0, 'a new row read started after the save');
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === f.legacy.id).watched, !was);
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !was);
+  assert.strictEqual(shownWatched(app, f.legacy.id), !was);
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('round 5: a watched edit starts, a refresh read starts, the edit succeeds, then the stale read returns — the saved value stays', async () => {
+  const { app, f } = await boot5();
+  const was = pageRow(app, f.legacy.id).watched;
+  const older = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  const patch = app.hold(patchOf(f.legacy.id));
+  const ep = app.ctx.toggleWatch(f.legacy.id);
+  assert.ok(await within(patch.reached));
+  const own = app.hold(rowGet(f.legacy.id));
+  const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  assert.ok(await within(own.reached));
+  patch.release(); await within(ep); await settle();                        // saved
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === f.legacy.id).watched, !was);
+  assert.ok(!/Refreshed\./.test(notice(app)));
+  const after = app.requests.length;
+  await releaseHeldOlder(app, own, 'watchlist_items', older, rp); await settle();   // the stale (unwatched) read returns
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !was, 'cached: saved value kept');
+  assert.strictEqual(shownWatched(app, f.legacy.id), !was, 'displayed: saved value kept');
+  assert.ok(idx(app, rowGet(f.legacy.id), after) >= 0, 'a current read started after the stale one returned');
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('round 5: a watched edit starts, a refresh read starts, the edit fails, then the stale read returns — reverted value and error stay; a current read completes the refresh', async () => {
+  const { app, f } = await boot5();
+  const was = pageRow(app, f.legacy.id).watched;
+  const stale = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  stale.find(r => r.id === f.legacy.id).title = 'Stale';
+  stale.find(r => r.id === f.legacy.id).watched = !was;                    // what the read saw differs from the reverted state
+  const patch = app.hold(patchOf(f.legacy.id));
+  const ep = app.ctx.toggleWatch(f.legacy.id);
+  assert.ok(await within(patch.reached));
+  const own = app.hold(rowGet(f.legacy.id));
+  const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  assert.ok(await within(own.reached));
+  patch.fail(); await within(ep); await settle();
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, was, 'reverted');
+  assert.match(app.el('errorBanner').innerHTML, /simulated failure/);
+  const after = app.requests.length;
+  await releaseHeldOlder(app, own, 'watchlist_items', stale, rp); await settle();
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, was, 'cached: reverted value kept');
+  assert.strictEqual(shownWatched(app, f.legacy.id), was, 'displayed: reverted value kept');
+  assert.notStrictEqual(pageRow(app, f.legacy.id).title, 'Stale', 'the overlapping read published nothing');
+  assert.match(app.el('errorBanner').innerHTML, /simulated failure/, 'the edit’s error is still shown');
+  assert.ok(app.requests.slice(after).every(r => r.method === 'GET'), 'only reads follow');
+  assert.ok(idx(app, rowGet(f.legacy.id), after) >= 0, 'a current read started after the stale one returned');
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('round 5: a show-status edit starts, then the refresh’s show read and an all-shows read start — pending and after the save, neither replaces the status; "Refreshed." from a read after the save', async () => {
+  const { app, f } = await boot5();
+  const before = cachedShowStatus(app, f.tvShow.id);
+  const olderShows = JSON.parse(JSON.stringify(app.store.tv_shows));
+  const n0 = app.requests.length;
+  const rpc = app.hold(showRpc);
+  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  assert.ok(await within(rpc.reached));
+  const own = app.hold(showsGet);
+  const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  assert.ok(await within(own.reached));
+  const all = app.hold(r => r.method === 'GET' && /\/tv_shows\?select=/.test(r.url));
+  const ap = app.run('loadAllTvShows()');
+  assert.ok(await within(all.reached));
+  assert.ok(idx(app, showRpc, n0) < idx(app, showsGet, n0), 'the edit started before the reads');
+  own.release(); await settle();                                           // returns the old status while the edit is pending
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'complete', 'cached: optimistic status kept');
+  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'complete', 'displayed: optimistic status kept');
+  assert.ok(!/Refreshed\./.test(notice(app)));
+  const saved = app.requests.length;
+  rpc.release(); await within(ep); await settle();                         // saved
+  all.releaseWith({ tv_shows: olderShows }); await within(ap); await within(rp); await settle(); await settle();   // the stale all-shows read returns
+  assert.notStrictEqual(before, 'complete');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'complete');
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'complete', 'cached: saved status kept');
+  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'complete', 'displayed: saved status kept');
+  assert.ok(idx(app, showsGet, saved) >= 0, 'a show read started after the save');
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('round 5: a show-status edit starts, the refresh’s show read starts, the edit fails, then the stale read returns — reverted status and error stay', async () => {
+  const { app, f } = await boot5();
+  const before = cachedShowStatus(app, f.tvShow.id);
+  const stale = JSON.parse(JSON.stringify(app.store.tv_shows));
+  stale.find(s => s.id === f.tvShow.id).status = 'complete';               // what the stale read saw differs from the reverted state
+  const rpc = app.hold(showRpc);
+  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  assert.ok(await within(rpc.reached));
+  const own = app.hold(showsGet);
+  const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  assert.ok(await within(own.reached));
+  rpc.fail(); await within(ep); await settle();
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), before, 'reverted');
+  assert.match(app.el('errorBanner').innerHTML, /simulated failure/);
+  const after = app.requests.length;
+  own.releaseWith({ tv_shows: stale }); await within(rp); await settle(); await settle();
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), before, 'cached: reverted status kept');
+  assert.strictEqual(shownShowStatus(app, f.tvShow.id), before, 'displayed: reverted status kept');
+  assert.match(app.el('errorBanner').innerHTML, /simulated failure/, 'the edit’s error is still shown');
+  assert.ok(idx(app, showsGet, after) >= 0, 'a current show read started after the stale one returned');
+  assert.ok(app.requests.slice(after).every(r => r.method === 'GET'));
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('round 5: two overlapping watched edits — finishing the first doesn’t release the row: a read started after it publishes nothing while the second is pending', async () => {
+  const { app, f } = await boot5();
+  const was = pageRow(app, f.legacy.id).watched;
+  const stale = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  stale.find(r => r.id === f.legacy.id).title = 'Stale';
+  const p1 = app.hold(patchOf(f.legacy.id)), p2 = app.hold(patchOf(f.legacy.id));
+  const e1 = app.ctx.toggleWatch(f.legacy.id);
+  assert.ok(await within(p1.reached));
+  const e2 = app.ctx.toggleWatch(f.legacy.id);                              // back to the original value
+  assert.ok(await within(p2.reached));
+  p1.release(); await within(e1); await settle();                          // the first edit is saved; the second is pending
+  const own = app.hold(rowGet(f.legacy.id));
+  const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);        // a read that starts after the first edit ended
+  assert.ok(await within(own.reached));
+  await releaseHeldOlder(app, own, 'watchlist_items', stale, rp); await settle();
+  assert.notStrictEqual(pageRow(app, f.legacy.id).title, 'Stale', 'nothing published while an edit is pending');
+  assert.ok(!/Refreshed\./.test(notice(app)), 'still refreshing');
+  const n = app.requests.length;
+  assert.ok(idx(app, rowGet(f.legacy.id), n) < 0, 'no new read while the second edit is pending');
+  p2.release(); await within(e2); await settle(); await settle();
+  assert.ok(idx(app, rowGet(f.legacy.id), n) >= 0, 'a current read after both edits settled');
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === f.legacy.id).watched, was);
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, was);
+  assert.strictEqual(shownWatched(app, f.legacy.id), was);
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('round 5: two overlapping show-status edits — a collection show read started after the first is saved publishes nothing while the second is pending', async () => {
+  const { app, f } = await boot5();
+  const stale = JSON.parse(JSON.stringify(app.store.tv_shows));
+  stale.find(s => s.id === f.tvShow.id).status = 'skipped';               // only the stale read has this status
+  const r1 = app.hold(showRpc), r2 = app.hold(showRpc);
+  const e1 = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  assert.ok(await within(r1.reached));
+  const e2 = app.ctx.setShowStatusById(f.tvShow.id, 'watching');
+  assert.ok(await within(r2.reached));
+  r1.release(); await within(e1); await settle();                          // the first edit is saved; the second is pending
+  const read = app.hold(showsGet);
+  const lp = app.run('loadTvShows("truecrime")');                          // a read that starts after the first edit ended
+  assert.ok(await within(read.reached));
+  read.releaseWith({ tv_shows: stale }); await within(lp); await settle();
+  assert.notStrictEqual(cachedShowStatus(app, f.tvShow.id), 'skipped', 'cached: the stale read published nothing while an edit is pending');
+  assert.notStrictEqual(shownShowStatus(app, f.tvShow.id), 'skipped', 'displayed: the stale read published nothing');
+  r2.release(); await within(e2); await settle();
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'watching');
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'watching');
+  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'watching');
+  await app.run('loadTvShows("truecrime")'); await settle();                // a read after both edits publishes
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'watching');
+});
+
+test('round 5: a watched edit starts, then a tab read starts — returning while pending and returning after the save, it keeps the edited value and doesn’t complete the refresh', async () => {
+  const { app, f } = await boot5();
+  const was = pageRow(app, f.legacy.id).watched;
+  const stale = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  const p1 = app.hold(patchOf(f.legacy.id));
+  const ep = app.ctx.toggleWatch(f.legacy.id);
+  assert.ok(await within(p1.reached));
+  const own = app.hold(rowGet(f.legacy.id));
+  const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  assert.ok(await within(own.reached));
+  const t1 = app.hold(tabGet);
+  const tp1 = app.run('loadTab("truecrime")');
+  assert.ok(await within(t1.reached));
+  const t2 = app.hold(tabGet);
+  const tp2 = app.run('loadTab("truecrime")');
+  assert.ok(await within(t2.reached));
+  t1.releaseWith({ watchlist_items: stale }); await within(tp1); await settle();      // returns while the edit is pending
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !was, 'cached: optimistic value kept');
+  assert.strictEqual(shownWatched(app, f.legacy.id), !was, 'displayed: optimistic value kept');
+  const saved = app.requests.length;
+  p1.release(); await within(ep); await settle();
+  t2.releaseWith({ watchlist_items: stale }); await within(tp2); await settle();      // returns after the save
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !was, 'cached: saved value kept');
+  assert.strictEqual(shownWatched(app, f.legacy.id), !was, 'displayed: saved value kept');
+  assert.ok(!/Refreshed\./.test(notice(app)), 'tab reads that kept the edited row don’t complete it');
+  own.releaseWith({ watchlist_items: stale }); await within(rp); await settle(); await settle();
+  assert.ok(idx(app, rowGet(f.legacy.id), saved) >= 0, 'a current row read after the save');
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !was);
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});

@@ -75,7 +75,8 @@ function publishAllTvShows(read, shows) {
   if (read && !matchMayPublishShows(read, '*')) return false;
   const next = new Map(shows.map(s => [s.id, s]));
   if (read) {
-    const newer = new Set(Object.keys(matchPublished.shows).filter(c => c !== '*' && matchPublished.shows[c].id > read.id));
+    const newer = new Set(Object.keys(matchPublished.shows).filter(c => c !== '*'
+      && (matchPublished.shows[c].id > read.id || matchEditPending('shows', c))));
     for (const [id, s] of next) if (newer.has(s.collection)) next.delete(id);
     for (const s of tvShowsById.values()) if (newer.has(s.collection)) next.set(s.id, s);
     // Show lists kept because of an edit aren't covered by this read.

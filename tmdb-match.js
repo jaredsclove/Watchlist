@@ -443,9 +443,11 @@ function renderMatchProposal(m) {
 // only if it is newer than that in the current epoch; an older read that finishes
 // late, or one from before a restore, publishes nothing. An edit counts as a
 // publication from its optimistic start, so no older read replaces what the user
-// changed (whether the edit is pending, saved or reverted). Edits never satisfy a
+// changed. While any edit of a row (or show list) is pending, no read publishes it;
+// when an edit ends its marker moves to a new number, so a read that overlapped the
+// edit stays older than its saved (or reverted) result. Edits never satisfy a
 // refresh; a read retired by an edit is void, and the refresh reads again once no
-// edit of that row is pending.
+// edit of that row (or show list) is pending.
 function matchPublishedReset() {
   if (matchPublished.epoch !== orgEpoch) matchPublished = { epoch: orgEpoch, tabs: {}, rows: {}, shows: {} };
 }
@@ -455,7 +457,10 @@ function matchReadStart(kind, collection, rowId) {
   const read = { id: ++matchReadSeq, kind, collection, rowId: rowId || null, epoch: orgEpoch, state: 'pending', error: null,
     applied: false, keptRows: null }; // keptRows: rows (or, for '*', show lists) kept because of an edit
   matchReads.push(read);
-  if (matchReads.length > 300) matchReads = matchReads.slice(-300);
+  if (matchReads.length > 300) { // trim settled history; a pending read or edit is never dropped
+    const cut = matchReads.length - 300;
+    matchReads = matchReads.filter((r, i) => i >= cut || r.state === 'pending');
+  }
   return read;
 }
 
@@ -484,16 +489,30 @@ function matchMayPublishTab(read) {
   return read.epoch === orgEpoch && read.id > matchPubId(matchPublished.tabs[read.collection]);
 }
 
+// An edit of this row (kind 'rows', key = row id) or show list (kind 'shows', key =
+// collection) is still pending in the current epoch.
+function matchEditPending(kind, key) {
+  return matchReads.some(r => r.kind === 'edit' && r.state === 'pending' && r.epoch === orgEpoch
+    && (kind === 'rows' ? r.rowId === key : !r.rowId && r.collection === key));
+}
+
+// A read of this row / show list that an edit makes stale: one is pending, or one ended after the read started.
+function matchRowEditBlocks(read, rowId) {
+  const e = matchPublished.rows[rowId];
+  return read.epoch === orgEpoch && (matchEditPending('rows', rowId) || !!(e && e.kind === 'edit' && e.id > read.id));
+}
+
 function matchMayPublishRow(read, collection, rowId) {
   matchPublishedReset();
-  return read.epoch === orgEpoch && read.id > Math.max(matchPubId(matchPublished.tabs[collection]), matchPubId(matchPublished.rows[rowId]));
+  return read.epoch === orgEpoch && read.id > Math.max(matchPubId(matchPublished.tabs[collection]), matchPubId(matchPublished.rows[rowId]))
+    && !matchEditPending('rows', rowId);
 }
 
 function matchMayPublishShows(read, collection) {
   matchPublishedReset();
   const newest = collection === '*' ? matchPubId(matchPublished.shows['*'])
     : Math.max(matchPubId(matchPublished.shows[collection]), matchPubId(matchPublished.shows['*']));
-  return read.epoch === orgEpoch && read.id > newest;
+  return read.epoch === orgEpoch && read.id > newest && (collection === '*' || !matchEditPending('shows', collection));
 }
 
 // Rows of a tab that a read newer than this one published (present or gone), for a
@@ -501,14 +520,16 @@ function matchMayPublishShows(read, collection) {
 function matchNewerRows(read, collection) {
   matchPublishedReset();
   const out = {};
-  for (const [rowId, e] of Object.entries(matchPublished.rows)) if (e.collection === collection && e.id > read.id) out[rowId] = e;
+  for (const [rowId, e] of Object.entries(matchPublished.rows)) {
+    if (e.collection === collection && (e.id > read.id || matchEditPending('rows', rowId))) out[rowId] = e;
+  }
   return out;
 }
 
-// The newest publication of a show list is an edit newer than this read.
+// An edit of this show list is pending, or one ended after this read started.
 function matchShowsBlockedByEdit(read, collection) {
   const e = matchPublished.shows[collection];
-  return !!(e && e.kind === 'edit' && e.id > read.id);
+  return read.epoch === orgEpoch && (matchEditPending('shows', collection) || !!(e && e.kind === 'edit' && e.id > read.id));
 }
 
 // An edit made on this page (rows: key = row id, row = the row as now shown or null if
@@ -527,8 +548,19 @@ function matchEditRevert(read, row) {
   if (e && e.id === read.id) e.row = row;
 }
 
+// The edit's result (saved or reverted) is published under a new number, newer than
+// every read that started while it was pending.
 function matchEditEnd(read) {
-  if (read) matchReadSettle(read, null, true);
+  if (!read) return;
+  matchPublishedReset();
+  if (read.epoch === orgEpoch) {
+    const id = ++matchReadSeq;
+    if (read.rowId) {
+      const cur = matchPublished.rows[read.rowId];
+      matchPublished.rows[read.rowId] = { id, kind: 'edit', collection: read.collection, row: cur ? cur.row : null };
+    } else matchPublished.shows[read.collection] = { id, kind: 'edit' };
+  }
+  matchReadSettle(read, null, true);
 }
 
 // ─── After a match that couldn't be put into the page ─────────────────────────
@@ -596,8 +628,7 @@ function matchReadRow(unit) {
     const now = (rows || [])[0] || null;
     if (!matchMayPublishRow(read, unit.collection, unit.rowId)) {
       // Retired. An edit made it stale: it covers nothing (a current read follows).
-      const e = matchPublished.rows[unit.rowId];
-      matchReadSettle(read, null, !!(read.epoch === orgEpoch && e && e.kind === 'edit' && e.id > read.id));
+      matchReadSettle(read, null, matchRowEditBlocks(read, unit.rowId));
       return;
     }
     const td = tabData[unit.collection];
