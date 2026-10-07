@@ -292,4 +292,30 @@ test('the season status column is never read for TV: scrambling it changes no vi
   assert.strictEqual(b, c);
 });
 
+test('every theme of a built-in collection has a badge style in styles.css, for dark and light (class names are case-sensitive)', async () => {
+  const fs = require('fs'), path = require('path'), vm = require('vm');
+  const ctx = {}; vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'config.js'), 'utf8') + ';this.C = COLLECTIONS;', ctx);
+  const app = await createApp({});
+  const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+  // The light-mode blocks, by brace matching.
+  const light = [];
+  for (const m of css.matchAll(/@media \(prefers-color-scheme: light\) \{/g)) {
+    let depth = 0, i = m.index + m[0].length - 1;
+    for (; i < css.length; i++) { if (css[i] === '{') depth++; else if (css[i] === '}' && --depth === 0) break; }
+    light.push([m.index, i]);
+  }
+  const inLight = at => light.some(([a, b]) => at > a && at < b);
+  const missing = [];
+  for (const c of ctx.C.filter(c => !c.dynamic && Array.isArray(c.themes))) {
+    for (const theme of c.themes) {
+      const cls = app.ctx.badgeClass(theme); // the class the app actually renders
+      const hits = [...css.matchAll(new RegExp('\\.' + cls + '(?![\\w-])', 'g'))].map(m => m.index);
+      if (!hits.some(at => !inLight(at))) missing.push(`${c.id}: ${theme} (${cls}) dark`);
+      if (!hits.some(inLight)) missing.push(`${c.id}: ${theme} (${cls}) light`);
+    }
+  }
+  assert.deepStrictEqual(missing, []);
+});
+
 T.run();

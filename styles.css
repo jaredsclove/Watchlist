@@ -202,7 +202,7 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 /* ── 90 Day badges ── */
 .b-MainShow         { background: #2d1015; color: #c0392b; border-color: #4d1520; }
 .b-HappilyEverAfter { background: #2d1a08; color: #e67e22; border-color: #4d2a10; }
-.b-BeforeThe90Days  { background: #1e0d2d; color: #9b59b6; border-color: #3a1555; }
+.b-Beforethe90Days  { background: #1e0d2d; color: #9b59b6; border-color: #3a1555; }
 .b-TheOtherWay      { background: #0d1e35; color: #3a8fde; border-color: #0d3060; }
 .b-Spinoff          { background: #0d2420; color: #1abc9c; border-color: #0d3830; }
 .b-TellAll          { background: #2d2508; color: #f1c40f; border-color: #4d3d08; }
@@ -240,7 +240,7 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   .b-Comedy { background: #f0f7e8; color: #65942e; border-color: #c9e3ab; }
   .b-MainShow { background: #f8e9e7; color: #a12d20; border-color: #e3b0ab; }
   .b-HappilyEverAfter { background: #f8efe7; color: #b25c10; border-color: #e3c5ab; }
-  .b-BeforeThe90Days { background: #f2eaf6; color: #723988; border-color: #d0b1dd; }
+  .b-Beforethe90Days { background: #f2eaf6; color: #723988; border-color: #d0b1dd; }
   .b-TheOtherWay { background: #e7f0f8; color: #1864a9; border-color: #abc8e3; }
   .b-Spinoff { background: #e7f8f5; color: #14ae8f; border-color: #abe3d8; }
   .b-TellAll { background: #f8f5e7; color: #bb9706; border-color: #e3d8ab; }
