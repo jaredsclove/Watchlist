@@ -378,14 +378,18 @@ test('control: with no newer read, a reply updates the working copy right away (
 test('write barrier: a read started before a change can’t publish after it; the post-write read started after the barrier does', async () => {
   const app = await boot();
   await open(app);
+  const preChange = JSON.parse(JSON.stringify(app.store.personal_collections));
   const early = app.hold(r => r.url.includes('/rest/v1/personal_collections?'));
   const p = app.ctx.loadOrganization();          // started before the change
   await early.reached;
   typeInto(app, 'manageNewCollection', 'Favourites');
   app.ctx.manageCreate('collection'); await settle();
   assert.ok(app.get('personalCollections').some(c => c.name === 'Favourites'), 'post-write read published');
-  // the early read finishes last with the pre-change list
+  // The early read finishes last and answers with what it saw before the change.
+  const now = app.store.personal_collections;
+  app.store.personal_collections = preChange;
   early.release(); await p; await settle();
+  app.store.personal_collections = now;
   assert.ok(app.get('personalCollections').some(c => c.name === 'Favourites'), 'the older read didn’t replace it');
 });
 
