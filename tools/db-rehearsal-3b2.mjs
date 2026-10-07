@@ -38,7 +38,7 @@ const ok = (cond, label, detail = '') => { if (!cond) failed++; console.log(`  $
 const section = t => console.log(`\n[${t}]`);
 
 // Stage final with Stage 3b-1 installed and the backup's data.
-async function buildReplica(snapshot) {
+export async function buildReplica(snapshot) {
   const db = new PGlite();
   const anon = (s, p) => db.transaction(async tx => {
     await tx.query(`select set_config('request.jwt.claims', '', true), set_config('role', 'anon', true)`);
