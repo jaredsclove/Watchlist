@@ -15,6 +15,8 @@ production step needs explicit approval and a fresh validated backup first.
 | Admin enrichment | `admin/tv_enrich.sql` (`private.tv_enrich_show`) | Adds an approved TMDB identity to one legacy built-in show and its seasons (dry run by default; admin only). The guard in `rpc.sql` makes later seasons of an enriched built-in show join it |
 | Stage 3b-1 | `phase3b_org.sql` (stage `final`) | Personal collections, memberships and watch-with choices; generated `watchlist_items.is_film`; the temporary membership trigger; `restore_backup` for format 3 only; `match_tv_row` keeping memberships (adds `p_expansion`); bootstrap from what each tab stores; self-verifying, one transaction |
 | Rollback 3b-1 | `rollback/phase3b.sql` | Refuses unless the organization is exactly what the old model holds; then removes it and puts back the previous `restore_backup` and `match_tv_row` |
+| Stage 3b-2 | `phase3b2_org_write.sql` (stage `final`, after Stage 3b-1) | Functions only: `org_capabilities` (read-only) and owner-scoped write functions for collections, memberships (whole show or film, the show or film locked first) and watch-with choices; an UPDATE that newly adds an archived watch-with choice is refused (rows keep the ones they have; an INSERT may carry them, so restore stays exact); one transaction |
+| Rollback 3b-2 | `rollback/phase3b2.sql` | Drops the 3b-2 functions and puts back the Stage 3b-1 watch-with check verbatim; keeps every row and every edit (the database then no longer refuses newly added archived choices) |
 | Future sign-in | `future/auth_switchover.sql` | Not part of this migration (covers the Stage 3b-1 tables) |
 
 `test/` is for test projects and local runs only: `replica_schema.sql` (the
@@ -35,4 +37,7 @@ Rehearsals:
   (refuses the production URL).
 - Stage 3b-1, local: `PGLITE_DIR=<dir> node tools/db-rehearsal-3b.mjs <format-2 backup.json>` (replica at stage final,
   migration, `test/t_3b_org.sql`, refused replay, guarded rollback back to the identical catalog, re-apply, sign-in script).
+- Stage 3b-2, local: `PGLITE_DIR=<dir> node tools/db-rehearsal-3b2.mjs <format-2 or format-3 backup.json> [--export-edited <out.json>]`
+  (replica with Stage 3b-1, migration, `test/t_3b2_org.sql` and `test/t_3b_org.sql`, refused replay, edits, rollback back to
+  the Stage 3b-1 catalog with the edits kept, re-apply). One session: it doesn't show how two sessions interleave.
 - Model vs reference on a test project: `node tools/tv-model-expectations.mjs <backup.json>` prints a self-check script.
