@@ -1061,3 +1061,42 @@ test('round 5: a watched edit starts, then a tab read starts — returning while
   assert.strictEqual(pageRow(app, f.legacy.id).watched, !was);
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
 });
+
+// Coverage found by deliberate breaks (round 5).
+test('round 5 (coverage): an all-shows read started during a pending show-status edit and returning while it is pending keeps the optimistic status', async () => {
+  const { app, f } = await boot5();
+  const stale = JSON.parse(JSON.stringify(app.store.tv_shows));
+  stale.find(s => s.id === f.tvShow.id).status = 'skipped';               // only the stale read has this status
+  const rpc = app.hold(showRpc);
+  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  assert.ok(await within(rpc.reached));
+  const all = app.hold(r => r.method === 'GET' && /\/tv_shows\?select=/.test(r.url));
+  const ap = app.run('loadAllTvShows()');
+  assert.ok(await within(all.reached));
+  all.releaseWith({ tv_shows: stale }); await within(ap); await settle();
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'complete', 'cached: optimistic status kept');
+  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'complete', 'displayed: optimistic status kept');
+  rpc.release(); await within(ep); await settle();
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'complete');
+});
+
+test('round 5 (coverage): a pending edit stays protected however many reads happen meanwhile', async () => {
+  const { app, f } = await boot5();
+  const was = pageRow(app, f.legacy.id).watched;
+  const stale = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  stale.find(r => r.id === f.legacy.id).title = 'Stale';
+  const patch = app.hold(patchOf(f.legacy.id));
+  const ep = app.ctx.toggleWatch(f.legacy.id);
+  assert.ok(await within(patch.reached));
+  for (let i = 0; i < 320; i++) await app.run('loadTvShows("disney")');    // many other tracked reads
+  const own = app.hold(rowGet(f.legacy.id));
+  const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  assert.ok(await within(own.reached));
+  await releaseHeldOlder(app, own, 'watchlist_items', stale, rp);
+  assert.notStrictEqual(pageRow(app, f.legacy.id).title, 'Stale', 'nothing published while the edit is pending');
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !was);
+  assert.ok(!/Refreshed\./.test(notice(app)));
+  patch.release(); await within(ep); await settle(); await settle();
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !was);
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
