@@ -413,6 +413,25 @@ test('write barrier (contract): a read started before a confirmed change never p
   assert.ok(app.get('orgCollectionsSeq') > app.get('orgWriteBarrier'), 'the post-write read (newer than the barrier) published');
 });
 
+test('write barrier (contract): a read started before a confirmed change never publishes after its reply when the post-write refresh fails; the stale flag stays', async () => {
+  const app = await boot();
+  await open(app);
+  const early = app.hold(r => r.url.includes('/rest/v1/personal_collections?'));
+  const p = app.ctx.loadOrganization();
+  await early.reached;
+  const earlySeq = app.get('orgReadSeq');
+  const seqBefore = app.get('orgCollectionsSeq');
+  app.failNext(r => r.url.includes('/rest/v1/personal_collections?'));   // the post-write collections read fails
+  typeInto(app, 'manageNewCollection', 'Favourites');
+  app.ctx.manageCreate('collection'); await settle();
+  assert.ok(app.get('orgCollectionsStale') > 0, 'collections marked possibly out of date');
+  early.release(); await p; await settle();
+  assert.strictEqual(app.get('orgCollectionsSeq'), seqBefore, 'the earlier read did not publish');
+  assert.ok(app.get('orgCollectionsSeq') < earlySeq);
+  assert.ok(app.get('orgCollectionsStale') > 0, 'still marked possibly out of date');
+  assert.match(app.el('browseBar').innerHTML, /Collections may be out of date/);
+});
+
 test('saved but refresh failed: the dialog says so with Retry; the Browse bar marks collections out of date; Retry recovers', async () => {
   const app = await boot();
   await open(app);
@@ -426,16 +445,18 @@ test('saved but refresh failed: the dialog says so with Retry; the Browse bar ma
   assert.ok(!/may be out of date/.test(app.el('browseBar').innerHTML));
 });
 
-test('per-kind stale flags: a collections-only read doesn’t clear choices; an older failed refresh doesn’t mark newer data stale', async () => {
+test('per-kind stale flags: a choices-only failure marks only choices stale; the collections read still publishes; a collections-only read doesn’t clear choices; an older failed refresh doesn’t mark newer data stale', async () => {
   const app = await boot();
   const choicesFail = app.hold(r => r.url.includes('/rest/v1/watch_with_choices?'), 'fail');
   const p = app.ctx.startOrgRefresh({ barrier: false, reason: 'retry' });
   await choicesFail.reached;
+  const readSeq = app.get('orgReadSeq');
   choicesFail.fail(); await p; await settle();
-  assert.ok(app.get('orgChoicesStale') > 0 && app.get('orgCollectionsStale') > 0);
+  assert.ok(app.get('orgChoicesStale') > 0, 'choices stale');
+  assert.strictEqual(app.get('orgCollectionsStale'), 0, 'collections not stale (their read succeeded)');
+  assert.strictEqual(app.get('orgCollectionsSeq'), readSeq, 'the successful collections read published');
   app.ctx.openBrowseCollection(app.browseId('disney')); await settle(); // a collections-only read
-  assert.strictEqual(app.get('orgCollectionsStale'), 0, 'collections cleared by a newer collections read');
-  assert.ok(app.get('orgChoicesStale') > 0, 'choices still stale');
+  assert.ok(app.get('orgChoicesStale') > 0, 'choices still stale after a collections-only read');
   // an older failed read can't mark newer data stale
   const older = app.get('orgReadStart()');
   await app.ctx.loadOrganization(); await settle();
@@ -443,6 +464,135 @@ test('per-kind stale flags: a collections-only read doesn’t clear choices; an 
   app.ctx.markOrgStale('collections', older);
   assert.strictEqual(app.get('orgChoicesStale'), 0);
   assert.strictEqual(app.get('orgCollectionsStale'), 0);
+});
+
+test('per-kind stale flags: a collections-only failure marks only collections stale; the choices read still publishes; a newer collections read clears it', async () => {
+  const app = await boot();
+  app.store.watch_with_choices.find(c => c.token === 'Suzanne').label = 'Suzanne R.';
+  app.failNext(r => r.url.includes('/rest/v1/personal_collections?'));
+  await app.ctx.startOrgRefresh({ barrier: false, reason: 'retry' }); await settle();
+  assert.ok(app.get('orgCollectionsStale') > 0, 'collections stale');
+  assert.strictEqual(app.get('orgChoicesStale'), 0, 'choices not stale');
+  assert.ok(app.get('watchWithChoices').some(c => c.label === 'Suzanne R.'), 'the successful choices read published');
+  assert.match(app.el('browseBar').innerHTML, /Collections may be out of date/);
+  app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
+  assert.strictEqual(app.get('orgCollectionsStale'), 0, 'cleared by a newer successful collections read');
+});
+
+test('a membership, show or row read failing after a change: both shared lists still publish, no stale flag; the editor says it couldn’t refresh (its complete-data rule)', async () => {
+  for (const table of ['collection_memberships', 'tv_shows', 'watchlist_items']) {
+    const app = await boot();
+    await open(app);
+    app.failNext(r => r.method === 'GET' && r.url.includes(`/rest/v1/${table}?`));
+    typeInto(app, 'manageNewCollection', 'Favourites');
+    app.ctx.manageCreate('collection'); await settle();
+    assert.ok(app.get('personalCollections').some(c => c.name === 'Favourites'), `${table}: collections published`);
+    assert.strictEqual(app.get('orgCollectionsStale'), 0, `${table}: collections not stale`);
+    assert.strictEqual(app.get('orgChoicesStale'), 0, `${table}: choices not stale`);
+    assert.match(text(app), /Saved\. Couldn’t refresh your collections/, `${table}: the editor reports the failed refresh`);
+  }
+});
+
+// ── Ambiguous HTTP outcomes (review finding 2) ──
+const rawResponse = (status, body) => ({ ok: false, status, text: async () => body, json: async () => JSON.parse(body), headers: { get: () => null } });
+
+test('a committed write whose response is an unstructured gateway error stays unconfirmed; reconciled by a read; never re-sent', async () => {
+  const app = await boot();
+  await open(app);
+  const s = coll(app, 'sheridan');
+  const original = app.rpcHandlers.org_rename_collection;
+  app.rpcHandlers.org_rename_collection = body => { original(body); app.rpcHandlers.org_rename_collection = original; return rawResponse(502, '<html><body>502 Bad Gateway</body></html>'); };
+  const i = app.requests.length;
+  app.ctx.manageStartRename('c', s.id);
+  typeInto(app, `manageRename-${s.id}`, 'Sheridan Universe');
+  app.ctx.manageSaveRename('c', s.id); await settle();
+  assert.strictEqual(rpc(app, 'org_rename_collection').length, 1, 'never re-sent');
+  assert.ok(app.requests.slice(i).some(r => r.method === 'GET' && r.url.includes('/rest/v1/personal_collections?')), 'reconciled by a read');
+  assert.match(text(app), /Your rename wasn’t confirmed\./);
+  assert.ok(!/refused|Not saved|nothing changed/i.test(text(app)), 'not reported as a refusal');
+});
+
+test('a JSON error without a database code (a gateway or proxy) is also ambiguous; an unconfirmed create keeps its id for a same-name retry', async () => {
+  const app = await boot();
+  await open(app);
+  app.rpcHandlers.org_create_collection = (orig => body => { app.rpcHandlers.org_create_collection = orig; return rawResponse(503, '{"message":"upstream request timeout"}'); })(app.rpcHandlers.org_create_collection);
+  typeInto(app, 'manageNewCollection', 'Favourites');
+  app.ctx.manageCreate('collection'); await settle();
+  assert.match(text(app), /Not created as of this check\. Your earlier request could still create it\./);
+  const first = rpc(app, 'org_create_collection')[0].body.p_id;
+  app.ctx.manageCreate('collection'); await settle();
+  assert.strictEqual(rpc(app, 'org_create_collection')[1].body.p_id, first, 'same name → same id');
+  assert.strictEqual(app.store.personal_collections.filter(c => c.name === 'Favourites').length, 1);
+});
+
+test('recognized database answers stay definitive: a statement timeout (57014) and a P0001 refusal are reported, with no "wasn’t confirmed"', async () => {
+  const app = await boot();
+  await open(app);
+  const s = coll(app, 'sheridan');
+  app.rpcHandlers.org_rename_collection = (orig => () => { app.rpcHandlers.org_rename_collection = orig; return rawResponse(500, '{"code":"57014","details":null,"hint":null,"message":"canceling statement due to statement timeout"}'); })(app.rpcHandlers.org_rename_collection);
+  app.ctx.manageStartRename('c', s.id);
+  typeInto(app, `manageRename-${s.id}`, 'Sheridan Universe');
+  app.ctx.manageSaveRename('c', s.id); await settle();
+  assert.match(text(app), /The database didn’t finish this .* so nothing was changed\. Try again\./);
+  assert.ok(!/wasn’t confirmed/.test(text(app)));
+  s.name = 'Elsewhere';
+  app.ctx.manageStartRename('c', s.id);
+  typeInto(app, `manageRename-${s.id}`, 'X');
+  app.ctx.manageSaveRename('c', s.id); await settle();
+  assert.match(text(app), /Renamed elsewhere to “Elsewhere”; nothing changed\./);
+  assert.ok(!/wasn’t confirmed/.test(text(app)));
+});
+
+// ── Overlapping unresolved requests on one record (review finding 3) ──
+test('Archive → Stop waiting → Unarchive succeeds → the original Archive arrives late: each request’s uncertainty is its own', async () => {
+  const app = await boot();
+  await open(app);
+  const d = coll(app, 'disney');
+  const original = app.rpcHandlers.org_set_collection_archived;
+  let releaseFirst, calls = 0;
+  app.rpcHandlers.org_set_collection_archived = body => {
+    const res = original(body);
+    return ++calls === 1 ? new Promise(r => { releaseFirst = () => r(res); }) : res;   // the archive commits; its reply is delayed
+  };
+  app.ctx.manageSetArchived('c', d.id, true); await settle();
+  const op1 = Object.values(state(app).pending)[0];
+  app.ctx.manageStopWaiting(String(op1.id)); await settle();
+  app.ctx.manageToggleArchived(); await settle();
+  assert.match(text(app), /It is now archived\. Your earlier archive request wasn’t confirmed/);
+  app.ctx.manageSetArchived('c', d.id, false); await settle();          // a fresh action: Unarchive succeeds
+  assert.strictEqual(d.archived_at, null);
+  assert.match(text(app), /Disney\+ .*Your earlier archive request wasn’t confirmed/, 'the earlier Archive is still unconfirmed after the Unarchive succeeded');
+  releaseFirst(); await settle(); await settle();                        // the original Archive's reply arrives
+  assert.match(text(app), /Your earlier change was saved\./, 'it resolves only its own request');
+  assert.strictEqual(d.archived_at, null, 'its record was not applied over the newer state');
+  assert.strictEqual(state(app).data.collections.find(c => c.id === d.id).archived_at, null);
+});
+
+test('two unresolved requests on one record whose replies arrive out of order: each reply resolves only its own request', async () => {
+  const app = await boot();
+  await open(app);
+  const s = coll(app, 'sheridan');
+  const rename = async (to) => {
+    const g = app.hold(r => r.url.includes('/rpc/org_rename_collection') && r.body && r.body.p_name === to);
+    app.ctx.manageStartRename('c', s.id);
+    typeInto(app, `manageRename-${s.id}`, to);
+    app.ctx.manageSaveRename('c', s.id);
+    await g.reached; await settle();
+    const op = Object.values(state(app).pending).find(o => o.args.p_name === to);
+    app.ctx.manageStopWaiting(String(op.id)); await settle();
+    return g;
+  };
+  const g1 = await rename('First Name');
+  const g2 = await rename('Second Name');
+  assert.strictEqual((text(app).match(/could still rename it/g) || []).length, 2, 'two unconfirmed requests shown');
+  g2.release(); await settle(); await settle();                          // the second one's reply first
+  assert.match(text(app), /Your earlier change was saved\./);
+  assert.strictEqual((text(app).match(/could still rename it/g) || []).length, 1, 'the first is still unconfirmed');
+  g1.release(); await settle(); await settle();                          // then the first (refused by its guard)
+  assert.match(text(app), /Your earlier change was refused: Renamed elsewhere to “Second Name”; nothing changed\./);
+  assert.match(text(app), /Your earlier change was saved\./, 'the second request’s resolution is kept');
+  assert.ok(!/could still rename it/.test(text(app)));
+  assert.strictEqual(s.name, 'Second Name');
 });
 
 // ── memberships and Undo ──

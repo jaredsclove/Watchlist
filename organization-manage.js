@@ -34,19 +34,25 @@ const ORG_LATE_NOTE = 'Your earlier attempt might still arrive. Depending on wha
 const ORG_INCONSISTENT_TAIL = 'Something may have changed while reading. This does not mean anything was deleted; this read changed nothing.';
 
 // ── Errors ──
-// sbFetch throws "Supabase error <status>: <body>" for a database answer; anything
-// else (a TypeError from fetch) means no answer came back.
+// sbFetch throws "Supabase error <status>: <body>" for an HTTP error; a TypeError
+// from fetch means no answer came back. Only a recognized database or API answer
+// (a JSON body with an error code: a SQLSTATE such as P0001, 23514, 57014, or a
+// PostgREST code such as PGRST202) is definitive. Any other HTTP error (a gateway
+// or proxy page, JSON without a code) doesn't show whether the write committed:
+// it is treated like no answer ('ambiguous').
 function orgErrorInfo(e) {
   const msg = String(e && e.message || e || '');
   const m = msg.match(/^Supabase error (\d+): ([\s\S]*)$/);
   if (!m) return { kind: 'network', message: msg };
-  let body = {};
-  try { body = JSON.parse(m[2]) || {}; } catch (x) { body = {}; }
+  let body = null;
+  try { body = JSON.parse(m[2]); } catch (x) { body = null; }
+  const recognized = body && typeof body === 'object' && typeof body.code === 'string' && /^([0-9A-Z]{5}|PGRST\d+)$/.test(body.code);
+  if (!recognized) return { kind: 'ambiguous', status: Number(m[1]), message: String((body && body.message) || m[2]) };
   const text = String(body.message || m[2]);
   let detail = null;
   try { detail = body.details ? JSON.parse(body.details) : null; } catch (x) { detail = null; }
   const prefix = (text.match(/^([a-z_]+):/) || [])[1] || '';
-  return { kind: 'database', status: Number(m[1]), pgCode: body.code || '', code: prefix, message: text, detail };
+  return { kind: 'database', status: Number(m[1]), pgCode: body.code, code: prefix, message: text, detail };
 }
 
 // A function this database doesn't have (or the API hasn't loaded yet).
@@ -160,13 +166,25 @@ function startOrgRefresh({ barrier = true, reason = 'write', reconcile = null } 
     manage.refreshFor = reason;
     if (reconcile) manage.reconcile.push(reconcile);
   }
+  // Collections and choices publish (or are marked possibly out of date) on their
+  // own, as each read finishes, under the usual sequence, barrier and epoch rules;
+  // a failure of one never discards the other. The editor still needs every read.
+  const collectionsRead = fetchAllRowsStrict('personal_collections').then(rows => {
+    if (publishCollections(rows, read)) buildBrowseBar();
+    return rows;
+  }, e => { markOrgStale('collections', read); throw e; });
+  const choicesRead = fetchAllRowsStrict('watch_with_choices').then(rows => {
+    publishChoices(rows, read);
+    return rows;
+  }, e => { markOrgStale('choices', read); throw e; });
   const reads = open
-    ? [fetchAllRowsStrict('personal_collections'), fetchAllRowsStrict('collection_memberships'), fetchAllRowsStrict('watch_with_choices'),
-       fetchAllRowsStrict('tv_shows'), fetchAllRowsStrict(TABLE)]
-    : [fetchAllRowsStrict('personal_collections'), Promise.resolve(null), fetchAllRowsStrict('watch_with_choices')];
-  return Promise.all(reads).then(([collections, memberships, choices, shows, rows]) => {
-    if (publishCollections(collections, read)) buildBrowseBar();
-    publishChoices(choices, read);
+    ? [collectionsRead, fetchAllRowsStrict('collection_memberships'), choicesRead, fetchAllRowsStrict('tv_shows'), fetchAllRowsStrict(TABLE)]
+    : [collectionsRead, Promise.resolve(null), choicesRead];
+  return Promise.allSettled(reads).then(results => {
+    const failed = results.find(r => r.status === 'rejected');
+    if (failed) throw failed.reason;
+    return results.map(r => r.value);
+  }).then(([collections, memberships, choices, shows, rows]) => {
     if (!manage || manage.session !== session || manage.epoch !== orgEpoch || read.seq !== manage.readSeq) return;
     manage.data = { collections, memberships, choices, shows, rows, readSeq: read.seq, readAt: new Date() };
     manage.refreshing = false;
@@ -179,8 +197,6 @@ function startOrgRefresh({ barrier = true, reason = 'write', reconcile = null } 
     renderManage();
   }, e => {
     console.error(e);
-    markOrgStale('collections', read);
-    markOrgStale('choices', read);
     if (!manage || manage.session !== session || manage.epoch !== orgEpoch || read.seq !== manage.readSeq) return;
     manage.refreshing = false;
     const msg = String(e && e.message || e);
@@ -272,7 +288,7 @@ function becomeUnknown(op) {
   if (manage && manage.session === op.session) {
     if (manage.pending[op.key] === op) delete manage.pending[op.key];
     manage.undo = manage.undo.filter(u => u.key !== op.key);
-    manage.unconfirmed[op.key] = { op, text: 'Your change wasn’t confirmed. Checking what is saved now…' };
+    manage.unconfirmed[op.id] = { op, text: 'Your change wasn’t confirmed. Checking what is saved now…' };
     renderManage();
   }
   startOrgRefresh({ barrier: true, reason: 'reconcile', reconcile: op });
@@ -282,7 +298,8 @@ function finishOrgOp(op, res, err) {
   if (typeof clearTimeout === 'function') clearTimeout(op.timer);
   const info = err ? orgErrorInfo(err) : null;
   const wasUnknown = op.state === 'unknown';
-  if (info && info.kind === 'network') {
+  // No answer, or an answer that doesn't show whether it committed: unknown.
+  if (info && info.kind !== 'database') {
     if (!wasUnknown) becomeUnknown(op);
     return;
   }
@@ -301,9 +318,9 @@ function finishOrgOp(op, res, err) {
     if (wasUnknown) {
       // A late, definitive reply resolves that request's uncertainty; its record is
       // not applied (a reconciliation read may already show newer data).
-      manage.unconfirmed[op.key] = { op, text: res ? 'Your earlier change was saved.' : `Your earlier change was refused: ${outcome.text}`, resolved: true };
+      // Only this request's uncertainty is resolved; other requests on the record keep theirs.
+      manage.unconfirmed[op.id] = { op, text: res ? 'Your earlier change was saved.' : `Your earlier change was refused: ${outcome.text}`, resolved: true };
     } else {
-      delete manage.unconfirmed[op.key];
       const canApply = res && manage.latestOp[op.key] === op.id && manage.data && manage.data.readSeq <= op.sentReadSeq;
       if (canApply) applyOrgReply(op, res);
       if (res) manage.saved[op.key] = true;
@@ -410,8 +427,8 @@ function manageUndo(index) {
 // After a reconciliation read: what is saved now, for an unconfirmed request. The
 // request stays unconfirmed whatever the read shows.
 function observeAfterReconcile(op) {
-  const u = manage.unconfirmed[op.key];
-  if (!u || u.op !== op || u.resolved) return;
+  const u = manage.unconfirmed[op.id];
+  if (!u || u.resolved) return;
   const d = manage.data;
   let text;
   if (op.kind === 'createCollection' || op.kind === 'createChoice') {
@@ -446,8 +463,15 @@ function observeAfterReconcile(op) {
     else if (pair) text = `Your removal wasn’t confirmed. ${op.label || 'This'} is in this collection, added again elsewhere.`;
     else text = 'Your removal wasn’t confirmed; it may have been removed elsewhere.';
   }
-  manage.unconfirmed[op.key] = { op, text };
+  manage.unconfirmed[op.id] = { op, text };
 }
+
+// Every unconfirmed request on one record (by operation, oldest first), and the
+// records that have any.
+function unconfirmedFor(key) {
+  return Object.values(manage.unconfirmed).filter(u => u.op.key === key).sort((a, b) => a.op.id - b.op.id);
+}
+const unconfirmedKeys = () => [...new Set(Object.values(manage.unconfirmed).map(u => u.op.key))];
 
 // ── User actions ──
 function manageDraft(el) {
@@ -502,11 +526,11 @@ function manageCreate(kind) {
     args: kind === 'choice' ? { p_id: id, p_label: name } : { p_id: id, p_name: name } }).then(() => {
     if (!manage) return;
     // The form keeps the text unless the create is confirmed.
-    if (manage.unconfirmed[key] == null && manage.latestOp[key] && Object.values(manage.pending).every(o => o.key !== key)) {
+    if (!unconfirmedFor(key).some(u => !u.resolved) && manage.latestOp[key] && Object.values(manage.pending).every(o => o.key !== key)) {
       const done = manage.lastOutcome && manage.lastOutcome[key];
       if (done) manage.drafts[inputId] = '';
     }
-    if (prior && prior.id === id && manage.unconfirmed[key] == null) manage.unconfirmedCreate = null;
+    if (prior && prior.id === id && !unconfirmedFor(key).some(u => !u.resolved)) manage.unconfirmedCreate = null;
     renderManage();
   });
 }
@@ -649,8 +673,7 @@ function manageRecheck() {
 // Notes for one record: its last outcome, and anything unconfirmed.
 function manageNotesHtml(key) {
   const out = [];
-  const u = manage.unconfirmed[key];
-  if (u) out.push(`<div class="manage-note">${esc(u.text)}${u.resolved ? '' : ` ${esc(ORG_LATE_NOTE)}`}</div>`);
+  unconfirmedFor(key).forEach(u => out.push(`<div class="manage-note">${esc(u.text)}${u.resolved ? '' : ` ${esc(ORG_LATE_NOTE)}`}</div>`));
   if (manage.notes[key]) out.push(`<div class="manage-note">${esc(manage.notes[key])}</div>`);
   const op = manage.pending[key];
   if (op) out.push(`<div class="manage-note">Saving…${op.slow ? ` <button class="btn" onclick="manageStopWaiting('${op.id}')">Stop waiting</button>` : ''}</div>`);
@@ -711,7 +734,7 @@ function manageCollectionsHtml(ix) {
       <div class="manage-actions">${actions}</div>${manageNotesHtml(key)}</li>`;
   };
   const createId = 'manageNewCollection';
-  const newKeyNotes = Object.keys(manage.unconfirmed).filter(k => k.startsWith('c:') && !ix.colls.has(k.slice(2))).map(k => manageNotesHtml(k)).join('');
+  const newKeyNotes = unconfirmedKeys().filter(k => k.startsWith('c:') && !ix.colls.has(k.slice(2))).map(k => manageNotesHtml(k)).join('');
   return `${manageInconsistencyHtml(ix, null)}
     <div class="manage-create"><label for="${createId}">New collection</label>
       <input id="${createId}" type="text" maxlength="100" value="${esc(manage.drafts[createId] || '')}" oninput="manageDraft(this)"
@@ -740,7 +763,7 @@ function manageMembersHtml(ix) {
   };
   // Notes for members no longer listed (removed, or unconfirmed changes).
   const listed = new Set(members.map(x => orgKeyMember(c.id, x.m.show_id, x.m.item_id)));
-  const otherNotes = Object.keys({ ...manage.unconfirmed, ...manage.notes, ...manage.pending })
+  const otherNotes = [...new Set([...unconfirmedKeys(), ...Object.keys(manage.notes), ...Object.keys(manage.pending)])]
     .filter(k => k.startsWith(`m:${c.id}|`) && !listed.has(k)).map(k => manageNotesHtml(k)).join('');
   const undo = manage.undo.map((u, i) => u.collectionId === c.id
     ? `<div class="manage-note">${u.action === 'remove' ? 'Added' : 'Removed'} ${esc(u.label)}. <button class="btn" onclick="manageUndo(${i})"${locked ? ' disabled' : ''}>Undo</button></div>` : '').join('');
@@ -791,7 +814,7 @@ function manageChoicesHtml(ix) {
       <div class="manage-actions">${actions}</div>${manageNotesHtml(key)}</li>`;
   };
   const createId = 'manageNewChoice';
-  const newKeyNotes = Object.keys({ ...manage.unconfirmed, ...manage.pending }).filter(k => k.startsWith('w:') && !manage.data.choices.some(c => `w:${c.id}` === k)).map(k => manageNotesHtml(k)).join('');
+  const newKeyNotes = [...new Set([...unconfirmedKeys(), ...Object.keys(manage.pending)])].filter(k => k.startsWith('w:') && !manage.data.choices.some(c => `w:${c.id}` === k)).map(k => manageNotesHtml(k)).join('');
   return `<p class="manage-hint">Archiving a choice stops offering it; items that have it keep it and still show it.</p>
     <div class="manage-create"><label for="${createId}">New watch-with choice</label>
       <input id="${createId}" type="text" maxlength="100" value="${esc(manage.drafts[createId] || '')}" oninput="manageDraft(this)"
