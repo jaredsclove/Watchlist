@@ -393,6 +393,26 @@ test('write barrier: a read started before a change can’t publish after it; th
   assert.ok(app.get('personalCollections').some(c => c.name === 'Favourites'), 'the older read didn’t replace it');
 });
 
+test('write barrier (contract): a read started before a confirmed change never publishes after its reply, even before the post-write read finishes', async () => {
+  // Replies never touch the shared lists, so a late pre-change read would show the same
+  // data they already hold; this pins the publication rule itself (defence in depth).
+  const app = await boot();
+  await open(app);
+  const early = app.hold(r => r.url.includes('/rest/v1/personal_collections?'));
+  const p = app.ctx.loadOrganization();
+  await early.reached;
+  const earlySeq = app.get('orgReadSeq');
+  const post = app.hold(r => r.url.includes('/rest/v1/personal_collections?'));
+  typeInto(app, 'manageNewCollection', 'Favourites');
+  app.ctx.manageCreate('collection');
+  await post.reached;                               // the post-write read is in flight
+  assert.ok(app.get('orgWriteBarrier') >= earlySeq, 'barrier set before the post-write read started');
+  early.release(); await p; await settle();
+  assert.ok(app.get('orgCollectionsSeq') < earlySeq, 'the earlier read did not publish');
+  post.release(); await settle();
+  assert.ok(app.get('orgCollectionsSeq') > app.get('orgWriteBarrier'), 'the post-write read (newer than the barrier) published');
+});
+
 test('saved but refresh failed: the dialog says so with Retry; the Browse bar marks collections out of date; Retry recovers', async () => {
   const app = await boot();
   await open(app);
