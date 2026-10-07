@@ -22,10 +22,13 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const req = createRequire(path.join(process.env.PGLITE_DIR || '.', 'package.json'));
 const { PGlite } = await import(req.resolve('@electric-sql/pglite'));
 const args = process.argv.slice(2);
-const backupPath = args.find(a => !a.startsWith('--'));
 const exportIdx = args.indexOf('--export-edited');
 const exportPath = exportIdx >= 0 ? args[exportIdx + 1] : null;
-if (!backupPath) { console.error('usage: node tools/db-rehearsal-3b2.mjs <backup.json> [--export-edited <out.json>]'); process.exit(2); }
+const preIdx = args.indexOf('--export-pre');
+const exportPrePath = preIdx >= 0 ? args[preIdx + 1] : null;
+const flagValues = new Set([exportIdx, preIdx].filter(i => i >= 0).map(i => i + 1));
+const backupPath = args.find((a, i) => !a.startsWith('--') && !flagValues.has(i));
+if (!backupPath) { console.error('usage: node tools/db-rehearsal-3b2.mjs <backup.json> [--export-edited <out.json>] [--export-pre <out.json>]'); process.exit(2); }
 const backup = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
 if (![2, 3].includes(backup.formatVersion)) { console.error('needs a format 2 or 3 backup'); process.exit(2); }
 
@@ -152,6 +155,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) try {
   // defined in this session by the self-check script); restored after the
   // rollback, because both self-check scripts assume the bootstrap state.
   const preEdit = (await db.query(`select pg_temp.backup_v3() b`)).rows[0].b;
+  if (exportPrePath) { fs.writeFileSync(exportPrePath, JSON.stringify(preEdit, null, 2)); console.log(`  info pre-edit state written to ${exportPrePath}`); }
   const edit = async (s, p) => (await anon(s, p))[0];
   await edit(`select public.org_create_collection('c3b2e000-0000-4000-8000-000000000001', 'ZZ Favourites')`);
   const anyOtherShow = (await q(`select id from public.tv_shows where collection = 'othertv' order by id limit 1`))[0]?.id
@@ -159,17 +163,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) try {
   const aFilm = (await q(`select id from public.watchlist_items where is_film order by id limit 1`))[0].id;
   await edit(`select public.org_add_membership('c3b2e000-0000-4000-8000-000000000001', $1, null)`, [anyOtherShow]);
   await edit(`select public.org_add_membership('c3b2e000-0000-4000-8000-000000000001', null, $1)`, [aFilm]);
-  const sher = (await q(`select id from public.personal_collections where legacy_source = 'sheridan'`))[0].id;
-  await edit(`select public.org_rename_collection($1, 'Sheridan', 'ZZ Sheridan (renamed)')`, [sher]);
+  const sher = (await q(`select id, name from public.personal_collections where legacy_source = 'sheridan'`))[0];
+  await edit(`select public.org_rename_collection($1, $2, 'ZZ Sheridan (renamed)')`, [sher.id, sher.name]);
   const ninety = (await q(`select id from public.personal_collections where legacy_source = '90day'`))[0].id;
-  await edit(`select public.org_set_collection_archived($1, true)`, [ninety]);
+  await edit(`select public.org_set_collection_archived($1, true)`, [ninety]).catch(() => {}); // already archived in an edited input
   const disneyShowMember = (await q(`select m.id, m.show_id, m.collection_id from public.collection_memberships m
     join public.personal_collections c on c.id = m.collection_id where c.legacy_source = 'disney' and m.show_id is not null order by m.id limit 1`))[0];
   if (disneyShowMember) await edit(`select public.org_remove_membership($1, $2, $3, null)`, [disneyShowMember.id, disneyShowMember.collection_id, disneyShowMember.show_id]);
   await edit(`select public.org_create_choice('e3b2e000-0000-4000-8000-000000000001', 'ZZ Grandma')`);
   await anon(`update public.watchlist_items set watch_with = array['ww:e3b2e000-0000-4000-8000-000000000001'] where id = $1`, [aFilm]);
   const rina = (await q(`select id from public.watch_with_choices where token = 'Rina'`))[0];
-  if (rina) await edit(`select public.org_set_choice_archived($1, true)`, [rina.id]);
+  if (rina) await edit(`select public.org_set_choice_archived($1, true)`, [rina.id]).catch(() => {});
   const editedContent = (await q(CONTENT))[0].c;
   ok(editedContent !== contentBefore, 'edits applied');
   if (exportPath) {
