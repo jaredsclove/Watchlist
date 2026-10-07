@@ -572,7 +572,7 @@ test('hostile names render as text everywhere and never reach a handler (ids onl
   app.ctx.closeManage();
   app.ctx.openBrowseCollection(`browse:${created.id}`); await settle();
   assert.ok(!app.el('viewHead').innerHTML.includes('<script>x()'), 'escaped in the Browse heading');
-  assert.match(app.el('viewHead').innerHTML, new RegExp(`openManage\\('members', '${created.id}'\\)`));
+  assert.match(app.el('viewHead').innerHTML, new RegExp(`openManage\\('members', '${created.id}', this\\)`));
 });
 
 test('no tracking write and no write without a user action, across every dialog operation', async () => {

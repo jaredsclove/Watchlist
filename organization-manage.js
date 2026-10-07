@@ -74,12 +74,17 @@ async function checkOrgCapability() {
 }
 
 // ── Opening and closing ──
-function openManage(view, collectionId) {
+// opener: the control that opened the dialog (passed by its handler; a mouse click
+// doesn't always focus a button), else whatever had focus.
+function openManage(view, collectionId, openerEl) {
   if (manage) return;
   if (orgState === 'absent') return;
-  const opener = document.activeElement || null;
+  const opener = openerEl || document.activeElement || null;
+  // The control that opened the dialog may be redrawn meanwhile: remember how to find it again.
+  const openerSelector = opener && typeof opener.matches === 'function'
+    ? ['.browse-manage', '.browse-edit-members', '.ww-filter .btn-link'].find(sel => opener.matches(sel)) || null : null;
   manage = {
-    session: ++manageSession, epoch: orgEpoch, opener, view: view === 'choices' ? 'choices' : view === 'members' ? 'members' : 'collections',
+    session: ++manageSession, epoch: orgEpoch, opener, openerSelector, view: view === 'choices' ? 'choices' : view === 'members' ? 'members' : 'collections',
     collectionId: collectionId || null, phase: 'checking', error: '', data: null, readSeq: 0, refreshing: false, refreshFor: null,
     pending: {}, latestOp: {}, notes: {}, unconfirmed: {}, saved: {}, drafts: {}, undo: [], status: null, confirm: null,
     renaming: null, showArchived: false, wrote: false, reconcile: []
@@ -104,13 +109,15 @@ function manageHasPending() {
 
 function closeManage() {
   if (!manage || manageHasPending()) return;
-  const { opener, wrote } = manage;
+  const { opener, openerSelector, wrote } = manage;
   manage = null;
   document.getElementById('manageModalOverlay').style.display = 'none';
   document.getElementById('manageModalBox').innerHTML = '';
   buildBrowseBar();
   if (wrote && isBrowseCollectionView(activeViewId)) loadBrowseView();
-  if (opener && typeof opener.focus === 'function') opener.focus();
+  // Focus goes back to the control that opened the dialog (or its redrawn equivalent).
+  const back = opener && opener.isConnected ? opener : (openerSelector && document.querySelector(openerSelector)) || null;
+  if (back && typeof back.focus === 'function') back.focus();
 }
 
 // A restore made in this page (organization.js): everything the dialog holds is stale.

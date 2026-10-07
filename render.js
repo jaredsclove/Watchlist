@@ -382,7 +382,7 @@ function watchWithFilterControlHtml(selected) {
     : '';
   const stale = watchWithState === 'ready' && orgChoicesStale
     ? ` <span class="ww-stale">Choices may be out of date · <button class="btn" onclick="retryOrgRefresh()">Retry</button></span>` : '';
-  const manageLink = watchWithState === 'ready' ? ` <button class="btn btn-link" onclick="openManage('choices')">Manage choices…</button>` : '';
+  const manageLink = watchWithState === 'ready' ? ` <button class="btn btn-link" onclick="openManage('choices', null, this)">Manage choices…</button>` : '';
   return `<select id="fWatchWith" onchange="renderTable()" aria-label="Watch with">
         <option value="">Watch with: anyone</option>${opts}${archivedOpts}
       </select>${retry}${stale}${manageLink}`;
