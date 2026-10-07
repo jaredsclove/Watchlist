@@ -430,10 +430,14 @@ function renderMatchProposal(m) {
 
 // ─── After a match that couldn't be put into the page ─────────────────────────
 // The match is reported as saved; the refresh is reported separately: "Refreshed."
-// only once a fresh read (newer than anything shown) is accepted under the current
-// restore epoch. A failed read keeps the Match outcome and offers Retry, which only
-// reads. A read retired by a newer one (or by a restore) says nothing; a restore
-// while it runs starts the read again under the new epoch.
+// only once a fresh read is accepted. The row, the shows and the collections are
+// fetched without publishing anything; they are put into the page only if, when
+// they arrive, nothing newer has happened: the same restore epoch (else the read
+// starts again under the new one), no newer refresh, no newer read of that tab or
+// of the shows, no newer Match of the row, and the page's copy of the row
+// unchanged. Otherwise this refresh is retired: nothing is published and it never
+// says "Refreshed" (the Match outcome stays reported). A failed read keeps the
+// Match outcome and offers Retry, which only reads.
 function setMatchNotice(text, withRetry) {
   const el = document.getElementById('noticeBanner');
   if (!el) return;
@@ -447,14 +451,29 @@ function refreshAfterMatch(stamp, restored) {
   matchRefreshStamp = stamp;
   const outcome = `Matched “${stamp.title}”.${restored ? ' Your data was also restored while this match was in progress.' : ''}`;
   setMatchNotice(`${outcome} Refreshing to show what is saved now…`);
+  // What the page shows now; anything newer than this retires the refresh.
+  const tab0 = tabData[stamp.collection];
+  const rowSig = () => { const t = tabData[stamp.collection]; const r = t && t.rows ? t.rows.find(x => x.id === stamp.rowId) : null; return r ? JSON.stringify(r) : null; };
+  const row0 = rowSig();
+  const match0 = matchLatestByRow[stamp.rowId];
+  const showsSeq0 = tvShowsReadSeq, showsMap0 = tvShowsById;
+  const tv = isTvCollection(stamp.collection);
   const read = orgReadStart();
   return Promise.all([
     sbFetch('GET', `${TABLE}?id=eq.${stamp.rowId}&select=*`, null),
-    isTvCollection(stamp.collection) ? loadTvShows(stamp.collection) : Promise.resolve(),
+    tv ? sbFetch('GET', `tv_shows?collection=eq.${encodeURIComponent(stamp.collection)}&select=*`, null) : Promise.resolve(null),
     orgState === 'absent' ? Promise.resolve(null) : fetchAllRowsStrict('personal_collections')
-  ]).then(([rows, , colls]) => {
-    if (seq !== matchRefreshSeq) return; // superseded: no "Refreshed"
+  ]).then(([rows, shows, colls]) => {
+    if (seq !== matchRefreshSeq) return; // a newer refresh owns the notice
     if (epoch !== orgEpoch) { refreshAfterMatch(stamp, true); return; }
+    const newer = tabData[stamp.collection] !== tab0 || rowSig() !== row0 || matchLatestByRow[stamp.rowId] !== match0
+      || (tv && (tvShowsReadSeq !== showsSeq0 || tvShowsById !== showsMap0));
+    if (newer) { setMatchNotice(outcome); return; } // retired: nothing published, no "Refreshed"
+    if (tv) {
+      tvShowsReadSeq++;
+      for (const [id, s] of tvShowsById) if (s.collection === stamp.collection) tvShowsById.delete(id);
+      noteTvShows(shows || []);
+    }
     const td = tabData[stamp.collection];
     if (td && td.loaded) {
       const i = td.rows.findIndex(r => r.id === stamp.rowId);

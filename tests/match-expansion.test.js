@@ -293,4 +293,72 @@ test('the status-conflict answer keeps its message; an old-shape call is never s
   assert.ok(rpcCalls(app).every(c => c.body.p_expansion !== undefined));
 });
 
+// ── Refresh publication guards (review finding 1) ──
+const refreshStamp = (app, f) => ({ seq: 1, rowId: f.legacy.id, epoch: app.get('orgEpoch'), rowObj: null, collection: 'truecrime', title: 'Target Show' });
+// Answer a held request with what the database held before (the older read's view), then put the newer state back.
+const releaseWithOlder = async (app, g, table, older, p) => {
+  const now = app.store[table]; app.store[table] = older; g.release(); await p; await settle(); app.store[table] = now;
+};
+
+test('a refresh retired by a newer tab read never overwrites it and never says "Refreshed"', async () => {
+  const { app, f } = await boot();
+  const older = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  const held = app.hold(r => r.method === 'GET' && r.url.includes(`watchlist_items?id=eq.${f.legacy.id}`));
+  const p = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  await held.reached;
+  app.store.watchlist_items.find(r => r.id === f.legacy.id).title = 'Newer Read';
+  await app.run('loadTab("truecrime")'); await settle();
+  assert.strictEqual(app.get('tabData').truecrime.rows.find(r => r.id === f.legacy.id).title, 'Newer Read');
+  await releaseWithOlder(app, held, 'watchlist_items', older, p);
+  assert.strictEqual(app.get('tabData').truecrime.rows.find(r => r.id === f.legacy.id).title, 'Newer Read', 'not overwritten by the older refresh');
+  assert.ok(!/Refreshed\./.test(notice(app)), 'no "Refreshed" from a retired refresh');
+  assert.ok(!/Refreshing/.test(notice(app)), 'no lingering "Refreshing" either');
+  assert.match(notice(app), /Matched “Target Show”\./, 'the Match outcome stays reported');
+});
+
+test('a refresh retired by a newer Match of the row never overwrites the page row and never says "Refreshed"', async () => {
+  const { app, f } = await boot();
+  const held = app.hold(r => r.method === 'GET' && r.url.includes(`watchlist_items?id=eq.${f.legacy.id}`));
+  const p = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  await held.reached;
+  app.run(`matchLatestByRow['${f.legacy.id}'] = 99`);                 // a newer Match of this row …
+  app.get('tabData').truecrime.rows.find(r => r.id === f.legacy.id).title = 'After Newer Match'; // … applied to the page
+  held.release(); await p; await settle();
+  assert.strictEqual(app.get('tabData').truecrime.rows.find(r => r.id === f.legacy.id).title, 'After Newer Match');
+  assert.ok(!/Refreshed\./.test(notice(app)));
+});
+
+test('a delayed show response from a refresh never overwrites a newer show read (the shared show cache)', async () => {
+  const { app, f } = await boot();
+  const older = JSON.parse(JSON.stringify(app.store.tv_shows));
+  const held = app.hold(r => r.method === 'GET' && r.url.includes('tv_shows?collection=eq.truecrime'));
+  const p = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  await held.reached;
+  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'complete';
+  await app.run('loadTvShows("truecrime")'); await settle();
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
+  await releaseWithOlder(app, held, 'tv_shows', older, p);
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete', 'the older show response was not published');
+  assert.ok(!/Refreshed\./.test(notice(app)));
+});
+
+test('a show response from before a restore is never published (the restarted refresh publishes the new epoch’s data)', async () => {
+  const { app, f } = await boot();
+  const older = JSON.parse(JSON.stringify(app.store.tv_shows));
+  older.find(s => s.id === f.tvShow.id).status = 'watching';           // what the pre-restore read saw (distinct from the boot value)
+  const first = app.hold(r => r.method === 'GET' && r.url.includes('tv_shows?collection=eq.truecrime'));
+  const p = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
+  await first.reached;
+  app.run('orgEpoch++');                                               // a restore …
+  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'maybe';  // … with different show data
+  const second = app.hold(r => r.method === 'GET' && r.url.includes('tv_shows?collection=eq.truecrime'));
+  const now = app.store.tv_shows; app.store.tv_shows = older; first.release(); await p; await settle(); app.store.tv_shows = now;
+  await second.reached;
+  assert.notStrictEqual(app.get('tvShowsById').get(f.tvShow.id)?.status, 'watching', 'the pre-restore response was not published');
+  assert.ok(!/Refreshed\./.test(notice(app)));
+  second.release(); await settle(); await settle();
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'maybe');
+  assert.match(notice(app), /Refreshed\./);
+});
+
 T.run();

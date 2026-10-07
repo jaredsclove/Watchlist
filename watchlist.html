@@ -156,6 +156,7 @@ let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.j
 let matchLatestByRow = {}; // row id → the latest Match call's number for that row
 let matchRefreshSeq = 0; // the latest refresh after a Match whose result couldn't be put into the page
 let matchRefreshStamp = null; // what that refresh is for (Retry reads it again)
+let tvShowsReadSeq = 0; // bumped when a read of the shows starts (tv-shows.js), so an older Match refresh never publishes over a newer one
 
 
 
