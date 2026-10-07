@@ -1100,3 +1100,22 @@ test('round 5 (coverage): a pending edit stays protected however many reads happ
   assert.strictEqual(pageRow(app, f.legacy.id).watched, !was);
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
 });
+
+// Found in the real-Chrome browser validation: the refresh completing while a cross-collection view is shown.
+test('browser validation: a refresh that completes while All TV is shown redraws it (the matched row’s new show is listed, no stale "isn’t linked" note)', async () => {
+  const { app, f } = await boot();
+  const ownShows = app.hold(showsGet);
+  const x = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const rpc = app.hold(showRpc);
+  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');          // a show-status edit is pending
+  assert.ok(await within(rpc.reached));
+  x.g.release(); assert.ok(await within(ownShows.reached));              // the Match creates a new show; the refresh's show read is held
+  app.ctx.switchView('alltv'); await settle(); await settle();           // All TV: its show read keeps True Crime's list (edit pending)
+  assert.match(app.el('tbody').innerHTML, /linked to a loaded show/, 'before: the new show isn’t loaded yet');
+  ownShows.release(); await within(x.p); await settle();
+  rpc.release(); await within(ep); await settle(); await settle();        // the edit settles; a current show read completes the refresh
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+  const matched = app.store.watchlist_items.find(r => r.id === f.legacy.id);
+  assert.ok(app.get('tvShowsById').has(matched.show_id), 'cached: the new show');
+  assert.doesNotMatch(app.el('tbody').innerHTML, /linked to a loaded show/, 'displayed: All TV was redrawn from the current data');
+});

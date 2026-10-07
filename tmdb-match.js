@@ -690,7 +690,9 @@ function matchRefreshEvaluate(progress) {
   progress.state = failed ? 'failed' : units.every(u => u.state === 'ok') ? 'done' : 'pending';
   progress.error = failed ? failed.error : null;
   matchRefreshNotice(progress);
-  if (progress.state === 'done' && before !== 'done' && units.some(u => u.collection === activeTabId)) { renderFilters(); renderTable(); }
+  // The refreshed data is shown now: its collection's tab, or a view drawn across collections (All TV,
+  // Currently Watching, Coming Soon, Browse), which draws from the same row and show caches.
+  if (progress.state === 'done' && before !== 'done' && (units.some(u => u.collection === activeTabId) || activeViewId)) { renderFilters(); renderTable(); }
   if (rereads.length) matchRefreshRead(rereads);
 }
 
