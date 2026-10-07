@@ -39,16 +39,30 @@ function noteTvShows(shows) {
 // Replaces one collection's shows (after its rows were read or seeded).
 async function loadTvShows(collectionId) {
   tvShowsReadSeq++; // a show read started: an older refresh after a Match won't publish over it (tmdb-match.js)
-  const shows = await sbFetch('GET', `tv_shows?collection=eq.${encodeURIComponent(collectionId)}&select=*`, null);
-  for (const [id, s] of tvShowsById) if (s.collection === collectionId) tvShowsById.delete(id);
-  noteTvShows(shows);
+  const read = typeof matchShowReadStarted === 'function' ? matchShowReadStarted(collectionId) : null;
+  try {
+    const shows = await sbFetch('GET', `tv_shows?collection=eq.${encodeURIComponent(collectionId)}&select=*`, null);
+    for (const [id, s] of tvShowsById) if (s.collection === collectionId) tvShowsById.delete(id);
+    noteTvShows(shows);
+    if (read) matchShowReadSettled(read, null);
+  } catch (e) {
+    if (read) matchShowReadSettled(read, e);
+    throw e;
+  }
 }
 
 // Every show, paginated and exact-count checked (the derived views).
 async function loadAllTvShows() {
   tvShowsReadSeq++;
-  const shows = await fetchAllRows('tv_shows');
-  tvShowsById = new Map(shows.map(s => [s.id, s]));
+  const read = typeof matchShowReadStarted === 'function' ? matchShowReadStarted('*') : null;
+  try {
+    const shows = await fetchAllRows('tv_shows');
+    tvShowsById = new Map(shows.map(s => [s.id, s]));
+    if (read) matchShowReadSettled(read, null);
+  } catch (e) {
+    if (read) matchShowReadSettled(read, e);
+    throw e;
+  }
 }
 
 // ─── Up next and Up to date (the approved rules; tests/tv-model-reference.js) ─

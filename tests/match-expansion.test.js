@@ -300,7 +300,7 @@ const releaseWithOlder = async (app, g, table, older, p) => {
   const now = app.store[table]; app.store[table] = older; g.release(); await p; await settle(); app.store[table] = now;
 };
 
-test('a refresh retired by a newer tab read never overwrites it and never says "Refreshed"', async () => {
+test('a newer tab read that completed first is the accepted replacement: the older refresh never overwrites it; "Refreshed." comes from that read', async () => {
   const { app, f } = await boot();
   const older = JSON.parse(JSON.stringify(app.store.watchlist_items));
   const held = app.hold(r => r.method === 'GET' && r.url.includes(`watchlist_items?id=eq.${f.legacy.id}`));
@@ -311,12 +311,10 @@ test('a refresh retired by a newer tab read never overwrites it and never says "
   assert.strictEqual(app.get('tabData').truecrime.rows.find(r => r.id === f.legacy.id).title, 'Newer Read');
   await releaseWithOlder(app, held, 'watchlist_items', older, p);
   assert.strictEqual(app.get('tabData').truecrime.rows.find(r => r.id === f.legacy.id).title, 'Newer Read', 'not overwritten by the older refresh');
-  assert.ok(!/Refreshed\./.test(notice(app)), 'no "Refreshed" from a retired refresh');
-  assert.ok(!/Refreshing/.test(notice(app)), 'no lingering "Refreshing" either');
-  assert.match(notice(app), /Matched “Target Show”\./, 'the Match outcome stays reported');
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./, 'the replacement read (tab and its show read) was accepted; the outcome stays reported');
 });
 
-test('a refresh retired by a newer Match of the row never overwrites the page row and never says "Refreshed"', async () => {
+test('(guard) after a newer Match changed the page row, the older refresh never overwrites it; the page row is the accepted current state', async () => {
   const { app, f } = await boot();
   const held = app.hold(r => r.method === 'GET' && r.url.includes(`watchlist_items?id=eq.${f.legacy.id}`));
   const p = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
@@ -325,10 +323,10 @@ test('a refresh retired by a newer Match of the row never overwrites the page ro
   app.get('tabData').truecrime.rows.find(r => r.id === f.legacy.id).title = 'After Newer Match'; // … applied to the page
   held.release(); await p; await settle();
   assert.strictEqual(app.get('tabData').truecrime.rows.find(r => r.id === f.legacy.id).title, 'After Newer Match');
-  assert.ok(!/Refreshed\./.test(notice(app)));
+  assert.ok(!/couldn’t be refreshed/.test(notice(app)));
 });
 
-test('a delayed show response from a refresh never overwrites a newer show read (the shared show cache)', async () => {
+test('a delayed show response from a refresh never overwrites a newer show read that completed (the shared show cache); that read is accepted', async () => {
   const { app, f } = await boot();
   const older = JSON.parse(JSON.stringify(app.store.tv_shows));
   const held = app.hold(r => r.method === 'GET' && r.url.includes('tv_shows?collection=eq.truecrime'));
@@ -339,7 +337,7 @@ test('a delayed show response from a refresh never overwrites a newer show read 
   assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
   await releaseWithOlder(app, held, 'tv_shows', older, p);
   assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete', 'the older show response was not published');
-  assert.ok(!/Refreshed\./.test(notice(app)));
+  assert.match(notice(app), /Refreshed\./, 'the newer show read was accepted');
 });
 
 test('a show response from before a restore is never published (the restarted refresh publishes the new epoch’s data)', async () => {
@@ -359,6 +357,116 @@ test('a show response from before a restore is never published (the restarted re
   second.release(); await settle(); await settle();
   assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'maybe');
   assert.match(notice(app), /Refreshed\./);
+});
+
+// ── Refresh progress ownership (review round 2) ──
+// A Match that the database applies while a newer read replaced the page's rows, so its result isn't
+// current and it refreshes (the real confirm path). Returns the held match call.
+async function matchNotCurrent(app, rowId, tmdb, name) {
+  app.ctx.__tmdbMatch = { rowId, results: [], target: { mediaType: 'tv', seasonNumber: 1,
+    details: { id: tmdb, name, networks: [{ name: 'Net' }], seasons: [{ season_number: 1, air_date: '2020-01-01' }] } } };
+  const g = app.hold(r => r.url.includes('/rpc/match_tv_row'));
+  const p = app.ctx.confirmTmdbMatch();
+  await g.reached;
+  app.get('tabData').truecrime.rows = app.get('tabData').truecrime.rows.map(r => ({ ...r })); // a newer read replaced the rows
+  return { g, p };
+}
+const rowGet = id => r => r.method === 'GET' && r.url.includes(`watchlist_items?id=eq.${id}`);
+const showsGet = r => r.method === 'GET' && r.url.includes('tv_shows?collection=eq.truecrime');
+
+test('a replacement show read still pending keeps "Refreshing…"; when it succeeds, "Refreshed."', async () => {
+  const { app, f } = await boot();
+  const { g, p } = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const own = app.hold(rowGet(f.legacy.id));
+  g.release(); await own.reached;
+  const replacement = app.hold(showsGet);
+  const rp = app.run('loadTvShows("truecrime")');                       // an ordinary show read starts
+  await replacement.reached;
+  own.release(); await p; await settle();
+  assert.match(notice(app), /Matched “Target Show”\. Refreshing to show what is saved now…/, 'still pending: the replacement owns the shows part');
+  assert.ok(!/Refreshed|couldn’t/.test(notice(app)));
+  replacement.release(); await rp; await settle();
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('a replacement show read that fails leaves the Match outcome, the warning and a read-only Retry', async () => {
+  const { app, f } = await boot();
+  const { g, p } = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const own = app.hold(rowGet(f.legacy.id));
+  g.release(); await own.reached;
+  const replacement = app.hold(showsGet);
+  const rp = app.run('loadTvShows("truecrime")').catch(() => {});
+  await replacement.reached;
+  own.release(); await p; await settle();
+  assert.match(notice(app), /Refreshing/);
+  replacement.fail(); await rp; await settle();
+  assert.match(notice(app), /Matched “Target Show”, but the current data couldn’t be refreshed/);
+  assert.match(notice(app), /retryMatchRefresh\(\)">Retry/);
+  const before = app.requests.length;
+  app.ctx.retryMatchRefresh(); await settle();
+  const sent = app.requests.slice(before);
+  assert.ok(sent.length && sent.every(r => r.method === 'GET' && !r.url.includes('/rpc/')), 'Retry only reads');
+  assert.match(notice(app), /Refreshed\./);
+});
+
+test('an older refresh that fails after a newer ordinary read succeeded doesn’t announce a failure; the newer read is accepted', async () => {
+  const { app, f } = await boot();
+  const { g, p } = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const own = app.hold(rowGet(f.legacy.id));
+  g.release(); await own.reached;
+  await app.run('loadTab("truecrime")'); await settle();               // a newer ordinary read succeeds (rows and shows)
+  own.fail(); await p; await settle();                                   // then the older refresh's read fails
+  assert.ok(!/couldn’t be refreshed/.test(notice(app)), 'no failure for data that a newer read already refreshed');
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('a newer Match (another row) supersedes the refresh; its refresh succeeds; both outcomes stay; the older result changes nothing', async () => {
+  const { app, f } = await boot();
+  const other = { ...f.legacy, id: 'f0000000-0000-4000-8000-000000000099', item_key: 'other show|film', title: 'Other Show' };
+  app.store.watchlist_items.push({ ...other }); app.get('tabData').truecrime.rows.push({ ...other });
+  const x = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const ownX = app.hold(rowGet(f.legacy.id));
+  x.g.release(); await ownX.reached;
+  const y = await matchNotCurrent(app, other.id, 6000, 'Other Show');
+  y.g.release(); await y.p; await settle();
+  assert.match(notice(app), /Matched “Target Show”\. Matched “Other Show”\. Refreshed\./);
+  ownX.release(); await x.p; await settle();
+  assert.match(notice(app), /Matched “Target Show”\. Matched “Other Show”\. Refreshed\./, 'the superseded refresh changed nothing');
+});
+
+test('a newer Match supersedes the refresh and its refresh fails: both outcomes, the warning and Retry; the older result changes nothing', async () => {
+  const { app, f } = await boot();
+  const other = { ...f.legacy, id: 'f0000000-0000-4000-8000-000000000098', item_key: 'other show|film', title: 'Other Show' };
+  app.store.watchlist_items.push({ ...other }); app.get('tabData').truecrime.rows.push({ ...other });
+  const x = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const ownX = app.hold(rowGet(f.legacy.id));
+  x.g.release(); await ownX.reached;
+  const y = await matchNotCurrent(app, other.id, 6000, 'Other Show');
+  app.failNext(rowGet(other.id));
+  y.g.release(); await y.p; await settle();
+  assert.match(notice(app), /Matched “Target Show” and “Other Show”, but the current data couldn’t be refreshed/);
+  assert.match(notice(app), /Retry/);
+  ownX.release(); await x.p; await settle();
+  assert.match(notice(app), /Matched “Target Show” and “Other Show”, but the current data couldn’t be refreshed/, 'unchanged by the older result');
+});
+
+test('a newer Match of the same row in progress owns the row part; when it ends without changing the row, the page reads again (Match not re-sent) and "Refreshed."', async () => {
+  const { app, f } = await boot();
+  const x = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const own = app.hold(rowGet(f.legacy.id));
+  x.g.release(); await own.reached;
+  // The page still shows the row unmatched: the user matches it again.
+  app.ctx.__tmdbMatch = { rowId: f.legacy.id, results: [], target: { mediaType: 'tv', seasonNumber: 1,
+    details: { id: 5000, name: 'Target Show', networks: [], seasons: [{ season_number: 1, air_date: '2020-01-01' }] } } };
+  const g2 = app.hold(r => r.url.includes('/rpc/match_tv_row'));
+  const p2 = app.ctx.confirmTmdbMatch();
+  await g2.reached;
+  own.release(); await x.p; await settle();
+  assert.match(notice(app), /Refreshing to show what is saved now…/, 'the newer Match owns the row part');
+  g2.release(); await p2; await settle(); await settle();               // it ends without changing the row (already matched)
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+  assert.strictEqual(app.requests.filter(r => r.url.includes('/rpc/match_tv_row')).length, 2, 'only the user’s two match calls');
+  assert.strictEqual(app.get('tabData').truecrime.rows.find(r => r.id === f.legacy.id).tmdb_id, 5000, 'the fresh read shows the match');
 });
 
 T.run();

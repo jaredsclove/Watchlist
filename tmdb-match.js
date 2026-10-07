@@ -239,6 +239,7 @@ async function confirmTmdbMatch(withConfirmation) {
   // Each call's stamp: a delayed answer is checked against what the page shows now.
   const stamp = { seq: ++matchRequestSeq, rowId: row.id, epoch: orgEpoch, rowObj: row, collection: row.collection, title: patch.title };
   matchLatestByRow[row.id] = stamp.seq;
+  matchLatestStamp[row.id] = stamp; // settled (and applied, if it changed the row) when this call ends
   m.inFlight = stamp.seq;
   if (m.proposal) renderMatchProposal(m);
   const viaShowFunction = patch.media_type === 'tv' && isTvCollection(row.collection);
@@ -319,6 +320,7 @@ async function confirmTmdbMatch(withConfirmation) {
     // under the current guards, shows what is saved now.
     const stillCurrent = stamp.epoch === orgEpoch && matchLatestByRow[row.id] === stamp.seq
       && (tabData[stamp.collection]?.rows || []).includes(stamp.rowObj);
+    stamp.applied = true; // the database applied it (shown below, or through a refresh)
     if (!stillCurrent) {
       if (window.__tmdbMatch === m) { window.__tmdbMatch = null; cancelTMDBPreview(); }
       refreshAfterMatch(stamp, stamp.epoch !== orgEpoch);
@@ -369,6 +371,9 @@ async function confirmTmdbMatch(withConfirmation) {
       m.inFlight = 0;
       if (window.__tmdbMatch === m && m.proposal) renderMatchProposal(m);
     }
+    // A refresh waiting on this Match of the row can now finish (or read again).
+    stamp.settled = true;
+    matchRefreshReevaluate();
   }
 
   // row.collection is where the row lives; the user may have switched tabs or
@@ -429,15 +434,23 @@ function renderMatchProposal(m) {
 }
 
 // ─── After a match that couldn't be put into the page ─────────────────────────
-// The match is reported as saved; the refresh is reported separately: "Refreshed."
-// only once a fresh read is accepted. The row, the shows and the collections are
-// fetched without publishing anything; they are put into the page only if, when
-// they arrive, nothing newer has happened: the same restore epoch (else the read
-// starts again under the new one), no newer refresh, no newer read of that tab or
-// of the shows, no newer Match of the row, and the page's copy of the row
-// unchanged. Otherwise this refresh is retired: nothing is published and it never
-// says "Refreshed" (the Match outcome stays reported). A failed read keeps the
-// Match outcome and offers Retry, which only reads.
+// The confirmed Match outcome stays reported; refresh progress is reported apart
+// from it. A refresh fetches the row, the shows and the collections without
+// publishing anything, then decides each part (row, shows) when its result
+// arrives, the same way for a success and a failure:
+//   * nothing newer happened → its own result decides: published and accepted,
+//     or failed;
+//   * a newer read of that part already completed (the tab was read again, the
+//     page's row changed, the shows were read again) → that read is current: the
+//     part is accepted and nothing older is published;
+//   * a newer read of that part is still in progress (a show read, or a Match of
+//     the row) → that read owns the part: the notice stays "Refreshing…" until it
+//     is accepted or fails (then the failure, with Retry). A Match of the row that
+//     ends without changing it hands the part back to a fresh read (read-only).
+// "Refreshed." only when every part is accepted; a failure keeps the Match outcome
+// and offers Retry, which only reads. A newer refresh takes over the notice and
+// keeps the earlier outcomes; a restore (epoch change) starts the read again under
+// the new epoch. Retired results publish nothing and never change the notice.
 function setMatchNotice(text, withRetry) {
   const el = document.getElementById('noticeBanner');
   if (!el) return;
@@ -445,53 +458,117 @@ function setMatchNotice(text, withRetry) {
     ? ' <button class="btn" onclick="retryMatchRefresh()">Retry</button>' : ''}</div>` : '';
 }
 
+function matchRefreshNotice(progress) {
+  const outcomes = progress.titles.map(t => `Matched “${t}”.`).join(' ');
+  const restored = progress.restored ? ' Your data was also restored while this match was in progress.' : '';
+  if (progress.state === 'failed') {
+    const who = progress.titles.map(t => `“${t}”`).join(' and ');
+    setMatchNotice(`Matched ${who}, but the current data couldn’t be refreshed (${progress.error}).`, true);
+  } else if (progress.state === 'done') setMatchNotice(`${outcomes}${restored} Refreshed.`);
+  else setMatchNotice(`${outcomes}${restored} Refreshing to show what is saved now…`);
+}
+
+// Show reads (tv-shows.js) report when they start and end, so a newer one can own a part.
+function matchShowReadStarted(collectionId) {
+  const read = { id: ++matchShowReadSeq, collection: collectionId, state: 'pending', error: null };
+  matchShowReads.push(read);
+  if (matchShowReads.length > 50) matchShowReads = matchShowReads.slice(-50);
+  return read;
+}
+
+function matchShowReadSettled(read, error) {
+  read.state = error ? 'failed' : 'ok';
+  read.error = error ? String(error.message || error) : null;
+  matchRefreshReevaluate();
+}
+
 function refreshAfterMatch(stamp, restored) {
-  const seq = ++matchRefreshSeq;
-  const epoch = orgEpoch;
+  const prev = matchRefreshProgress;
+  const carry = prev && prev.state !== 'done' && prev.state !== 'failed' ? prev : null;
+  const titles = [...new Set([...(carry ? carry.titles : []), stamp.title])];
+  const progress = { seq: ++matchRefreshSeq, stamp, epoch: orgEpoch, titles, restored: !!restored || !!(carry && carry.restored),
+    state: 'pending', error: null, parts: {} };
+  matchRefreshProgress = progress;
   matchRefreshStamp = stamp;
-  const outcome = `Matched “${stamp.title}”.${restored ? ' Your data was also restored while this match was in progress.' : ''}`;
-  setMatchNotice(`${outcome} Refreshing to show what is saved now…`);
-  // What the page shows now; anything newer than this retires the refresh.
+  matchRefreshNotice(progress);
+  // What the page shows now; a newer read or change of a part decides that part.
   const tab0 = tabData[stamp.collection];
   const rowSig = () => { const t = tabData[stamp.collection]; const r = t && t.rows ? t.rows.find(x => x.id === stamp.rowId) : null; return r ? JSON.stringify(r) : null; };
   const row0 = rowSig();
-  const match0 = matchLatestByRow[stamp.rowId];
-  const showsSeq0 = tvShowsReadSeq, showsMap0 = tvShowsById;
+  const match0 = matchLatestStamp[stamp.rowId] || null;
+  const showsMap0 = tvShowsById, showRead0 = matchShowReadSeq;
   const tv = isTvCollection(stamp.collection);
   const read = orgReadStart();
-  return Promise.all([
+  return Promise.allSettled([
     sbFetch('GET', `${TABLE}?id=eq.${stamp.rowId}&select=*`, null),
     tv ? sbFetch('GET', `tv_shows?collection=eq.${encodeURIComponent(stamp.collection)}&select=*`, null) : Promise.resolve(null),
     orgState === 'absent' ? Promise.resolve(null) : fetchAllRowsStrict('personal_collections')
-  ]).then(([rows, shows, colls]) => {
-    if (seq !== matchRefreshSeq) return; // a newer refresh owns the notice
-    if (epoch !== orgEpoch) { refreshAfterMatch(stamp, true); return; }
-    const newer = tabData[stamp.collection] !== tab0 || rowSig() !== row0 || matchLatestByRow[stamp.rowId] !== match0
-      || (tv && (tvShowsReadSeq !== showsSeq0 || tvShowsById !== showsMap0));
-    if (newer) { setMatchNotice(outcome); return; } // retired: nothing published, no "Refreshed"
+  ]).then(([rowRes, showsRes, collsRes]) => {
+    if (progress !== matchRefreshProgress) return; // a newer refresh owns the notice
+    if (progress.epoch !== orgEpoch) { refreshAfterMatch(stamp, true); return; }
+    const err = r => String((r.reason && r.reason.message) || r.reason);
+    // Collections aren't part of the match: published, or marked possibly out of date.
+    if (collsRes.status === 'fulfilled') { if (collsRes.value && publishCollections(collsRes.value, read)) buildBrowseBar(); }
+    else if (orgState !== 'absent') markOrgStale('collections', read);
+    // The row.
+    const newerMatch = matchLatestStamp[stamp.rowId] && matchLatestStamp[stamp.rowId] !== match0 ? matchLatestStamp[stamp.rowId] : null;
+    if (tabData[stamp.collection] !== tab0 || rowSig() !== row0) progress.parts.row = { state: 'ok' };
+    else if (newerMatch && !newerMatch.settled) progress.parts.row = { state: 'pending', match: newerMatch };
+    else if (rowRes.status === 'fulfilled') {
+      const td = tabData[stamp.collection];
+      if (td && td.loaded) {
+        const i = td.rows.findIndex(r => r.id === stamp.rowId);
+        const now = (rowRes.value || [])[0];
+        if (now && i >= 0) td.rows[i] = now;
+        else if (now) td.rows.push(now);
+        else if (i >= 0) td.rows.splice(i, 1);
+        td.rows.sort((a, b) => String(a.date_sort).localeCompare(String(b.date_sort)));
+      }
+      progress.parts.row = { state: 'ok', published: true };
+    } else progress.parts.row = { state: 'failed', error: err(rowRes) };
+    // The shows.
     if (tv) {
-      tvShowsReadSeq++;
-      for (const [id, s] of tvShowsById) if (s.collection === stamp.collection) tvShowsById.delete(id);
-      noteTvShows(shows || []);
+      const newerReads = matchShowReads.filter(x => x.id > showRead0 && (x.collection === stamp.collection || x.collection === '*'));
+      if (tvShowsById !== showsMap0) progress.parts.shows = { state: 'ok' };
+      else if (newerReads.length) progress.parts.shows = { state: 'pending', reads: newerReads };
+      else if (showsRes.status === 'fulfilled') {
+        tvShowsReadSeq++;
+        for (const [id, sh] of tvShowsById) if (sh.collection === stamp.collection) tvShowsById.delete(id);
+        noteTvShows(showsRes.value || []);
+        progress.parts.shows = { state: 'ok', published: true };
+      } else progress.parts.shows = { state: 'failed', error: err(showsRes) };
     }
-    const td = tabData[stamp.collection];
-    if (td && td.loaded) {
-      const i = td.rows.findIndex(r => r.id === stamp.rowId);
-      const now = (rows || [])[0];
-      if (now && i >= 0) td.rows[i] = now;
-      else if (now) td.rows.push(now);
-      else if (i >= 0) td.rows.splice(i, 1);
-      td.rows.sort((a, b) => String(a.date_sort).localeCompare(String(b.date_sort)));
-    }
-    if (colls && publishCollections(colls, read)) buildBrowseBar();
-    setMatchNotice(`${outcome} Refreshed.`);
-    if (activeTabId === stamp.collection) { renderFilters(); renderTable(); }
-  }, e => {
-    if (seq !== matchRefreshSeq) return;
-    if (epoch !== orgEpoch) { refreshAfterMatch(stamp, true); return; }
-    if (orgState !== 'absent') markOrgStale('collections', read);
-    setMatchNotice(`Matched “${stamp.title}”, but the current data couldn’t be refreshed (${String(e && e.message || e)}).`, true);
+    matchRefreshEvaluate(progress);
   });
+}
+
+// A part owned by a newer read finishes when that read does.
+function matchRefreshReevaluate() {
+  if (matchRefreshProgress) matchRefreshEvaluate(matchRefreshProgress);
+}
+
+function matchRefreshEvaluate(progress) {
+  if (progress !== matchRefreshProgress || progress.state !== 'pending' || !progress.parts.row) return;
+  for (const part of Object.values(progress.parts)) {
+    if (part.state !== 'pending') continue;
+    if (part.reads) {
+      if (part.reads.some(x => x.state === 'pending')) continue;
+      // The newest replacement decides.
+      const last = part.reads[part.reads.length - 1];
+      if (last.state === 'failed') { part.state = 'failed'; part.error = last.error; }
+      else part.state = 'ok';
+    } else if (part.match && part.match.settled) {
+      if (part.match.applied) part.state = 'ok';
+      // That Match ended without changing the row: read again (read only).
+      else { refreshAfterMatch(progress.stamp, progress.restored); return; }
+    }
+  }
+  const parts = Object.values(progress.parts);
+  const failed = parts.find(p => p.state === 'failed');
+  if (failed) { progress.state = 'failed'; progress.error = failed.error; }
+  else if (parts.every(p => p.state === 'ok')) progress.state = 'done';
+  matchRefreshNotice(progress);
+  if (progress.state === 'done' && activeTabId === progress.stamp.collection) { renderFilters(); renderTable(); }
 }
 
 function retryMatchRefresh() {
