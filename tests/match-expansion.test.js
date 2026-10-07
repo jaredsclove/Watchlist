@@ -299,6 +299,8 @@ const refreshStamp = (app, f) => ({ seq: 1, rowId: f.legacy.id, epoch: app.get('
 const releaseWithOlder = async (app, g, table, older, p) => {
   const now = app.store[table]; app.store[table] = older; g.release(); await p; await settle(); app.store[table] = now;
 };
+// Only the held request sees the older rows; any read that follows it sees the database as it is.
+const releaseHeldOlder = async (app, g, table, older, p) => { g.releaseWith({ [table]: older }); await p; await settle(); };
 
 test('a newer tab read that completed first is the accepted replacement: the older refresh never overwrites it; "Refreshed." comes from that read', async () => {
   const { app, f } = await boot();
@@ -650,6 +652,127 @@ test('round 3: an older derived-view show read that finishes after a newer show 
   assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
   const now = app.store.tv_shows; app.store.tv_shows = older; allShows.release(); await settle(); await settle(); app.store.tv_shows = now;
   assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete', 'the older full read did not replace it');
+});
+
+// ── Publication of presence/absence, local edits and retired failures (review round 4) ──
+const tabHtml = app => app.el('tbody').innerHTML + app.el('cardList').innerHTML;
+
+test('round 4: an older tab response after a newer row read established a deletion doesn’t bring the row back', async () => {
+  const { app, f } = await boot();
+  const older = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  const tabRead = app.hold(tabGet);
+  const tp = app.run('loadTab("truecrime")');
+  assert.ok(await within(tabRead.reached));
+  app.store.watchlist_items = app.store.watchlist_items.filter(r => r.id !== f.legacy.id);   // deleted elsewhere
+  await within(app.ctx.refreshAfterMatch(refreshStamp(app, f), false)); await settle();     // a newer row read finds it gone
+  assert.ok(!pageRow(app, f.legacy.id), 'the row read removed it');
+  await releaseWithOlder(app, tabRead, 'watchlist_items', older, tp);                        // the older tab response still has it
+  assert.ok(!pageRow(app, f.legacy.id), 'not brought back into the cache');
+  assert.ok(!tabHtml(app).includes(f.legacy.id), 'not displayed');
+});
+
+test('round 4: an older tab response after a newer row read established an additional row doesn’t drop it', async () => {
+  const { app, f } = await boot();
+  const older = JSON.parse(JSON.stringify(app.store.watchlist_items)).filter(r => r.id !== f.legacy.id);
+  const tabRead = app.hold(tabGet);
+  const tp = app.run('loadTab("truecrime")');
+  assert.ok(await within(tabRead.reached));
+  await within(app.ctx.refreshAfterMatch(refreshStamp(app, f), false)); await settle();     // a newer row read publishes it
+  assert.ok(pageRow(app, f.legacy.id));
+  await releaseWithOlder(app, tabRead, 'watchlist_items', older, tp);                        // the older tab response lacks it
+  assert.ok(pageRow(app, f.legacy.id), 'kept in the cache');
+  assert.ok(tabHtml(app).includes(f.legacy.id), 'still displayed');
+});
+
+test('round 4: a delayed refresh after a real, successfully saved watched edit keeps the saved value; a current read then completes the refresh', async () => {
+  const { app, f } = await boot();
+  const x = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const own = app.hold(rowGet(f.legacy.id));
+  x.g.release(); assert.ok(await within(own.reached));
+  const older = JSON.parse(JSON.stringify(app.store.watchlist_items));                       // what the delayed read saw (unwatched)
+  const wasWatched = pageRow(app, f.legacy.id).watched;
+  await app.ctx.toggleWatch(f.legacy.id); await settle();                                    // a real edit, saved
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === f.legacy.id).watched, !wasWatched);
+  await releaseHeldOlder(app, own, 'watchlist_items', older, x.p); await settle();
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !wasWatched, 'the saved value stays displayed');
+  assert.strictEqual(pageRow(app, f.legacy.id).tmdb_id, 5000, 'a current read showed the match');
+  assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
+});
+
+test('round 4: a delayed refresh during a pending edit keeps the optimistic value; "Refreshed." only after a read made once the edit is saved', async () => {
+  const { app, f } = await boot();
+  const x = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const own = app.hold(rowGet(f.legacy.id));
+  x.g.release(); assert.ok(await within(own.reached));
+  const wasWatched = pageRow(app, f.legacy.id).watched;
+  const older = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  const patch = app.hold(r => r.method === 'PATCH' && r.url.includes(`id=eq.${f.legacy.id}`));
+  const ep = app.ctx.toggleWatch(f.legacy.id);
+  assert.ok(await within(patch.reached));
+  await releaseWithOlder(app, own, 'watchlist_items', older, x.p); await settle();
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !wasWatched, 'the optimistic value is kept while the edit is pending');
+  assert.ok(!/Refreshed\./.test(notice(app)), 'no "Refreshed" from a response the edit made stale');
+  patch.release(); await within(ep); await settle(); await settle();
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, !wasWatched);
+  assert.strictEqual(pageRow(app, f.legacy.id).tmdb_id, 5000);
+  assert.match(notice(app), /Refreshed\./);
+});
+
+test('round 4: a failed edit with a delayed refresh — the edit’s error stays, the value is reverted, a current read completes the refresh', async () => {
+  const { app, f } = await boot();
+  const x = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
+  const own = app.hold(rowGet(f.legacy.id));
+  x.g.release(); assert.ok(await within(own.reached));
+  const wasWatched = pageRow(app, f.legacy.id).watched;
+  const older = JSON.parse(JSON.stringify(app.store.watchlist_items));
+  const patch = app.hold(r => r.method === 'PATCH' && r.url.includes(`id=eq.${f.legacy.id}`));
+  const ep = app.ctx.toggleWatch(f.legacy.id);
+  assert.ok(await within(patch.reached));
+  await releaseWithOlder(app, own, 'watchlist_items', older, x.p); await settle();
+  assert.ok(!/Refreshed\./.test(notice(app)));
+  patch.fail(); await within(ep); await settle(); await settle();
+  assert.strictEqual(pageRow(app, f.legacy.id).watched, wasWatched, 'reverted (the edit failed)');
+  assert.match(app.el('errorBanner').innerHTML, /simulated failure/, 'the edit’s failure is not masked');
+  assert.strictEqual(pageRow(app, f.legacy.id).tmdb_id, 5000, 'a current read shows the match');
+  assert.match(notice(app), /Refreshed\./);
+});
+
+test('round 4: an older tab load that fails after a newer covering read succeeded leaves the current content and no error', async () => {
+  const { app, f } = await boot();
+  const a = app.hold(tabGet);
+  const ap = app.run('loadTab("truecrime")');
+  assert.ok(await within(a.reached));
+  await app.run('loadTab("truecrime")'); await settle();                                   // a newer tab read succeeds
+  const shown = tabHtml(app);
+  assert.ok(shown.includes(f.legacy.id));
+  app.ctx.showError('');
+  a.fail(); await within(ap); await settle();                                              // the older one fails
+  assert.ok(!/Failed to load/.test(tabHtml(app)), 'current content not replaced');
+  assert.ok(tabHtml(app).includes(f.legacy.id));
+  assert.strictEqual(app.el('errorBanner').innerHTML, '', 'no obsolete error');
+});
+
+test('round 4: a pre-restore tab load that fails after the restored data was loaded shows no obsolete error', async () => {
+  const { app, f } = await boot();
+  const a = app.hold(tabGet);
+  const ap = app.run('loadTab("truecrime")');
+  assert.ok(await within(a.reached));
+  app.run('invalidateOrganization()');                                                     // a restore …
+  app.ctx.finishRestoreAndReload(); await settle(); await settle();                        // … and its reload
+  assert.ok(tabHtml(app).includes(f.legacy.id), 'the restored data is shown');
+  app.ctx.showError('');
+  a.fail(); await within(ap); await settle();
+  assert.ok(!/Failed to load/.test(tabHtml(app)), 'no obsolete failure replaces it');
+  assert.ok(tabHtml(app).includes(f.legacy.id));
+  assert.strictEqual(app.el('errorBanner').innerHTML, '');
+});
+
+test('round 4 (control): a current tab load failure still shows the error and the failure message', async () => {
+  const { app } = await boot();
+  app.failNext(tabGet);
+  await app.run('loadTab("truecrime")'); await settle();
+  assert.match(tabHtml(app), /Failed to load/);
+  assert.match(app.el('errorBanner').innerHTML, /simulated failure/);
 });
 
 T.run();

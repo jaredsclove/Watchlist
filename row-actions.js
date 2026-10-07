@@ -22,6 +22,8 @@ async function toggleWatch(id) {
   if (!row) return;
   const newVal = !row.watched;
   row.watched = newVal;
+  // Tracked like a publication of the row (tmdb-match.js): no older read replaces it.
+  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, id, row) : null;
   renderTable();
   try {
     if (isTvSeason(row)) {
@@ -38,6 +40,7 @@ async function toggleWatch(id) {
     renderTable();
     showError(e.message);
   }
+  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
 }
 
 // Row-level status: films only. A TV season's status is its show's (setShowStatusById).
@@ -46,6 +49,7 @@ async function setStatus(id, status, selectEl) {
   if (!row || isTvSeason(row)) return;
   const old = row.status;
   row.status = status;
+  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, id, row) : null;
   // update select styling immediately
   if (selectEl) {
     selectEl.className = `status-select s-${status}`;
@@ -71,6 +75,7 @@ async function setStatus(id, status, selectEl) {
     renderTable();
     showError(e.message);
   }
+  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
 }
 
 async function delRow(id) {
@@ -97,6 +102,7 @@ async function delRow(id) {
   if (isDefaultItem) {
     const previousStatus = row.status;
     row.status = 'skipped';
+    const skipEdit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, id, row) : null;
     renderTable();
     try {
       await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { status: 'skipped' });
@@ -106,10 +112,13 @@ async function delRow(id) {
       renderTable();
       showError(e.message);
     }
+    if (typeof matchEditEnd === 'function') matchEditEnd(skipEdit);
     return;
   }
 
   const [removed] = td.rows.splice(idx, 1);
+  // Gone from the page from now on: no older read brings it back (put back if the delete fails).
+  const delEdit = typeof matchEditStart === 'function' ? matchEditStart('rows', removed.collection, id, null) : null;
   renderTable();
   try {
     if (isTvSeason(removed)) {
@@ -127,9 +136,11 @@ async function delRow(id) {
     showSaved();
   } catch(e) {
     td.rows.splice(idx, 0, removed);
+    if (typeof matchEditRevert === 'function') matchEditRevert(delEdit, removed);
     renderTable();
     showError(e.message);
   }
+  if (typeof matchEditEnd === 'function') matchEditEnd(delEdit);
 }
 
 function toggleAdd() {
@@ -215,6 +226,7 @@ async function toggleWatchWith(rowId, tag, checked) {
   const updated = [...current];
   const previous = row.watch_with || [];
   row.watch_with = updated;
+  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, rowId, row) : null;
   try {
     await sbFetch('PATCH', `${TABLE}?id=eq.${rowId}`, { watch_with: updated });
     mirrorRowUpdate(rowId, { watch_with: updated });
@@ -229,8 +241,10 @@ async function toggleWatchWith(rowId, tag, checked) {
       const label = (dbMessage.match(/watch_with_archived: "([^"]*)"/) || [])[1] || 'That choice';
       showError(`“${label}” is archived, so it can’t be added. Nothing was changed; the watch-with choices are being read again.`);
       if (typeof retryOrgRefresh === 'function') retryOrgRefresh();
+      if (typeof matchEditEnd === 'function') matchEditEnd(edit);
       return;
     }
     showError(e.message);
   }
+  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
 }

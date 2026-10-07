@@ -109,7 +109,7 @@ async function loadTab(collectionId) {
   // first and no restore happened meanwhile, and it can satisfy a refresh after a Match.
   const read = typeof matchReadStart === 'function' ? matchReadStart('tab', collectionId) : null;
   try {
-    const rows = await sbFetch('GET',
+    let rows = await sbFetch('GET',
       `${TABLE}?collection=eq.${encodeURIComponent(collectionId)}&order=date_sort.asc&select=*`,
       null
     );
@@ -169,14 +169,21 @@ async function loadTab(collectionId) {
 
     if (read) {
       if (!matchMayPublishTab(read)) { matchReadSettle(read, null); return; } // retired: a newer read (or a restore) came first
-      // A row a newer read already published keeps that newer version.
+      // A row that a newer read or an edit already published keeps that newer state:
+      // its newer version, its absence (deleted), or its presence (added). Rows kept
+      // because of an edit aren't covered by this read.
+      const newer = matchNewerRows(read, collectionId);
       const current = tabData[collectionId];
-      for (let i = 0; i < rows.length; i++) {
-        if ((matchPublished.rows[rows[i].id] || 0) > read.id) {
-          const newer = current && current.rows.find(r => r.id === rows[i].id);
-          if (newer) rows[i] = newer;
-        }
+      const kept = new Set();
+      const merged = rows.filter(r => !newer[r.id]);
+      for (const [rowId, e] of Object.entries(newer)) {
+        const shown = (current && current.rows.find(r => r.id === rowId)) || e.row;
+        if (e.row && shown) merged.push(shown);
+        if (e.kind === 'edit') kept.add(rowId);
       }
+      rows = merged;
+      rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+      read.keptRows = kept;
       matchNotePublished('tabs', collectionId, read);
     }
     // Always cache the result, even if the user has navigated away — this keeps
@@ -203,7 +210,11 @@ async function loadTab(collectionId) {
     renderFilters();
     renderTable();
   } catch(e) {
-    if (read && read.state === 'pending') matchReadSettle(read, e);
+    // A failure of a retired read (a newer read of this tab succeeded, or a restore
+    // came since) replaces nothing on the page.
+    const retired = !!read && !matchMayPublishTab(read);
+    if (read && read.state === 'pending') matchReadSettle(read, e, retired);
+    if (retired) { console.error(e); return; }
     if (activeTabId !== collectionId) { console.error(e); return; }
     showError(e.message);
     document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">Failed to load. Check console for details.</td></tr>`;

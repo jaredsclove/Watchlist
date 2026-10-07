@@ -590,9 +590,11 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
 
   // ── fake network ──
   // hold(pred) pauses the first matching request until release()/fail() is called.
+  // releaseWith({ table: rows }) answers the held request (only) from those rows,
+  // as an older read would have seen them; later requests see the store as it is.
   app.hold = pred => {
     const g = { pred, hit: false };
-    g.gate = new Promise(r => { g.release = () => r('ok'); g.fail = () => r('fail'); });
+    g.gate = new Promise(r => { g.release = () => r('ok'); g.fail = () => r('fail'); g.releaseWith = tables => r({ tables }); });
     g.reached = new Promise(r => { g.onHit = r; });
     gates.push(g);
     return g;
@@ -620,8 +622,19 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const req = { method, url, body, headers: opts.headers || {} };
     requests.push(req);
     const g = gates.find(x => !x.hit && x.pred(req));
+    let forceFail = false, older = null;
+    if (g) { g.hit = true; g.onHit(req); const v = await g.gate; forceFail = v === 'fail'; older = v && v.tables; }
+    if (forceFail) return response(500, { message: 'simulated failure' });
+    if (older) {
+      const now = {};
+      for (const t of Object.keys(older)) { now[t] = store[t]; store[t] = older[t]; }
+      try { return serveRequest(req, url, method, body); } finally { for (const t of Object.keys(now)) store[t] = now[t]; }
+    }
+    return serveRequest(req, url, method, body);
+  }
+
+  function serveRequest(req, url, method, body) {
     let forceFail = false;
-    if (g) { g.hit = true; g.onHit(req); forceFail = (await g.gate) === 'fail'; }
     const fi = failures.findIndex(p => p(req));
     if (fi !== -1) { failures.splice(fi, 1); forceFail = true; }
     if (forceFail) return response(500, { message: 'simulated failure' });

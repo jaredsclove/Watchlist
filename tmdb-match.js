@@ -329,7 +329,7 @@ async function confirmTmdbMatch(withConfirmation) {
     }
     Object.assign(row, fresh);
     stamp.read.applied = true; // the page now shows the row as the database returned it
-    matchNotePublished('rows', row.id, stamp.read);
+    matchNotePublished('rows', row.id, stamp.read, row);
     // The season may have joined an existing show, or its show may now be identified.
     if (viaShowFunction) {
       try { await loadTvShows(row.collection); }
@@ -435,51 +435,100 @@ function renderMatchProposal(m) {
     </div>`;
 }
 
-// ─── Tracked reads (shared with tabs.js, tv-shows.js, derived-views.js) ────────
-// Every read of a tab, a row or a show list, and every Match call, takes a number
-// when it starts and records the restore epoch. A read publishes only if it is the
-// newest read that has published that data (a tab, a row, a show list) in the
-// current epoch; an older read that finishes late, or one from before a restore,
-// publishes nothing. Each read's outcome is kept so it can satisfy a refresh.
+// ─── Tracked reads (shared with tabs.js, tv-shows.js, derived-views.js, row-actions.js) ─
+// Every read of a tab, a row or a show list, every Match call and every edit made
+// on this page takes a number when it starts and records the restore epoch. The
+// newest publication of each tab, row and show list is remembered (by number and
+// kind; for a row also whether it is present, and the row itself). A read publishes
+// only if it is newer than that in the current epoch; an older read that finishes
+// late, or one from before a restore, publishes nothing. An edit counts as a
+// publication from its optimistic start, so no older read replaces what the user
+// changed (whether the edit is pending, saved or reverted). Edits never satisfy a
+// refresh; a read retired by an edit is void, and the refresh reads again once no
+// edit of that row is pending.
 function matchPublishedReset() {
   if (matchPublished.epoch !== orgEpoch) matchPublished = { epoch: orgEpoch, tabs: {}, rows: {}, shows: {} };
 }
 
 function matchReadStart(kind, collection, rowId) {
   matchPublishedReset();
-  const read = { id: ++matchReadSeq, kind, collection, rowId: rowId || null, epoch: orgEpoch, state: 'pending', error: null, applied: false };
+  const read = { id: ++matchReadSeq, kind, collection, rowId: rowId || null, epoch: orgEpoch, state: 'pending', error: null,
+    applied: false, keptRows: null }; // keptRows: rows (or, for '*', show lists) kept because of an edit
   matchReads.push(read);
   if (matchReads.length > 300) matchReads = matchReads.slice(-300);
   return read;
 }
 
-// void: the call ended without covering anything (a Match that changed nothing on the page).
+// void: the call ended without covering anything (a Match that changed nothing on the
+// page, an edit, or a read whose data an edit made stale).
 function matchReadSettle(read, error, voided) {
   read.state = voided ? 'void' : error ? 'failed' : 'ok';
   read.error = error ? String(error.message || error) : null;
   matchRefreshReevaluate();
 }
 
-function matchNotePublished(kind, key, read) {
+// row: for kind 'rows', the row as now shown (an object) or null when it is gone.
+function matchNotePublished(kind, key, read, row) {
   matchPublishedReset();
-  if (read.epoch === orgEpoch && read.id > (matchPublished[kind][key] || 0)) matchPublished[kind][key] = read.id;
+  const cur = matchPublished[kind][key];
+  if (read.epoch !== orgEpoch || (cur && cur.id > read.id)) return;
+  matchPublished[kind][key] = kind === 'rows'
+    ? { id: read.id, kind: read.kind, collection: read.collection, row: row === undefined ? (cur ? cur.row : null) : row }
+    : { id: read.id, kind: read.kind };
 }
+
+const matchPubId = entry => (entry ? entry.id : 0);
 
 function matchMayPublishTab(read) {
   matchPublishedReset();
-  return read.epoch === orgEpoch && read.id > (matchPublished.tabs[read.collection] || 0);
+  return read.epoch === orgEpoch && read.id > matchPubId(matchPublished.tabs[read.collection]);
 }
 
 function matchMayPublishRow(read, collection, rowId) {
   matchPublishedReset();
-  return read.epoch === orgEpoch && read.id > Math.max(matchPublished.tabs[collection] || 0, matchPublished.rows[rowId] || 0);
+  return read.epoch === orgEpoch && read.id > Math.max(matchPubId(matchPublished.tabs[collection]), matchPubId(matchPublished.rows[rowId]));
 }
 
 function matchMayPublishShows(read, collection) {
   matchPublishedReset();
-  const newest = collection === '*' ? (matchPublished.shows['*'] || 0)
-    : Math.max(matchPublished.shows[collection] || 0, matchPublished.shows['*'] || 0);
+  const newest = collection === '*' ? matchPubId(matchPublished.shows['*'])
+    : Math.max(matchPubId(matchPublished.shows[collection]), matchPubId(matchPublished.shows['*']));
   return read.epoch === orgEpoch && read.id > newest;
+}
+
+// Rows of a tab that a read newer than this one published (present or gone), for a
+// tab read to keep: { rowId: { row (null = gone), kind } }.
+function matchNewerRows(read, collection) {
+  matchPublishedReset();
+  const out = {};
+  for (const [rowId, e] of Object.entries(matchPublished.rows)) if (e.collection === collection && e.id > read.id) out[rowId] = e;
+  return out;
+}
+
+// The newest publication of a show list is an edit newer than this read.
+function matchShowsBlockedByEdit(read, collection) {
+  const e = matchPublished.shows[collection];
+  return !!(e && e.kind === 'edit' && e.id > read.id);
+}
+
+// An edit made on this page (rows: key = row id, row = the row as now shown or null if
+// removed; shows: key = collection).
+function matchEditStart(kind, collection, key, row) {
+  if (typeof orgEpoch === 'undefined') return null;
+  const read = matchReadStart('edit', collection, kind === 'rows' ? key : null);
+  matchNotePublished(kind, key, read, row);
+  return read;
+}
+
+// A reverted edit puts the row back as it was (same publication number).
+function matchEditRevert(read, row) {
+  if (!read) return;
+  const e = matchPublished.rows[read.rowId];
+  if (e && e.id === read.id) e.row = row;
+}
+
+function matchEditEnd(read) {
+  if (read) matchReadSettle(read, null, true);
 }
 
 // ─── After a match that couldn't be put into the page ─────────────────────────
@@ -544,26 +593,31 @@ function matchRefreshRead(units) {
 function matchReadRow(unit) {
   const read = matchReadStart('row', unit.collection, unit.rowId);
   return sbFetch('GET', `${TABLE}?id=eq.${unit.rowId}&select=*`, null).then(rows => {
-    if (matchMayPublishRow(read, unit.collection, unit.rowId)) {
-      const td = tabData[unit.collection];
-      if (td && td.loaded) {
-        const i = td.rows.findIndex(r => r.id === unit.rowId);
-        const now = (rows || [])[0];
-        if (now && i >= 0) td.rows[i] = now;
-        else if (now) td.rows.push(now);
-        else if (i >= 0) td.rows.splice(i, 1);
-        td.rows.sort((a, b) => String(a.date_sort).localeCompare(String(b.date_sort)));
-        if (activeTabId === unit.collection) { renderFilters(); renderTable(); }
-      }
-      matchNotePublished('rows', unit.rowId, read);
+    const now = (rows || [])[0] || null;
+    if (!matchMayPublishRow(read, unit.collection, unit.rowId)) {
+      // Retired. An edit made it stale: it covers nothing (a current read follows).
+      const e = matchPublished.rows[unit.rowId];
+      matchReadSettle(read, null, !!(read.epoch === orgEpoch && e && e.kind === 'edit' && e.id > read.id));
+      return;
     }
+    const td = tabData[unit.collection];
+    if (td && td.loaded) {
+      const i = td.rows.findIndex(r => r.id === unit.rowId);
+      if (now && i >= 0) td.rows[i] = now;
+      else if (now) td.rows.push(now);
+      else if (i >= 0) td.rows.splice(i, 1);
+      td.rows.sort((a, b) => String(a.date_sort).localeCompare(String(b.date_sort)));
+      if (activeTabId === unit.collection) { renderFilters(); renderTable(); }
+    }
+    matchNotePublished('rows', unit.rowId, read, now);
     matchReadSettle(read, null);
   }, e => matchReadSettle(read, e));
 }
 
 function matchReadCovers(read, unit) {
-  if (unit.kind === 'shows') return read.kind === 'shows' && (read.collection === unit.collection || read.collection === '*');
-  if (read.kind === 'tab') return read.collection === unit.collection;
+  if (unit.kind === 'shows') return read.kind === 'shows' && (read.collection === unit.collection
+    || (read.collection === '*' && !(read.keptRows && read.keptRows.has(unit.collection))));
+  if (read.kind === 'tab') return read.collection === unit.collection && !(read.keptRows && read.keptRows.has(unit.rowId));
   if (read.kind === 'row') return read.rowId === unit.rowId;
   return read.kind === 'match' && read.rowId === unit.rowId && read.applied;
 }
@@ -586,10 +640,18 @@ function matchRefreshEvaluate(progress) {
     return;
   }
   let failed = null;
+  const rereads = [];
   for (const u of Object.values(progress.units)) {
     const covering = matchReads.filter(r => r.id > u.since && r.epoch === orgEpoch && r.state !== 'void' && matchReadCovers(r, u));
     if (covering.some(r => r.state === 'ok')) u.state = 'ok';
-    else if (covering.some(r => r.state === 'pending') || !covering.length) u.state = 'pending';
+    else if (covering.some(r => r.state === 'pending')) u.state = 'pending';
+    else if (!covering.length) {
+      // Nothing covers it (its read was retired by an edit): read again once no edit of it is pending.
+      u.state = 'pending';
+      const editing = matchReads.some(r => r.kind === 'edit' && r.state === 'pending' && r.epoch === orgEpoch
+        && (u.kind === 'row' ? r.rowId === u.rowId : r.collection === u.collection && !r.rowId));
+      if (!editing) { u.since = matchReadSeq; rereads.push(u); }
+    }
     else { u.state = 'failed'; u.error = covering[covering.length - 1].error; failed = failed || u; }
   }
   const units = Object.values(progress.units);
@@ -598,6 +660,7 @@ function matchRefreshEvaluate(progress) {
   progress.error = failed ? failed.error : null;
   matchRefreshNotice(progress);
   if (progress.state === 'done' && before !== 'done' && units.some(u => u.collection === activeTabId)) { renderFilters(); renderTable(); }
+  if (rereads.length) matchRefreshRead(rereads);
 }
 
 // Retry: reads every obligation that isn't satisfied (read only; nothing is re-sent).

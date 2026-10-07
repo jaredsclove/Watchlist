@@ -48,8 +48,8 @@ async function loadTvShows(collectionId) {
       for (const [id, s] of tvShowsById) if (s.collection === collectionId) tvShowsById.delete(id);
       noteTvShows(shows);
       if (read) matchNotePublished('shows', collectionId, read);
-    }
-    if (read) matchReadSettle(read, null);
+      if (read) matchReadSettle(read, null);
+    } else if (read) matchReadSettle(read, null, matchShowsBlockedByEdit(read, collectionId));
   } catch (e) {
     if (read) matchReadSettle(read, e);
     throw e;
@@ -75,9 +75,11 @@ function publishAllTvShows(read, shows) {
   if (read && !matchMayPublishShows(read, '*')) return false;
   const next = new Map(shows.map(s => [s.id, s]));
   if (read) {
-    const newer = new Set(Object.keys(matchPublished.shows).filter(c => c !== '*' && matchPublished.shows[c] > read.id));
+    const newer = new Set(Object.keys(matchPublished.shows).filter(c => c !== '*' && matchPublished.shows[c].id > read.id));
     for (const [id, s] of next) if (newer.has(s.collection)) next.delete(id);
     for (const s of tvShowsById.values()) if (newer.has(s.collection)) next.set(s.id, s);
+    // Show lists kept because of an edit aren't covered by this read.
+    read.keptRows = new Set([...newer].filter(c => matchPublished.shows[c].kind === 'edit'));
     matchNotePublished('shows', '*', read);
   }
   tvShowsById = next;
@@ -141,6 +143,7 @@ async function setShowStatusById(showId, status) {
   if (!show || show.status === status) return;
   const old = show.status;
   show.status = status;
+  const edit = typeof matchEditStart === 'function' ? matchEditStart('shows', show.collection, show.collection) : null;
   renderTable();
   try {
     const saved = await sbRpc('set_show_status', { p_show_id: showId, p_status: status });
@@ -150,6 +153,7 @@ async function setShowStatusById(showId, status) {
     show.status = old;
     showError(e.message);
   }
+  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
   renderTable();
 }
 
@@ -159,6 +163,7 @@ async function setSeasonSkipped(id, skipped) {
   const old = !!row.skipped;
   if (old === skipped) return;
   row.skipped = skipped;
+  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, id, row) : null;
   renderTable();
   try {
     const saved = await sbRpc('set_season_skipped', { p_row_id: id, p_skipped: skipped });
@@ -168,6 +173,7 @@ async function setSeasonSkipped(id, skipped) {
     row.skipped = old;
     showError(e.message);
   }
+  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
   renderTable();
 }
 
