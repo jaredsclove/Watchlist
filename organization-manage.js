@@ -789,15 +789,17 @@ function manageMembersHtml(ix) {
     }).join('') || '<li class="manage-empty">Nothing saved matches.</li>'}</ul>
     ${unclassified ? `<p class="manage-hint">${unclassified} matching saved row${unclassified === 1 ? ' is' : 's are'} neither a TV season nor a film, so ${unclassified === 1 ? 'it' : 'they'} can’t be added. All Movies lists such rows.</p>` : ''}`;
   }
+  // Adding comes first, so it never needs a scroll past a long member list.
   return `${back}<h3 class="manage-subtitle">${esc(c.name)}${c.archived_at ? ' (archived)' : ''}</h3>
     ${c.archived_at ? `<p class="manage-hint">This collection is archived. Unarchive it to change its members.</p>` : ''}
     ${manageInconsistencyHtml(ix, c.id)}${undo}${otherNotes}
-    <ul class="manage-list" aria-label="Members of ${esc(c.name)}">${members.map(memberRow).join('') || '<li class="manage-empty">No members yet.</li>'}</ul>
     ${c.archived_at ? '' : `<div class="manage-create"><label for="manageMemberSearch">Add a saved show or film</label>
       <input id="manageMemberSearch" type="search" value="${esc(manage.drafts.manageMemberSearch || '')}" oninput="manageDraft(this)"${locked ? ' disabled' : ''}
         placeholder="Search your saved titles…">
       <p class="manage-hint">A show is added whole: every stored season, and any added later. Nothing is copied or moved, and watched status is unchanged.</p>
-      ${results}</div>`}`;
+      ${results}</div>`}
+    <h4 class="manage-members-head">Members (${members.length})</h4>
+    <ul class="manage-list" aria-label="Members of ${esc(c.name)}">${members.map(memberRow).join('') || '<li class="manage-empty">No members yet.</li>'}</ul>`;
 }
 
 function manageChoicesHtml(ix) {

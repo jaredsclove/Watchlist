@@ -45,6 +45,7 @@ function switchTab(id) {
   activeTabId = id;
   browseOrigin = null;
   backNavFilters = null;
+  viewFilterMemory = { tag: null, values: {} };
   invalidateRestorePreparation();
   addOpen = false;
   tmdbSelectedShow = null;
@@ -73,6 +74,7 @@ function switchView(id) {
   if (!isBrowseCollectionView(id)) browseOrigin = null;
   else enterBrowseCollection(id);
   if (backNavFilters && backNavFilters.view !== id) backNavFilters = null;
+  viewFilterMemory = { tag: null, values: {} }; // a fresh entry starts from the defaults (Back puts its filters back itself)
   browseData = null;
   invalidateRestorePreparation();
   addOpen = false;

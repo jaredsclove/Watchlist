@@ -101,7 +101,7 @@ function listed(app) {
 }
 const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"]*)"/g)]
   .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1])).filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
-const READ_ONLY = new Set(['toggleBrowseShow', 'setBrowseMedia', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
+const READ_ONLY = new Set(['toggleFilterPill', 'toggleBrowseShow', 'setBrowseMedia', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
   'renderTable', 'toggleFilters', 'browseBack', 'openBrowseCollection', 'loadBrowseView',
   'openManage']); // Stage 3b-2: opens the Manage collections dialog (organization only, never tracking)
 const mutating = app => app.requests.filter(r => r.method !== 'GET' || /\/rpc\//.test(r.url) || !r.url.includes('/rest/v1/'));

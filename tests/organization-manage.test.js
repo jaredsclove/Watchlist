@@ -612,6 +612,28 @@ test('add a whole show from search: the button says all stored seasons; Undo rem
   assert.ok(!app.store.collection_memberships.some(m => m.id === added.id));
 });
 
+test('members view: the add search and its results come before the member list (no scroll past a long list); typing keeps focus', async () => {
+  const app = await boot();
+  const d = coll(app, 'disney');
+  await open(app, 'members', d.id);
+  const at = s => box(app).indexOf(s);
+  assert.ok(at('id="manageMemberSearch"') > 0 && at('id="manageMemberSearch"') < at('aria-label="Members of Disney+"'));
+  assert.match(text(app), /Members \(1\)/);
+  const focused = [];
+  app.ctx.document.activeElement = { id: 'manageMemberSearch', selectionStart: 3, selectionEnd: 3 };
+  app.el('manageModalBox').contains = () => true;
+  const realGet = app.ctx.document.getElementById;
+  app.ctx.document.getElementById = id => { const el = realGet(id); if (el && id === 'manageMemberSearch') { el.focus = () => focused.push(id); el.setSelectionRange = (a, b) => focused.push(`${a}-${b}`); } return el; };
+  typeInto(app, 'manageMemberSearch', 'sev'); await settle();
+  app.ctx.document.getElementById = realGet;
+  assert.deepStrictEqual(focused.slice(0, 2), ['manageMemberSearch', '3-3']);
+  const results = at('aria-label="Search results"');
+  assert.ok(results > at('id="manageMemberSearch"') && results < at('aria-label="Members of Disney+"'), 'results right under the search');
+  app.ctx.manageAddMember('s', showByTitle(app, 'Severance').id); await settle();
+  assert.match(text(app), /Members \(2\)/);
+  assert.ok(at('Added “Severance”') < at('id="manageMemberSearch"'), 'the Undo note stays at the top');
+});
+
 test('no Undo for a no-op add (someone else’s existing membership), a refusal or an unknown outcome', async () => {
   const app = await boot();
   const d = coll(app, 'disney');

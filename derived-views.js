@@ -169,6 +169,28 @@ function allTvStatusMatches(status, fStatus) {
   return status === fStatus;
 }
 
+// The theme / genre / network filter ('' = any): a row's own theme; a show when any
+// of its stored seasons has it (the show still keeps all its seasons).
+function themeMatchesRow(r, fTheme) {
+  return !fTheme || r.theme === fTheme;
+}
+function themeMatchesShow(seasons, fTheme) {
+  return !fTheme || seasons.some(r => r.theme === fTheme);
+}
+
+// All TV Shows' progress filter, on the seasons' own flags, never the show status
+// (Status filters that separately). Skipped seasons don't count. Has unwatched
+// seasons: at least one season neither watched nor skipped, aired or not, and
+// never a Skipped show (the To watch rule of Seasons). All non-skipped seasons
+// watched: at least one such season and every one watched, whatever the show status.
+const ALLTV_PROGRESS_LABELS = { '': 'Any progress', unwatched: 'Has unwatched seasons', allwatched: 'All non-skipped seasons watched' };
+function allTvProgressMatches(item, fProgress) {
+  const kept = item.seasons.filter(r => !r.skipped);
+  if (fProgress === 'unwatched') return item.show.status !== 'skipped' && kept.some(r => !r.watched);
+  if (fProgress === 'allwatched') return kept.length > 0 && kept.every(r => r.watched);
+  return true;
+}
+
 // ─── All TV: Shows / Seasons presentation ────────────────────────────────────
 // Shows (one card per show) is the first-use default. The choice is remembered
 // on this device only (not in backups or the database); without usable storage
@@ -205,12 +227,13 @@ function allTvSeasonVisible(r, show, vis) {
 }
 
 // The seasons of the given All TV shows (deriveAllTv items, already filtered by
-// Search / Source / show Status), split before any sorting: genuine TBA (text or
+// Search / Source / show Status) that pass the visibility choice and rowMatches
+// (the theme filter), split before any sorting: genuine TBA (text or
 // sentinel; wins over a guessed date_sort), dates needing review (not TBA, no
 // valid date) and dated seasons, oldest first. Ties: title, season order,
 // collection, row id.
-function deriveAllTvSeasons(items, vis) {
-  const rows = items.flatMap(it => it.seasons.filter(r => allTvSeasonVisible(r, it.show, vis)));
+function deriveAllTvSeasons(items, vis, rowMatches = () => true) {
+  const rows = items.flatMap(it => it.seasons.filter(r => allTvSeasonVisible(r, it.show, vis) && rowMatches(r)));
   const tieOrder = (a, b) => compareTitles(a.title, b.title)
     || seasonOrder(a, b)
     || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
@@ -268,6 +291,7 @@ async function loadDerivedView() {
   if (!viewId) return;
   const seq = ++derivedLoadSeq;
   document.getElementById('statsRow').innerHTML = '';
+  holdViewFilters(viewId); // a reload or Retry keeps this visit's filters (browse-views.js)
   document.getElementById('filtersRow').innerHTML = '';
   showError('');
   paintDerivedMessage('Loading…', false);
@@ -296,19 +320,26 @@ function paintDerivedMessage(text, withRetry) {
 }
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
+// What a derived view's theme choices are drawn from: every show (with all its
+// seasons) or season the view lists before any filter.
+function derivedThemeChoices() {
+  if (!derivedData || !derivedData.loaded) return [];
+  const today = localTodayStr();
+  if (activeViewId === 'comingsoon') {
+    const { dated, tba } = deriveComingSoon(derivedData.rows, tvShowsById, today);
+    return dated.concat(tba).map(r => r.theme);
+  }
+  const items = activeViewId === 'watching'
+    ? (({ active, upToDate }) => active.concat(upToDate))(deriveCurrentlyWatching(derivedData.rows, tvShowsById, today))
+    : deriveAllTv(derivedData.rows, tvShowsById, today).items;
+  return items.flatMap(x => x.seasons.map(r => r.theme));
+}
+
 function renderDerivedFilters() {
   const filtersRowEl = document.getElementById('filtersRow');
   const tag = `view:${activeViewId}`;
   // Back from a collection (browse-views.js) puts this view's filters back once.
-  const restored = takeBackNavFilters(activeViewId);
-  const keepState = filtersRowEl.dataset.tab === tag || !!restored;
-  const savedValues = restored ? { ...restored } : {};
-  if (keepState && !restored) {
-    ['fSearch', 'fSource', 'fStatus'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) savedValues[id] = el.value;
-    });
-  }
+  const { restored, keepState, values } = viewFilterStart(tag, filtersRowEl);
   const wasCollapsed = filtersRowEl.classList.contains('collapsed');
   const sourceOpts = COLLECTIONS.filter(c => c.mediaType === 'tv')
     .map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('');
@@ -322,7 +353,7 @@ function renderDerivedFilters() {
       </select>`
     : '';
   // All TV only: the Shows / Seasons switch (outside the collapsible panel) and,
-  // in Seasons only, which seasons to list.
+  // in Seasons only, which seasons to list; in Shows only, the progress filter.
   const presentationToggle = activeViewId === 'alltv'
     ? `
     <div class="view-toggle" role="group" aria-label="Presentation">${[['shows', 'Shows'], ['seasons', 'Seasons']].map(([mode, label]) =>
@@ -338,6 +369,12 @@ function renderDerivedFilters() {
         <option value="skipped">Skipped</option>
       </select>`
     : '';
+  const progressSelect = activeViewId === 'alltv' && allTvPresentation === 'shows'
+    ? `
+      <select id="fProgress" onchange="renderTable()" aria-label="Progress" title="Which shows to list by their seasons’ watched state (Shows only)">${Object.entries(ALLTV_PROGRESS_LABELS).map(([value, text]) =>
+        `<option value="${value}">${text}</option>`).join('')}</select>`
+    : '';
+  const themeSelect = themeFilterSelectHtml(derivedThemeChoices(), 'All networks / themes', 'Network or theme');
 
   filtersRowEl.innerHTML = `${presentationToggle}
     <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
@@ -348,7 +385,7 @@ function renderDerivedFilters() {
       <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" oninput="renderTable()">
       <select id="fSource" onchange="renderTable()">
         <option value="">All TV sources</option>${sourceOpts}
-      </select>${statusSelect}${seasonVisSelect}
+      </select>${statusSelect}${themeSelect}${progressSelect}${seasonVisSelect}
     </div>
   `;
   filtersRowEl.dataset.tab = tag;
@@ -360,28 +397,22 @@ function renderDerivedFilters() {
   tmdbPanel.style.display = 'none';
   tmdbPanel.innerHTML = '';
 
-  if (keepState) {
-    for (const [id, value] of Object.entries(savedValues)) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === value)) continue;
-      el.value = value;
-    }
-    if (!restored && filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
-  }
+  applyViewFilters(tag, values);
+  if (keepState && !restored && filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
 function renderDerivedTable() {
   if (!derivedData || !derivedData.loaded) return;
   const today = localTodayStr();
-  const fSearch = document.getElementById('fSearch')?.value.trim().toLowerCase() || '';
-  const fSource = document.getElementById('fSource')?.value || '';
+  const val = id => document.getElementById(id)?.value || ''; // a control that isn't shown doesn't filter
+  const fSearch = val('fSearch').trim().toLowerCase();
+  const fSource = val('fSource'), fTheme = val('fTheme');
   const keep = x => (!fSource || x.collection === fSource) && (!fSearch || (x.title || '').toLowerCase().includes(fSearch));
   updateDerivedTableHeader();
-  if (activeViewId === 'comingsoon') renderComingSoon(today, keep);
-  else if (activeViewId === 'alltv') renderAllTv(today, keep, document.getElementById('fStatus')?.value || '');
-  else if (activeViewId === 'watching') renderCurrentlyWatching(today, keep);
+  if (activeViewId === 'comingsoon') renderComingSoon(today, r => keep(r) && themeMatchesRow(r, fTheme));
+  else if (activeViewId === 'alltv') renderAllTv(today, keep, val('fStatus'), fTheme, val('fProgress'));
+  else if (activeViewId === 'watching') renderCurrentlyWatching(today, x => keep(x) && themeMatchesShow(x.seasons, fTheme));
 }
 
 function updateDerivedTableHeader() {
@@ -402,13 +433,13 @@ function sourceBadgeHtml(collectionId) {
   return `<span class="source-badge" title="Stored in ${esc(col?.label || collectionId)}">${col ? `${col.icon} ` : ''}${esc(col?.label || collectionId)}</span>`;
 }
 
-// Dynamic tabs store the network as the theme; static tabs use themed badges.
-function themeBadgeHtml(collectionId, theme) {
+// Dynamic tabs store the network (TV) or genre (Movies) as the theme; static tabs
+// use themed badges. Either is a filter pill for the view's theme filter (render.js).
+function themeBadgeHtml(collectionId, theme, owner = '') {
   if (!theme) return '';
   const col = COLLECTIONS.find(c => c.id === collectionId);
-  return col?.dynamic
-    ? `<span class="badge" ${networkBadgeStyle(theme)}>${esc(theme)}</span>`
-    : `<span class="badge ${badgeClass(theme)}">${esc(theme)}</span>`;
+  const look = col?.dynamic ? { cls: 'badge', attrs: networkBadgeStyle(theme) } : { cls: `badge ${badgeClass(theme)}` };
+  return filterPillHtml('theme', theme, theme, { ...look, title: `Filter by “${theme}”`, owner });
 }
 
 function derivedStatsHtml(stats) {
@@ -470,10 +501,13 @@ function renderCurrentlyWatching(today, keep) {
 
 // All TV: every show with a linked season, filtered by title, source and show
 // status; the show count is shows, not seasons.
-function renderAllTv(today, keep, fStatus) {
+// Shows: Theme matches any stored season and Progress applies; Seasons: Theme
+// applies to each season (Progress is a Shows filter and isn't shown there).
+function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '') {
   const { items, unlinked, missingShow } = deriveAllTv(derivedData.rows, tvShowsById, today);
-  const shown = items.filter(x => keep(x) && allTvStatusMatches(x.show.status, fStatus));
-  if (allTvPresentation === 'seasons') return renderAllTvSeasons(today, items, shown, unlinked + missingShow);
+  const listed = items.filter(x => keep(x) && allTvStatusMatches(x.show.status, fStatus));
+  if (allTvPresentation === 'seasons') return renderAllTvSeasons(today, items, listed, unlinked + missingShow, fTheme);
+  const shown = listed.filter(x => themeMatchesShow(x.seasons, fTheme) && allTvProgressMatches(x, fProgress));
 
   document.getElementById('statsRow').innerHTML = derivedStatsHtml([
     [shown.length, shown.length === 1 ? 'Show' : 'Shows'],
@@ -507,8 +541,8 @@ function renderAllTv(today, keep, fStatus) {
 // Status, narrowed by the Seasons-only visibility choice. Dated seasons oldest
 // first under year headers; genuine TBA and dates needing review in one
 // collapsed section, labelled and counted separately.
-function renderAllTvSeasons(today, items, shown, notListed) {
-  const { dated, tba, review, total, showCount } = deriveAllTvSeasons(shown, allTvSeasonVis);
+function renderAllTvSeasons(today, items, shown, notListed, fTheme = '') {
+  const { dated, tba, review, total, showCount } = deriveAllTvSeasons(shown, allTvSeasonVis, r => themeMatchesRow(r, fTheme));
   const stats = [[total, total === 1 ? 'Season' : 'Seasons'], [showCount, showCount === 1 ? 'Show' : 'Shows'], [tba.length, 'TBA']];
   if (review.length) stats.push([review.length, 'Date needs review']);
   document.getElementById('statsRow').innerHTML = derivedStatsHtml(stats);
@@ -575,7 +609,7 @@ function allTvSeasonRowHtml(r, today, needsReview) {
   const reviewTag = needsReview ? '<span class="review-tag">date needs review</span>' : '';
   const statusPill = `<span class="status-pill s-${status}" title="Show status — applies to every season of ${esc(r.title)}. Switch to Shows to change it.">${esc(statusOptionLabel(status))}</span>`;
   const releaseOpts = { requireReleased: true, today };
-  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme)}`;
+  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme, r.id)}`;
   const row = `<tr class="${rowClass}">
       <td>
         <span class="show-title">${esc(r.title)}</span>
@@ -625,7 +659,7 @@ function derivedShowHtml(item, today) {
   const isExpanded = expandedShows.has(key);
   const keyArg = esc(key).replace(/'/g, "\\'");
   const theme = (upNext || seasons[0]).theme;
-  const badges = `${sourceBadgeHtml(item.collection)} ${themeBadgeHtml(item.collection, theme)}`;
+  const badges = `${sourceBadgeHtml(item.collection)} ${themeBadgeHtml(item.collection, theme, key)}`;
 
   const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;
@@ -759,7 +793,7 @@ function comingSoonRowHtml(r, today) {
         ${todayTag}
       </td>
       <td>${sourceBadgeHtml(r.collection)}</td>
-      <td>${themeBadgeHtml(r.collection, r.theme)}</td>
+      <td>${themeBadgeHtml(r.collection, r.theme, r.id)}</td>
       <td class="date-cell">${esc(r.display_date)}</td>
       <td>${statusPill}</td>
       <td>${skip}</td>
@@ -774,7 +808,7 @@ function comingSoonRowHtml(r, today) {
       </div>
       <div class="card-meta">
         ${sourceBadgeHtml(r.collection)}
-        ${themeBadgeHtml(r.collection, r.theme)}
+        ${themeBadgeHtml(r.collection, r.theme, r.id)}
         <span class="card-date">${esc(r.display_date)}</span>
       </div>
       <div class="card-actions">${statusPill} ${skip}</div>

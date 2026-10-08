@@ -94,7 +94,9 @@ const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"
 const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'renderTable', 'toggleFilters', 'browseBack', 'openBrowseCollection',
   'loadBrowseView', 'switchView', 'switchTab', 'switchMediaType', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
   // Stage 3b-2: opens the Manage collections dialog (organization only; it never changes tracking — tests/organization-manage.test.js)
-  'openManage']);
+  'openManage',
+  // a filter pill: sets or clears a filter control and redraws (tests/filter-pills.test.js)
+  'toggleFilterPill']);
 function assertReadOnlyDom(app) {
   for (const id of ['tbody', 'cardList', 'filtersRow', 'statsRow', 'browseBar', 'viewHead']) {
     const bad = handlersIn(app.el(id).innerHTML).filter(h => !READ_ONLY_HANDLERS.has(h));
@@ -190,7 +192,8 @@ test('Back returns to the view it came from with its filters; from a legacy tab 
   app.ctx.browseBack(); await settle();
   assert.strictEqual(app.get('activeViewId'), 'allmovies');
   assert.strictEqual(app.el('fSource').value, 'sheridan');
-  assert.deepStrictEqual(titles(app), ['F.A.S.T.', 'Sicario']);
+  assert.strictEqual(app.el('fWatch').value, 'unwatched', 'All Movies’ Unwatched only default comes back too');
+  assert.deepStrictEqual(titles(app), ['F.A.S.T.']);
 
   app.ctx.switchMediaType('tv'); await settle();
   app.ctx.switchTab('sheridan'); await settle();
@@ -451,15 +454,17 @@ test('a Movies-stored film with a Sheridan tag and theme is not added to Sherida
   assert.deepStrictEqual(titles(app), ['Tulsa King', 'Yellowstone', 'F.A.S.T.', 'Sicario']);
   app.ctx.switchMediaType('movie'); await settle();
   assert.ok(titles(app).includes('Wind River'));
-  assert.ok(html(app).includes('<span class="ro-label">Sheridan</span>') && html(app).includes('<span class="ro-label">Taylor Sheridan</span>'),
-    'existing tags are shown as plain text (display-only short form)');
-  assert.ok(html(app).includes('With Kids'));
+  setFilter(app, 'fWatch', '');
+  assert.ok(/<button type="button" class="collection-tag [^"]*" data-filter-kind="collection" data-filter-value="Sheridan"[^>]*>Sheridan<\/button>/.test(html(app))
+    && /data-filter-value="Taylor Sheridan"[^>]*>Taylor Sheridan<\/button>/.test(html(app)),
+    'existing tags are filter pills (display-only short form)');
+  assert.ok(/class="ww-tag [^"]*"[^>]*data-filter-value="Kids"[^>]*>Kids<\/button>/.test(html(app)), 'watch-with pill');
 });
 
 test('All Movies lists every saved film from every tab, once, with the same row and state as its collection; unknown rows are reported, not listed', async () => {
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle();
-  setFilter(app, 'fStatus', 'all');
+  setFilter(app, 'fStatus', 'all'); setFilter(app, 'fWatch', '');
   assert.deepStrictEqual(titles(app), ['Avengers: Doomsday', 'Dune', 'Dune', 'Ewoks: The Battle for Endor', 'F.A.S.T.', 'Sicario', 'Tell Me Who I Am',
     'The Mandalorian &amp; Grogu', 'Wind River']);
   assert.ok(html(app).includes('1 saved entry is neither a TV season nor a film'));
@@ -480,14 +485,16 @@ test('Source in All Movies is the storage tab; Status is the film row’s own; S
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle();
   assert.ok(!titles(app).includes('Ewoks: The Battle for Endor'), 'skipped film hidden by default');
-  assert.ok(titles(app).includes('Sicario'), 'watched films stay');
+  assert.ok(!titles(app).includes('Sicario'), 'watched films hidden by the Unwatched only default');
+  setFilter(app, 'fWatch', '');
+  assert.ok(titles(app).includes('Sicario'), 'Any watched state lists them');
   setFilter(app, 'fSource', 'disney');
   assert.deepStrictEqual(titles(app), ['The Mandalorian &amp; Grogu']);
   setFilter(app, 'fStatus', 'skipped');
   assert.deepStrictEqual(titles(app), ['Ewoks: The Battle for Endor']);
   setFilter(app, 'fSource', 'truecrime'); setFilter(app, 'fStatus', '');
   assert.deepStrictEqual(titles(app), ['Tell Me Who I Am']);
-  assert.deepStrictEqual(stats(app), ['1 Film', '1 Watched']);
+  assert.deepStrictEqual(stats(app), ['1 Shown', '1 Film', '1 Watched', '0 To watch']);
 });
 
 test('repeated TMDB identities in different tabs stay separate records: Disney+ shows only its own The Bear; All TV still lists both', async () => {

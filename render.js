@@ -148,6 +148,83 @@ function renderFilters() {
   }
 }
 
+// ─── Filter pills ─────────────────────────────────────────────────────────────
+// A pill that filters the open list by its value: a genre / theme / network
+// (fTheme), a legacy collection tag (fCollection; a saved content tag, not one of
+// the personal collections) or a watch-with choice (fWatchWith; filtered by its
+// stored token, showing the choice's current label). One value per filter:
+// clicking the selected pill clears it, another pill replaces it. A pill shows
+// whether it is the current filter (aria-pressed, and ✕ in CSS). Without its
+// filter control the label is plain text. Filtering only redraws; nothing is written.
+const FILTER_PILLS = {
+  theme: { select: 'fTheme', clickable: 'badge-clickable' },
+  collection: { select: 'fCollection', clickable: 'collection-tag-clickable' },
+  watchwith: { select: 'fWatchWith', clickable: 'ww-tag-clickable' }
+};
+
+// cls / attrs: the label's existing look; owner: the row or show it sits on (for focus).
+function filterPillHtml(kind, value, text, { cls = '', attrs = '', title = '', owner = '' } = {}) {
+  const pill = FILTER_PILLS[kind];
+  const select = pill && document.getElementById(pill.select);
+  const extra = attrs ? ` ${attrs}` : '';
+  if (!select) return `<span class="${cls}"${extra}>${esc(text)}</span>`;
+  const pressed = value !== '' && select.value === value;
+  return `<button type="button" class="${cls} ${pill.clickable} filter-pill"${extra} data-filter-kind="${kind}" data-filter-value="${esc(value)}"${owner ? ` data-pill-owner="${esc(owner)}"` : ''} aria-pressed="${pressed}" title="${esc(pressed ? `Remove this filter (${text})` : title)}" onclick="event.stopPropagation(); toggleFilterPill(this)">${esc(text)}</button>`;
+}
+
+// Sets the filter control to the value (or clears it when it is already set),
+// opens the collapsed filter panel so the choice is visible, and redraws. A value
+// the control doesn't offer changes nothing.
+function toggleFilterSelect(selectId, value) {
+  const select = document.getElementById(selectId);
+  if (!select) return false;
+  if (select.tagName === 'SELECT' && select.value !== value && ![...select.options].some(o => o.value === value)) return false;
+  select.value = select.value === value ? '' : value;
+  const filtersEl = document.getElementById('filtersRow');
+  if (filtersEl && filtersEl.classList.contains('collapsed')) {
+    filtersEl.classList.remove('collapsed');
+    const chevron = document.getElementById('filterToggleChevron');
+    if (chevron) chevron.textContent = '▴';
+  }
+  // The legacy Movies tab's ↻ Refresh link for a person collection (a read only); nothing in the other views.
+  if (selectId === 'fCollection' && activeTabId) updateCollectionRefreshLink();
+  renderTable();
+  return true;
+}
+
+// A pill's click (mouse, Enter or Space). Keyboard focus stays on the same pill
+// after the redraw (same container and row, else the same value), else on the filter control.
+function toggleFilterPill(btn) {
+  const kind = btn && btn.dataset ? btn.dataset.filterKind : '';
+  const pill = FILTER_PILLS[kind];
+  if (!pill) return;
+  const value = btn.dataset.filterValue || '', owner = btn.dataset.pillOwner || '';
+  const container = document.activeElement === btn ? focusedContainerOf(['tbody', 'cardList']) : null;
+  if (!toggleFilterSelect(pill.select, value) || !container) return;
+  const box = document.getElementById(container);
+  const sel = `[data-filter-kind="${kind}"][data-filter-value=${JSON.stringify(value)}]`;
+  const target = (owner && box && box.querySelector(`${sel}[data-pill-owner=${JSON.stringify(owner)}]`))
+    || (box && box.querySelector(sel)) || document.getElementById(pill.select);
+  if (target && typeof target.focus === 'function') target.focus();
+}
+
+// A theme / genre / network filter control: every value in the view's loaded rows
+// (never only the shown ones), so a choice can always be changed or cleared.
+function themeFilterSelectHtml(themes, allLabel, ariaLabel) {
+  const list = [...new Set(themes.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return `<select id="fTheme" onchange="renderTable()" aria-label="${esc(ariaLabel)}">
+        <option value="">${esc(allLabel)}</option>${list.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+      </select>`;
+}
+
+// A film's legacy collection tags (cleaned names) and watch-with choices as filter pills.
+function collectionTagPillsHtml(tags, owner) {
+  return tags.map(c => filterPillHtml('collection', c, c, { cls: 'collection-tag', title: 'Filter by this collection tag', owner })).join('');
+}
+function watchWithPillsHtml(tokens, owner) {
+  return tokens.map(w => filterPillHtml('watchwith', w, watchWithLabel(w), { cls: 'ww-tag', title: 'Filter by this person', owner })).join('');
+}
+
 // ─── Render table ─────────────────────────────────────────────────────────────
 function renderTable() {
   if (isBrowseView(activeViewId)) { renderBrowseTable(); return; }
@@ -288,6 +365,7 @@ function renderFlatTable(list, td) {
     }
     const isNew = td.newKeys.includes(r.item_key);
     const bc = badgeClass(r.theme);
+    const themePill = filterPillHtml('theme', r.theme, r.theme, { cls: `badge ${bc}`, title: 'Filter by this theme', owner: r.id });
     const tv = isTvSeason(r);
     const isSkipped = isOffList(r);
     const isMaybe   = displayStatus(r) === 'maybe';
@@ -312,7 +390,7 @@ function renderFlatTable(list, td) {
         <span class="season-lbl"> · ${esc(r.season)}</span>
         ${isNew?'<span class="new-tag">New</span>':''}
       </td>
-      <td><button class="badge ${bc} badge-clickable" onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this theme">${esc(r.theme)}</button></td>
+      <td>${themePill}</td>
       <td class="date-cell">${esc(r.display_date)}</td>
       <td>${statusCell}</td>
       <td>${seasonControls || `<span class="confirmed-lbl">—</span>`}</td>
@@ -329,7 +407,7 @@ function renderFlatTable(list, td) {
         ${delBtn('card-del-btn')}
       </div>
       <div class="card-meta">
-        <button class="badge ${bc} badge-clickable" onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this theme">${esc(r.theme)}</button>
+        ${themePill}
         <span class="card-date">${esc(r.display_date)}</span>
       </div>
       <div class="card-actions">
@@ -410,7 +488,7 @@ function renderMoviesTable(list, td) {
   let html = '', cardHtml = '';
   list.forEach(r => {
     const isNew = td.newKeys.includes(r.item_key);
-    const genreBadgeStyle = networkBadgeStyle(r.theme);
+    const genrePill = filterPillHtml('theme', r.theme, r.theme, { cls: 'badge', attrs: networkBadgeStyle(r.theme), title: 'Filter by this genre', owner: r.id });
     const isSkipped = r.status === 'skipped';
     const isMaybe   = r.status === 'maybe';
     const statusClass = `s-${r.status}`;
@@ -420,8 +498,8 @@ function renderMoviesTable(list, td) {
 
     const watchWith = r.watch_with || [];
     const collections = (r.collections || []).map(cleanCollectionName);
-    const collectionTagsHtml = collections.map(c => `<button class="collection-tag collection-tag-clickable" onclick="event.stopPropagation(); toggleCollectionFilterFromTag('${esc(c).replace(/'/g,"\\'")}')" title="Filter by this collection">${esc(c)}</button>`).join('');
-    const watchWithTagsHtml = watchWith.map(w => `<button class="ww-tag ww-tag-clickable" onclick="event.stopPropagation(); toggleWatchWithFilterFromTag('${esc(w).replace(/'/g,"\\'")}')" title="Filter by this person">${esc(watchWithLabel(w))}</button>`).join('');
+    const collectionTagsHtml = collectionTagPillsHtml(collections, r.id);
+    const watchWithTagsHtml = watchWithPillsHtml(watchWith, r.id);
     // mobile card view keeps tags combined near the title — no column grid to align there anyway
     const inlineTagsHtml = collectionTagsHtml + watchWithTagsHtml;
     const cleanCollectionDisplayName = cleanCollectionName(r.tmdb_collection_name || '');
@@ -442,7 +520,7 @@ function renderMoviesTable(list, td) {
         <span class="show-title">${esc(r.title)}</span>
         ${isNew?'<span class="new-tag">New</span>':''}
       </td>
-      <td><button class="badge badge-clickable" ${genreBadgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this genre">${esc(r.theme)}</button></td>
+      <td>${genrePill}</td>
       <td class="tags-cell">${collectionTagsHtml || '<span class="tags-empty">—</span>'}</td>
       <td class="tags-cell">${watchWithTagsHtml || '<span class="tags-empty">—</span>'}</td>
       <td class="date-cell">${esc(r.display_date)}</td>
@@ -472,7 +550,7 @@ function renderMoviesTable(list, td) {
         ${morePopover}
       </div>
       <div class="card-meta">
-        <button class="badge badge-clickable" ${genreBadgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(r.theme).replace(/'/g,"\\'")}')" title="Filter by this genre">${esc(r.theme)}</button>
+        ${genrePill}
         <span class="card-date">${esc(r.display_date)}</span>
       </div>
       <div class="card-actions">
@@ -605,7 +683,7 @@ function renderGroupedTable(list, td, fStatus) {
     const isExpanded = expandedShows.has(key);
     const first = seasons[0];
     const network = first.theme || 'Unknown';
-    const badgeStyle = networkBadgeStyle(network);
+    const networkPill = filterPillHtml('theme', network, network, { cls: 'badge', attrs: networkBadgeStyle(network), title: 'Filter by this network', owner: key });
     const trackableSeasons = seasons.filter(s => !isOffList(s));
     const watchedCount = trackableSeasons.filter(s => s.watched).length;
     const totalCount = trackableSeasons.length;
@@ -635,7 +713,7 @@ function renderGroupedTable(list, td, fStatus) {
           <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
         </div>
       </td>
-      <td><button class="badge badge-clickable" ${badgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(network).replace(/'/g,"\\'")}')" title="Filter by this network">${esc(network)}</button></td>
+      <td>${networkPill}</td>
       <td class="date-cell">${esc(first.display_date)}</td>
       <td>${masterStatusCell} ${upToDateTag}</td>
       <td class="card-date">${progressLabel}${progressBarHtml}</td>
@@ -652,7 +730,7 @@ function renderGroupedTable(list, td, fStatus) {
         <span class="expand-chevron">${isExpanded?'▾':'▸'}</span>
       </div>
       <div class="card-meta">
-        <button class="badge badge-clickable" ${badgeStyle} onclick="event.stopPropagation(); toggleThemeFilterFromTag('${esc(network).replace(/'/g,"\\'")}')" title="Filter by this network">${esc(network)}</button>
+        ${networkPill}
         <span class="card-date">${esc(first.display_date)} · ${progressLabel}</span>
         ${progressBarHtml}
       </div>

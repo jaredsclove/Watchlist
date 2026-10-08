@@ -174,8 +174,12 @@ function chronoBuckets(entries) {
 }
 
 // A collection as shown: the filtered shows and films (Search on the show or film
-// title, Status on the show or the film's own row), counts, and the sections to
-// draw. opts: { media, presentation, grouping, seasonVis, textMatches, fStatus }.
+// title, Status on the show or the film's own row, Theme on any stored season of a
+// show (on the season itself in Seasons) or the film's own; collection tag and
+// watch-with are carried by films only, so while one is set no TV is listed),
+// counts, and the sections to draw. opts: { media, presentation, grouping,
+// seasonVis, textMatches, fStatus, fTheme, fCollection, fWatchWith }. A show keeps
+// all its seasons for progress, up next and expansion.
 // Seasons lists TV season entries (narrowed by seasonVis, never films) and puts
 // everything chronological; Shows and Movies-only are A–Z. Grouping only chooses
 // one interleaved section or one per media: it never changes counts or members.
@@ -183,11 +187,13 @@ function deriveBrowsePresentation(base, opts) {
   const withTv = opts.media !== 'movie', withFilms = opts.media !== 'tv';
   const seasons = withTv && opts.presentation === 'seasons';
   const combined = opts.media === 'all' && opts.grouping === 'combined';
-  const shows = base.shows.filter(x => opts.textMatches(x.title) && allTvStatusMatches(x.show.status, opts.fStatus));
-  const films = base.films.filter(r => opts.textMatches(r.title) && allTvStatusMatches(r.status, opts.fStatus));
+  const shows = base.shows.filter(x => opts.textMatches(x.title) && allTvStatusMatches(x.show.status, opts.fStatus)
+    && (seasons || themeMatchesShow(x.seasons, opts.fTheme)) && !opts.fCollection && !opts.fWatchWith);
+  const films = base.films.filter(r => browseFilmMatches(r, opts));
   const tv = !withTv ? []
     : seasons
-      ? shows.flatMap(item => item.seasons.filter(r => allTvSeasonVisible(r, item.show, opts.seasonVis)).map(row => ({ kind: 'season', row, show: item.show })))
+      ? shows.flatMap(item => item.seasons.filter(r => allTvSeasonVisible(r, item.show, opts.seasonVis) && themeMatchesRow(r, opts.fTheme))
+        .map(row => ({ kind: 'season', row, show: item.show })))
       : shows.map(item => ({ kind: 'show', item }));
   const filmEntries = withFilms ? films.map(row => ({ kind: 'film', row })) : [];
   const counts = {
@@ -206,6 +212,63 @@ function deriveBrowsePresentation(base, opts) {
   return { withTv, withFilms, seasons, combined, counts, sections, baseShows: base.shows.length, baseFilms: base.films.length };
 }
 
+// A film by every filter but Watched: Search, Status (its own row), Theme, a
+// legacy collection tag (cleaned name, as shown) and a watch-with token.
+function browseFilmMatches(r, f) {
+  return f.textMatches(r.title) && allTvStatusMatches(r.status, f.fStatus) && themeMatchesRow(r, f.fTheme)
+    && (!f.fCollection || (r.collections || []).some(c => cleanCollectionName(c) === f.fCollection))
+    && (!f.fWatchWith || (r.watch_with || []).includes(f.fWatchWith));
+}
+
+// All Movies' Watched filter, on the stored watched flag (not the status).
+const BROWSE_WATCH_LABELS = { '': 'Any watched state', unwatched: 'Unwatched only', watched: 'Watched only' };
+function browseWatchMatches(r, fWatch) {
+  return fWatch === 'unwatched' ? !r.watched : fWatch === 'watched' ? !!r.watched : true;
+}
+
+// ─── Filter values of the derived and browse views ───────────────────────────
+// A view's filter values are kept for the visit (viewFilterMemory): a redraw (a
+// presentation, media or other change, Retry) puts every value back, including
+// those of a control the current mode doesn't show, which doesn't filter while
+// hidden. A fresh entry starts from the view's defaults; Back puts back the
+// values the view had when a collection was opened from it.
+const VIEW_FILTER_IDS = ['fSearch', 'fSource', 'fStatus', 'fWatch', 'fTheme', 'fCollection', 'fWatchWith', 'fProgress'];
+
+function currentViewFilters(tag) {
+  const values = viewFilterMemory.tag === tag ? { ...viewFilterMemory.values } : {};
+  VIEW_FILTER_IDS.forEach(id => { const el = document.getElementById(id); if (el) values[id] = el.value; });
+  return values;
+}
+
+// Before the filter row is redrawn: whether this is a redraw of the same view
+// (or Back), and the values its new controls get.
+function viewFilterStart(tag, filtersRowEl, defaults = {}) {
+  const restored = takeBackNavFilters(activeViewId);
+  const keepState = filtersRowEl.dataset.tab === tag || !!restored;
+  return { restored, keepState, values: { ...defaults, ...(restored || (keepState ? currentViewFilters(tag) : {})) } };
+}
+
+// Before a loader clears the filter row (reload, Retry, a refresh): the visit keeps the
+// controls' current values. Only for this view's own controls, and only once the visit
+// has drawn them: a fresh entry (switchView reset the memory) or another view's row keeps nothing.
+function holdViewFilters(viewId) {
+  const tag = `view:${viewId}`;
+  if (viewFilterMemory.tag !== tag || document.getElementById('filtersRow').dataset.tab !== tag) return;
+  viewFilterMemory = { tag, values: currentViewFilters(tag) };
+}
+
+// After it is drawn: each shown control takes its value (a choice it doesn't offer
+// leaves its default), and the visit remembers them all.
+function applyViewFilters(tag, values) {
+  for (const [id, value] of Object.entries(values)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === value)) continue;
+    el.value = value;
+  }
+  viewFilterMemory = { tag, values: { ...values } };
+}
+
 // ─── Navigation ───────────────────────────────────────────────────────────────
 // Opens a collection. Back returns to where it was opened from: the same view
 // with its filters, or the area's first view when that was a legacy tab (whose
@@ -214,13 +277,7 @@ function openBrowseCollection(id) {
   if (!browseCollectionOf(id)) return;
   if (!isBrowseCollectionView(activeViewId)) {
     const safeView = activeViewId && !isBrowseCollectionView(activeViewId) ? activeViewId : null;
-    const filters = {};
-    if (safeView) {
-      ['fSearch', 'fSource', 'fStatus'].forEach(f => {
-        const el = document.getElementById(f);
-        if (el) filters[f] = el.value;
-      });
-    }
+    const filters = safeView ? currentViewFilters(`view:${safeView}`) : {};
     browseOrigin = { mediaType: activeMediaType, viewId: safeView, filters };
   }
   switchView(id);
@@ -389,9 +446,10 @@ async function loadBrowseView() {
   const seq = ++browseLoadSeq;
   browseData = null;
   document.getElementById('statsRow').innerHTML = '';
-  const filtersRowEl = document.getElementById('filtersRow');
-  filtersRowEl.innerHTML = '';
-  filtersRowEl.dataset.tab = '';
+  // The filter row's view tag stays: Retry (or a refresh) puts this visit's filters back
+  // (viewFilterMemory, holding the current controls first); a fresh entry has already reset them (switchView).
+  holdViewFilters(viewId);
+  document.getElementById('filtersRow').innerHTML = '';
   document.getElementById('viewHead').innerHTML = browseHeadHtml();
   showError('');
   paintBrowseMessage('Loading…', false);
@@ -455,20 +513,41 @@ function browseHeadHtml() {
     </div>`;
 }
 
+// What a browse view's filter choices are drawn from: every loaded show and film
+// of the view, whatever is shown, so a choice can always be changed or cleared.
+function browseFilterBase() {
+  if (!browseData || !browseData.loaded) return { shows: [], films: [] };
+  if (!isBrowseCollectionView(activeViewId)) return { shows: [], films: deriveAllMovies(browseData.rows).films };
+  if (!browseData.members) return { shows: [], films: [] };
+  return deriveBrowseCollection(browseData.rows, browseData.showsById, browseData.members, localTodayStr());
+}
+
+// Collection tag and watch-with filters for the films' existing labels (offered
+// only when some film has one). Watch-with is by token, labelled as the choice is now.
+function filmTagFiltersHtml(films) {
+  const tags = [...new Set(films.flatMap(r => (r.collections || []).map(cleanCollectionName)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const tokens = [...new Set(films.flatMap(r => r.watch_with || []).filter(Boolean))]
+    .map(t => ({ t, label: watchWithArchived(t) ? `${watchWithLabel(t)} (archived)` : watchWithLabel(t) }))
+    .sort((a, b) => a.label.localeCompare(b.label) || cmpStr(a.t, b.t));
+  const tagSelect = tags.length
+    ? `<select id="fCollection" onchange="renderTable()" aria-label="Collection tag">
+        <option value="">All collection tags</option>${tags.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+      </select>` : '';
+  const wwSelect = tokens.length
+    ? `<select id="fWatchWith" onchange="renderTable()" aria-label="Watch with">
+        <option value="">Watch with: anyone</option>${tokens.map(w => `<option value="${esc(w.t)}">${esc(w.label)}</option>`).join('')}
+      </select>` : '';
+  return tagSelect + wwSelect;
+}
+
 function renderBrowseFilters() {
   const filtersRowEl = document.getElementById('filtersRow');
   const tag = `view:${activeViewId}`;
-  const restored = takeBackNavFilters(activeViewId);
-  const keepState = filtersRowEl.dataset.tab === tag || !!restored;
-  const savedValues = restored ? { ...restored } : {};
-  if (keepState && !restored) {
-    ['fSearch', 'fSource', 'fStatus'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) savedValues[id] = el.value;
-    });
-  }
-  const wasCollapsed = filtersRowEl.classList.contains('collapsed');
   const dest = isBrowseCollectionView(activeViewId);
+  // All Movies opens on Unwatched only; a changed choice is kept for the visit and by Back.
+  const { restored, keepState, values } = viewFilterStart(tag, filtersRowEl, dest ? {} : { fWatch: 'unwatched' });
+  const wasCollapsed = filtersRowEl.classList.contains('collapsed');
+  const base = browseFilterBase();
   const mediaToggle = dest
     ? `<div class="view-toggle" role="group" aria-label="Media">${Object.entries(BROWSE_MEDIA_LABELS).map(([media, label]) =>
         `<button class="view-toggle-btn${browseMedia === media ? ' active' : ''}" data-media="${media}" aria-pressed="${browseMedia === media}" onclick="setBrowseMedia('${media}')">${label}</button>`).join('')}</div>`
@@ -491,6 +570,14 @@ function renderBrowseFilters() {
     : `<select id="fSource" onchange="renderTable()" aria-label="Stored in">
         <option value="">All sources</option>${COLLECTIONS.map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
       </select>`;
+  const watchSelect = dest
+    ? ''
+    : `<select id="fWatch" onchange="renderTable()" aria-label="Watched">${Object.entries(BROWSE_WATCH_LABELS).map(([value, text]) =>
+        `<option value="${value}"${value === 'unwatched' ? ' selected' : ''}>${text}</option>`).join('')}</select>`;
+  const themes = base.shows.flatMap(x => x.seasons.map(r => r.theme)).concat(base.films.map(r => r.theme));
+  const themeSelect = themeFilterSelectHtml(themes, 'All genres / themes', 'Genre or theme');
+  // The films' labels: only while films are shown (a collection's TV only hides them, and they don't filter then).
+  const tagFilters = !dest || browseMedia !== 'tv' ? filmTagFiltersHtml(base.films) : '';
   document.getElementById('viewHead').innerHTML = browseHeadHtml();
   // .browse-controls scopes the larger phone touch targets to these views (All TV's toggle is unchanged).
   filtersRowEl.innerHTML = `${dest ? `<div class="browse-controls">${mediaToggle}${layoutToggles}</div>` : ''}
@@ -505,7 +592,7 @@ function renderBrowseFilters() {
         <option value="">All (except Skipped)</option>
         <option value="all">All statuses</option>
         ${TV_STATUS_ORDER.map(s => `<option value="${s}">${esc(statusOptionLabel(s))}${s === 'skipped' ? '' : ' only'}</option>`).join('')}
-      </select>${seasonVisSelect}
+      </select>${watchSelect}${themeSelect}${tagFilters}${seasonVisSelect}
     </div>
   `;
   filtersRowEl.dataset.tab = tag;
@@ -515,15 +602,8 @@ function renderBrowseFilters() {
   tmdbPanel.style.display = 'none';
   tmdbPanel.innerHTML = '';
 
-  if (keepState) {
-    for (const [id, value] of Object.entries(savedValues)) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === value)) continue;
-      el.value = value;
-    }
-    if (!restored && filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
-  }
+  applyViewFilters(tag, values);
+  if (keepState && !restored && filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
@@ -532,12 +612,13 @@ function renderBrowseTable() {
   const thead = document.getElementById('tableHead');
   if (thead) thead.innerHTML = `<tr><th>Title</th><th>Source</th><th>Next / Release</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`;
   const today = localTodayStr();
-  const q = document.getElementById('fSearch')?.value.trim().toLowerCase() || '';
-  const fStatus = document.getElementById('fStatus')?.value || '';
-  const textMatches = title => !q || (title || '').toLowerCase().includes(q);
+  const val = id => document.getElementById(id)?.value || ''; // a control that isn't shown doesn't filter
+  const q = val('fSearch').trim().toLowerCase();
+  const f = { textMatches: title => !q || (title || '').toLowerCase().includes(q), fStatus: val('fStatus'),
+    fTheme: val('fTheme'), fCollection: val('fCollection'), fWatchWith: val('fWatchWith') };
   const dest = currentBrowseDest();
-  if (isBrowseCollectionView(activeViewId)) { if (dest) renderBrowseCollection(dest, today, textMatches, fStatus); }
-  else renderAllMovies(today, textMatches, fStatus, document.getElementById('fSource')?.value || '');
+  if (isBrowseCollectionView(activeViewId)) { if (dest) renderBrowseCollection(dest, today, f); }
+  else renderAllMovies(today, { ...f, fSource: val('fSource'), fWatch: val('fWatch') });
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -561,10 +642,10 @@ function browseSectionHtml(label, count) {
 // (Shows; Movies only) or chronological (Seasons) with TBA and Date needs review
 // apart. Counts keep shows, season entries and films apart and don't depend on
 // grouping. Status is the show's for TV and the film's own.
-function renderBrowseCollection(dest, today, textMatches, fStatus) {
+function renderBrowseCollection(dest, today, f) {
   const base = deriveBrowseCollection(browseData.rows, browseData.showsById, browseData.members, today);
   const v = deriveBrowsePresentation(base, { media: browseMedia, presentation: browsePresentation, grouping: browseGrouping,
-    seasonVis: browseSeasonVis, textMatches, fStatus });
+    seasonVis: browseSeasonVis, ...f });
   const { counts } = v;
 
   const stats = [];
@@ -582,6 +663,9 @@ function renderBrowseCollection(dest, today, textMatches, fStatus) {
   }
   if (base.unclassified > 0) {
     add(browseNoteHtml(`⚠️ ${plural(base.unclassified, 'saved entry here is', 'saved entries here are')} neither a TV season nor a film, so ${base.unclassified === 1 ? 'it isn’t' : 'they aren’t'} listed.`));
+  }
+  if (v.withTv && (f.fCollection || f.fWatchWith)) {
+    add(browseNoteHtml('Only films carry collection tags and watch-with choices, so no TV is listed while one of those filters is set.'));
   }
   // Only a choice that narrows by watched or skipped state; the default and All don't need it.
   if (v.seasons && v.withFilms && ['towatch', 'watched', 'skipped'].includes(browseSeasonVis)) {
@@ -642,12 +726,18 @@ function browseSubsectionHtml(name, label, count) {
   return { row: `<tr class="browse-subsection-row"><td colspan="6">${btn}</td></tr>`, card: `<div class="browse-subsection-card">${btn}</div>` };
 }
 
-function renderAllMovies(today, textMatches, fStatus, fSource) {
+// The totals count the films that pass every filter but Watched (so Unwatched only
+// doesn't zero Watched); Shown counts what the list holds.
+function renderAllMovies(today, f) {
   const { films, unclassified } = deriveAllMovies(browseData.rows);
-  const shown = films.filter(r => (!fSource || r.collection === fSource) && textMatches(r.title) && allTvStatusMatches(r.status, fStatus));
+  const matching = films.filter(r => (!f.fSource || r.collection === f.fSource) && browseFilmMatches(r, f));
+  const shown = matching.filter(r => browseWatchMatches(r, f.fWatch));
+  const watched = matching.filter(r => r.watched).length;
   document.getElementById('statsRow').innerHTML = derivedStatsHtml([
-    [shown.length, shown.length === 1 ? 'Film' : 'Films'],
-    [shown.filter(r => r.watched).length, 'Watched']
+    [shown.length, 'Shown'],
+    [matching.length, matching.length === 1 ? 'Film' : 'Films'],
+    [watched, 'Watched'],
+    [matching.length - watched, 'To watch']
   ]);
   let html = '', cardHtml = '';
   const add = out => { html += out.row; cardHtml += out.card; };
@@ -673,8 +763,9 @@ function browseDateHtml(r, today) {
   return `${esc(r.display_date)}${r.date_sort > today ? '<span class="upcoming-tag">Upcoming</span>' : ''}`;
 }
 
+// The stored watched state as a label (not a control: these views change nothing).
 function browseWatchedHtml(watched) {
-  return watched ? '<span class="ro-watched">✓ Watched</span>' : '<span class="confirmed-lbl">Not watched</span>';
+  return watched ? '<span class="ro-watch watched">✓ Watched</span>' : '<span class="ro-watch">Not watched</span>';
 }
 
 // A show: its status, progress and what's next, as text; a labelled button
@@ -687,7 +778,7 @@ function browseShowHtml(item, today, combined) {
   const isExpanded = expandedShows.has(key);
   const keyArg = esc(key).replace(/'/g, "\\'");
   const theme = (upNext || seasons[0]).theme;
-  const badges = `${sourceBadgeHtml(item.collection)} ${themeBadgeHtml(item.collection, theme)}`;
+  const badges = `${sourceBadgeHtml(item.collection)} ${themeBadgeHtml(item.collection, theme, key)}`;
   const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;
   const skippedCount = seasons.length - trackable.length;
@@ -749,7 +840,7 @@ function browseShowHtml(item, today, combined) {
 function browseSeasonEntryHtml(e, today, combined) {
   const { row: r, show } = e;
   const dimClass = show.status === 'skipped' || r.skipped ? 'row-skipped' : show.status === 'maybe' ? 'row-maybe' : '';
-  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme)}`;
+  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme, r.id)}`;
   const kindTag = combined ? '<span class="ro-tag">TV</span>' : '';
   const statusHtml = browseStatusPillHtml(show.status, `Show status — applies to every season of ${show.title}`);
   const skippedHtml = r.skipped ? '<span class="ro-tag">Season skipped</span>' : '';
@@ -777,13 +868,13 @@ function browseSeasonEntryHtml(e, today, combined) {
   return { row, card };
 }
 
-// A film: the row's own status and watched state; its existing tags and
-// watch-with labels as plain text.
+// A film: the row's own status and watched state; its existing collection tags and
+// watch-with choices as filter pills (they filter the list; they change nothing).
 function browseFilmHtml(r, today) {
   const dimClass = r.status === 'skipped' ? 'row-skipped' : r.status === 'maybe' ? 'row-maybe' : '';
-  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme)}`;
-  const labels = [...(r.collections || []).map(cleanCollectionName), ...(r.watch_with || []).map(w => `With ${watchWithLabel(w)}`)];
-  const labelsHtml = labels.length ? `<div class="ro-labels">${labels.map(l => `<span class="ro-label">${esc(l)}</span>`).join('')}</div>` : '';
+  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme, r.id)}`;
+  const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
+  const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
   const statusHtml = browseStatusPillHtml(r.status, 'Film status');
   const row = `<tr class="browse-film-row ${dimClass}">
       <td><span class="show-title">${esc(r.title)}</span><span class="season-lbl"> · Film</span>${labelsHtml}</td>
