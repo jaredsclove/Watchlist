@@ -1350,8 +1350,8 @@ Tags:
   pre-derived-views                  → e2c1c16   (local only, not pushed)
   pre-tv-shows                       → b266a5b   (local only, not pushed)
 
-Supabase:                 the production project. A temporary Stage 4a test project (synthetic data, hosted verification) is kept
-                          by the owner for release review until the owner deletes it. The temporary Stage 3b-2 test project was deleted by the owner (owner-reported, 2026-10-08). The temporary Stage 3b-1 test project (synthetic data) was deleted by the
+Supabase:                 the production project. The temporary Stage 4a test project (synthetic data, hosted verification) was deleted
+                          by the owner after the release review (owner-reported, 2026-10-08). The temporary Stage 3b-2 test project was deleted by the owner (owner-reported, 2026-10-08). The temporary Stage 3b-1 test project (synthetic data) was deleted by the
                           owner on 2026-10-06; the TV-migration test project was deleted by the owner on 2026-10-05. Local rehearsals: tools/db-rehearsal.mjs, tools/db-rehearsal-3b.mjs and tools/db-rehearsal-3b2.mjs on PGlite.
 
 refresh-catalogs:         skill updated for Stage 4a in both copies (2026-10-08), identical, SHA-256
@@ -1758,7 +1758,7 @@ All 31 legacy shows were reviewed against TMDB (and fresh web evidence where a h
 ### Next
 
 - **Stage 4a is released** (2026-10-08, above). **Next: the first catalog application** through Catalog updates, when a refresh (or a pending entry) needs it, under the `/refresh-catalogs` gates; then **Stage 4b (tab retirement)**, which needs its own plan and approval.
-- **Owner housekeeping:** the temporary Stage 4a test project is kept for release review until the owner deletes it.
+- **Owner housekeeping:** the temporary Stage 4a test project was deleted by the owner after the release review (owner-reported, 2026-10-08).
 - **List filters (`90738a8`) are deployed and verified** (2026-10-08, above).
 - **Stage 3b-2 is released** (2026-10-08) and its release freeze is **lifted** by the owner; the skill stays user-invoked only, and lifting the freeze authorized no refresh.
 - **Owner housekeeping:** the temporary Stage 3b-2 test project was deleted by the owner (owner-reported, 2026-10-08); the first real organization edit is the first production use of the write path (above).
