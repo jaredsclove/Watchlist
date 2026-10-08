@@ -13,6 +13,16 @@
 -- Errors are raised with a stable prefix the app can map to messages:
 --   invalid_input, not_found, not_available, integrity_fault, match_conflict.
 
+-- Stage 4a guard: with Stage 4a installed (db/phase4a_catalog.sql), re-running this
+-- file would replace the refusing seed_tv_defaults with the old tab-open seeding for
+-- every open page of an earlier app version. Refuse before anything runs; the
+-- supported sequence is in db/README.md ("Stage 4a maintenance").
+do $$ begin
+  if to_regprocedure('public.catalog_apply(text, jsonb, text)') is not null then
+    raise exception 'rpc.sql: Stage 4a is installed; re-running this file would restore tab-open seeding. Follow "Stage 4a maintenance" in db/README.md.';
+  end if;
+end $$;
+
 create or replace function private.tv_require_stage(p_function text, variadic p_stages text[]) returns text
 language plpgsql stable set search_path = '' as $$
 declare v text := private.tv_stage();

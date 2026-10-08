@@ -17,6 +17,8 @@ production step needs explicit approval and a fresh validated backup first.
 | Rollback 3b-1 | `rollback/phase3b.sql` | Refuses unless the organization is exactly what the old model holds; then removes it and puts back the previous `restore_backup` and `match_tv_row` |
 | Stage 3b-2 | `phase3b2_org_write.sql` (stage `final`, after Stage 3b-1) | Functions only: `org_capabilities` (read-only) and owner-scoped write functions for collections, memberships (whole show or film, the show or film locked first) and watch-with choices; an UPDATE that newly adds an archived watch-with choice is refused (rows keep the ones they have; an INSERT may carry them, so restore stays exact); one transaction |
 | Rollback 3b-2 | `rollback/phase3b2.sql` | Drops the 3b-2 functions and puts back the Stage 3b-1 watch-with check verbatim; keeps every row and every edit (the database then no longer refuses newly added archived choices) |
+| Stage 4a | `phase4a_catalog.sql` (stage `final`, after Stage 3b-2) | Functions and one trigger: `catalog_apply` (preview by an always-rolled-back run; apply only when the hash of the effects it performs equals the approved hash; returns the effects document and the execution receipt), the former seeding logic moved to `private.catalog_insert_missing`, `seed_tv_defaults` replaced by a refusal (`catalog_apply_required`), and `catalog_date_guard` (built-in rows' dates change only inside `catalog_apply`'s date step, or an admin transaction that sets `watchlist.catalog_date_write` deliberately); no table or row change; one transaction. After Stage 4a, `rpc.sql` refuses to run (its first statement checks for `catalog_apply`), because it would put the old tab-open `seed_tv_defaults` back for every open old page; see "Stage 4a maintenance" below |
+| Rollback 4a | `rollback/phase4a.sql` | Drops the 4a functions and trigger and restores `seed_tv_defaults` verbatim from `rpc.sql`; keeps every row. **Re-enables implicit writes for every open old page immediately**: a separate owner decision, paired with reverting the refresh-catalogs copies |
 | Future sign-in | `future/auth_switchover.sql` | Not part of this migration (covers the Stage 3b-1 tables) |
 
 `test/` is for test projects and local runs only: `replica_schema.sql` (the
@@ -40,4 +42,20 @@ Rehearsals:
 - Stage 3b-2, local: `PGLITE_DIR=<dir> node tools/db-rehearsal-3b2.mjs <format-2 or format-3 backup.json> [--export-edited <out.json>]`
   (replica with Stage 3b-1, migration, `test/t_3b2_org.sql` and `test/t_3b_org.sql`, refused replay, edits, rollback back to
   the Stage 3b-1 catalog with the edits kept, re-apply). One session: it doesn't show how two sessions interleave.
+- Stage 4a, local: `PGLITE_DIR=<dir> node tools/db-rehearsal-4a.mjs <format-3 backup.json> [--evidence <dir>]` (replica with
+  Stage 3b-2, migration, `test/t_4a_catalog.sql`, refused replay, every built-in catalog previewed twice and after a restore
+  with shuffled rows, the app's payload hash compared with the database's, rollback back to the exact pre-4a catalog with
+  data unchanged, re-apply). One session: lock waits, `catalog_busy` and deadlocks between sessions need two real
+  connections. `node tools/catalog-payload-hash.mjs [commit]` prints each catalog's payload hash at a commit.
 - Model vs reference on a test project: `node tools/tv-model-expectations.mjs <backup.json>` prints a self-check script.
+
+## Stage 4a maintenance
+
+- With Stage 4a installed, `rpc.sql` refuses to run, so it can't silently re-enable tab-open seeding.
+- If a TV function in `rpc.sql` ever has to be reinstalled on a 4a database, that is a separately approved change with its own
+  plan. The only supported sequence is: `rollback/phase4a.sql` (this re-enables tab-open seeding and old pages' date writes
+  immediately), `rpc.sql`, then `phase4a_catalog.sql`, each run in full in the SQL Editor (a failed statement stops the run),
+  one after the other in one maintenance window, with both refresh-catalogs copies and the app version accounted for, and a
+  check afterwards that `seed_tv_defaults` refuses and the date guard is present. Never run `rpc.sql` with a client that
+  continues after an error.
+
