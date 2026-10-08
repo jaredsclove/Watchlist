@@ -132,16 +132,18 @@ test('Movies → TV always lands on Currently Watching; Movies opens on All Movi
   assert.strictEqual(app.get('activeTabId'), null);
 });
 
-test('real collection tabs still load (and static tabs still seed) as before', async () => {
+test('real collection tabs still load; opening a built-in tab only reads (Stage 4a) and says what the catalog would add', async () => {
   const app = await createApp();
   const defaults = app.get("COLLECTIONS.find(c => c.id === 'disney').defaults.length");
   await openTab(app, 'disney');
-  const posts = app.writes().filter(r => r.method === 'POST');
-  assert.strictEqual(posts.length, 1, 'opening Disney+ seeds its defaults');
-  assert.ok(posts[0].url.endsWith('/rpc/seed_tv_defaults'), 'TV defaults are seeded through seed_tv_defaults');
-  assert.strictEqual(posts[0].body.p_collection, 'disney');
-  assert.strictEqual(posts[0].body.p_defaults.length, defaults);
-  // Every default lands once, TV seasons linked to a show, films unlinked, today's row statuses.
+  assert.deepStrictEqual(app.writes(), [], 'opening Disney+ writes nothing');
+  assert.ok(app.el('banner').innerHTML.includes(`${defaults} catalog entries are waiting`) && app.el('banner').innerHTML.includes("openCatalogUpdates('disney'"), app.el('banner').innerHTML);
+  // After an explicit application every default lands once, TV seasons linked to a show, films unlinked, today's row statuses.
+  await app.applyCatalog('disney');
+  app.run('delete tabData.disney'); // applied outside the page: read the tab again
+  app.ctx.switchTab('othertv'); await settle();
+  await openTab(app, 'disney');
+  assert.strictEqual(app.el('banner').innerHTML, '', 'nothing waiting once applied');
   const seeded = app.store.watchlist_items.filter(r => r.collection === 'disney');
   assert.strictEqual(seeded.length, defaults);
   assert.strictEqual(app.get('tabData.disney.rows.length'), defaults);

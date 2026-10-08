@@ -1,5 +1,5 @@
 // Offline tests for the app's TV writes on the first-class show model: TV
-// structural writes (seeding defaults, Refresh shows, TMDB search add, manual
+// structural writes (an explicit catalog application, Refresh shows, TMDB search add, manual
 // Add entry, Match to TMDB, Delete) go through the database functions, which
 // link every new season to its show and reopen a Complete show that gets a
 // genuinely new season; show status, Watched and Skip go through their functions;
@@ -51,10 +51,11 @@ test('manual TV season → add_tv_seasons with the legacy show key; the season i
 
 test('manual "The Clone Wars" season on Disney+ joins the overridden show key', async () => {
   const app = await createApp();
+  await app.applyCatalog('disney'); // the owner applied the Disney+ catalog (Stage 4a)
   await addManual(app, 'disney', 'The Clone Wars', 'Season 8');
   const call = app.writes().find(r => r.url.endsWith('/rpc/add_tv_seasons'));
   assert.strictEqual(call.body.p_show.show_key, 'star wars: the clone wars (2008)');
-  // Opening Disney+ seeded its defaults, including the Clone Wars seasons: Season 8 joins that same show.
+  // The applied catalog holds the Clone Wars seasons: Season 8 joins that same show.
   const cw = app.store.tv_shows.filter(s => s.show_key === 'star wars: the clone wars (2008)');
   assert.strictEqual(cw.length, 1);
   const s8 = app.store.watchlist_items.find(r => r.item_key === 'the clone wars|season 8');
@@ -119,12 +120,13 @@ test('deleting a movie is a plain DELETE; × on a built-in TV season skips it (s
   await app.ctx.delRow('m'); await settle();
   assert.deepStrictEqual(writes(app), ['DELETE watchlist_items']);
   const app2 = await createApp();
+  await app2.applyCatalog('disney');
   await openTab(app2, 'disney');
   const def = app2.get('tabData.disney.rows').find(r => r.season !== 'Film');
   const defFilm = app2.get('tabData.disney.rows').find(r => r.season === 'Film');
   await app2.ctx.delRow(def.id); await settle();
   await app2.ctx.delRow(defFilm.id); await settle();
-  assert.deepStrictEqual(writes(app2), ['POST rpc/seed_tv_defaults', 'POST rpc/set_season_skipped', 'PATCH watchlist_items']);
+  assert.deepStrictEqual(writes(app2), ['POST rpc/set_season_skipped', 'PATCH watchlist_items'], 'opening the tab wrote nothing');
   const stored = id => app2.store.watchlist_items.find(r => r.id === id);
   assert.strictEqual(stored(def.id).skipped, true, 'the season is skipped, nothing deleted');
   assert.strictEqual(stored(defFilm.id).status, 'skipped');
@@ -209,7 +211,7 @@ test('TMDB search: a film on True Crime / Docs stays a direct insert with no tra
 });
 
 // ── Seeding built-in defaults ──
-test('seeding sends only the defaults the old rule finds missing; a key held by an identified row is not re-seeded', async () => {
+test('opening a tab never seeds; an explicit catalog application adds only the defaults missing by the old rule; a key held by an identified row is not re-added', async () => {
   const app0 = await createApp();
   const defaults = app0.get("COLLECTIONS.find(c => c.id === '90day').defaults");
   const [d0, d1] = defaults;
@@ -218,17 +220,19 @@ test('seeding sends only the defaults the old rule finds missing; a key held by 
     tv({ id: 'i1', collection: '90day', item_key: d1.k, title: d1.t, tmdb_id: 4242, season_number: Number(/\d+/.exec(d1.s)[0]), season: d1.s, show_id: null })
   ] });
   await openTab(app, '90day');
-  const call = app.writes().find(r => r.url.endsWith('/rpc/seed_tv_defaults'));
-  assert.strictEqual(call.body.p_defaults.length, defaults.length - 2);
-  assert.ok(!call.body.p_defaults.some(d => d.k === d0.k || d.k === d1.k));
-  assert.strictEqual(app.get("tabData['90day'].rows.length"), defaults.length);
+  assert.deepStrictEqual(app.writes(), [], 'opening the tab wrote nothing');
+  assert.strictEqual(app.get("tabData['90day'].rows.length"), 2);
+  const a = await app.applyCatalog('90day');
+  assert.strictEqual(a.document.entries.filter(e => e.kind === 'insert_season' || e.kind === 'insert_film').length, defaults.length - 2);
+  assert.ok(!a.document.entries.some(e => (e.kind === 'insert_season' || e.kind === 'insert_film') && (e.item_key === d0.k || e.item_key === d1.k)));
+  assert.strictEqual(app.store.watchlist_items.filter(r => r.collection === '90day').length, defaults.length);
   assert.strictEqual(app.store.watchlist_items.filter(r => r.item_key === d1.k).length, 1, 'no legacy twin of the identified row');
 });
 
 test('a fully seeded tab makes no write at all on load', async () => {
   const app0 = await createApp();
-  await openTab(app0, 'sheridan');
-  const app = await createApp({ rows: app0.store.watchlist_items });
+  await app0.applyCatalog('sheridan');
+  const app = await createApp({ rows: app0.store.watchlist_items, tvShows: app0.store.tv_shows });
   await openTab(app, 'sheridan');
   assert.deepStrictEqual(app.writes(), []);
 });
@@ -238,7 +242,7 @@ test('a fully seeded tab makes no write at all on load', async () => {
 // TMDB (identity only) and one built-in season of each is missing again.
 async function enrichedSheridan() {
   const app0 = await createApp();
-  await openTab(app0, 'sheridan');
+  await app0.applyCatalog('sheridan');
   const rows = app0.store.watchlist_items, shows = app0.store.tv_shows;
   const enrich = (key, tmdb) => {
     const show = shows.find(x => x.show_key === key);
@@ -254,18 +258,21 @@ async function enrichedSheridan() {
   const app = await createApp({ rows: rows.filter(r => !drop.has(r.id)), tvShows: shows });
   return { app, landman, mayor, showCount: shows.length };
 }
-test('a missing built-in season of a TMDB-matched show rejoins it as that TMDB season; a non-"Season N" one is held for review', async () => {
+test('a missing built-in season of a TMDB-matched show rejoins it as that TMDB season; a non-"Season N" one is excluded for review', async () => {
   const { app, landman, mayor, showCount } = await enrichedSheridan();
   await openTab(app, 'sheridan');
+  assert.deepStrictEqual(app.writes(), [], 'opening the tab wrote nothing');
+  const a = await app.applyCatalog('sheridan');
   const back = app.store.watchlist_items.find(r => r.item_key === 'landman|season 3');
   assert.ok(back && back.show_id === landman.id && back.tmdb_id === 157741 && back.season_number === 3 && back.media_type === 'tv', JSON.stringify(back));
   assert.ok(!app.store.watchlist_items.some(r => r.show_id === mayor.id && /Final/.test(r.season)), '"Season 5 (Final)" not added');
   assert.strictEqual(app.store.tv_shows.length, showCount, 'no second show');
-  const b = app.el('banner').innerHTML;
-  assert.ok(/needs review/.test(b) && /Season 5 \(Final\)/.test(b) && /Mayor of Kingstown/.test(b), b);
+  const excluded = a.document.entries.filter(e => e.kind === 'excluded_conflict');
+  assert.ok(excluded.some(e => e.reason === 'enriched_show_label' && /^mayor of kingstown\|/.test(e.item_key)), JSON.stringify(excluded));
 });
 test('manual Add entry on a built-in tab: a plain "Season N" of a matched show joins it; "Season 4 (Part 1)" is refused for review', async () => {
   const { app, landman, showCount } = await enrichedSheridan();
+  await app.applyCatalog('sheridan');
   await addManual(app, 'sheridan', 'Landman', 'Season 4');
   const s4 = app.store.watchlist_items.find(r => r.item_key === 'landman|season 4');
   assert.ok(s4 && s4.show_id === landman.id && s4.tmdb_id === 157741 && s4.season_number === 4, JSON.stringify(s4));
@@ -318,9 +325,9 @@ test('a request whose seasons are all already listed: "Already on your list.", n
   assert.ok(banner(app).includes('Added 1 season; 1 already on your list.'), banner(app));
 });
 
-test('seeding a new built-in season into a Complete show reopens it; a Skipped show stays Skipped', async () => {
+test('applying a catalog with a new built-in season reopens a Complete show; a Skipped show stays Skipped', async () => {
   const app0 = await createApp();
-  await openTab(app0, '90day');
+  await app0.applyCatalog('90day');
   const all = app0.store.watchlist_items, shows = app0.store.tv_shows;
   // Two multi-season shows: drop one season of each, mark one show Complete and the other Skipped.
   const multi = shows.filter(s => all.filter(r => r.show_id === s.id).length > 1).slice(0, 2);
@@ -329,9 +336,11 @@ test('seeding a new built-in season into a Complete show reopens it; a Skipped s
   const gone = [all.find(r => r.show_id === c.id), all.find(r => r.show_id === k.id)].map(r => r.id);
   const app = await createApp({ rows: all.filter(r => !gone.includes(r.id)), tvShows: shows });
   await openTab(app, '90day');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === c.id).status, 'complete', 'opening the tab changed nothing');
+  const a = await app.applyCatalog('90day');
   assert.strictEqual(app.store.tv_shows.find(s => s.id === c.id).status, 'confirmed');
   assert.strictEqual(app.store.tv_shows.find(s => s.id === k.id).status, 'skipped');
-  assert.ok(app.el('banner').innerHTML.includes(`"${c.title}" was Complete and got a new season`), app.el('banner').innerHTML);
+  assert.deepStrictEqual(a.document.entries.filter(e => e.kind === 'reopen').map(e => [e.show_id, e.from, e.to]), [[c.id, 'complete', 'confirmed']]);
 });
 
 T.run();

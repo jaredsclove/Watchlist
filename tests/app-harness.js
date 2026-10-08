@@ -13,6 +13,11 @@ const SCRIPT_FILES = [...HTML.matchAll(/<script src="([^"?]+)(?:\?[^"]*)?"><\/sc
 const INLINE_SCRIPT = HTML.match(/<script>\n([\s\S]*?)<\/script>/)[1];
 const PAGE_IDS = [...HTML.replace(/<script[\s\S]*?<\/script>/g, '').matchAll(/id="([^"]+)"/g)].map(m => m[1]);
 
+const cmpC = (a, b) => (a < b ? -1 : a > b ? 1 : 0); // code-point order, as collate "C"
+// Canonical JSON (keys by code point, arrays in order, no whitespace) and SHA-256: db/phase4a_catalog.sql's form.
+const canonical = v => v === null || v === undefined ? 'null' : Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
+  : typeof v === 'object' ? `{${Object.keys(v).filter(k => v[k] !== undefined).sort(cmpC).map(k => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}` : JSON.stringify(v);
+const sha256 = t => require('crypto').createHash('sha256').update(t, 'utf8').digest('hex');
 const settle = async (n = 20) => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
 const clone = v => JSON.parse(JSON.stringify(v));
 
@@ -151,6 +156,141 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
     if (inserted.length && authoritative() && show.status === 'complete') { show.status = 'confirmed'; reopened = true; }
     return { inserted, existing, rejected, reopened };
   }
+  function seedDefaults(coll, defs) {
+      if (!TV_COLLECTIONS.includes(coll)) throw new DbError('22023', `invalid_input: ${coll} is not a TV collection`);
+      const keys = new Set();
+      for (const d of defs) {
+        if (!String(d.k || '').includes('|') || !String(d.t || '').trim() || !String(d.s || '').trim() || !validDate(d.ds)
+            || ('p' in d && typeof d.p !== 'boolean')) throw new DbError('22023', `invalid_input: default ${JSON.stringify(d)}`);
+        if (keys.has(d.k)) throw new DbError('22023', `invalid_input: default ${d.k} listed twice`);
+        keys.add(d.k);
+      }
+      const missing = d => !items().some(r => r.collection === coll && r.tmdb_id == null && r.item_key === d.k);
+      const rowFields = d => ({ collection: coll, item_key: d.k, title: d.t, season: d.s, theme: d.th || '', display_date: d.d || '',
+        date_sort: d.ds, status: d.p ? 'pending' : 'confirmed' });
+      const inserted = [];
+      const reopened = [];
+      let showsCreated = 0;
+      const groups = new Map();
+      for (const d of defs) {
+        if (d.s === 'Film') continue;
+        const k = sqlShowKey(coll, d.k);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(d);
+      }
+      const conflicts = [];
+      const identified = [];
+      const reopenedIds = [];
+      for (const [k, ds] of groups) {
+        const enriched = enrichedFor(coll, k);
+        if (enriched) {
+          const r = addToEnriched(enriched, ds.map(d => ({ item_key: d.k, title: d.t, season: d.s, theme: d.th, display_date: d.d, date_sort: d.ds, status: d.p ? 'pending' : 'confirmed' })));
+          inserted.push(...r.inserted); conflicts.push(...r.rejected); identified.push(...r.existing);
+          if (r.reopened) reopenedIds.push(enriched.id);
+          continue;
+        }
+        const todo = ds.filter(missing);
+        if (!todo.length) continue;
+        const title = (ds.find(d => d.k.split('|')[0] === k) || ds[0]).t;
+        const { show, created } = lockOrCreateShow(coll, null, k, title, ds.every(d => d.p === true) ? 'pending' : 'confirmed');
+        if (created) showsCreated++;
+        for (const d of todo) inserted.push(insertRow({ ...rowFields(d), show_id: show.id }));
+        if (!created && authoritative() && show.status === 'complete') { show.status = 'confirmed'; reopened.push(show.id); }
+      }
+      for (const d of defs) if (d.s === 'Film' && missing(d)) inserted.push(insertRow(rowFields(d)));
+      inserted.sort((a, b) => a.date_sort.localeCompare(b.date_sort) || a.item_key.localeCompare(b.item_key));
+      return { inserted: clone(inserted), shows_created: showsCreated, reopened: [...reopened, ...reopenedIds], conflicts, identified };
+    }
+
+  // Stage 4a: public.catalog_apply as db/phase4a_catalog.sql defines it, written
+  // independently of the app: the former seed logic, TBA date fills, reopen,
+  // membership reconciliation for an archived target, the effects document and
+  // its hash (canonical JSON, SHA-256), preview by undoing every write, apply
+  // only when the effects hash equals p_approved (catalog_stale otherwise), and
+  // the execution receipt.
+  function catalogApply({ p_collection: coll, p_defaults: defs, p_approved: approved }) {
+    if (!BUILTIN.includes(coll)) throw new DbError('22023', `invalid_input: ${coll} has no built-in catalog`);
+    if (app.catalogBusyNext) { app.catalogBusyNext--; throw new DbError('P0001', 'catalog_busy: The database was busy, so nothing was changed. Review again in a moment.'); }
+    const snap = { w: clone(items()), s: clone(shows()), m: clone(store.collection_memberships || []) };
+    const undo = () => { store.watchlist_items = snap.w; store.tv_shows = snap.s; if (store.collection_memberships) store.collection_memberships = snap.m; };
+    const pre = Object.fromEntries(shows().filter(x => x.collection === coll).map(x => [x.id, x.status]));
+    const showIdsBefore = new Set(shows().map(x => x.id));
+    const target = (store.personal_collections || []).find(c => c.legacy_source === coll) || null;
+    const fills = [];
+    for (const d of defs) for (const w of items().filter(r => r.collection === coll && r.item_key === d.k)) {
+      if (/tba/i.test(w.display_date || '') && !/tba/i.test(d.d || '')) {
+        fills.push({ row_id: w.id, item_key: w.item_key, is_film: isFilmRow(w), show_id: w.show_id, old_display: w.display_date, old_sort: w.date_sort,
+          new_display: d.d, new_sort: d.ds, watched: !!w.watched, skipped: !!w.skipped, status: w.status });
+      }
+    }
+    fills.sort((a, b) => cmpC(a.row_id, b.row_id));
+    // Only defaults whose key no row of this tab holds (the tab-open rule, as the SQL does).
+    const heldKeys = new Set(items().filter(r => r.collection === coll).map(r => r.item_key));
+    let res;
+    try { res = seedDefaults(coll, defs.filter(d => !heldKeys.has(d.k))); } catch (e) { undo(); throw e; }
+    for (const f of fills) { const w = items().find(r => r.id === f.row_id); w.display_date = f.new_display; w.date_sort = f.new_sort; }
+    const insertedRows = res.inserted.map(r => items().find(x => x.id === r.id));
+    const created = shows().filter(x => !showIdsBefore.has(x.id)).sort((a, b) => cmpC(a.show_key, b.show_key) || cmpC(a.id, b.id));
+    const refs = {};
+    created.forEach((x, i) => { refs[x.id] = `S${i + 1}`; });
+    insertedRows.filter(isFilmRow).sort((a, b) => cmpC(a.item_key, b.item_key) || cmpC(a.id, b.id)).forEach((r, i) => { refs[r.id] = `F${i + 1}`; });
+    const entries = [], receipt = {};
+    for (const x of created) {
+      entries.push({ kind: 'create_show', key: `create_show:${refs[x.id]}`, ref: refs[x.id], show_key: x.show_key, title: x.title, tmdb_id: x.tmdb_id ?? null, initial_status: x.status });
+      receipt[`create_show:${refs[x.id]}`] = { show_id: x.id };
+    }
+    const attached = new Set(insertedRows.filter(r => !isFilmRow(r) && !refs[r.show_id]).map(r => r.show_id));
+    for (const id of attached) { const x = shows().find(y => y.id === id); entries.push({ kind: 'attach', key: `attach:${id}`, show_id: id, show_key: x.show_key, status: pre[id] }); }
+    for (const r of insertedRows) {
+      if (isFilmRow(r)) {
+        entries.push({ kind: 'insert_film', key: `insert_film:${refs[r.id]}`, ref: refs[r.id], item_key: r.item_key, title: r.title, season: r.season, theme: r.theme,
+          display_date: r.display_date, date_sort: r.date_sort, status: r.status, watched: !!r.watched, media_type: r.media_type ?? null, tmdb_id: r.tmdb_id ?? null });
+        receipt[`insert_film:${refs[r.id]}`] = { row_id: r.id };
+      } else {
+        const sk = shows().find(y => y.id === r.show_id).show_key;
+        entries.push({ kind: 'insert_season', key: `insert_season:${sk}|${r.item_key}`, show: refs[r.show_id] || r.show_id, item_key: r.item_key, title: r.title,
+          season: r.season, theme: r.theme, display_date: r.display_date, date_sort: r.date_sort, status: r.status, watched: !!r.watched, skipped: !!r.skipped,
+          media_type: r.media_type ?? null, tmdb_id: r.tmdb_id ?? null, season_number: r.season_number ?? null });
+        receipt[`insert_season:${sk}|${r.item_key}`] = { row_id: r.id, show_id: r.show_id };
+      }
+    }
+    for (const f of fills) {
+      entries.push({ kind: 'fill_date', key: `fill_date:${f.row_id}`, row_id: f.row_id, item_key: f.item_key, item: f.is_film ? 'film' : 'season', show_id: f.show_id ?? null,
+        old_display: f.old_display, old_sort: f.old_sort, new_display: f.new_display, new_sort: f.new_sort,
+        tracking: f.is_film ? { watched: f.watched, status: f.status } : { watched: f.watched, skipped: f.skipped, show_status: pre[f.show_id] ?? null } });
+      receipt[`fill_date:${f.row_id}`] = { row_id: f.row_id };
+    }
+    for (const id of res.reopened) {
+      const cause = insertedRows.filter(r => r.show_id === id).map(r => r.item_key).sort(cmpC)[0];
+      entries.push({ kind: 'reopen', key: `reopen:${id}`, show_id: id, from: pre[id], to: 'confirmed', cause });
+      receipt[`reopen:${id}`] = { show_id: id };
+    }
+    for (const [id, ref] of Object.entries(refs).sort((a, b) => cmpC(a[1], b[1]))) {
+      let memId = null;
+      if (target && target.archived_at) {
+        store.collection_memberships = store.collection_memberships.filter(m => !(m.collection_id === target.id && (m.show_id === id || m.item_id === id)));
+      } else if (target) {
+        memId = ((store.collection_memberships || []).find(m => m.collection_id === target.id && (m.show_id === id || m.item_id === id)) || {}).id || null;
+      }
+      entries.push({ kind: 'membership', key: `membership:${ref}`, ref, collection_id: target ? target.id : null, archived: !!(target && target.archived_at),
+        result: !target ? 'no_collection' : target.archived_at ? 'not_joined' : 'joined' });
+      receipt[`membership:${ref}`] = { membership_id: memId || 'none' };
+    }
+    for (const c of res.conflicts) entries.push({ kind: 'excluded_conflict', key: `excluded_conflict:${c.item_key}`, item_key: c.item_key, reason: c.reason, conflicting_id: c.conflicting_row_id || c.row_id || null });
+    const touched = new Set(entries.filter(e => ['insert_season', 'insert_film', 'fill_date', 'excluded_conflict'].includes(e.kind)).map(e => e.item_key));
+    const identified = new Set([...(res.identified || []).map(x => x.item_key),
+      ...items().filter(r => r.collection === coll && r.tmdb_id != null).map(r => r.item_key)]);
+    for (const d of defs) if (!touched.has(d.k)) entries.push({ kind: 'noop', key: `noop:${d.k}`, item_key: d.k, category: identified.has(d.k) ? 'identified' : 'present' });
+    const rank = ['create_show', 'attach', 'insert_season', 'insert_film', 'fill_date', 'reopen', 'membership', 'excluded_conflict', 'noop'];
+    entries.sort((a, b) => rank.indexOf(a.kind) - rank.indexOf(b.kind) || cmpC(a.key, b.key));
+    const document = { version: '4a.1', owner: 'owner-1', collection: coll, payload_hash: sha256(canonical(defs)),
+      target: target ? { collection_id: target.id, archived: !!target.archived_at } : null, entries };
+    const hash = sha256(canonical(document));
+    if (approved == null) { undo(); return { mode: 'preview', document, hash }; }
+    if (hash !== approved) { undo(); throw new DbError('P0001', 'catalog_stale: Your library or the catalog changed since this preview, so nothing was changed. Review again.'); }
+    app.catalogApplied = (app.catalogApplied || 0) + 1;
+    return { mode: 'applied', document, hash, receipt, applied_at: new Date().toISOString() };
+  }
   const handlers = {
     add_tv_seasons({ p_collection: coll, p_show: show, p_seasons: seasons }) {
       const tmdb = show.tmdb_id ?? null;
@@ -210,49 +350,11 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       return { show_id: target.id, show_created: created, inserted: clone(inserted), existing, rejected, reopened, show_status: target.status };
     },
     seed_tv_defaults({ p_collection: coll, p_defaults: defs }) {
-      if (!TV_COLLECTIONS.includes(coll)) throw new DbError('22023', `invalid_input: ${coll} is not a TV collection`);
-      const keys = new Set();
-      for (const d of defs) {
-        if (!String(d.k || '').includes('|') || !String(d.t || '').trim() || !String(d.s || '').trim() || !validDate(d.ds)
-            || ('p' in d && typeof d.p !== 'boolean')) throw new DbError('22023', `invalid_input: default ${JSON.stringify(d)}`);
-        if (keys.has(d.k)) throw new DbError('22023', `invalid_input: default ${d.k} listed twice`);
-        keys.add(d.k);
-      }
-      const missing = d => !items().some(r => r.collection === coll && r.tmdb_id == null && r.item_key === d.k);
-      const rowFields = d => ({ collection: coll, item_key: d.k, title: d.t, season: d.s, theme: d.th || '', display_date: d.d || '',
-        date_sort: d.ds, status: d.p ? 'pending' : 'confirmed' });
-      const inserted = [];
-      const reopened = [];
-      let showsCreated = 0;
-      const groups = new Map();
-      for (const d of defs) {
-        if (d.s === 'Film') continue;
-        const k = sqlShowKey(coll, d.k);
-        if (!groups.has(k)) groups.set(k, []);
-        groups.get(k).push(d);
-      }
-      const conflicts = [];
-      const reopenedIds = [];
-      for (const [k, ds] of groups) {
-        const enriched = enrichedFor(coll, k);
-        if (enriched) {
-          const r = addToEnriched(enriched, ds.map(d => ({ item_key: d.k, title: d.t, season: d.s, theme: d.th, display_date: d.d, date_sort: d.ds, status: d.p ? 'pending' : 'confirmed' })));
-          inserted.push(...r.inserted); conflicts.push(...r.rejected);
-          if (r.reopened) reopenedIds.push(enriched.id);
-          continue;
-        }
-        const todo = ds.filter(missing);
-        if (!todo.length) continue;
-        const title = (ds.find(d => d.k.split('|')[0] === k) || ds[0]).t;
-        const { show, created } = lockOrCreateShow(coll, null, k, title, ds.every(d => d.p === true) ? 'pending' : 'confirmed');
-        if (created) showsCreated++;
-        for (const d of todo) inserted.push(insertRow({ ...rowFields(d), show_id: show.id }));
-        if (!created && authoritative() && show.status === 'complete') { show.status = 'confirmed'; reopened.push(show.id); }
-      }
-      for (const d of defs) if (d.s === 'Film' && missing(d)) inserted.push(insertRow(rowFields(d)));
-      inserted.sort((a, b) => a.date_sort.localeCompare(b.date_sort) || a.item_key.localeCompare(b.item_key));
-      return { inserted: clone(inserted), shows_created: showsCreated, reopened: [...reopened, ...reopenedIds], conflicts };
+      // Stage 4a (db/phase4a_catalog.sql): the old tab-open seeding call is refused.
+      if (app.catalog4a) throw new DbError('P0001', 'catalog_apply_required: Catalog updates are now reviewed and applied explicitly. Reload the page. Nothing was changed.');
+      return seedDefaults(coll, defs);
     },
+    catalog_apply(body) { return catalogApply(body); },
     delete_tv_season({ p_row_id: id }) {
       const r = items().find(x => x.id === id && isTvRow(x));
       if (!r) throw new DbError('P0002', 'not_found: TV season');
@@ -484,11 +586,14 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            Phase 1c backfill would (see linkFixtureRows)
 //   format1: true for a database without the TV-show schema (no tv_shows)
 //   stage:   migration stage the TV functions behave by (default 'final')
+//   catalog4a: false for a database without Stage 4a (no catalog_apply: 404 PGRST202;
+//            seed_tv_defaults seeds and built-in dates can be patched, as before)
+//   configText: the config.js text a fresh (no-store) read returns (default: the file)
 //   orgWrite: false for a database with Stage 3b-1 but not the Stage 3b-2 functions
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, stage = 'final', org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true } = {}) {
+  orgWrite = true, catalog4a = true, configText = null } = {}) {
   const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
   if (!format1) store.tv_shows = clone(tvShows || []);
   const requests = [];
@@ -497,7 +602,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   const consoleErrors = [];
   const selectors = {};
   let nextId = 1;
-  const app = { store, requests, selectors, consoleErrors, countOverride, stage };
+  const app = { store, requests, selectors, consoleErrors, countOverride, stage, catalog4a, configText };
   if (store.tv_shows) linkFixtureRows(store, () => `new-${nextId++}`);
 
   // ── personal organization (db/phase3b_org.sql) ──
@@ -616,6 +721,14 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     ...(orgOn && orgWrite ? orgWriteFunctions(store, () => `0d3b2000-0000-4000-8000-${String(nextId++).padStart(12, '0')}`, isFilmRow) : {})
   };
 
+  // An owner's explicit catalog application (Stage 4a), done directly against the
+  // fake database (not through the page): preview, then apply with its hash.
+  app.applyCatalog = async (coll, defs) => {
+    const d = clone(defs || app.get(`COLLECTIONS.find(c => c.id === ${JSON.stringify(coll)}).defaults`));
+    const p = await app.rpcHandlers.catalog_apply({ p_collection: coll, p_defaults: d }).json();
+    return app.rpcHandlers.catalog_apply({ p_collection: coll, p_defaults: d, p_approved: p.hash }).json();
+  };
+
   async function fetchStub(url, opts = {}) {
     const method = (opts.method || 'GET').toUpperCase();
     const body = opts.body ? JSON.parse(opts.body) : null;
@@ -639,6 +752,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     if (fi !== -1) { failures.splice(fi, 1); forceFail = true; }
     if (forceFail) return response(500, { message: 'simulated failure' });
 
+    // config.js read again by the page (catalog-apply.js freshness check).
+    if (url === 'config.js') return { ok: true, status: 200, text: async () => (app.configText ?? fs.readFileSync(path.join(ROOT, 'config.js'), 'utf8')) };
     const TMDB_BASE = vm.runInContext('TMDB_BASE', ctx), SUPABASE_URL = vm.runInContext('SUPABASE_URL', ctx);
     if (url.startsWith(TMDB_BASE)) {
       const p = url.slice(TMDB_BASE.length);
@@ -651,7 +766,10 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const table = u.pathname.split('/').pop();
     const params = [...u.searchParams.entries()];
     if (u.pathname.includes('/rpc/')) {
-      const handler = app.rpcHandlers[table];
+      const handler = table === 'catalog_apply' && !app.catalog4a ? null : app.rpcHandlers[table];
+      if (!handler && table === 'catalog_apply') {
+        return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.catalog_apply in the schema cache' });
+      }
       if (!handler && ORG_WRITE_FUNCTIONS.includes(table)) {
         return response(404, { code: 'PGRST202', details: null, hint: null, message: `Could not find the function public.${table} in the schema cache` });
       }
@@ -696,6 +814,11 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       const problem = writeProblem(table, [body]);
       if (problem) return problem;
       const targets = rowsOf.filter(r => matches(r, params));
+      // Stage 4a date guard: built-in catalog rows' dates change only through catalog_apply.
+      if (app.catalog4a && table === 'watchlist_items' && body && targets.some(r => ['disney', '90day', 'sheridan'].includes(r.collection)
+          && (('display_date' in body && body.display_date !== r.display_date) || ('date_sort' in body && body.date_sort !== r.date_sort)))) {
+        return pgError(400, 'P0001', 'catalog_apply_required: Dates of built-in catalog entries now change only through Catalog updates. Reload the page. Nothing was changed.');
+      }
       // Stage 3b-2: an UPDATE may not newly add an archived choice (rows keep the ones they have).
       if (orgOn && orgWrite && table === 'watchlist_items' && body && Array.isArray(body.watch_with)) {
         for (const r of targets) {
@@ -748,7 +871,9 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     alert() {},
     setTimeout: () => 0,
     innerWidth: width,
-    matchMedia: () => ({ matches: false })
+    matchMedia: () => ({ matches: false }),
+    crypto: require('crypto').webcrypto,
+    TextEncoder
   };
   ctx.window = ctx;
   vm.createContext(ctx);

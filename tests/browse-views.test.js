@@ -209,7 +209,7 @@ test('Back returns to the view it came from with its filters; from a legacy tab 
 });
 
 // ─── Read-only ────────────────────────────────────────────────────────────────
-test('missing defaults and a stale TBA date cause no write from any new view or any of its controls (the legacy tab would write)', async () => {
+test('missing defaults and a stale TBA date cause no write from any new view or any of its controls, nor from the legacy tab (Stage 4a)', async () => {
   const probe = await createApp();
   const def = probe.get("COLLECTIONS.find(c => c.id === 'disney').defaults.find(d => d.s !== 'Film' && !/TBA/i.test(d.d))");
   const stale = show({ title: def.t, show_key: def.k.split('|')[0], status: 'confirmed' }, [{ season: def.s, display: 'TBA', date: '2099-01-01' }]);
@@ -233,11 +233,11 @@ test('missing defaults and a stale TBA date cause no write from any new view or 
   setFilter(app, 'fStatus', 'all'); setFilter(app, 'fSource', 'disney');
   assertReadOnlyDom(app);
   assert.deepStrictEqual(mutating(app), [], 'no POST/PATCH/DELETE/RPC/TMDB request');
-  // Control: the legacy Disney+ tab does write for the same data.
+  // The legacy Disney+ tab no longer writes either (Stage 4a): it only reads and offers Catalog updates.
   app.ctx.switchMediaType('tv'); await settle();
   app.ctx.switchTab('disney'); await settle();
-  const w = mutating(app).map(r => `${r.method} ${new URL(r.url).pathname.split('/').pop()}`);
-  assert.ok(w.includes('PATCH watchlist_items') && w.includes('POST seed_tv_defaults'), w.join(', '));
+  assert.deepStrictEqual(mutating(app), [], 'opening the legacy tab wrote nothing');
+  assert.ok(/catalog entr(y is|ies are) waiting/.test(app.el('banner').innerHTML), app.el('banner').innerHTML);
 });
 
 test('every row action and Restore is inert while a read-only view is open; Restore is hidden there only', async () => {
@@ -791,7 +791,7 @@ test('a slow read never paints after leaving the view, or over a newer entry of 
   assert.strictEqual(app.el('errorBanner').innerHTML, '');
 });
 
-test('an old legacy tab load cannot paint over a browse view; its own writes are the legacy loader’s, not the view’s', async () => {
+test('an old legacy tab load cannot paint over a browse view; it writes nothing (Stage 4a)', async () => {
   const app = await boot();
   const g = app.hold(r => r.method === 'GET' && r.url.includes('collection=eq.disney'));
   app.ctx.switchTab('disney');
@@ -802,8 +802,8 @@ test('an old legacy tab load cannot paint over a browse view; its own writes are
   g.release(); await settle();
   assert.strictEqual(html(app), browseHtml, 'the late legacy load did not paint');
   assert.strictEqual(app.get('activeViewId'), B['disney']);
-  const late = mutating(app).filter(r => app.requests.indexOf(r) >= mark).map(r => new URL(r.url).pathname.split('/').pop());
-  assert.ok(late.length > 0 && late.every(t => t === 'seed_tv_defaults' || t === 'watchlist_items'), 'only the legacy seeding that was already in flight');
+  const late = mutating(app).filter(r => app.requests.indexOf(r) >= mark);
+  assert.deepStrictEqual(late, [], 'the legacy load wrote nothing');
 });
 
 test('coming back after an edit in a legacy tab shows the current saved state', async () => {

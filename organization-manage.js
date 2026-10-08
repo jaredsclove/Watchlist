@@ -725,7 +725,7 @@ function manageCollectionsHtml(ix) {
     if (archivedRow) actions = `<button class="btn" onclick="manageSetArchived('c', '${esc(c.id)}', false)"${busy ? ' disabled' : ''}>Unarchive</button>
       <button class="btn" onclick="manageEditMembers('${esc(c.id)}')">Members</button>`;
     else if (confirming) {
-      const note = c.legacy_source ? ` New shows and films added in the ${storageLabel(c.legacy_source)} tab will still join it.` : '';
+      const note = c.legacy_source ? ` New shows and films you add in the ${storageLabel(c.legacy_source)} tab will still join it; catalog updates won’t.` : '';
       actions = `<div class="manage-confirm">Hides ${esc(c.name)} from Browse collections. Its shows and films stay saved, in every other view and in this collection. You can unarchive it at any time.${esc(note)}
         <button class="btn btn-danger" onclick="manageSetArchived('c', '${esc(c.id)}', true)"${busy ? ' disabled' : ''}>Archive</button>
         <button class="btn" onclick="manageAskArchive(null, null)">Cancel</button></div>`;

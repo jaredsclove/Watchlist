@@ -190,7 +190,7 @@ test('archive: the confirmation explains what happens (no plan references) and, 
   app.ctx.manageAskArchive('c', coll(app, 'disney').id); await settle();
   const t = text(app);
   assert.match(t, /Hides Disney\+ from Browse collections\. Its shows and films stay saved, in every other view and in this collection\. You can unarchive it at any time\./);
-  assert.match(t, /New shows and films added in the Disney\+ tab will still join it\./);
+  assert.match(t, /New shows and films you add in the Disney\+ tab will still join it; catalog updates won’t\./);
   assert.ok(!/\(C4\)|§|Stage 3b/.test(t), 'no plan references in UI text');
 });
 

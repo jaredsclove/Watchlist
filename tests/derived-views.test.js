@@ -228,7 +228,7 @@ test('render: Coming Soon has Skip only — no status menu, no watch control, no
 // ─── Rendering: collection tabs ───────────────────────────────────────────────
 test('flat tab (Disney+): TV rows get the show control and Skip; × on a built-in season means Skip; films stay row-level', async () => {
   const app0 = await createApp();
-  app0.ctx.switchTab('disney'); await settle();
+  await app0.applyCatalog('disney');
   const app = await createApp({ rows: app0.store.watchlist_items, tvShows: app0.store.tv_shows });
   app.ctx.switchTab('disney'); await settle();
   const rows = app.get('tabData.disney.rows');

@@ -57,6 +57,7 @@ function switchTab(id) {
   if (!td || !td.loaded) {
     loadTab(id);
   } else {
+    showCatalogNotice(id);
     renderFilters();
     renderTable();
   }
@@ -116,55 +117,9 @@ async function loadTab(collectionId) {
       null
     );
 
-    const col = COLLECTIONS.find(c => c.id === collectionId);
-    const existingKeys = new Set(rows.map(r => r.item_key));
-    const toInsert = [];
-    const newKeys = [];
-
-    for (const d of col.defaults) {
-      if (!existingKeys.has(d.k)) {
-        toInsert.push({
-          collection: collectionId,
-          item_key: d.k,
-          title: d.t,
-          season: d.s,
-          theme: d.th,
-          display_date: d.d,
-          date_sort: d.ds,
-          watched: false,
-          status: d.p ? 'pending' : 'confirmed'
-        });
-        newKeys.push(d.k);
-      } else {
-        // refresh TBA dates
-        const existing = rows.find(r => r.item_key === d.k);
-        if (existing && /TBA/i.test(existing.display_date) && !/TBA/i.test(d.d)) {
-          await sbFetch('PATCH',
-            `${TABLE}?collection=eq.${encodeURIComponent(collectionId)}&item_key=eq.${encodeURIComponent(d.k)}`,
-            { display_date: d.d, date_sort: d.ds }
-          );
-          existing.display_date = d.d;
-          existing.date_sort = d.ds;
-        }
-      }
-    }
-
-    let reopenedIds = [];
-    let reviewConflicts = [];
-    if (toInsert.length > 0 && isTvCollection(collectionId)) {
-      // Only the defaults found missing above, so the rule for "missing" stays
-      // exactly this one; seed_tv_defaults links each new season to its show
-      // (and reopens a Complete show that gets a new season).
-      const missing = new Set(newKeys);
-      const res = await sbRpc('seed_tv_defaults', { p_collection: collectionId, p_defaults: col.defaults.filter(d => missing.has(d.k)) });
-      rows.push(...(res.inserted || []));
-      reopenedIds = res.reopened || [];
-      reviewConflicts = (res.conflicts || []).filter(c => TV_REVIEW_REASONS.includes(c.reason));
-    } else if (toInsert.length > 0) {
-      const inserted = await sbFetch('POST', TABLE, toInsert);
-      if (inserted) rows.push(...inserted);
-    }
-    // A TV tab's statuses live on its shows: read them after any seeding.
+    // Opening a tab only reads (Stage 4a): built-in catalog entries are added and
+    // dated only through Catalog updates (catalog-apply.js). A TV tab's statuses
+    // live on its shows.
     if (isTvCollection(collectionId)) await loadTvShows(collectionId);
 
     rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
@@ -190,25 +145,13 @@ async function loadTab(collectionId) {
     }
     // Always cache the result, even if the user has navigated away — this keeps
     // tabData correct and avoids redundant reloads when they switch back.
-    tabData[collectionId] = { rows, loaded: true, newKeys };
+    tabData[collectionId] = { rows, loaded: true, newKeys: [] };
     if (read) matchReadSettle(read, null);
 
     // But only touch the visible DOM if this tab is still the one being viewed.
     if (activeTabId !== collectionId) return;
 
-    if (newKeys.length > 0) {
-      const reopened = reopenedIds.map(id => tvShowsById.get(id)?.title).filter(Boolean);
-      const reopenedNote = reopened.length
-        ? ` ${reopened.map(t => `"${esc(t)}"`).join(', ')} ${reopened.length === 1 ? 'was' : 'were'} Complete and got a new season, so ${reopened.length === 1 ? 'it is' : 'they are'} back On List.`
-        : '';
-      const added = newKeys.length - reviewConflicts.length;
-      const reviewNote = reviewConflicts.length
-        ? ` ${esc(tvReviewMessage(reviewConflicts.map(c => ({ season: c.season || c.item_key, reason: c.reason, title: tvShowsById.get(c.show_id)?.title }))))}`
-        : '';
-      document.getElementById('banner').innerHTML =
-        `<div class="banner">✦ ${added} new entr${added===1?'y':'ies'} added.${reopenedNote}${reviewNote}</div>`;
-    }
-
+    showCatalogNotice(collectionId);
     renderFilters();
     renderTable();
   } catch(e) {
