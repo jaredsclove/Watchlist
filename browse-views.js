@@ -2,12 +2,12 @@
 // A collection destination (Disney+, Sheridan, 90 Day, True Crime / Docs, …; your
 // personal collections, organization.js) shows its member TV shows (with every
 // stored season) and films together, and All Movies shows every saved film,
-// whichever tab it is stored in. Membership is the stored list of members only:
-// the tab a row is saved in, tags, themes, titles and TMDB credits add nothing,
-// and the storage tab appears only as the source badge. Nothing here writes: the
-// loader only reads (it never calls loadTab, which can seed defaults and PATCH
-// TBA dates), and the controls only search, filter, expand and navigate.
-// Changes are made in the existing tabs and views. A collection can list TV as
+// wherever it is stored. Membership is the stored list of members only: where a
+// row is stored, tags, themes, titles and TMDB credits add nothing (since Stage 4b
+// storage isn't shown at all). The loader only reads; a collection's controls only
+// search, filter, expand and navigate. All Movies (Stage 4b) also has the film
+// actions — status, watched, watch-with, Match, delete — by the row's real id
+// (row-actions.js, library.js); TV is changed in All TV. A collection can list TV as
 // Shows or Seasons and show TV and films Separate or Combined (remembered per
 // collection on this device); Shows and Movies only are A–Z, Seasons is oldest
 // first. While one of these is open,
@@ -16,8 +16,6 @@
 // rather than in config.js so the catalog-refresh workflow's config.js cache
 // handling is unaffected.
 const ALL_MOVIES_VIEW = { id: 'allmovies', label: 'All Movies', icon: '🎞️', mediaType: 'movie' };
-// The existing Movies tab keeps its tools; its tab says it's the legacy place to edit.
-const LEGACY_TAB_LABELS = { movies: 'Movies (legacy)' };
 const BROWSE_MEDIA_LABELS = { all: 'All media', tv: 'TV', movie: 'Movies' };
 // A collection's TV presentation and grouping, remembered on this device per
 // collection (never on entry, only when changed) under its layout key
@@ -42,10 +40,6 @@ function currentBrowseDest() {
 
 function isBrowseView(id) {
   return id === ALL_MOVIES_VIEW.id || isBrowseCollectionView(id);
-}
-
-function legacyTabLabel(c) {
-  return LEGACY_TAB_LABELS[c.id] || c.label;
 }
 
 // The view tabs of a media area, in order; the first is where the area opens
@@ -232,7 +226,7 @@ function browseWatchMatches(r, fWatch) {
 // those of a control the current mode doesn't show, which doesn't filter while
 // hidden. A fresh entry starts from the view's defaults; Back puts back the
 // values the view had when a collection was opened from it.
-const VIEW_FILTER_IDS = ['fSearch', 'fSource', 'fStatus', 'fWatch', 'fTheme', 'fCollection', 'fWatchWith', 'fProgress'];
+const VIEW_FILTER_IDS = ['fSearch', 'fStatus', 'fWatch', 'fTheme', 'fYear', 'fCollection', 'fWatchWith', 'fProgress'];
 
 function currentViewFilters(tag) {
   const values = viewFilterMemory.tag === tag ? { ...viewFilterMemory.values } : {};
@@ -300,6 +294,9 @@ function takeBackNavFilters(viewId) {
   return values;
 }
 
+// Catalog updates (catalog-apply.js) is reached from here in both areas (Stage 4b).
+const CATALOG_BUTTON = `<button class="btn catalog-btn" onclick="openCatalogChooser(this)">Catalog updates</button>`;
+
 // The selector: your collections once loaded; while loading, or after a failed
 // load, it says so (with Retry) rather than showing an empty list.
 function buildBrowseBar() {
@@ -310,7 +307,7 @@ function buildBrowseBar() {
     const text = orgState === 'loading' ? 'Loading collections…' : 'Collections unavailable';
     const retry = orgState === 'loading' ? '' : ` <button class="btn" onclick="loadOrganization()">Retry</button>`;
     bar.innerHTML = `${label}
-    <select id="browseSelect" disabled><option value="" selected>${text}</option></select>${retry}`;
+    <select id="browseSelect" disabled><option value="" selected>${text}</option></select>${retry} ${CATALOG_BUTTON}`;
     return;
   }
   const list = activeBrowseCollections();
@@ -322,7 +319,7 @@ function buildBrowseBar() {
     <select id="browseSelect" onchange="openBrowseCollection(this.value)"${list.length ? '' : ' disabled'}>
       <option value=""${activeId ? '' : ' selected'}>${list.length ? 'Choose a collection…' : 'No collections yet'}</option>${list.map(c =>
         `<option value="${esc(c.id)}"${activeId === c.id ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}
-    </select> <button class="btn browse-manage" onclick="openManage('collections', null, this)">Manage</button>${stale}`;
+    </select> <button class="btn browse-manage" onclick="openManage('collections', null, this)">Manage</button> ${CATALOG_BUTTON}${stale}`;
 }
 
 // Restore is hidden (and its entry points do nothing) while a read-only view is
@@ -496,15 +493,13 @@ function browseHeadHtml() {
   if (!isBrowseCollectionView(activeViewId)) {
     return `<div class="browse-head">
       <h2 class="browse-title">${ALL_MOVIES_VIEW.icon} All Movies</h2>
-      <p class="browse-note">Every saved film, whichever tab it's stored in. Read-only: make changes in Movies (legacy) or in the tab the film is stored in.</p>
+      <p class="browse-note">Every saved film. Change a film’s status, watched state or watch-with here; ⋯ has more.</p>
     </div>`;
   }
   const backTo = (browseOrigin ? browseOrigin.mediaType : activeMediaType) === 'movie' ? 'Movies' : 'TV';
   if (!dest) return `<div class="browse-head"><button class="btn browse-back" onclick="browseBack()">← Back to ${backTo}</button></div>`;
   const icon = COLLECTIONS.find(c => c.id === dest.legacySource)?.icon || '';
-  // A collection lists its members, which can be saved in any tab (each shows its
-  // tab as its source), so the note never points at a same-named tab.
-  const notes = [dest.note, `Read-only: the shows and films in your ${dest.label} collection. Make changes in the tab each one is saved in (shown as its source).`].filter(Boolean);
+  const notes = [dest.note, `Read-only: the shows and films in your ${dest.label} collection. Change shows in All TV and films in All Movies.`].filter(Boolean);
   return `<div class="browse-head">
       <button class="btn browse-back" onclick="browseBack()">← Back to ${backTo}</button>
       <button class="btn btn-link browse-edit-members" onclick="openManage('members', '${esc(dest.collectionId)}', this)">Edit members</button>
@@ -529,10 +524,12 @@ function filmTagFiltersHtml(films) {
   const tokens = [...new Set(films.flatMap(r => r.watch_with || []).filter(Boolean))]
     .map(t => ({ t, label: watchWithArchived(t) ? `${watchWithLabel(t)} (archived)` : watchWithLabel(t) }))
     .sort((a, b) => a.label.localeCompare(b.label) || cmpStr(a.t, b.t));
+  // All Movies: a person collection's tag offers ↻ Refresh beside it (collections-pull.js).
+  const allMovies = activeViewId === ALL_MOVIES_VIEW.id;
   const tagSelect = tags.length
-    ? `<select id="fCollection" onchange="renderTable()" aria-label="Collection tag">
+    ? `<select id="fCollection" onchange="renderTable()${allMovies ? '; updateCollectionRefreshLink()' : ''}" aria-label="Collection tag">
         <option value="">All collection tags</option>${tags.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
-      </select>` : '';
+      </select>${allMovies ? '<span id="collectionRefreshLink"></span>' : ''}` : '';
   const wwSelect = tokens.length
     ? `<select id="fWatchWith" onchange="renderTable()" aria-label="Watch with">
         <option value="">Watch with: anyone</option>${tokens.map(w => `<option value="${esc(w.t)}">${esc(w.label)}</option>`).join('')}
@@ -564,35 +561,29 @@ function renderBrowseFilters() {
     ? `<select id="fSeasonVis" onchange="setBrowseSeasonVis(this.value)" aria-label="TV seasons">${Object.entries(BROWSE_SEASON_VIS_LABELS).map(([value, text]) =>
         `<option value="${value}"${browseSeasonVis === value ? ' selected' : ''}>TV seasons: ${text}</option>`).join('')}</select>`
     : '';
-  // Source (All Movies only) is the tab a film is stored in, not where it streams.
-  const sourceSelect = dest
-    ? ''
-    : `<select id="fSource" onchange="renderTable()" aria-label="Stored in">
-        <option value="">All sources</option>${COLLECTIONS.map(c => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
-      </select>`;
   const watchSelect = dest
     ? ''
     : `<select id="fWatch" onchange="renderTable()" aria-label="Watched">${Object.entries(BROWSE_WATCH_LABELS).map(([value, text]) =>
         `<option value="${value}"${value === 'unwatched' ? ' selected' : ''}>${text}</option>`).join('')}</select>`;
   const themes = base.shows.flatMap(x => x.seasons.map(r => r.theme)).concat(base.films.map(r => r.theme));
   const themeSelect = themeFilterSelectHtml(themes, 'All genres / themes', 'Genre or theme');
+  const yearSelect = dest ? '' : yearFilterSelectHtml(base.films); // All Movies (Stage 4b)
   // The films' labels: only while films are shown (a collection's TV only hides them, and they don't filter then).
   const tagFilters = !dest || browseMedia !== 'tv' ? filmTagFiltersHtml(base.films) : '';
   document.getElementById('viewHead').innerHTML = browseHeadHtml();
   // .browse-controls scopes the larger phone touch targets to these views (All TV's toggle is unchanged).
-  filtersRowEl.innerHTML = `${dest ? `<div class="browse-controls">${mediaToggle}${layoutToggles}</div>` : ''}
+  filtersRowEl.innerHTML = `${dest ? `<div class="browse-controls">${mediaToggle}${layoutToggles}</div>` : libraryAddButtonHtml('movie')}
     <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
       <span>🔍 Search &amp; Filter</span><span id="filterToggleChevron">▾</span>
     </button>
     <div class="filters-inner">
       <span class="filter-label">Filter:</span>
       <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" aria-label="Search titles" oninput="renderTable()">
-      ${sourceSelect}
       <select id="fStatus" onchange="renderTable()" aria-label="Status">
         <option value="">All (except Skipped)</option>
         <option value="all">All statuses</option>
         ${TV_STATUS_ORDER.map(s => `<option value="${s}">${esc(statusOptionLabel(s))}${s === 'skipped' ? '' : ' only'}</option>`).join('')}
-      </select>${watchSelect}${themeSelect}${tagFilters}${seasonVisSelect}
+      </select>${watchSelect}${themeSelect}${yearSelect}${tagFilters}${seasonVisSelect}
     </div>
   `;
   filtersRowEl.dataset.tab = tag;
@@ -603,6 +594,7 @@ function renderBrowseFilters() {
   tmdbPanel.innerHTML = '';
 
   applyViewFilters(tag, values);
+  if (!dest) updateCollectionRefreshLink();
   if (keepState && !restored && filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
 }
 
@@ -610,7 +602,9 @@ function renderBrowseFilters() {
 function renderBrowseTable() {
   if (!browseData || !browseData.loaded) return;
   const thead = document.getElementById('tableHead');
-  if (thead) thead.innerHTML = `<tr><th>Title</th><th>Source</th><th>Next / Release</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`;
+  if (thead) thead.innerHTML = isBrowseCollectionView(activeViewId)
+    ? `<tr><th>Title</th><th>Theme</th><th>Next / Release</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`
+    : `<tr><th>Title</th><th>Theme</th><th>Release</th><th>Status</th><th>Watched</th><th></th></tr>`;
   const today = localTodayStr();
   const val = id => document.getElementById(id)?.value || ''; // a control that isn't shown doesn't filter
   const q = val('fSearch').trim().toLowerCase();
@@ -618,7 +612,7 @@ function renderBrowseTable() {
     fTheme: val('fTheme'), fCollection: val('fCollection'), fWatchWith: val('fWatchWith') };
   const dest = currentBrowseDest();
   if (isBrowseCollectionView(activeViewId)) { if (dest) renderBrowseCollection(dest, today, f); }
-  else renderAllMovies(today, { ...f, fSource: val('fSource'), fWatch: val('fWatch') });
+  else renderAllMovies(today, { ...f, fYear: val('fYear'), fWatch: val('fWatch') });
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -730,7 +724,7 @@ function browseSubsectionHtml(name, label, count) {
 // doesn't zero Watched); Shown counts what the list holds.
 function renderAllMovies(today, f) {
   const { films, unclassified } = deriveAllMovies(browseData.rows);
-  const matching = films.filter(r => (!f.fSource || r.collection === f.fSource) && browseFilmMatches(r, f));
+  const matching = films.filter(r => (!f.fYear || rowYear(r) === f.fYear) && browseFilmMatches(r, f));
   const shown = matching.filter(r => browseWatchMatches(r, f.fWatch));
   const watched = matching.filter(r => r.watched).length;
   document.getElementById('statsRow').innerHTML = derivedStatsHtml([
@@ -744,7 +738,7 @@ function renderAllMovies(today, f) {
   if (unclassified > 0) {
     add(browseNoteHtml(`⚠️ ${plural(unclassified, 'saved entry is', 'saved entries are')} neither a TV season nor a film, so ${unclassified === 1 ? 'it isn’t' : 'they aren’t'} listed.`));
   }
-  shown.forEach(r => add(browseFilmHtml(r, today)));
+  shown.forEach(r => add(allMoviesFilmHtml(r, today, films)));
   if (shown.length === 0) add(browseNoteHtml(films.length === 0 ? 'No films saved yet.' : 'No films match these filters.'));
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
@@ -778,7 +772,7 @@ function browseShowHtml(item, today, combined) {
   const isExpanded = expandedShows.has(key);
   const keyArg = esc(key).replace(/'/g, "\\'");
   const theme = (upNext || seasons[0]).theme;
-  const badges = `${sourceBadgeHtml(item.collection)} ${themeBadgeHtml(item.collection, theme, key)}`;
+  const badges = `${themeBadgeHtml(item.collection, theme, key)} ${duplicateShowTagHtml(show)}`;
   const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;
   const skippedCount = seasons.length - trackable.length;
@@ -840,7 +834,7 @@ function browseShowHtml(item, today, combined) {
 function browseSeasonEntryHtml(e, today, combined) {
   const { row: r, show } = e;
   const dimClass = show.status === 'skipped' || r.skipped ? 'row-skipped' : show.status === 'maybe' ? 'row-maybe' : '';
-  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme, r.id)}`;
+  const badges = `${themeBadgeHtml(r.collection, r.theme, r.id)} ${duplicateShowTagHtml(show)}`;
   const kindTag = combined ? '<span class="ro-tag">TV</span>' : '';
   const statusHtml = browseStatusPillHtml(show.status, `Show status — applies to every season of ${show.title}`);
   const skippedHtml = r.skipped ? '<span class="ro-tag">Season skipped</span>' : '';
@@ -872,7 +866,7 @@ function browseSeasonEntryHtml(e, today, combined) {
 // watch-with choices as filter pills (they filter the list; they change nothing).
 function browseFilmHtml(r, today) {
   const dimClass = r.status === 'skipped' ? 'row-skipped' : r.status === 'maybe' ? 'row-maybe' : '';
-  const badges = `${sourceBadgeHtml(r.collection)} ${themeBadgeHtml(r.collection, r.theme, r.id)}`;
+  const badges = `${themeBadgeHtml(r.collection, r.theme, r.id)} ${duplicateFilmTagHtml(r, browseData ? browseData.rows : [])}`;
   const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
   const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
   const statusHtml = browseStatusPillHtml(r.status, 'Film status');
@@ -897,6 +891,63 @@ function browseFilmHtml(r, today) {
       </div>
       ${labelsHtml}
       <div class="card-actions">${statusHtml} ${browseWatchedHtml(r.watched)}</div>
+    </div>`;
+  return { row, card };
+}
+
+// A film in All Movies (Stage 4b): the film actions of the old Movies tab, for every
+// film wherever it is stored. Status, Watched and the ⋯ menu (watch-with, the rest
+// of its franchise for a film stored with the films, Match for an eligible row);
+// × is labelled by what it does (editPolicyOf): Skip for a built-in catalog film,
+// Delete otherwise. Pills filter the list.
+function allMoviesFilmHtml(r, today, films) {
+  const policy = editPolicyOf(r);
+  const isSkipped = r.status === 'skipped';
+  const dimClass = isSkipped ? 'row-skipped' : r.status === 'maybe' ? 'row-maybe' : '';
+  const badges = `${themeBadgeHtml(r.collection, r.theme, r.id)} ${duplicateFilmTagHtml(r, films)}`;
+  const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
+  const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
+  const statusCell = `<select class="status-select s-${esc(r.status)}" onchange="setStatus('${r.id}', this.value, this)" aria-label="Status of ${esc(r.title)}">${statusOptionsHtml(r.status)}</select>`;
+  const watchBtn = isSkipped ? '<span class="confirmed-lbl">—</span>'
+    : `<button class="watch-btn${r.watched ? ' watched' : ''}" onclick="toggleWatch('${r.id}')">${r.watched ? '✓ Watched' : 'Mark watched'}</button>`;
+  const franchise = cleanCollectionName(r.tmdb_collection_name || '');
+  const pullBtn = r.tmdb_collection_id && r.collection === LIBRARY_NEW_FILM
+    ? `<div class="popover-section-label" style="margin-top:8px">Collection</div><button class="popover-action" onclick="libraryPullRest('${r.id}', ${r.tmdb_collection_id}, '${esc(franchise).replace(/'/g, "\\'")}')">🔗 Pull rest of ${esc(franchise || 'collection')}</button>` : '';
+  const matchBtn = policy.matchable
+    ? `<div class="popover-section-label" style="margin-top:8px">TMDB</div><button class="popover-action" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : '';
+  const popover = `<div class="more-popover" id="more-popover-${r.id}" style="display:none">
+        <div class="popover-section-label">Watch with</div>
+        <div class="ww-options-grid">${watchWithPickerHtml(r.id, r.watch_with || [])}</div>${pullBtn}${matchBtn}
+      </div>`;
+  const delTitle = policy.deleteEffect === 'skip-film' ? 'Skip (built-in catalog film)' : 'Delete';
+  const delBtn = cls => policy.deleteEffect === 'skip-film' && isSkipped ? ''
+    : `<button class="${cls}" onclick="delRow('${r.id}')" title="${delTitle}" aria-label="${esc(`${delTitle}: ${r.title}`)}">×</button>`;
+  const row = `<tr class="browse-film-row ${dimClass}">
+      <td><span class="show-title">${esc(r.title)}</span><span class="season-lbl"> · Film</span>${labelsHtml}</td>
+      <td>${badges}</td>
+      <td class="date-cell">${browseDateHtml(r, today)}</td>
+      <td>${statusCell}</td>
+      <td>${watchBtn}</td>
+      <td class="more-cell"><button class="more-btn" onclick="toggleMorePopover('${r.id}', this)" title="Watch with, collection, TMDB">⋯</button>${popover} ${delBtn('del-btn')}</td>
+    </tr>`;
+  const card = `<div class="item-card ${dimClass}">
+      <div class="card-top">
+        <div class="card-title-block">
+          <span class="card-title">${esc(r.title)}</span>
+          <span class="card-season">Film</span>
+        </div>
+        <div class="card-row-actions">
+          <button class="more-btn" onclick="toggleMorePopover('${r.id}', this)" title="Watch with, collection, TMDB">⋯</button>
+          ${delBtn('card-del-btn')}
+        </div>
+        ${popover}
+      </div>
+      <div class="card-meta">
+        ${badges}
+        <span class="card-date">${browseDateHtml(r, today)}</span>
+      </div>
+      ${labelsHtml}
+      <div class="card-actions">${statusCell} ${isSkipped ? '' : watchBtn}</div>
     </div>`;
   return { row, card };
 }

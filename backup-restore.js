@@ -651,6 +651,7 @@ ${esc(preRestoreFilename)}</div>
 // rather than stale in-memory data. Other tabs will refetch next time they're opened.
 function finishRestoreAndReload() {
   closeRestoreModal();
+  closeLibraryPanel(); // anything prepared before the restore no longer applies (library.js)
   tabData = {};
   loadOrganization(); // the restored collections and watch-with choices (in the background)
   if (isBrowseView(activeViewId)) loadBrowseView();

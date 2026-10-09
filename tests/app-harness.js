@@ -349,6 +349,59 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       if (tmdb != null) track(coll, tmdb, show.title.trim(), show.network || '');
       return { show_id: target.id, show_created: created, inserted: clone(inserted), existing, rejected, reopened, show_status: target.status };
     },
+    // Stage 4b (db/phase4b_add_to_show.sql): seasons for one existing show. Refuses
+    // (and writes nothing) when the show is gone, differs from p_expected, or the
+    // seasons would land on another show or a new one; otherwise add_tv_seasons'
+    // own rules apply, in one transaction.
+    add_tv_seasons_to_show({ p_show_id: id, p_expected: exp, p_seasons: seasons }) {
+      if (app.stage !== 'final') throw new DbError('55000', `not_available: add_tv_seasons_to_show is not available in stage ${app.stage}`);
+      if (!id || !exp || typeof exp !== 'object' || !exp.collection || !exp.show_key) throw new DbError('22023', 'invalid_input: the show id and the show as the page showed it are required');
+      if (!Array.isArray(seasons) || !seasons.length) throw new DbError('22023', 'invalid_input: seasons must be a non-empty list');
+      const show = shows().find(x => x.id === id);
+      if (!show) throw new DbError('P0001', 'target_missing: This show is no longer on your list, so nothing was added.');
+      if (show.collection !== exp.collection || (show.tmdb_id ?? null) !== (exp.tmdb_id ?? null) || show.show_key !== exp.show_key) {
+        throw new DbError('P0001', 'target_changed: This show changed since you chose it, so nothing was added. Look at it again.');
+      }
+      const byNumber = show.tmdb_id != null && !BUILTIN.includes(show.collection);
+      if (seasons.some(x => (x && x.season_number != null) !== byNumber)) throw new DbError('22023', `invalid_input: this show takes ${byNumber ? 'TMDB seasons' : 'seasons by label'}`);
+      const snap = { w: clone(items()), s: clone(shows()), m: clone(store.collection_memberships || []), o: clone(store.othertv_shows) };
+      const undo = () => { store.watchlist_items = snap.w; store.tv_shows = snap.s; if (store.collection_memberships) store.collection_memberships = snap.m; store.othertv_shows = snap.o; };
+      let res;
+      try {
+        res = handlers.add_tv_seasons({ p_collection: show.collection, p_show: { tmdb_id: byNumber ? show.tmdb_id : null, title: show.title, show_key: show.show_key, network: exp.network || '' }, p_seasons: seasons });
+      } catch (e) { undo(); throw e; }
+      if (res.show_id !== id || res.show_created) {
+        undo();
+        throw new DbError('P0001', 'target_changed: These seasons would not have been added to the show you chose, so nothing was added. Look at it again.');
+      }
+      return res;
+    },
+    // Stage 4b (db/phase4b_add_to_show.sql): a genuinely new show where new shows go
+    // ('othertv') with all its seasons, or nothing: refused (show_exists) when the TMDB
+    // identity is a show anywhere, or the key / identity is taken there; every season
+    // must be added (create_conflict). Never joins or changes an existing show.
+    create_tv_show({ p_show: show, p_seasons: seasons }) {
+      if (app.stage !== 'final') throw new DbError('55000', `not_available: create_tv_show is not available in stage ${app.stage}`);
+      if (!show || typeof show !== 'object') throw new DbError('22023', 'invalid_input: show');
+      const tmdb = show.tmdb_id ?? null, key = String(show.show_key || '').trim(), title = String(show.title || '').trim();
+      if (!title || !key) throw new DbError('22023', 'invalid_input: show title and show_key are required');
+      if (!Array.isArray(seasons) || !seasons.length) throw new DbError('22023', 'invalid_input: seasons must be a non-empty list');
+      const exists = tmdb != null ? shows().some(x => x.tmdb_id === tmdb) : shows().some(x => x.collection === 'othertv' && x.tmdb_id == null && x.show_key === key);
+      if (exists) throw new DbError('P0001', 'show_exists: This show is already on your list, so nothing was added. Look at it again.');
+      const snap = { w: clone(items()), s: clone(shows()), m: clone(store.collection_memberships || []), o: clone(store.othertv_shows) };
+      const undo = () => { store.watchlist_items = snap.w; store.tv_shows = snap.s; if (store.collection_memberships) store.collection_memberships = snap.m; store.othertv_shows = snap.o; };
+      const created = { id: newId(), collection: 'othertv', title, show_key: key, tmdb_id: tmdb, status: show.initial_status || 'confirmed' };
+      shows().push(created);
+      org.newShow(created);
+      let res;
+      try { res = handlers.add_tv_seasons({ p_collection: 'othertv', p_show: { tmdb_id: tmdb, title, show_key: key, network: show.network || '' }, p_seasons: seasons }); }
+      catch (e) { undo(); throw e; }
+      if (res.show_id !== created.id || res.inserted.length !== seasons.length) {
+        undo();
+        throw new DbError('P0001', 'create_conflict: Not every season could be added to the new show, so nothing was added. Look at it again.');
+      }
+      return { ...res, show_created: true };
+    },
     seed_tv_defaults({ p_collection: coll, p_defaults: defs }) {
       // Stage 4a (db/phase4a_catalog.sql): the old tab-open seeding call is refused.
       if (app.catalog4a) throw new DbError('P0001', 'catalog_apply_required: Catalog updates are now reviewed and applied explicitly. Reload the page. Nothing was changed.');
@@ -589,11 +642,12 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //   catalog4a: false for a database without Stage 4a (no catalog_apply: 404 PGRST202;
 //            seed_tv_defaults seeds and built-in dates can be patched, as before)
 //   configText: the config.js text a fresh (no-store) read returns (default: the file)
+//   addToShow: false for a database without Stage 4b (add_tv_seasons_to_show answers 404 PGRST202)
 //   orgWrite: false for a database with Stage 3b-1 but not the Stage 3b-2 functions
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, stage = 'final', org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true, catalog4a = true, configText = null } = {}) {
+  orgWrite = true, catalog4a = true, configText = null, addToShow = true } = {}) {
   const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
   if (!format1) store.tv_shows = clone(tvShows || []);
   const requests = [];
@@ -602,7 +656,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   const consoleErrors = [];
   const selectors = {};
   let nextId = 1;
-  const app = { store, requests, selectors, consoleErrors, countOverride, stage, catalog4a, configText };
+  const app = { store, requests, selectors, consoleErrors, countOverride, stage, catalog4a, configText, addToShow };
   if (store.tv_shows) linkFixtureRows(store, () => `new-${nextId++}`);
 
   // ── personal organization (db/phase3b_org.sql) ──
@@ -767,6 +821,9 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const params = [...u.searchParams.entries()];
     if (u.pathname.includes('/rpc/')) {
       const handler = table === 'catalog_apply' && !app.catalog4a ? null : app.rpcHandlers[table];
+      if (table === 'add_tv_seasons_to_show' && !app.addToShow) {
+        return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.add_tv_seasons_to_show in the schema cache' });
+      }
       if (!handler && table === 'catalog_apply') {
         return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.catalog_apply in the schema cache' });
       }
@@ -835,6 +892,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
           }
         }
       }
+      const returning = /return=representation/.test((req.headers || {}).Prefer || '');
       targets.forEach(r => {
         const before = { ...r };
         Object.assign(r, clone(body));
@@ -843,6 +901,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
           ORG.collectionsOfShow(before.show_id).forEach(c => ORG.add(c, { item_id: r.id }));
         }
       });
+      // Prefer: return=representation answers with the rows the PATCH changed (PostgREST).
+      if (returning) return response(200, clone(targets).map(r => (orgOn && table === 'watchlist_items' ? { ...r, is_film: isFilmRow(r) } : r)));
       return response(204, null);
     }
     if (method === 'DELETE') {

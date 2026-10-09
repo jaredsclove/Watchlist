@@ -70,6 +70,78 @@ function showCatalogNotice(collectionId) {
     : '';
 }
 
+// ── The permanent entry (Stage 4b): a chooser of the built-in catalogs ──
+// "Catalog updates" in the Browse bar lists each catalog with a hint of how many
+// of its entries the library doesn't hold (catalogPendingCount over a complete
+// read of that catalog's rows; GET only) and opens the dialog below for one.
+function catalogIds() {
+  return COLLECTIONS.filter(c => catalogDefaultsOf(c.id).length).map(c => c.id);
+}
+
+function openCatalogChooser(openerEl) {
+  if (catalogDialog || catalogChooser) return;
+  const session = ++catalogSession;
+  catalogChooser = { session, opener: openerEl || document.activeElement || null, hints: {} };
+  const ids = catalogIds();
+  ids.forEach(id => { catalogChooser.hints[id] = { state: 'reading' }; });
+  document.getElementById('catalogModalOverlay').style.display = 'flex';
+  renderCatalogChooser();
+  const box = document.getElementById('catalogModalBox');
+  if (box && typeof box.focus === 'function') box.focus();
+  ids.forEach(id => catalogChooserHint(session, id));
+}
+
+async function catalogChooserHint(session, id) {
+  let hint;
+  try {
+    const rows = await fetchAllRowsStrict(TABLE, `collection=eq.${encodeURIComponent(id)}`);
+    hint = { state: 'ready', n: catalogPendingCount(id, rows) };
+  } catch (e) {
+    hint = { state: 'failed' };
+  }
+  if (!catalogChooser || catalogChooser.session !== session) return;
+  catalogChooser.hints[id] = hint;
+  renderCatalogChooser();
+}
+
+function renderCatalogChooser() {
+  const box = document.getElementById('catalogModalBox');
+  if (!box || !catalogChooser) return;
+  const hintText = h => h.state === 'reading' ? 'Checking…' : h.state === 'failed' ? 'Couldn’t check (Review still works)'
+    : h.n ? `${h.n} ${h.n === 1 ? 'entry' : 'entries'} not in your list yet` : 'Nothing waiting';
+  const items = catalogIds().map(id => {
+    const label = COLLECTIONS.find(c => c.id === id)?.label || id;
+    return `<li class="manage-item"><div class="manage-line"><span class="manage-name">${esc(label)} catalog</span>
+      <span class="manage-meta">${esc(hintText(catalogChooser.hints[id] || { state: 'reading' }))}</span>
+      <button class="btn" onclick="catalogChooserReview('${esc(id)}')">Review</button></div></li>`;
+  }).join('');
+  const active = document.activeElement;
+  const hadFocus = !!active && (active === document.body || (typeof box.contains === 'function' && box.contains(active)));
+  box.innerHTML = `<h2 class="modal-title" id="catalogTitle">Catalog updates</h2>
+    <div class="manage-body"><p class="manage-message">The built-in catalogs add shows, seasons and films to your list only when you review and apply them. The counts are a hint; the review decides.</p>
+    <ul class="manage-list">${items}</ul></div>
+    <div class="modal-actions"><button class="btn" onclick="closeCatalogChooser()">Close</button></div>`;
+  if (hadFocus && typeof box.focus === 'function') box.focus();
+}
+
+function closeCatalogChooser(keepOpen) {
+  if (!catalogChooser) return;
+  const opener = catalogChooser.opener;
+  catalogChooser = null;
+  if (keepOpen) return opener;
+  document.getElementById('catalogModalOverlay').style.display = 'none';
+  document.getElementById('catalogModalBox').innerHTML = '';
+  const back = opener && opener.isConnected ? opener : document.querySelector('#browseBar .catalog-btn');
+  if (back && typeof back.focus === 'function') back.focus();
+  return opener;
+}
+
+function catalogChooserReview(id) {
+  if (!catalogChooser) return;
+  const opener = closeCatalogChooser(true);
+  openCatalogUpdates(id, opener);
+}
+
 // ── Dialog ──
 function openCatalogUpdates(collectionId, openerEl) {
   if (catalogDialog || !catalogDefaultsOf(collectionId).length) return;
@@ -96,13 +168,13 @@ function closeCatalogUpdates() {
   // The notice is redrawn, so its Review button is a new element: focus that one (or,
   // when nothing is waiting any more, the open tab), never leave focus on the page.
   const back = opener && opener.isConnected ? opener
-    : document.querySelector('#banner .catalog-banner button') || document.querySelector('#tabBar .tab.active');
+    : document.querySelector('#browseBar .catalog-btn') || document.querySelector('#banner .catalog-banner button') || document.querySelector('#tabBar .tab.active');
   if (back && typeof back.focus === 'function') back.focus();
 }
 
 function catalogKeydown(event) {
-  if (!catalogDialog) return;
-  if (event.key === 'Escape') { event.preventDefault(); closeCatalogUpdates(); return; }
+  if (!catalogDialog && !catalogChooser) return;
+  if (event.key === 'Escape') { event.preventDefault(); if (catalogDialog) closeCatalogUpdates(); else closeCatalogChooser(); return; }
   if (event.key !== 'Tab') return;
   const box = document.getElementById('catalogModalBox');
   const items = [...box.querySelectorAll('button')].filter(el => !el.disabled && el.offsetParent !== null);
@@ -197,9 +269,10 @@ async function catalogApply() {
   d.readBack = { state: 'reading' };
   renderCatalogDialog();
   await catalogVerify(session);
-  // The tab shows the new state (read again; nothing is written).
+  // The tab, or the open view (Stage 4b), shows the new state (read again; nothing is written).
   delete tabData[d.collectionId];
   if (activeTabId === d.collectionId) loadTab(d.collectionId);
+  else if (activeViewId) reloadOpenView();
 }
 
 // ── Comparing the library with the approved outcomes ──
@@ -269,7 +342,7 @@ async function catalogCompareOutcomes(collectionId, doc, receipt) {
   };
   const rowsWithKey = key => st.rows.filter(r => r.item_key === key);
 
-  if (doc.collection !== collectionId) say('the approved changes are for another tab');
+  if (doc.collection !== collectionId) say('the approved changes are for another catalog');
   if (receipt) {
     const want = doc.entries.filter(e => CATALOG_RECEIPT_KINDS.includes(e.kind)).map(e => e.key).sort();
     if (JSON.stringify(want) !== JSON.stringify(Object.keys(receipt).sort())) say('the receipt doesn’t list exactly the approved changes');
@@ -352,7 +425,7 @@ async function catalogCompareOutcomes(collectionId, doc, receipt) {
     mems = a.concat(b);
   }
   for (const e of memberships) {
-    if (!same(e.collection_id, doc.target && doc.target.collection_id)) say(`${e.ref}: its approved collection isn’t this tab’s`);
+    if (!same(e.collection_id, doc.target && doc.target.collection_id)) say(`${e.ref}: its approved collection isn’t this catalog’s`);
     const rec = refRec[e.ref];
     if (!rec) continue; // reported above
     const mine = mems.filter(m => m.show_id === rec.id || m.item_id === rec.id);
@@ -419,6 +492,9 @@ async function catalogCheckState() {
   d.preview = res;
   d.phase = 'checked';
   renderCatalogDialog();
+  // What the library holds now, also in the open view (a read).
+  delete tabData[d.collectionId];
+  if (activeViewId) reloadOpenView();
 }
 
 // ── Rendering ──

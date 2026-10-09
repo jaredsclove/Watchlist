@@ -725,7 +725,7 @@ function manageCollectionsHtml(ix) {
     if (archivedRow) actions = `<button class="btn" onclick="manageSetArchived('c', '${esc(c.id)}', false)"${busy ? ' disabled' : ''}>Unarchive</button>
       <button class="btn" onclick="manageEditMembers('${esc(c.id)}')">Members</button>`;
     else if (confirming) {
-      const note = c.legacy_source ? ` New shows and films you add in the ${storageLabel(c.legacy_source)} tab will still join it; catalog updates won’t.` : '';
+      const note = c.legacy_source ? ' Catalog updates won’t add new shows or films to it while it’s archived.' : '';
       actions = `<div class="manage-confirm">Hides ${esc(c.name)} from Browse collections. Its shows and films stay saved, in every other view and in this collection. You can unarchive it at any time.${esc(note)}
         <button class="btn btn-danger" onclick="manageSetArchived('c', '${esc(c.id)}', true)"${busy ? ' disabled' : ''}>Archive</button>
         <button class="btn" onclick="manageAskArchive(null, null)">Cancel</button></div>`;
@@ -748,6 +748,16 @@ function manageCollectionsHtml(ix) {
       ${manage.showArchived ? `<ul class="manage-list" aria-label="Archived collections">${archived.map(row).join('')}</ul>` : ''}` : ''}`;
 }
 
+// Since Stage 4b where a record is stored isn't shown; two records with one TMDB
+// identity get the "Duplicate on your list" marker (its tooltip names their storage).
+function manageDuplicateHtml(kind, t) {
+  if (!t || t.tmdb_id == null || !manage || !manage.data) return '';
+  const same = kind === 's' ? (manage.data.shows || []).filter(s => s.tmdb_id === t.tmdb_id)
+    : (manage.data.rows || []).filter(r => r.is_film && r.media_type === 'movie' && r.tmdb_id === t.tmdb_id);
+  if (same.length < 2) return '';
+  return ` · <span class="dup-tag" title="${esc(`${same.length} records on your list have this TMDB identity (stored under: ${same.map(x => storageLabel(x.collection)).join(', ')}). They are not merged automatically.`)}">Duplicate on your list</span>`;
+}
+
 function manageMembersHtml(ix) {
   const c = ix.colls.get(manage.collectionId);
   const back = `<button class="btn" onclick="manageShow('collections')">← All collections</button>`;
@@ -759,7 +769,7 @@ function manageMembersHtml(ix) {
     const key = orgKeyMember(c.id, x.m.show_id, x.m.item_id), busy = !!manage.pending[key];
     const kind = x.kind === 'show' ? `TV show · ${ix.seasons.get(x.target.id) || 0} stored season${(ix.seasons.get(x.target.id) || 0) === 1 ? '' : 's'}` : 'Film';
     return `<li class="manage-item"><div class="manage-line"><span class="manage-name">${esc(x.target.title)}</span>
-      <span class="manage-meta">${esc(kind)} · <span class="source-badge">${esc(storageLabel(x.target.collection))}</span> · ${esc(plainStatus(x.target.status))}</span></div>
+      <span class="manage-meta">${esc(kind)} · ${esc(plainStatus(x.target.status))}${manageDuplicateHtml(x.kind === 'show' ? 's' : 'i', x.target)}</span></div>
       <div class="manage-actions"><button class="btn" onclick="manageRemoveMember('${esc(x.m.id)}')"${locked || busy ? ' disabled' : ''} aria-label="Remove ${esc(x.target.title)} from ${esc(c.name)}">Remove</button></div>
       ${manageNotesHtml(key)}</li>`;
   };
@@ -783,7 +793,7 @@ function manageMembersHtml(ix) {
       const key = orgKeyMember(c.id, kind === 's' ? t.id : null, kind === 'i' ? t.id : null), busy = !!manage.pending[key];
       const label = kind === 's' ? `Add show (all ${n} stored season${n === 1 ? '' : 's'}, and any added later)` : 'Add film';
       return `<li class="manage-item"><div class="manage-line"><span class="manage-name">${esc(t.title)}</span>
-        <span class="manage-meta">${kind === 's' ? 'TV show' : 'Film'} · <span class="source-badge">${esc(storageLabel(t.collection))}</span> · ${esc(plainStatus(t.status))}${t.status === 'skipped' ? ' (Browse hides Skipped by default)' : ''}</span></div>
+        <span class="manage-meta">${kind === 's' ? 'TV show' : 'Film'} · ${esc(plainStatus(t.status))}${t.status === 'skipped' ? ' (Browse hides Skipped by default)' : ''}${manageDuplicateHtml(kind, t)}</span></div>
         <div class="manage-actions">${inIt ? '<span class="manage-in">In this collection</span>'
           : `<button class="btn" onclick="manageAddMember('${kind}', '${esc(t.id)}')"${busy ? ' disabled' : ''}>${esc(label)}</button>`}</div>${inIt ? '' : manageNotesHtml(key)}</li>`;
     }).join('') || '<li class="manage-empty">Nothing saved matches.</li>'}</ul>

@@ -151,7 +151,7 @@ test('real collection tabs still load; opening a built-in tab only reads (Stage 
   const byKey = new Map(app.get("COLLECTIONS.find(c => c.id === 'disney').defaults").map(d => [d.k, d]));
   assert.ok(seeded.every(r => r.status === (byKey.get(r.item_key).p ? 'pending' : 'confirmed')));
   assert.strictEqual(app.get('activeViewId'), null);
-  assert.ok(app.el('tabBar').innerHTML.includes('class="tab active" onclick="switchTab(\'disney\')"'));
+  assert.ok(!app.el('tabBar').innerHTML.includes('switchTab('), 'storage tabs are internal since Stage 4b (no tab bar entry)');
   assert.ok(app.el('tableHead').innerHTML.includes('Show &amp; Season'));
   await openTab(app, 'othertv');
   assert.strictEqual(app.el('tmdbPanel').style.display, 'block', 'TMDB panel back on dynamic tabs');

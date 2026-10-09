@@ -1,16 +1,11 @@
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 function buildTabs() {
   const bar = document.getElementById('tabBar');
-  // Views (Currently Watching, All TV, Coming Soon; All Movies) come first; they aren't collections.
-  const viewTabs = tabViewsFor(activeMediaType).map(v =>
+  // The views (Currently Watching, All TV, Coming Soon; All Movies). Since Stage 4b
+  // there are no storage tabs: where a record is stored is internal (library.js).
+  bar.innerHTML = tabViewsFor(activeMediaType).map(v =>
     `<div class="tab${v.id===activeViewId?' active':''}" onclick="switchView('${v.id}')">
       <span class="tab-icon">${v.icon}</span>${esc(v.label)}
-    </div>`
-  ).join('');
-  const visibleCollections = COLLECTIONS.filter(c => c.mediaType === activeMediaType);
-  bar.innerHTML = viewTabs + (viewTabs ? '<div class="tab-sep"></div>' : '') + visibleCollections.map(c =>
-    `<div class="tab${!activeViewId && c.id===activeTabId?' active':''}" onclick="switchTab('${c.id}')">
-      <span class="tab-icon">${c.icon}</span>${esc(legacyTabLabel(c))}
     </div>`
   ).join('');
   buildBrowseBar();
@@ -40,7 +35,9 @@ function switchMediaType(type) {
   buildMediaSwitch();
 }
 
+// A storage tab (internal since Stage 4b: nothing on the page opens one).
 function switchTab(id) {
+  closeLibraryPanel();
   activeViewId = null;
   activeTabId = id;
   browseOrigin = null;
@@ -86,6 +83,7 @@ function switchView(id) {
   if (id === 'alltv') allTvPresentation = readAllTvPresentation();
   allTvSeasonVis = 'notskipped';
   derivedData = null;
+  closeLibraryPanel(); // the "+ Add" panel belongs to the view it was opened in
   document.getElementById('addForm').style.display = 'none';
   document.getElementById('banner').innerHTML = '';
   const tmdbPanel = document.getElementById('tmdbPanel');

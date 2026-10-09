@@ -100,16 +100,18 @@ async function confirmPersonRole() {
 async function pullPersonFilmography(personId, personName, isNewCollection, role, preloadedCredits) {
   // The tab this pull runs for, captured before any await (the user may switch
   // tabs or views while TMDB and the tag backfills are in flight).
-  const collectionId = activeTabId;
+  const collectionId = toolCollectionId(); // the open tab, or All Movies' panel (library.js)
   if (!collectionId) return;
+  const tool = toolContext(collectionId);
   cancelTMDBPreview();
   const resultsEl = document.getElementById('tmdbResults');
   const previewEl = document.getElementById('tmdbPreview');
   resultsEl.innerHTML = '';
   previewEl.innerHTML = `<div class="tmdb-loading">Loading ${esc(personName)}'s filmography…</div>`;
 
-  const td = tabData[activeTabId];
-  const existingRows = td?.rows || [];
+  const td = tabData[toolCollectionId()];
+  const existingRows = toolKnownRows(toolCollectionId()); // library-wide in All Movies (library.js)
+  const ownRows = new Set(td?.rows || []); // the person tag is added only to films stored here
 
   try {
     const credits = preloadedCredits || await tmdbFetch(`/person/${personId}/movie_credits`);
@@ -157,7 +159,7 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
       const existingRow = findExistingRow(existingRows, { itemKey: key, mediaType: 'movie', tmdbId: m.id });
       if (existingRow) {
         const currentCollections = existingRow.collections || [];
-        if (!currentCollections.includes(personName)) {
+        if (ownRows.has(existingRow) && !currentCollections.includes(personName)) {
           const updated = [...currentCollections, personName];
           try {
             await sbFetch('PATCH', `${TABLE}?id=eq.${existingRow.id}`, { collections: updated });
@@ -202,10 +204,11 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
     if (backfilled > 0) showSaved();
     // Switched away meanwhile: the tag backfills above are saved, but this tab's
     // panel is gone, so don't redraw another view or write the preview into it.
-    if (activeTabId !== collectionId) return;
+    if (!toolContextLive(tool)) return;
     // Re-render before writing the preview: renderFilters() rebuilds the whole
     // TMDB panel (including #tmdbPreview), so running it afterwards wiped the list.
-    if (backfilled > 0) { renderFilters(); renderTable(); }
+    // In All Movies the view is read again instead (its panel is kept).
+    if (backfilled > 0) { if (tool.tab) { renderFilters(); renderTable(); } else reloadOpenView(); }
     const previewTarget = document.getElementById('tmdbPreview');
     if (!previewTarget) return;
     previewTarget.innerHTML = `
@@ -232,8 +235,9 @@ async function addPulledPersonMovies() {
   if (!personName) return;
   // The tab this preview belongs to, captured before any await: the TMDB lookups
   // below take a while, and the user may switch tabs or views meanwhile.
-  const collectionId = activeTabId;
+  const collectionId = toolCollectionId(); // the open tab, or All Movies' panel (library.js)
   if (!collectionId) return;
+  const tool = toolContext(collectionId);
   const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
   const seenTmdbIds = new Set();
@@ -284,20 +288,16 @@ async function addPulledPersonMovies() {
   const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
   if (toInsert.length === 0) {
     // keep the preview open when every lookup failed, so the user can retry
-    if (failureNote) showError(failureNote); else if (activeTabId === collectionId) cancelTMDBPreview();
+    if (failureNote) showError(failureNote); else if (toolContextLive(tool)) cancelTMDBPreview();
     return;
   }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
-    if (inserted) tabData[collectionId]?.rows.push(...inserted);
-    tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    toolCachePush(tool, inserted);
     showSaved();
-    if (activeTabId === collectionId) {
-      resetTMDBSearchUI();
-      renderFilters();
-      renderTable();
-    }
+    if (toolContextLive(tool)) resetTMDBSearchUI();
+    toolFinished(tool);
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (e.message.includes('23505') || e.message.includes('duplicate key')) {

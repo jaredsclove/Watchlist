@@ -5,14 +5,15 @@ async function openPullCollection(rowId, collectionId, collectionName) {
   const resultsEl = document.getElementById('tmdbResults');
   if (!previewEl) return;
   resultsEl.innerHTML = '';
-  document.getElementById('tmdbQuery').value = '';
+  const queryEl = document.getElementById('tmdbQuery');
+  if (queryEl) queryEl.value = '';
   previewEl.innerHTML = `<div class="tmdb-loading">Loading ${esc(collectionName)}…</div>`;
   previewEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   try {
     const data = await tmdbFetch(`/collection/${collectionId}`);
     const movies = (data.parts || []).slice().sort((a,b) => (a.release_date||'9999').localeCompare(b.release_date||'9999'));
-    const existingRows = tabData[activeTabId]?.rows || [];
+    const existingRows = toolKnownRows(toolCollectionId()); // library-wide in All Movies (library.js)
 
     const rowsHtml = movies.map(m => {
       const key = `${m.title.toLowerCase().trim()}|film`;
@@ -51,8 +52,9 @@ async function addPulledCollectionMovies() {
   if (!data) return;
   // The tab this preview belongs to, captured before any await: the TMDB lookups
   // below take a while, and the user may switch tabs or views meanwhile.
-  const collectionId = activeTabId;
+  const collectionId = toolCollectionId(); // the open tab, or All Movies' panel (library.js)
   if (!collectionId) return;
+  const tool = toolContext(collectionId);
   const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-movie-id]');
   const moviesById = {};
@@ -106,20 +108,16 @@ async function addPulledCollectionMovies() {
   const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
   if (toInsert.length === 0) {
     // keep the preview open when every lookup failed, so the user can retry
-    if (failureNote) showError(failureNote); else if (activeTabId === collectionId) cancelTMDBPreview();
+    if (failureNote) showError(failureNote); else if (toolContextLive(tool)) cancelTMDBPreview();
     return;
   }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
-    if (inserted) tabData[collectionId]?.rows.push(...inserted);
-    tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    toolCachePush(tool, inserted);
     showSaved();
-    if (activeTabId === collectionId) {
-      resetTMDBSearchUI();
-      renderFilters();
-      renderTable();
-    }
+    if (toolContextLive(tool)) resetTMDBSearchUI();
+    toolFinished(tool);
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {
@@ -135,11 +133,13 @@ async function refreshCollections() {
   const previewEl = document.getElementById('tmdbPreview');
   const resultsEl = document.getElementById('tmdbResults');
   resultsEl.innerHTML = '';
-  document.getElementById('tmdbQuery').value = '';
+  const queryEl = document.getElementById('tmdbQuery');
+  if (queryEl) queryEl.value = '';
   previewEl.innerHTML = `<div class="tmdb-loading">Checking your tracked collections…</div>`;
 
-  const td = tabData[activeTabId];
+  const td = tabData[toolCollectionId()];
   const rows = td?.rows || [];
+  const known = toolKnownRows(toolCollectionId()); // library-wide in All Movies (library.js)
 
   // distinct collections already represented in this tab's movies
   const collectionsMap = new Map(); // id -> name
@@ -159,7 +159,7 @@ async function refreshCollections() {
       let data;
       try { data = await tmdbFetch(`/collection/${collectionId}`); } catch(e) { failedCollections.push(cleanCollectionName(collectionName)); continue; }
       const movies = data.parts || [];
-      const newOnes = movies.filter(m => !isAlreadyAdded(rows, { itemKey: `${m.title.toLowerCase().trim()}|film`, mediaType: 'movie', tmdbId: m.id }));
+      const newOnes = movies.filter(m => !isAlreadyAdded(known, { itemKey: `${m.title.toLowerCase().trim()}|film`, mediaType: 'movie', tmdbId: m.id }));
       if (newOnes.length > 0) {
         newByCollection.push({ collectionId, collectionName: data.name || collectionName, newOnes });
       }
@@ -207,8 +207,9 @@ async function addRefreshedCollectionMovies() {
   const data = window.__refreshCollectionsData || [];
   // The tab this preview belongs to, captured before any await: the TMDB lookups
   // below take a while, and the user may switch tabs or views meanwhile.
-  const collectionId = activeTabId;
+  const collectionId = toolCollectionId(); // the open tab, or All Movies' panel (library.js)
   if (!collectionId) return;
+  const tool = toolContext(collectionId);
   const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-collection-idx]');
   const toInsert = [];
@@ -254,20 +255,16 @@ async function addRefreshedCollectionMovies() {
   const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
   if (toInsert.length === 0) {
     // keep the preview open when every lookup failed, so the user can retry
-    if (failureNote) showError(failureNote); else if (activeTabId === collectionId) cancelTMDBPreview();
+    if (failureNote) showError(failureNote); else if (toolContextLive(tool)) cancelTMDBPreview();
     return;
   }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
-    if (inserted) tabData[collectionId]?.rows.push(...inserted);
-    tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    toolCachePush(tool, inserted);
     showSaved();
-    if (activeTabId === collectionId) {
-      resetTMDBSearchUI();
-      renderFilters();
-      renderTable();
-    }
+    if (toolContextLive(tool)) resetTMDBSearchUI();
+    toolFinished(tool);
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {
@@ -297,5 +294,8 @@ function updateCollectionRefreshLink() {
     return;
   }
   const nameEsc = esc(selected).replace(/'/g,"\\'");
-  linkSpan.innerHTML = `<button class="collection-refresh-link" onclick="refreshPersonCollection('${nameEsc}')">↻ Refresh</button>`;
+  // In All Movies (Stage 4b) the refresh runs in its "+ Add" panel (library.js).
+  linkSpan.innerHTML = activeViewId
+    ? `<button class="collection-refresh-link" onclick="libraryRefreshPerson('${nameEsc}')">↻ Refresh</button>`
+    : `<button class="collection-refresh-link" onclick="refreshPersonCollection('${nameEsc}')">↻ Refresh</button>`;
 }

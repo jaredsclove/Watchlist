@@ -184,13 +184,13 @@ test('rename is guarded by the name shown: renamed elsewhere → "Renamed elsewh
   assert.match(text(app), /Taylor Sheridan 1 show/);
 });
 
-test('archive: the confirmation explains what happens (no plan references) and, for an original, that new tab items still join it', async () => {
+test('archive: the confirmation explains what happens (no plan references) and, for an original, that catalog updates won’t add to it', async () => {
   const app = await boot();
   await open(app);
   app.ctx.manageAskArchive('c', coll(app, 'disney').id); await settle();
   const t = text(app);
   assert.match(t, /Hides Disney\+ from Browse collections\. Its shows and films stay saved, in every other view and in this collection\. You can unarchive it at any time\./);
-  assert.match(t, /New shows and films you add in the Disney\+ tab will still join it; catalog updates won’t\./);
+  assert.match(t, /Catalog updates won’t add new shows or films to it while it’s archived\./);
   assert.ok(!/\(C4\)|§|Stage 3b/.test(t), 'no plan references in UI text');
 });
 
@@ -602,7 +602,8 @@ test('add a whole show from search: the button says all stored seasons; Undo rem
   const sev = showByTitle(app, 'Severance');
   await open(app, 'members', d.id);
   typeInto(app, 'manageMemberSearch', 'Severance'); await settle();
-  assert.match(text(app), /Severance TV show · Other TV · /);
+  assert.match(text(app), /Severance TV show · On List/);
+  assert.ok(!text(app).includes('Other TV'), 'storage isn’t shown (Stage 4b)');
   app.ctx.manageAddMember('s', sev.id); await settle();
   const added = app.store.collection_memberships.find(m => m.collection_id === d.id && m.show_id === sev.id);
   assert.ok(added);

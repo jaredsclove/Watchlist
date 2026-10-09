@@ -32,7 +32,8 @@ async function searchTMDB() {
     ]);
     const tvResults = (tvData.results || []).map(r => ({ ...r, mediaType: 'tv' }));
     const movieResults = (movieData.results || []).map(r => ({ ...r, mediaType: 'movie' }));
-    const mode = tmdbSearchModeFor(COLLECTIONS.find(c => c.id === activeTabId));
+    // The "+ Add" panel of a view (library.js) searches by its media; a tab by its kind.
+    const mode = libraryPanel && !activeTabId ? (libraryPanel.media === 'movie' ? 'movie' : 'tv') : tmdbSearchModeFor(COLLECTIONS.find(c => c.id === activeTabId));
     const results = selectTmdbSearchResults(tvResults, movieResults, mode);
 
     if (results.length === 0) {
@@ -97,6 +98,7 @@ function getTMDBPreviewContainer() {
 }
 
 function renderTMDBPreview() {
+  if (libraryPanel && !activeTabId) { libraryRenderPreview(); return; } // a view's "+ Add" panel (library.js)
   const previewEl = getTMDBPreviewContainer();
   if (!previewEl || !tmdbSelectedShow || !tmdbSelectedShow.details) return;
   const details = tmdbSelectedShow.details;
@@ -200,6 +202,7 @@ function resetTMDBSearchUI() {
 }
 
 async function addSelectedTMDBSeasons() {
+  if (libraryPanel && !activeTabId) return librarySubmitSelection(); // a view's "+ Add" panel (library.js)
   if (!tmdbSelectedShow || !tmdbSelectedShow.details) return;
   // Captured before any await: switching tabs or views clears tmdbSelectedShow
   // and changes activeTabId while the writes are in flight.

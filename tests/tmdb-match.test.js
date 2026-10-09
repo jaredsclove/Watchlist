@@ -35,6 +35,7 @@ function makeEnv({ rows = [], tab = 'movies', tmdb = () => ({}), db = {} } = {})
     tabData: { [tab]: { rows, loaded: true, newKeys: [] } },
     tvShowsById: new Map(),
     activeTabId: tab,
+    activeViewId: null, libraryPanel: null, // a tab is open, not a view (Stage 4b)
     // page state the Match flow reads (watchlist.html): request stamps and the restore epoch
     matchRequestSeq: 0, matchLatestByRow: {}, matchRefreshSeq: 0, matchRefreshStamp: null, orgEpoch: 0, matchRefreshProgress: null, matchReadSeq: 0, matchReads: [], matchPublished: { epoch: 0, tabs: {}, rows: {}, shows: {} },
     tmdbFetch: async p => tmdb(p),

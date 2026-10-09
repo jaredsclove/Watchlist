@@ -9,7 +9,7 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'refresh-shows.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js'];
+const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'refresh-shows.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'library.js'];
 
 // A fresh sandbox per test. tmdb(path) decides each TMDB response: return a value,
 // or throw via fail(status) / down().
@@ -25,6 +25,7 @@ function makeEnv({ tmdb, tracked = [], rows = [], tab = 'othertv', checkboxes = 
     document: { getElementById: el, querySelectorAll: () => checkboxes },
     tabData: { [tab]: { rows, loaded: true, newKeys: [] } },
     activeTabId: tab,
+    activeViewId: null, libraryPanel: null, orgEpoch: 0, // page state the tool context reads (Stage 4b, library.js)
     tmdbShowSpecials: false,
     tmdbFetch: async p => { log.tmdbCalls++; return tmdb(p); },
     sbFetch: async (method, p, body) => {

@@ -7,8 +7,9 @@ async function pullUniverse(universeKey) {
   resultsEl.innerHTML = '';
   previewEl.innerHTML = `<div class="tmdb-loading">Looking up ${esc(universe.label)} titles…</div>`;
 
-  const td = tabData[activeTabId];
-  const existingRows = td?.rows || [];
+  const td = tabData[toolCollectionId()];
+  const existingRows = toolKnownRows(toolCollectionId()); // library-wide in All Movies (library.js)
+  const ownRows = new Set(td?.rows || []); // the universe tag is added only to films stored here
   const found = [];
   const notFound = [];
   const ambiguous = []; // { title, candidates } — more than one TMDB film has this exact title
@@ -61,7 +62,7 @@ async function pullUniverse(universeKey) {
       found.push({ title, alreadyAdded: true });
       // backfill the universe tag if this row predates the universe-pull feature
       const currentCollections = existingRow.collections || [];
-      if (!currentCollections.includes(universe.label)) {
+      if (ownRows.has(existingRow) && !currentCollections.includes(universe.label)) {
         const updated = [...currentCollections, universe.label];
         try {
           await sbFetch('PATCH', `${TABLE}?id=eq.${existingRow.id}`, { collections: updated });
@@ -146,8 +147,9 @@ async function addPulledUniverseMovies() {
   const universe = UNIVERSE_LISTS[universeKey];
   // The tab this preview belongs to, captured before any await: the TMDB lookups
   // below take a while, and the user may switch tabs or views meanwhile.
-  const collectionId = activeTabId;
+  const collectionId = toolCollectionId(); // the open tab, or All Movies' panel (library.js)
   if (!collectionId) return;
+  const tool = toolContext(collectionId);
   const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
   const toInsert = [];
@@ -192,20 +194,16 @@ async function addPulledUniverseMovies() {
   const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
   if (toInsert.length === 0) {
     // keep the preview open when every lookup failed, so the user can retry
-    if (failureNote) showError(failureNote); else if (activeTabId === collectionId) cancelTMDBPreview();
+    if (failureNote) showError(failureNote); else if (toolContextLive(tool)) cancelTMDBPreview();
     return;
   }
 
   try {
     const inserted = await sbFetch('POST', TABLE, toInsert);
-    if (inserted) tabData[collectionId]?.rows.push(...inserted);
-    tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
+    toolCachePush(tool, inserted);
     showSaved();
-    if (activeTabId === collectionId) {
-      resetTMDBSearchUI();
-      renderFilters();
-      renderTable();
-    }
+    if (toolContextLive(tool)) resetTMDBSearchUI();
+    toolFinished(tool);
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {

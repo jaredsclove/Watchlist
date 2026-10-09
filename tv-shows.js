@@ -143,14 +143,18 @@ async function setShowStatusById(showId, status) {
   const show = tvShowsById.get(showId);
   if (!show || show.status === status) return;
   const old = show.status;
+  const epoch = orgEpoch;
   show.status = status;
   const edit = typeof matchEditStart === 'function' ? matchEditStart('shows', show.collection, show.collection) : null;
   renderTable();
   try {
     const saved = await sbRpc('set_show_status', { p_show_id: showId, p_status: status });
+    // An answer from before a restore never reaches the restored shows (Stage 4b).
+    if (epoch !== orgEpoch) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(`“${show.title}” · show status`); return; }
     if (saved) Object.assign(show, saved);
     showSaved();
   } catch(e) {
+    if (epoch !== orgEpoch) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(`“${show.title}” · show status`); return; }
     show.status = old;
     showError(e.message);
   }
@@ -163,14 +167,16 @@ async function setSeasonSkipped(id, skipped) {
   if (!row || !isTvSeason(row)) return;
   const old = !!row.skipped;
   if (old === skipped) return;
+  const epoch = orgEpoch;
   row.skipped = skipped;
   const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, id, row) : null;
   renderTable();
   try {
     const saved = await sbRpc('set_season_skipped', { p_row_id: id, p_skipped: skipped });
-    mirrorRowUpdate(id, saved || { skipped });
+    if (!mirrorRowUpdate(id, saved || { skipped }, epoch)) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(`“${row.title}” · ${row.season}`); return; }
     showSaved();
   } catch(e) {
+    if (epoch !== orgEpoch) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(`“${row.title}” · ${row.season}`); return; }
     row.skipped = old;
     showError(e.message);
   }

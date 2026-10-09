@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261008-catalog1">
+<link rel="stylesheet" href="styles.css?v=20261008-library1">
 </head>
 <body>
 
@@ -49,6 +49,7 @@
   <div class="filters" id="filtersRow"></div>
 
   <div id="tmdbPanel" class="tmdb-panel" style="display:none"></div>
+  <div id="libraryPanel" class="tmdb-panel library-panel" style="display:none"></div>
 
   <table id="desktopTable">
     <thead id="tableHead">
@@ -78,24 +79,25 @@
      deliberately unversioned (the catalog-refresh workflow reloads it by plain URL). -->
 <script src="config.js"></script>
 <script src="identity.js"></script>
-<script src="api.js?v=20261008-catalog1"></script>
+<script src="api.js?v=20261008-library1"></script>
 <script src="ui-helpers.js"></script>
-<script src="backup-restore.js?v=20261008-catalog1"></script>
-<script src="tabs.js?v=20261008-catalog1"></script>
-<script src="render.js?v=20261008-catalog1"></script>
-<script src="row-actions.js?v=20261008-catalog1"></script>
-<script src="tmdb-search.js?v=20261008-catalog1"></script>
-<script src="collections-pull.js?v=20261008-catalog1"></script>
-<script src="universe-pull.js?v=20261008-catalog1"></script>
-<script src="person-pull.js?v=20261008-catalog1"></script>
-<script src="refresh-shows.js?v=20261008-catalog1"></script>
-<script src="tmdb-match.js?v=20261008-catalog1"></script>
-<script src="derived-views.js?v=20261008-catalog1"></script>
-<script src="tv-shows.js?v=20261008-catalog1"></script>
-<script src="organization.js?v=20261008-catalog1"></script>
-<script src="organization-manage.js?v=20261008-catalog1"></script>
-<script src="catalog-apply.js?v=20261008-catalog1"></script>
-<script src="browse-views.js?v=20261008-catalog1"></script>
+<script src="backup-restore.js?v=20261008-library1"></script>
+<script src="tabs.js?v=20261008-library1"></script>
+<script src="render.js?v=20261008-library1"></script>
+<script src="row-actions.js?v=20261008-library1"></script>
+<script src="tmdb-search.js?v=20261008-library1"></script>
+<script src="collections-pull.js?v=20261008-library1"></script>
+<script src="universe-pull.js?v=20261008-library1"></script>
+<script src="person-pull.js?v=20261008-library1"></script>
+<script src="refresh-shows.js?v=20261008-library1"></script>
+<script src="tmdb-match.js?v=20261008-library1"></script>
+<script src="derived-views.js?v=20261008-library1"></script>
+<script src="tv-shows.js?v=20261008-library1"></script>
+<script src="organization.js?v=20261008-library1"></script>
+<script src="organization-manage.js?v=20261008-library1"></script>
+<script src="catalog-apply.js?v=20261008-library1"></script>
+<script src="browse-views.js?v=20261008-library1"></script>
+<script src="library.js?v=20261008-library1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -158,6 +160,9 @@ let manageSession = 0; // bumped each time the Manage dialog opens; replies for 
 let manage = null; // the open Manage dialog's state (organization-manage.js); null while closed
 let catalogDialog = null; // the open Catalog updates dialog (catalog-apply.js); null while closed
 let catalogSession = 0; // bumped each time it opens; answers for an earlier opening never touch it
+let catalogChooser = null; // the open Catalog updates chooser (catalog-apply.js): { session, hints }; null while closed
+let libraryPanel = null; // the open "+ Add" panel of a view (library.js); null while closed
+let libraryPanelSeq = 0; // bumped each time the panel opens; answers for an earlier opening never touch it
 let orgWriteCapability = null; // { value: 'yes', epoch }: this database has the Stage 3b-2 functions (checked when Manage opens)
 let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.js)
 let matchLatestByRow = {}; // row id → the latest Match call's number for that row

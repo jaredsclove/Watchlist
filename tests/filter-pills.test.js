@@ -100,8 +100,8 @@ test('All Movies opens on Unwatched only (the stored watched flag); Status still
   assert.deepStrictEqual(titles(app), ['Alpha', 'Epsilon', 'Gamma', 'Zeta'], 'Status All statuses + Unwatched only');
   setFilter(app, 'fStatus', 'skipped');
   assert.deepStrictEqual(titles(app), ['Epsilon']);
-  setFilter(app, 'fStatus', ''); setFilter(app, 'fSearch', 'a'); setFilter(app, 'fSource', 'disney');
-  assert.deepStrictEqual(titles(app), ['Gamma', 'Zeta'], 'Search and Source combine with it');
+  setFilter(app, 'fStatus', ''); setFilter(app, 'fSearch', 'a');
+  assert.deepStrictEqual(titles(app), ['Alpha', 'Gamma', 'Zeta'], 'Search combines with it (no Source filter since Stage 4b)');
   assert.ok(readsOnly(app));
 });
 
@@ -266,7 +266,7 @@ test('All TV: a network/theme pill filters Shows by any stored season, keeping e
   assert.ok(mixed.includes('1/2 watched') && mixed.includes('Season 2'), 'all seasons kept: progress 1/2, up next Season 2');
   assert.ok(/data-filter-value="Star Wars"[^>]*aria-pressed="false"/.test(mixed), 'its own pill (another theme) isn’t shown as selected');
   app.ctx.toggleDerivedShow(app.get("[...tvShowsById.values()].find(s => s.title === 'Mixed Show').id"));
-  assert.strictEqual((html(app).match(/class="[^"]*sub-row/g) || []).length, 2, 'expanded: both seasons');
+  assert.strictEqual((html(app).match(/class="[^"]*sub-row/g) || []).length, 3, 'expanded: both seasons and the Add season row (Stage 4b)');
   click(app, 'theme', 'Marvel');
   assert.strictEqual(app.el('fTheme').value, '');
 });
@@ -343,7 +343,7 @@ test('Currently Watching and Coming Soon filter by theme too, with choices from 
 });
 
 // ─── Legacy tabs ──────────────────────────────────────────────────────────────
-test('legacy tabs: the same pills show their selected state; collection tags keep the legacy refresh link only there', async () => {
+test('legacy tabs: the same pills show their selected state; collection tags update the person-collection refresh link (in All Movies too since Stage 4b)', async () => {
   const app = await boot();
   app.ctx.switchTab('othertv'); await settle();
   app.el('fWatch').value = ''; app.ctx.renderTable();
@@ -367,7 +367,7 @@ test('legacy tabs: the same pills show their selected state; collection tags kee
   app.ctx.switchView('allmovies'); await settle();
   click(app, 'collection', 'Star Wars');
   assert.strictEqual(app.el('fCollection').value, 'Star Wars');
-  assert.strictEqual(linkCalls, 1, 'not in All Movies');
+  assert.strictEqual(linkCalls, 2, 'All Movies offers the refresh link too');
   app.ctx.updateCollectionRefreshLink = original;
   assert.strictEqual(app.writes().length, writes, 'no write from any pill');
 });
@@ -407,17 +407,21 @@ test('a pill is plain text without its filter control; an unoffered value change
   assert.ok(/<button type="button" class="badge [^"]*filter-pill"/.test(html(app)), 'a real button: Enter and Space work');
 });
 
-test('selected-state styling survives a network badge’s inline colours; the read-only watched label is not a control', async () => {
+test('selected-state styling survives a network badge’s inline colours; in a collection the watched state is a read-only label, in All Movies a control', async () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   const rule = (css.match(/\.filter-pill\[aria-pressed="true"\] \{([^}]*)\}/) || [])[1] || '';
   assert.ok(/box-shadow/.test(rule) && /::after \{ content: ' ✕'; \}/.test(css));
   const app = await boot();
   const inline = app.get("networkBadgeStyle('HBO')");
   assert.ok(!/box-shadow|font-weight|outline/.test(inline), inline);
-  app.ctx.switchMediaType('movie'); await settle();
-  setFilter(app, 'fWatch', '');
+  app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
+  const mixed = app.get("[...browseData.showsById.values()].find(s => s.title === 'Mixed Show').id");
+  app.ctx.toggleBrowseShow(mixed); await settle();
   assert.ok(html(app).includes('<span class="ro-watch">Not watched</span>') && html(app).includes('<span class="ro-watch watched">✓ Watched</span>'));
   assert.ok(!/class="[^"]*(watch-btn|confirmed-lbl)[^"]*">(Not watched|✓ Watched)/.test(html(app) + cards(app)));
+  app.ctx.switchMediaType('movie'); await settle();
+  setFilter(app, 'fWatch', '');
+  assert.ok(html(app).includes("toggleWatch('f-beta')") && !html(app).includes('ro-watch'), 'All Movies has the Watched control (Stage 4b)');
 });
 
 T.run();

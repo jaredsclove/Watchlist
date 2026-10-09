@@ -614,7 +614,7 @@ function seasonRowControlHtml(r, opts = {}) {
 }
 
 // One season of a grouped show: a desktop sub-row and a mobile card row.
-// opts: { isNew, showMatch, showDelete, requireReleased, today }
+// opts: { isNew, showMatch, showDelete, deleteTitle, requireReleased, today }
 function seasonSubRowHtml(r, opts) {
   const isSkipped = isOffList(r);
   const isMaybe   = displayStatus(r) === 'maybe';
@@ -628,7 +628,7 @@ function seasonSubRowHtml(r, opts) {
         <td class="date-cell">${esc(r.display_date)}</td>
         <td>${seasonRowControlHtml(r)}</td>
         <td>${seasonWatchControlHtml(r, opts, false)}</td>
-        <td>${opts.showDelete ? `<button class="del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>` : ''}</td>
+        <td>${opts.showDelete ? `<button class="del-btn" onclick="delRow('${r.id}')" title="${esc(opts.deleteTitle || 'Remove')}">×</button>` : ''}</td>
       </tr>`;
 }
 
@@ -638,7 +638,7 @@ function seasonSubCardHtml(r, opts) {
           <div class="card-actions">
             ${seasonRowControlHtml(r)}
             ${seasonWatchControlHtml(r, opts, true)}
-            ${opts.showDelete ? `<button class="card-del-btn" onclick="delRow('${r.id}')" title="Remove">×</button>` : ''}
+            ${opts.showDelete ? `<button class="card-del-btn" onclick="delRow('${r.id}')" title="${esc(opts.deleteTitle || 'Remove')}">×</button>` : ''}
           </div>
         </div>`;
 }

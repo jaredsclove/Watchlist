@@ -89,7 +89,7 @@ test('switching to Seasons: header, visibility select at All (except Skipped), n
   assert.deepStrictEqual([...app.el('filtersRow').innerHTML.matchAll(/<option value="(\w+)">([^<]*)</g)].filter(m => m[1] !== '').map(m => m[2]).slice(-5),
     ['All (except Skipped)', 'All seasons', 'To watch', 'Watched', 'Skipped']);
   assert.ok(app.el('filtersRow').innerHTML.includes('onchange="setAllTvSeasonVis(this.value)"'));
-  assert.ok(app.el('tableHead').innerHTML.includes('<th>Show &amp; Season</th><th>Source</th><th>Premiere</th><th>Show status</th>'));
+  assert.ok(app.el('tableHead').innerHTML.includes('<th>Show &amp; Season</th><th>Theme</th><th>Premiere</th><th>Show status</th>'));
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 1']);
   assert.strictEqual(app.writes().length, 0);
 });
@@ -108,22 +108,23 @@ test('Watching and Coming Soon have no Shows/Seasons switch and are unaffected b
 });
 
 // ─── Shared filters across toggles ───────────────────────────────────────────
-test('Search, Source and show Status keep their values across Shows → Seasons → Shows and select the same shows', async () => {
+test('Search and show Status keep their values across Shows → Seasons → Shows and select the same shows (no Source filter since Stage 4b)', async () => {
   const a = show({ title: 'Andor', collection: 'disney', tmdb_id: null, status: 'watching' }, [{ season: 'Season 1' }, { season: 'Season 2', date: '2025-04-22' }]);
   const b = show({ title: 'Andor Talk', collection: 'othertv', status: 'confirmed' }, [{ num: 1 }]);
   const c = show({ title: 'Andorra', collection: 'disney', tmdb_id: null, status: 'skipped' }, [{ season: 'Season 1' }]);
   const d = show({ title: 'Bluey', collection: 'disney', tmdb_id: null }, [{ season: 'Season 1' }]);
   const app = await openAllTv(all(a, b, c, d));
-  app.el('fSearch').value = 'andor'; app.el('fSource').value = 'disney'; app.el('fStatus').value = 'all'; app.ctx.renderTable();
+  assert.strictEqual(app.el('fSource'), null);
+  app.el('fSearch').value = 'andor'; app.el('fStatus').value = 'all'; app.ctx.renderTable();
   const showIds = showCards(app);
-  assert.deepStrictEqual(showIds, [a.show.id, c.show.id]);
+  assert.deepStrictEqual(showIds, [a.show.id, b.show.id, c.show.id]);
   const showsHtml = tbody(app);
   await seasons(app);
-  for (const [id, v] of [['fSearch', 'andor'], ['fSource', 'disney'], ['fStatus', 'all']]) assert.strictEqual(app.el(id).value, v, id);
+  for (const [id, v] of [['fSearch', 'andor'], ['fStatus', 'all']]) assert.strictEqual(app.el(id).value, v, id);
   const rowShowIds = [...new Set(app.get('derivedData').rows.filter(r => seasonRows(app).includes(`${r.title} · ${r.season}`)).map(r => r.show_id))];
   assert.deepStrictEqual(rowShowIds.sort(), [...showIds].sort(), 'Seasons lists seasons of exactly the Shows-mode shows');
   await shows(app);
-  for (const [id, v] of [['fSearch', 'andor'], ['fSource', 'disney'], ['fStatus', 'all']]) assert.strictEqual(app.el(id).value, v, id);
+  for (const [id, v] of [['fSearch', 'andor'], ['fStatus', 'all']]) assert.strictEqual(app.el(id).value, v, id);
   assert.strictEqual(tbody(app), showsHtml, 'Shows output identical after the round trip');
 });
 
@@ -134,7 +135,7 @@ test('expanded shows stay expanded across toggles', async () => {
   const expanded = tbody(app);
   await seasons(app); await shows(app);
   assert.strictEqual(tbody(app), expanded);
-  assert.strictEqual((tbody(app).match(/sub-row/g) || []).length, 2);
+  assert.strictEqual((tbody(app).match(/sub-row/g) || []).length, 3, 'two seasons and the Add season row (Stage 4b)');
 });
 
 // ─── Season visibility memory ────────────────────────────────────────────────
@@ -257,8 +258,8 @@ test('approved exception: with To watch in Seasons, expanding a show in Shows st
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 3']);
   await shows(app);
   app.ctx.toggleDerivedShow(a.show.id); await settle();
-  assert.strictEqual((tbody(app).match(/sub-row/g) || []).length, 3);
-  assert.strictEqual((cards(app).match(/card-subseason-row/g) || []).length, 3);
+  assert.strictEqual((tbody(app).match(/sub-row/g) || []).length, 4, 'three seasons and the Add season row (Stage 4b)');
+  assert.strictEqual((cards(app).match(/card-subseason-row/g) || []).length, 4);
 });
 
 // ─── Ordering ────────────────────────────────────────────────────────────────

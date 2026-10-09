@@ -58,12 +58,12 @@ const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.render
 const statNums = app => [...app.el('statsRow').innerHTML.matchAll(/stat-num">(\d+)</g)].map(m => Number(m[1]));
 
 // ─── Navigation and loading ───────────────────────────────────────────────────
-test('All TV sits between Currently Watching and Coming Soon, before the collection tabs; startup is unchanged', async () => {
+test('All TV sits between Currently Watching and Coming Soon; no storage tabs (Stage 4b); startup is unchanged', async () => {
   const app = await createApp();
   const bar = app.el('tabBar').innerHTML;
   const at = id => bar.indexOf(`switchView('${id}')`);
   assert.ok(at('watching') >= 0 && at('watching') < at('alltv') && at('alltv') < at('comingsoon'));
-  assert.ok(at('comingsoon') < bar.indexOf('tab-sep') && bar.indexOf('tab-sep') < bar.indexOf("switchTab('disney')"));
+  assert.ok(!bar.includes('switchTab(') && !bar.includes('tab-sep'), 'the tab bar holds only the views');
   assert.strictEqual(app.get('activeViewId'), 'watching', 'the app still opens on Currently Watching');
   app.ctx.switchMediaType('movie'); await settle();
   assert.ok(!app.el('tabBar').innerHTML.includes("switchView('alltv')"), 'not a Movies view');
@@ -219,19 +219,22 @@ test('up next uses the whole show, not a filtered subset; Specials never move pr
 });
 
 // ─── Expansion and edits ─────────────────────────────────────────────────────
-test('expanded: every stored season with Watched (Not aired yet until it airs) and Skip / Keep; no add, delete or Match anywhere', async () => {
+test('expanded: every stored season with Watched (Not aired yet until it airs), Skip / Keep and (Stage 4b) Delete and Add season; Match only for an eligible row', async () => {
   const s = show({ title: 'S', status: 'confirmed' }, [{ num: 1, w: true }, { num: 2, s: true }, { num: 3, date: day(9) }, { num: 4, tba: true }]);
   const app = await openAllTv(all(s));
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   const html = app.html();
-  assert.strictEqual((app.el('tbody').innerHTML.match(/sub-row/g) || []).length, 4);
-  assert.strictEqual((app.el('cardList').innerHTML.match(/card-subseason-row/g) || []).length, 4);
+  assert.strictEqual((app.el('tbody').innerHTML.match(/sub-row/g) || []).length, 5, 'four seasons and the Add season row');
+  assert.strictEqual((app.el('cardList').innerHTML.match(/card-subseason-row/g) || []).length, 5);
+  s.rows.forEach(r => assert.ok(html.includes(`delRow('${r.id}')`), 'Delete on a season that is not a built-in catalog entry'));
+  assert.ok(html.includes(`openAddSeason('${s.show.id}')`));
+  assert.ok(!html.includes('openTmdbMatch('), 'identified seasons are not Match-eligible');
   assert.ok(html.includes(`setSeasonSkipped('${s.rows[1].id}', false)`), 'Keep on the skipped season');
   assert.ok(html.includes(`setSeasonSkipped('${s.rows[2].id}', true)`), 'Skip on the others');
   assert.ok(html.includes('Not aired yet'));
   assert.ok(html.includes(`toggleWatch('${s.rows[0].id}')`), 'a watched season can be unmarked');
   assert.ok(!html.includes(`toggleWatch('${s.rows[2].id}')`) && !html.includes(`toggleWatch('${s.rows[3].id}')`));
-  assert.ok(!/delRow\(|openTmdbMatch\(|addEntry\(|toggleAdd\(|searchTMDB\(/.test(html + app.el('filtersRow').innerHTML));
+  assert.ok(!/addEntry\(|toggleAdd\(|searchTMDB\(/.test(html + app.el('filtersRow').innerHTML), 'adding is in the + Add panel only');
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   assert.ok(!app.el('tbody').innerHTML.includes('sub-row'));
 });
@@ -293,15 +296,15 @@ test('Watched and Skip from All TV: one function call each by row id, mirrored i
   assert.strictEqual(app.store.watchlist_items.filter(r => r.show_id === s.show.id).length, 2, 'nothing deleted or added');
 });
 
-test('Search, Source and Status combine; switching views resets filters; Watching and Coming Soon have no Status filter', async () => {
+test('Search and Status combine (no Source filter since Stage 4b); switching views resets filters; Watching and Coming Soon have no Status filter', async () => {
   const a = show({ title: 'Andor', collection: 'disney', tmdb_id: null, status: 'watching' }, [{ season: 'Season 1' }]);
   const b = show({ title: 'Andor Talk', collection: 'othertv', status: 'confirmed' }, [{ num: 1 }]);
   const c = show({ title: 'Bluey', collection: 'disney', tmdb_id: null, status: 'confirmed' }, [{ season: 'Season 1' }]);
   const app = await openAllTv(all(a, b, c));
+  assert.strictEqual(app.el('fSource'), null, 'no Source filter');
   setFilter(app, 'fSearch', 'andor');  assert.deepStrictEqual(titlesShown(app), ['Andor', 'Andor Talk']);
-  setFilter(app, 'fSource', 'disney'); assert.deepStrictEqual(titlesShown(app), ['Andor']);
-  setFilter(app, 'fStatus', 'confirmed'); assert.deepStrictEqual(titlesShown(app), []);
-  setFilter(app, 'fSearch', '');        assert.deepStrictEqual(titlesShown(app), ['Bluey']);
+  setFilter(app, 'fStatus', 'confirmed'); assert.deepStrictEqual(titlesShown(app), ['Andor Talk']);
+  setFilter(app, 'fSearch', '');        assert.deepStrictEqual(titlesShown(app), ['Andor Talk', 'Bluey']);
   app.ctx.switchView('watching'); await settle();
   assert.strictEqual(app.el('fStatus'), null);
   assert.ok(!app.el('filtersRow').innerHTML.includes('fStatus'));

@@ -85,14 +85,26 @@ function tmdbMatchConflictMessage(conflict) {
 // what is being matched discards it. inFlight: the request number of a match call
 // in progress (Confirm, the seasons and Back wait for it; Cancel doesn't).
 
+// The rows the Match controls came from: the open tab's, or (Stage 4b) the open
+// view's (All TV, All Movies), whose Match panel is the view's "+ Add" panel.
+function tmdbMatchRows() {
+  return activeViewId ? actionRows() : (tabData[activeTabId]?.rows || []);
+}
+
 function tmdbMatchRow() {
   const m = window.__tmdbMatch;
-  return m ? (tabData[activeTabId]?.rows || []).find(r => r.id === m.rowId) : null;
+  return m ? tmdbMatchRows().find(r => r.id === m.rowId) : null;
+}
+
+// The kind of row a Match is for decides the search and the theme, as on its tab.
+function tmdbMatchCollection(row) {
+  return COLLECTIONS.find(c => c.id === (row ? row.collection : activeTabId));
 }
 
 function openTmdbMatch(rowId) {
-  const row = (tabData[activeTabId]?.rows || []).find(r => r.id === rowId);
+  const row = tmdbMatchRows().find(r => r.id === rowId);
   if (!row || !isTmdbMatchEligible(row)) return;
+  if (activeViewId) openLibraryPanel(isFilmRow(row) ? 'movie' : 'tv', 'match');
   cancelTMDBPreview();
   document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
   document.getElementById('tmdbResults').innerHTML = '';
@@ -135,7 +147,7 @@ async function searchTmdbMatch() {
     ]);
     const tvResults = (tvData.results || []).map(r => ({ ...r, mediaType: 'tv' }));
     const movieResults = (movieData.results || []).map(r => ({ ...r, mediaType: 'movie' }));
-    m.results = selectTmdbSearchResults(tvResults, movieResults, tmdbSearchModeFor(COLLECTIONS.find(c => c.id === activeTabId)));
+    m.results = selectTmdbSearchResults(tvResults, movieResults, tmdbSearchModeFor(tmdbMatchCollection(tmdbMatchRow())));
     if (m.results.length === 0) { body.innerHTML = `<div class="tmdb-no-results">No results found for "${esc(query)}".</div>`; return; }
     body.innerHTML = `<div class="tmdb-refresh-summary">Pick the exact title — nothing is matched until you confirm.</div>
       <div class="tmdb-result-list">${m.results.map((r, idx) => {
@@ -185,7 +197,7 @@ function renderTmdbMatchConfirm() {
   if (!m?.target || !row || !body || m.inFlight) return;
   m.proposal = null; // Back from a collection expansion: it no longer applies
   const { mediaType, details } = m.target;
-  const isMoviesTab = !!COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+  const isMoviesTab = !!tmdbMatchCollection(row)?.isMovieTab;
   let html = `<div class="tmdb-result-title" style="margin-top:10px">${esc(mediaType === 'movie' ? details.title : details.name)}
     <span class="tmdb-type-tag ${mediaType === 'movie' ? 'tmdb-type-movie' : 'tmdb-type-tv'}">${mediaType === 'movie' ? 'Film' : 'Series'}</span> · TMDB ${details.id}</div>`;
   if (mediaType === 'tv') {
@@ -227,7 +239,7 @@ async function confirmTmdbMatch(withConfirmation) {
   const m = window.__tmdbMatch;
   const row = tmdbMatchRow();
   if (!m?.target || !row || m.inFlight) return;
-  const isMoviesTab = !!COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
+  const isMoviesTab = !!tmdbMatchCollection(row)?.isMovieTab;
   const patch = buildTmdbMatchPatch(row, m.target, isMoviesTab);
   if (!patch) return;
   let expansion = {};
@@ -237,7 +249,7 @@ async function confirmTmdbMatch(withConfirmation) {
     expansion = { confirm: p.token };
   }
   // Each call's stamp: a delayed answer is checked against what the page shows now.
-  const stamp = { seq: ++matchRequestSeq, rowId: row.id, epoch: orgEpoch, rowObj: row, collection: row.collection, title: patch.title };
+  const stamp = { seq: ++matchRequestSeq, rowId: row.id, epoch: orgEpoch, rowObj: row, collection: row.collection, title: patch.title, viewId: activeViewId };
   matchLatestByRow[row.id] = stamp.seq;
   // Tracked like a read of the row: when the match is applied to the page it covers the row
   // (a refresh waiting on it is satisfied); otherwise it covers nothing.
@@ -320,11 +332,14 @@ async function confirmTmdbMatch(withConfirmation) {
     // while it is still current (same restore epoch, the page's copy of the row not
     // replaced by a newer read, no newer match of this row). Otherwise a fresh read,
     // under the current guards, shows what is saved now.
+    const inView = !!stamp.viewId && activeViewId === stamp.viewId && actionRows().includes(stamp.rowObj);
     const stillCurrent = stamp.epoch === orgEpoch && matchLatestByRow[row.id] === stamp.seq
-      && (tabData[stamp.collection]?.rows || []).includes(stamp.rowObj);
+      && ((tabData[stamp.collection]?.rows || []).includes(stamp.rowObj) || inView);
     if (!stillCurrent) {
       if (window.__tmdbMatch === m) { window.__tmdbMatch = null; cancelTMDBPreview(); }
       refreshAfterMatch(stamp, stamp.epoch !== orgEpoch);
+      // A view (Stage 4b) is read again under its own guards, keeping its filters.
+      if (stamp.viewId && stamp.epoch === orgEpoch && activeViewId === stamp.viewId) reloadOpenView();
       return;
     }
     Object.assign(row, fresh);
@@ -383,6 +398,13 @@ async function confirmTmdbMatch(withConfirmation) {
   if (window.__tmdbMatch === m) window.__tmdbMatch = null;
   tabData[row.collection]?.rows.sort((a, b) => a.date_sort.localeCompare(b.date_sort));
   showSaved();
+  // In a view (Stage 4b) the match is reported in its panel and the view is read again.
+  if (stamp.viewId && activeViewId === stamp.viewId) {
+    cancelTMDBPreview();
+    if (libraryPanel) libraryReport(libraryContext(), `Matched “${patch.title}”.`, false);
+    reloadOpenView();
+    return;
+  }
   if (activeTabId !== row.collection) return;
   cancelTMDBPreview();
   renderFilters();

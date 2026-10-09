@@ -1,8 +1,10 @@
 // ─── Actions ──────────────────────────────────────────────────────────────────
-// The rows the visible controls came from: the open derived view's cross-TV rows,
-// or the active collection tab's rows. Row actions PATCH by the row's real id
-// either way. The read-only browse views have none, so no row action can act there.
+// The rows the visible controls came from: All Movies' films (Stage 4b), the open
+// derived view's cross-TV rows, or the active collection tab's rows. Row actions
+// PATCH by the row's real id either way. The read-only collection views have none,
+// so no row action can act there.
 function actionRows() {
+  if (activeViewId === ALL_MOVIES_VIEW.id) return browseData?.rows || [];
   if (isBrowseView(activeViewId)) return [];
   if (activeViewId) return derivedData?.rows || [];
   return tabData[activeTabId]?.rows || [];
@@ -10,17 +12,32 @@ function actionRows() {
 
 // After a successful PATCH, copy the saved fields onto every other in-memory copy
 // of that row (the derived view's rows and any loaded tab), so the source tab's
-// cache stays correct without a refetch or a re-seed.
-function mirrorRowUpdate(id, fields) {
+// cache stays correct without a refetch or a re-seed. epoch: the restore epoch the
+// request started in; an answer from before a restore never reaches the restored
+// caches (Stage 4b).
+function mirrorRowUpdate(id, fields, epoch) {
+  if (epoch !== undefined && epoch !== orgEpoch) return false;
   const lists = Object.values(tabData).map(td => td?.rows || []);
   if (derivedData?.rows) lists.push(derivedData.rows);
+  if (browseData?.rows) lists.push(browseData.rows);
   lists.forEach(rows => rows.forEach(r => { if (r.id === id) Object.assign(r, fields); }));
+  return true;
+}
+
+// An answer to a change sent before a restore arrived after it: its payload is
+// set aside (nothing restored is overwritten) and what is open is read again.
+// It doesn't say which happened last; nothing is resent.
+function staleAfterRestore(what) {
+  showNotice(`${what} was sent before the restore and answered afterwards. The list has been read again; this doesn’t show whether the change ran before or after the restore. Check it before changing it again.`);
+  if (activeTabId) loadTab(activeTabId);
+  else if (typeof reloadOpenView === 'function') reloadOpenView();
 }
 
 async function toggleWatch(id) {
   const row = actionRows().find(r => r.id === id);
   if (!row) return;
   const newVal = !row.watched;
+  const epoch = orgEpoch;
   row.watched = newVal;
   // Tracked like a publication of the row (tmdb-match.js): no older read replaces it.
   const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, id, row) : null;
@@ -29,16 +46,19 @@ async function toggleWatch(id) {
     if (isTvSeason(row)) {
       // The database also keeps the show's compatibility values in step.
       const saved = await sbRpc('set_season_watched', { p_row_id: id, p_watched: newVal });
-      mirrorRowUpdate(id, saved || { watched: newVal });
+      if (!mirrorRowUpdate(id, saved || { watched: newVal }, epoch)) staleAfterRestore(`“${row.title}” · watched`);
     } else {
       await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { watched: newVal });
-      mirrorRowUpdate(id, { watched: newVal });
+      if (!mirrorRowUpdate(id, { watched: newVal }, epoch)) staleAfterRestore(`“${row.title}” · watched`);
     }
-    showSaved();
+    if (epoch === orgEpoch) showSaved();
   } catch(e) {
-    row.watched = !newVal;
-    renderTable();
-    showError(e.message);
+    if (epoch !== orgEpoch) staleAfterRestore(`“${row.title}” · watched`);
+    else {
+      row.watched = !newVal;
+      renderTable();
+      showError(e.message);
+    }
   }
   if (typeof matchEditEnd === 'function') matchEditEnd(edit);
 }
@@ -48,6 +68,7 @@ async function setStatus(id, status, selectEl) {
   const row = actionRows().find(r => r.id === id);
   if (!row || isTvSeason(row)) return;
   const old = row.status;
+  const epoch = orgEpoch;
   row.status = status;
   const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, id, row) : null;
   // update select styling immediately
@@ -66,19 +87,25 @@ async function setStatus(id, status, selectEl) {
   }
   try {
     await sbFetch('PATCH', `${TABLE}?id=eq.${id}`, { status });
-    mirrorRowUpdate(id, { status });
-    showSaved();
-    // full re-render to update watch button availability and stats
-    renderTable();
+    if (!mirrorRowUpdate(id, { status }, epoch)) staleAfterRestore(`“${row.title}” · status`);
+    else {
+      showSaved();
+      // full re-render to update watch button availability and stats
+      renderTable();
+    }
   } catch(e) {
-    row.status = old;
-    renderTable();
-    showError(e.message);
+    if (epoch !== orgEpoch) staleAfterRestore(`“${row.title}” · status`);
+    else {
+      row.status = old;
+      renderTable();
+      showError(e.message);
+    }
   }
   if (typeof matchEditEnd === 'function') matchEditEnd(edit);
 }
 
 async function delRow(id) {
+  if (activeViewId) return delRowInView(id); // All TV and All Movies (library.js), by the same rules
   const td = tabData[activeTabId];
   if (!td) return; // collection tabs only; derived views have no delete control
   const idx = td.rows.findIndex(r => r.id === id);
@@ -225,14 +252,16 @@ async function toggleWatchWith(rowId, tag, checked) {
   if (checked) current.add(tag); else current.delete(tag);
   const updated = [...current];
   const previous = row.watch_with || [];
+  const epoch = orgEpoch;
   row.watch_with = updated;
   const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, rowId, row) : null;
   try {
     await sbFetch('PATCH', `${TABLE}?id=eq.${rowId}`, { watch_with: updated });
-    mirrorRowUpdate(rowId, { watch_with: updated });
+    if (!mirrorRowUpdate(rowId, { watch_with: updated }, epoch)) { staleAfterRestore(`“${row.title}” · watch with`); if (typeof matchEditEnd === 'function') matchEditEnd(edit); return; }
     showSaved();
     renderTable();
   } catch(e) {
+    if (epoch !== orgEpoch) { staleAfterRestore(`“${row.title}” · watch with`); if (typeof matchEditEnd === 'function') matchEditEnd(edit); return; }
     row.watch_with = previous;
     renderTable();
     // An archived choice (archived since this page read the choices): say so and read them again.

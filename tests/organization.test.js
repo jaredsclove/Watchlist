@@ -125,7 +125,7 @@ test('a collection archived after the selector loaded: entering it says it isn�
 });
 
 // ── membership, not storage ──
-test('collections list their members only: a removed membership hides a show there but not in its tab or All TV; members from other tabs appear with their source', async () => {
+test('collections list their members only: a removed membership hides a show there but not in its tab or All TV; members stored elsewhere appear (without a storage badge since Stage 4b)', async () => {
   const data = library();
   const app = await boot(data);
   const andor = data.shows.find(s => s.title === 'Andor');
@@ -138,7 +138,7 @@ test('collections list their members only: a removed membership hides a show the
   assert.ok(!titles(app).includes('Andor'), 'not a member any more');
   assert.ok(titles(app).includes('Dune'), 'a film stored in Movies, added to Disney+');
   await open(app, B.sheridan);
-  assert.ok(titles(app).includes('Severance') && html(app).includes('Other TV'), 'an Other TV show in Sheridan, badged with its tab');
+  assert.ok(titles(app).includes('Severance') && !html(app).includes('source-badge'), 'a show stored in Other TV, listed in Sheridan; storage isn’t shown');
   assert.strictEqual(writes(app).length, 0, 'the collection views wrote nothing');
   app.ctx.switchTab('disney'); await settle(); // (the legacy tab seeds its missing defaults, as before)
   assert.ok(app.el('tbody').innerHTML.includes('Andor'), 'the legacy tab still shows what it stores');
