@@ -3,7 +3,7 @@
 // GET requests only, to Supabase (anon key from config.js) and TMDB; nothing is written.
 //
 //   node tools/tmdb-enrich-candidates.mjs <collection> [--out=file.json]
-//   collection: disney | 90day | sheridan
+//   collection: disney | 90day | sheridan (the catalog; since Stage 5 its governed shows)
 //
 // For each legacy show it prints the local seasons, every plausibly-titled TMDB
 // candidate (search results, with details: first air date, seasons, networks,
@@ -28,21 +28,24 @@ function loadConfig() {
   return vm.runInContext('({ SUPABASE_URL, SUPABASE_KEY, TMDB_TOKEN, TMDB_BASE })', ctx);
 }
 
-async function get(url, headers) {
+async function get(url, headers, { allow404 = false } = {}) {
   for (let attempt = 1; ; attempt++) {
     const res = await fetch(url, { method: 'GET', headers });
     if (res.ok) return res;
+    if (allow404 && res.status === 404) return null;
     if (attempt >= 4 || (res.status < 500 && res.status !== 429)) throw new Error(`GET ${url.split('?')[0]} failed: ${res.status}`);
     await new Promise(r => setTimeout(r, 1000 * attempt));
   }
 }
 
-async function fetchAll(cfg, table, filter) {
+// opts.allow404: a missing table or view answers null (a database before Stage 5).
+async function fetchAll(cfg, table, filter, opts = {}) {
   const headers = { apikey: cfg.SUPABASE_KEY, Authorization: `Bearer ${cfg.SUPABASE_KEY}`, 'Range-Unit': 'items', Prefer: 'count=exact' };
   const rows = [];
   let total = null;
   while (total === null || rows.length < total) {
-    const res = await get(`${cfg.SUPABASE_URL}/rest/v1/${table}?select=*&${filter}&order=id.asc`, { ...headers, Range: `${rows.length}-${rows.length + 499}` });
+    const res = await get(`${cfg.SUPABASE_URL}/rest/v1/${table}?select=*&${filter}&order=id.asc`, { ...headers, Range: `${rows.length}-${rows.length + 499}` }, opts);
+    if (!res) return null;
     const m = (res.headers.get('content-range') || '').match(/\/(\d+)$/);
     if (!m) throw new Error(`${table}: missing Content-Range total`);
     total = Number(m[1]);
@@ -68,9 +71,19 @@ async function main() {
 
   console.log('TMDB enrichment review — READ-ONLY: GET requests only; nothing is written.');
   console.log(`Supabase host: ${new URL(cfg.SUPABASE_URL).host}  collection: ${collection}  today: ${today}\n`);
-  const shows = (await fetchAll(cfg, 'tv_shows', `collection=eq.${collection}`)).filter(s => s.tmdb_id == null)
-    .sort((a, b) => a.title.localeCompare(b.title));
-  const rows = await fetchAll(cfg, 'watchlist_items', `collection=eq.${collection}`);
+  // Stage 5: the shows the catalog governs (library_catalog_shows, present from 5a on);
+  // before Stage 5, the shows stored with the collection.
+  const links = await fetchAll(cfg, 'library_catalog_shows', `catalog=eq.${collection}`, { allow404: true });
+  let shows, rows;
+  if (links) {
+    const ids = new Set(links.map(l => l.show_id));
+    shows = (await fetchAll(cfg, 'tv_shows', 'tmdb_id=is.null')).filter(s => ids.has(s.id));
+    rows = (await fetchAll(cfg, 'watchlist_items', 'show_id=not.is.null')).filter(r => ids.has(r.show_id)).map(r => ({ ...r, catalog: collection }));
+  } else {
+    shows = (await fetchAll(cfg, 'tv_shows', `collection=eq.${collection}`)).filter(s => s.tmdb_id == null);
+    rows = await fetchAll(cfg, 'watchlist_items', `collection=eq.${collection}`);
+  }
+  shows.sort((a, b) => a.title.localeCompare(b.title));
   console.log(`legacy shows: ${shows.length}; rows in ${collection}: ${rows.length} (films are not shows and are not reviewed)\n`);
 
   const report = [];

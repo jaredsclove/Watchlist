@@ -196,6 +196,26 @@ test('short + same-title 40-min work (feature) → C', 'C', () => gradeMovie(CIA
 test('short + same-title unknown-runtime work that fits the stored date better → C (date rule)', 'C',
   () => gradeMovie({ ...CIAO_ROW, date_sort: '2003-02-01', display_date: 'Feb 1, 2003' }, CIAO, ciaoCand(0)));
 
+// ── After the Stage 5 contraction: rows have no storage (collection); the film's theme
+// meaning is theme_kind and exceptions bind to the governing catalog (rowPlace). ──
+const contracted = ({ collection, ...row }, extra) => ({ ...row, ...extra });
+test('contracted: a genre-theme film (theme_kind genre) whose genre TMDB doesn’t list → B, as a Movies film was', 'B',
+  () => gradeMovie(contracted(movieRow('Reservoir Dogs', 500, '1992-09-02', 'Comedy'), { theme_kind: 'genre' }), RD_FEATURE, rdCandidates));
+test('contracted: a company-theme film (theme_kind other) is not checked against genres → A', 'A',
+  () => gradeMovie(contracted(movieRow('Reservoir Dogs', 500, '1992-09-02', 'Miramax'), { theme_kind: 'other' }), RD_FEATURE, rdCandidates));
+test('before the contraction: the same company-theme film stored in Movies is checked → B', 'B',
+  () => gradeMovie(movieRow('Reservoir Dogs', 500, '1992-09-02', 'Miramax'), RD_FEATURE, rdCandidates));
+exceptionTest('contracted: Visions "Volume 2" governed by the Disney+ catalog keeps its exception → B', 'B',
+  () => gradeTv(contracted(vol(2, '2023-05-04'), { catalog: 'disney' }), VISIONS, TODAY, EXC), ['visions-volume-2']);
+exceptionTest('contracted: the same identity governed by no catalog → C (the exception is bound to Disney+)', 'C',
+  () => gradeTv(contracted(vol(2, '2023-05-04'), { catalog: null }), VISIONS, TODAY, EXC), []);
+test('contracted: exceptionReport finds a governed row by its catalog', 'B', () => {
+  const lines = exceptionReport(validateExceptions({ version: 1, exceptions: loadExceptions().filter(e => e.id === 'rebels-s2-premiere') }), new Map(),
+    [contracted(dRow('Star Wars Rebels', 60554, 2, 'Season 2', '2015-06-20'), { catalog: 'disney' })]);
+  if (!/the row no longer has exactly this finding/.test(lines[0])) throw new Error(lines[0]);
+  return { grade: 'B', findings: [] };
+});
+
 let passed = 0;
 for (const t of tests) {
   const res = t.fn();

@@ -64,6 +64,9 @@ vm.runInContext(`const TV_COLLECTION_IDS = COLLECTIONS.filter(c => c.mediaType =
   function isTvCollection(id) { return TV_COLLECTION_IDS.includes(id); }
   function tvShowKey(collectionId, itemKey) { const prefix = String(itemKey || '').split('|')[0]; return SHOW_KEY_OVERRIDES[collectionId + '|' + prefix] || prefix; }`, ctx);
 vm.runInContext(sql('library.js'), ctx, { filename: 'library.js' });
+// Since Stage 5 the page sends the library_* functions (tools/db-rehearsal-5.mjs sends its
+// requests); this rehearsal's request section applies to the Stage 4b page only.
+const stage4bPage = !sql('library.js').includes('library_add_seasons');
 const app = name => (...a) => JSON.parse(JSON.stringify(ctx[name](...a)));
 
 async function selfChecks(db, file) {
@@ -106,71 +109,76 @@ try {
   }
   ok((await q(CONTENT))[0].c === contentPre, 'self-checks left nothing behind');
 
-  section('the app’s own requests (library.js) against the real functions');
-  const shows = await q(`select * from public.tv_shows order by id`);
-  const rows = await q(`select * from public.watchlist_items order by id`);
-  const builtin = ['disney', '90day', 'sheridan'];
-  const pickKind = pred => shows.find(s => pred(s) && rows.some(r => r.show_id === s.id));
-  const targets = [
-    ['identified show outside the built-in catalogs', pickKind(s => s.tmdb_id != null && !builtin.includes(s.collection))],
-    ['TMDB-matched built-in show', pickKind(s => s.tmdb_id != null && builtin.includes(s.collection))],
-    ['legacy built-in show', pickKind(s => s.tmdb_id == null && builtin.includes(s.collection))],
-    ['legacy show outside the built-in catalogs', pickKind(s => s.tmdb_id == null && !builtin.includes(s.collection))]
-  ];
-  // Runs fn as anon inside a transaction that is always rolled back.
-  const inTx = async fn => {
-    await db.exec('begin');
-    try { await db.query(`select set_config('request.jwt.claims', '{"role":"anon"}', true), set_config('role', 'anon', true)`); return await fn(); }
-    finally { await db.exec('rollback'); }
-  };
-  for (const [label, show] of targets) {
-    if (!show) { console.log(`  info no ${label} in this backup; covered by the self-checks`); continue; }
-    const kind = ctx.showAddKind(show);
-    const stored = rows.filter(r => r.show_id === show.id);
-    const network = stored[0]?.theme || '';
-    const seasons = kind === 'tmdb'
-      ? [app('libraryTmdbSeason')(show, { season_number: 90, air_date: null }, network)]
-      : [app('libraryLabelSeason')(show, 'Season 90', 'TBA 2099', network)];
-    const body = { p_show_id: show.id, p_expected: app('libraryExpected')(show, network), p_seasons: seasons };
-    const res = await inTx(async () => (await db.query(`select public.add_tv_seasons_to_show($1, $2::jsonb, $3::jsonb) r`, [body.p_show_id, body.p_expected, body.p_seasons])).rows[0].r);
-    const ins = res.inserted || [];
-    const identityOk = show.tmdb_id != null
-      ? ins.length === 1 && ins[0].tmdb_id === show.tmdb_id && ins[0].season_number === 90 && ins[0].media_type === 'tv'
-      : ins.length === 1 && ins[0].tmdb_id == null && ins[0].season_number == null;
-    ok(res.show_id === show.id && res.show_created === false && identityOk && ins[0]?.show_id === show.id,
-      `${label} (${kind}): the season joins that show${show.tmdb_id != null ? ' as season 90 of its TMDB identity' : ' by label, no identity guessed'}`, JSON.stringify(res));
-    evidence.requests.push({ label, kind, body: { ...body, p_show_id: '<id>' }, parent_ok: res.show_id === show.id, created: res.show_created, inserted: ins.length });
-    if (kind === 'label' && show.tmdb_id != null) {
-      const held = await inTx(async () => (await db.query(`select public.add_tv_seasons_to_show($1, $2::jsonb, $3::jsonb) r`,
-        [show.id, body.p_expected, [app('libraryLabelSeason')(show, 'Season 90 (Part 1)', 'TBA 2099', network)]])).rows[0].r);
-      ok((held.inserted || []).length === 0 && held.rejected?.[0]?.reason === 'enriched_show_label', `${label}: a nonstandard label is held for review`, JSON.stringify(held));
+  if (!stage4bPage) {
+    section('the app’s own requests (library.js)');
+    console.log('  info skipped: this page is the Stage 5 page (library_* functions); tools/db-rehearsal-5.mjs sends its requests');
+  } else {
+    section('the app’s own requests (library.js) against the real functions');
+    const shows = await q(`select * from public.tv_shows order by id`);
+    const rows = await q(`select * from public.watchlist_items order by id`);
+    const builtin = ['disney', '90day', 'sheridan'];
+    const pickKind = pred => shows.find(s => pred(s) && rows.some(r => r.show_id === s.id));
+    const targets = [
+      ['identified show outside the built-in catalogs', pickKind(s => s.tmdb_id != null && !builtin.includes(s.collection))],
+      ['TMDB-matched built-in show', pickKind(s => s.tmdb_id != null && builtin.includes(s.collection))],
+      ['legacy built-in show', pickKind(s => s.tmdb_id == null && builtin.includes(s.collection))],
+      ['legacy show outside the built-in catalogs', pickKind(s => s.tmdb_id == null && !builtin.includes(s.collection))]
+    ];
+    // Runs fn as anon inside a transaction that is always rolled back.
+    const inTx = async fn => {
+      await db.exec('begin');
+      try { await db.query(`select set_config('request.jwt.claims', '{"role":"anon"}', true), set_config('role', 'anon', true)`); return await fn(); }
+      finally { await db.exec('rollback'); }
+    };
+    for (const [label, show] of targets) {
+      if (!show) { console.log(`  info no ${label} in this backup; covered by the self-checks`); continue; }
+      const kind = ctx.showAddKind(show);
+      const stored = rows.filter(r => r.show_id === show.id);
+      const network = stored[0]?.theme || '';
+      const seasons = kind === 'tmdb'
+        ? [app('libraryTmdbSeason')(show, { season_number: 90, air_date: null }, network)]
+        : [app('libraryLabelSeason')(show, 'Season 90', 'TBA 2099', network)];
+      const body = { p_show_id: show.id, p_expected: app('libraryExpected')(show, network), p_seasons: seasons };
+      const res = await inTx(async () => (await db.query(`select public.add_tv_seasons_to_show($1, $2::jsonb, $3::jsonb) r`, [body.p_show_id, body.p_expected, body.p_seasons])).rows[0].r);
+      const ins = res.inserted || [];
+      const identityOk = show.tmdb_id != null
+        ? ins.length === 1 && ins[0].tmdb_id === show.tmdb_id && ins[0].season_number === 90 && ins[0].media_type === 'tv'
+        : ins.length === 1 && ins[0].tmdb_id == null && ins[0].season_number == null;
+      ok(res.show_id === show.id && res.show_created === false && identityOk && ins[0]?.show_id === show.id,
+        `${label} (${kind}): the season joins that show${show.tmdb_id != null ? ' as season 90 of its TMDB identity' : ' by label, no identity guessed'}`, JSON.stringify(res));
+      evidence.requests.push({ label, kind, body: { ...body, p_show_id: '<id>' }, parent_ok: res.show_id === show.id, created: res.show_created, inserted: ins.length });
+      if (kind === 'label' && show.tmdb_id != null) {
+        const held = await inTx(async () => (await db.query(`select public.add_tv_seasons_to_show($1, $2::jsonb, $3::jsonb) r`,
+          [show.id, body.p_expected, [app('libraryLabelSeason')(show, 'Season 90 (Part 1)', 'TBA 2099', network)]])).rows[0].r);
+        ok((held.inserted || []).length === 0 && held.rejected?.[0]?.reason === 'enriched_show_label', `${label}: a nonstandard label is held for review`, JSON.stringify(held));
+      }
     }
-  }
-  // A new show (create_tv_show) and a film typed by hand, as the app composes them.
-  const newShow = await inTx(async () => (await db.query(`select public.create_tv_show($1::jsonb, $2::jsonb) r`, [
-    { tmdb_id: 99999001, title: 'ZZ Brand New', show_key: 'zz brand new', network: 'ZZ' },
-    app('libraryNewShowSeasons')(99999001, 'ZZ Brand New', { networks: [{ name: 'ZZ' }], seasons: [{ season_number: 1, air_date: '2026-01-01' }] }, [1])])).rows[0].r);
-  ok(newShow.show_created === true && newShow.inserted.length === 1 && newShow.inserted[0].season_number === 1, 'a new TMDB show: created in othertv with its identity (create_tv_show)', JSON.stringify(newShow));
-  const taken = shows.find(s => s.tmdb_id != null && rows.some(r => r.show_id === s.id));
-  if (taken) {
-    const before = (await q(CONTENT))[0].c;
-    let refusal = '';
-    await inTx(async () => {
-      try { await db.query(`select public.create_tv_show($1::jsonb, $2::jsonb) r`, [{ tmdb_id: taken.tmdb_id, title: taken.title, show_key: taken.show_key, network: '' },
-        app('libraryNewShowSeasons')(taken.tmdb_id, taken.title, { networks: [], seasons: [{ season_number: 90, air_date: null }] }, [90])]); }
-      catch (e) { refusal = e.message; }
+    // A new show (create_tv_show) and a film typed by hand, as the app composes them.
+    const newShow = await inTx(async () => (await db.query(`select public.create_tv_show($1::jsonb, $2::jsonb) r`, [
+      { tmdb_id: 99999001, title: 'ZZ Brand New', show_key: 'zz brand new', network: 'ZZ' },
+      app('libraryNewShowSeasons')(99999001, 'ZZ Brand New', { networks: [{ name: 'ZZ' }], seasons: [{ season_number: 1, air_date: '2026-01-01' }] }, [1])])).rows[0].r);
+    ok(newShow.show_created === true && newShow.inserted.length === 1 && newShow.inserted[0].season_number === 1, 'a new TMDB show: created in othertv with its identity (create_tv_show)', JSON.stringify(newShow));
+    const taken = shows.find(s => s.tmdb_id != null && rows.some(r => r.show_id === s.id));
+    if (taken) {
+      const before = (await q(CONTENT))[0].c;
+      let refusal = '';
+      await inTx(async () => {
+        try { await db.query(`select public.create_tv_show($1::jsonb, $2::jsonb) r`, [{ tmdb_id: taken.tmdb_id, title: taken.title, show_key: taken.show_key, network: '' },
+          app('libraryNewShowSeasons')(taken.tmdb_id, taken.title, { networks: [], seasons: [{ season_number: 90, air_date: null }] }, [90])]); }
+        catch (e) { refusal = e.message; }
+      });
+      ok(/^show_exists/.test(refusal) && (await q(CONTENT))[0].c === before, 'a "new" show whose TMDB identity is already on the list: refused, nothing changed', refusal);
+    }
+    const film = await inTx(async () => {
+      const r = { collection: 'movies', item_key: 'zz hand film|film', title: 'ZZ Hand Film', season: 'Film', theme: 'Drama', display_date: 'Mar 3, 2021',
+        date_sort: ctx.parseDate('Mar 3, 2021'), watched: false, status: 'confirmed' };
+      await db.query(`insert into public.watchlist_items (collection, item_key, title, season, theme, display_date, date_sort, watched, status)
+        select collection, item_key, title, season, theme, display_date, date_sort, watched, status from jsonb_populate_record(null::public.watchlist_items, $1::jsonb)`, [r]);
+      return (await db.query(`select is_film, media_type, show_id from public.watchlist_items where item_key = 'zz hand film|film'`)).rows[0];
     });
-    ok(/^show_exists/.test(refusal) && (await q(CONTENT))[0].c === before, 'a "new" show whose TMDB identity is already on the list: refused, nothing changed', refusal);
+    ok(film && film.is_film === true && film.show_id == null, 'a film typed by hand is a film (is_film), so All Movies lists it', JSON.stringify(film));
+    ok((await q(CONTENT))[0].c === contentPre, 'those requests were rolled back');
   }
-  const film = await inTx(async () => {
-    const r = { collection: 'movies', item_key: 'zz hand film|film', title: 'ZZ Hand Film', season: 'Film', theme: 'Drama', display_date: 'Mar 3, 2021',
-      date_sort: ctx.parseDate('Mar 3, 2021'), watched: false, status: 'confirmed' };
-    await db.query(`insert into public.watchlist_items (collection, item_key, title, season, theme, display_date, date_sort, watched, status)
-      select collection, item_key, title, season, theme, display_date, date_sort, watched, status from jsonb_populate_record(null::public.watchlist_items, $1::jsonb)`, [r]);
-    return (await db.query(`select is_film, media_type, show_id from public.watchlist_items where item_key = 'zz hand film|film'`)).rows[0];
-  });
-  ok(film && film.is_film === true && film.show_id == null, 'a film typed by hand is a film (is_film), so All Movies lists it', JSON.stringify(film));
-  ok((await q(CONTENT))[0].c === contentPre, 'those requests were rolled back');
 
   section('rollback (db/rollback/phase4b.sql)');
   await db.exec(sql('db/rollback/phase4b.sql'));

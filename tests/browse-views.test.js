@@ -1,7 +1,7 @@
 // Offline tests for the read-only browse views (browse-views.js): Browse
 // collections (Disney+, Sheridan, 90 Day, True Crime / Docs; TV and films
-// together) and All Movies (every saved film, whatever tab stores it).
-// Membership is the storage tab only; TV groups by show_id and follows the show's
+// together) and All Movies (every saved film). Membership is the collection's
+// stored memberships (Stage 5: never storage); TV groups by show_id and follows the show's
 // status; films keep their own row. The views read everything completely or show
 // Retry, never write (not on entry and not from any control), and never paint
 // after being left. Run from the repo root: node tests/browse-views.test.js
@@ -73,7 +73,7 @@ function library() {
     film({ id: 'f-dune84', title: 'Dune', tmdb_id: 841, display_date: 'Dec 14, 1984', date_sort: '1984-12-14' }),
     film({ id: 'f-future', title: 'Avengers: Doomsday', display_date: disp(day(60)), date_sort: day(60) }),
     { id: 'odd-1', collection: 'movies', title: 'Odd Row', season: 'Season 1', item_key: 'odd row|season 1', theme: '', display_date: '', date_sort: '2020-01-01',
-      status: 'confirmed', watched: false, media_type: 'tv', tmdb_id: 5, season_number: 1, show_id: null, skipped: false, watch_with: [], collections: [] }
+      status: 'confirmed', watched: false, media_type: 'person', tmdb_id: 5, season_number: 1, show_id: null, skipped: false, watch_with: [], collections: [] } // a kind the app doesn't know
   );
 }
 
@@ -87,7 +87,8 @@ const titles = app => [...html(app).matchAll(/<span class="show-title">([^<]*)<\
 const cardTitles = app => [...cards(app).matchAll(/<span class="card-title">([^<]*)<\/span>/g)].map(m => m[1]);
 const stats = app => [...app.el('statsRow').innerHTML.matchAll(/stat-num">(\d+)<\/div><div class="stat-label">([^<]*)</g)].map(m => `${m[1]} ${m[2]}`);
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
-const mutating = app => app.requests.filter(r => r.method !== 'GET' || /\/rpc\//.test(r.url) || !r.url.includes('/rest/v1/'));
+// (The GET of rpc/stage5_capabilities is the read-only phase check made at startup.)
+const mutating = app => app.requests.filter(r => r.method !== 'GET' || (/\/rpc\//.test(r.url) && !r.url.endsWith('/rpc/stage5_capabilities')) || !r.url.includes('/rest/v1/'));
 const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"]*)"/g)]
   .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1]))
   .filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
@@ -112,24 +113,23 @@ function assertReadOnlyDom(app) {
 test('the app still opens on Currently Watching; Browse collections is offered in TV and in Movies, in the approved order', async () => {
   const app = await boot();
   assert.strictEqual(app.get('activeViewId'), 'watching');
-  assert.ok(!app.requests.some(r => !r.url.includes('collection=in.') && r.url.includes('/watchlist_items?')), 'boot reads only the TV rows, as before');
+  assert.ok(!app.requests.some(r => !r.url.includes('is_film=eq.false') && r.url.includes('/watchlist_items?')), 'boot reads only the TV rows, as before');
   const opts = () => [...app.el('browseBar').innerHTML.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)</g)].map(m => m[2]);
   assert.deepStrictEqual(opts(), ['Choose a collection…', 'Disney+', 'Sheridan', '90 Day', 'True Crime / Docs']);
   app.ctx.switchMediaType('movie'); await settle();
   assert.deepStrictEqual(opts().slice(1), ['Disney+', 'Sheridan', '90 Day', 'True Crime / Docs']);
 });
 
-test('Movies opens on All Movies; no storage tab is offered (Stage 4b; the old tab code stays internal); TV still lands on Currently Watching', async () => {
+test('Movies opens on All Movies; no storage tab is offered or kept (Stage 5); TV still lands on Currently Watching', async () => {
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle();
   assert.strictEqual(app.get('activeViewId'), 'allmovies');
-  assert.strictEqual(app.get('activeTabId'), null);
+  assert.strictEqual(app.get('typeof activeTabId'), 'undefined', 'no storage tab state (Stage 5)');
   const bar = app.el('tabBar').innerHTML;
   assert.ok(!bar.includes('switchTab(') && !bar.includes('tab-sep') && !bar.includes('Movies (legacy)'));
   assert.ok(/class="tab active" onclick="switchView\('allmovies'\)"/.test(bar));
-  app.ctx.switchTab('movies'); await settle();
-  assert.strictEqual(app.get('activeTabId'), 'movies');
-  assert.ok(html(app).includes("toggleWatch('f-wind')"), 'the internal tab code still works');
+  assert.strictEqual(app.get('typeof switchTab'), 'undefined', 'the storage tab code is gone (Stage 5)');
+  assert.ok(html(app).includes("toggleWatch('f-wind')"), 'All Movies has the film actions');
   app.ctx.switchMediaType('tv'); await settle();
   assert.strictEqual(app.get('activeViewId'), 'watching');
 });
@@ -141,7 +141,7 @@ for (const [id, label, from] of [[B['disney'], 'Disney+', 'tv'], [B['sheridan'],
     const before = app.requests.length;
     await openCol(app, id);
     assert.strictEqual(app.get('activeViewId'), id);
-    assert.strictEqual(app.get('activeTabId'), null);
+    assert.strictEqual(app.get('typeof activeTabId'), 'undefined', 'no storage tab state (Stage 5)');
     assert.strictEqual(app.get('browseMedia'), 'all');
     assert.ok(app.el('viewHead').innerHTML.includes(`${label.replace('&', '&amp;')} — All media`));
     assert.ok(app.el('viewHead').innerHTML.includes(`Back to ${from === 'tv' ? 'TV' : 'Movies'}`));
@@ -151,10 +151,13 @@ for (const [id, label, from] of [[B['disney'], 'Disney+', 'tv'], [B['sheridan'],
     assert.ok(reqs.length >= 2 && reqs.every(r => r.method === 'GET' && r.headers.Range && r.headers.Prefer === 'count=exact'));
     // Stage 3b-1: members come from the stored collections and memberships, read with everything else.
     assert.deepStrictEqual([...new Set(reqs.map(r => new URL(r.url).pathname.split('/').pop()))].sort(),
-      ['collection_memberships', 'personal_collections', 'tv_shows', 'watchlist_items']);
+      // Stage 5: catalog governance comes from the read views; storage never names a collection.
+      ['collection_memberships', 'library_catalog_films', 'library_catalog_shows', 'library_collection_catalogs', 'library_collection_presentation', 'library_film_theme_kinds',
+        'personal_collections', 'tv_shows', 'watchlist_items']);
     assert.ok(reqs.every(r => !r.url.includes('collection=')), 'a destination id is never sent as a collection');
     assert.strictEqual(mutating(app).length, 0);
-    assert.strictEqual(app.get('Object.keys(tabData).length'), 0, 'the legacy loader was not used');
+    assert.strictEqual(app.get('Object.keys(tabData).filter(k => tabData[k] && tabData[k].loaded).length'), 0, 'no storage-tab cache was filled');
+    // Its note comes from its presentation key (library_collection_presentation), never from storage.
     if (id === B['truecrime']) assert.ok(app.el('viewHead').innerHTML.includes('True Crime and Documentary are not yet classified separately'));
   });
 }
@@ -174,7 +177,7 @@ test('each fresh collection entry starts at All media with Search and Status res
   assert.ok(app.el('viewHead').innerHTML.includes('Disney+ — All media'));
 });
 
-test('Back returns to the view it came from with its filters; from a legacy tab it goes to the area’s first view without loading that tab', async () => {
+test('Back returns to the view it came from with its filters', async () => {
   const app = await boot();
   app.ctx.switchView('alltv'); await settle();
   setFilter(app, 'fSearch', 'bear'); setFilter(app, 'fStatus', 'all');
@@ -196,22 +199,11 @@ test('Back returns to the view it came from with its filters; from a legacy tab 
   assert.strictEqual(app.el('fSearch').value, 'f.a.s');
   assert.strictEqual(app.el('fWatch').value, 'unwatched', 'All Movies’ Unwatched only default comes back too');
   assert.deepStrictEqual(titles(app), ['F.A.S.T.']);
-
-  app.ctx.switchMediaType('tv'); await settle();
-  app.ctx.switchTab('sheridan'); await settle();
-  const writesBefore = mutating(app).length;
-  await openCol(app, B['sheridan']);
-  const getsBefore = app.requests.length;
-  app.ctx.browseBack(); await settle();
-  assert.strictEqual(app.get('activeViewId'), 'watching');
-  assert.strictEqual(app.get('activeTabId'), null);
-  assert.ok(app.requests.slice(getsBefore).every(r => r.method === 'GET' && !r.url.includes('collection=eq.sheridan')), 'the legacy loader did not run again');
-  assert.strictEqual(mutating(app).length, writesBefore);
-  assert.strictEqual(app.el('fSearch').value, '', 'a later visit starts with fresh filters');
+  assert.deepStrictEqual(mutating(app), []);
 });
 
 // ─── Read-only ────────────────────────────────────────────────────────────────
-test('missing defaults and a stale TBA date cause no write from any new view or any of its controls, nor from the legacy tab (Stage 4a)', async () => {
+test('missing defaults and a stale TBA date cause no write from any view or any of its controls (catalog entries arrive only through Catalog updates)', async () => {
   const probe = await createApp();
   const def = probe.get("COLLECTIONS.find(c => c.id === 'disney').defaults.find(d => d.s !== 'Film' && !/TBA/i.test(d.d))");
   const stale = show({ title: def.t, show_key: def.k.split('|')[0], status: 'confirmed' }, [{ season: def.s, display: 'TBA', date: '2099-01-01' }]);
@@ -234,12 +226,9 @@ test('missing defaults and a stale TBA date cause no write from any new view or 
   // All Movies has film actions since Stage 4b; showing and filtering it still writes nothing.
   app.ctx.switchMediaType('movie'); await settle();
   setFilter(app, 'fStatus', 'all'); setFilter(app, 'fSearch', 'mando'); setFilter(app, 'fSearch', '');
-  assert.deepStrictEqual(mutating(app), [], 'no POST/PATCH/DELETE/RPC/TMDB request');
-  // The legacy Disney+ tab no longer writes either (Stage 4a): it only reads and offers Catalog updates.
   app.ctx.switchMediaType('tv'); await settle();
-  app.ctx.switchTab('disney'); await settle();
-  assert.deepStrictEqual(mutating(app), [], 'opening the legacy tab wrote nothing');
-  assert.ok(/catalog entr(y is|ies are) waiting/.test(app.el('banner').innerHTML), app.el('banner').innerHTML);
+  for (const v of ['alltv', 'comingsoon', 'watching']) { app.ctx.switchView(v); await settle(); }
+  assert.deepStrictEqual(mutating(app), [], 'no POST/PATCH/DELETE/RPC/TMDB request');
 });
 
 test('every row action and Restore is inert while a read-only collection is open; Restore is hidden there and in All Movies only', async () => {
@@ -262,7 +251,6 @@ test('every row action and Restore is inert while a read-only collection is open
     await app.ctx.setShowStatusById(showId, 'watching');
     await app.ctx.delRow('f-wind');
     await app.ctx.toggleWatchWith('f-wind', 'Kids', false);
-    await app.ctx.addEntry();
     app.ctx.handleRestoreClick();
     await app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => '{}' }], value: 'x' } });
     await settle();
@@ -467,7 +455,7 @@ test('a Movies-stored film with a Sheridan tag and theme is not added to Sherida
   assert.ok(/class="ww-tag [^"]*"[^>]*data-filter-value="Kids"[^>]*>Kids<\/button>/.test(html(app)), 'watch-with pill');
 });
 
-test('All Movies lists every saved film from every tab, once, with the same row and state as its collection; unknown rows are reported, not listed', async () => {
+test('All Movies lists every saved film, once, with the same row and state as its collection; unknown rows are reported, not listed', async () => {
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle();
   setFilter(app, 'fStatus', 'all'); setFilter(app, 'fWatch', '');
@@ -504,12 +492,13 @@ test('All Movies has no Source filter (Stage 4b); Status is the film row’s own
   assert.deepStrictEqual(stats(app), ['1 Shown', '1 Film', '1 Watched', '0 To watch']);
 });
 
-test('repeated TMDB identities stay separate records, marked as duplicates (the tooltip names their storage): Disney+ shows only its own The Bear; All TV still lists both', async () => {
+test('no duplicate marker or storage name is shown (Stage 5: one record per identity); Disney+ shows only its own The Bear', async () => {
+  // (The fixture's two The Bear shows share a TMDB id, which the Stage 5 identity indexes refuse; the page draws each by its own record.)
   const app = await boot();
   await openCol(app, B['disney']);
   setFilter(app, 'fSearch', 'bear');
   assert.deepStrictEqual(titles(app), ['The Bear']);
-  assert.ok(html(app).includes('Duplicate on your list') && /stored under: (Disney\+, Other TV|Other TV, Disney\+)/.test(html(app)));
+  assert.ok(!html(app).includes('Duplicate on your list') && !html(app).includes('stored under'));
   assert.ok(!html(app).includes('Stored in'), 'no storage badge');
   assert.ok(!html(app).includes('Up to date'), 'the Other TV copy’s Watching state is not borrowed');
   app.ctx.switchView('alltv'); await settle();
@@ -799,27 +788,24 @@ test('a slow read never paints after leaving the view, or over a newer entry of 
   assert.strictEqual(app.el('errorBanner').innerHTML, '');
 });
 
-test('an old legacy tab load cannot paint over a browse view; it writes nothing (Stage 4a)', async () => {
+test('an All Movies load still in flight cannot paint over a browse view; it writes nothing', async () => {
   const app = await boot();
-  const g = app.hold(r => r.method === 'GET' && r.url.includes('collection=eq.disney'));
-  app.ctx.switchTab('disney');
+  const g = app.hold(r => r.method === 'GET' && r.url.includes('/watchlist_items?') && !r.url.includes('is_film='));
+  app.ctx.switchMediaType('movie');
   await g.reached;
   await openCol(app, B['disney']);
   const browseHtml = html(app);
-  const mark = app.requests.length;
   g.release(); await settle();
-  assert.strictEqual(html(app), browseHtml, 'the late legacy load did not paint');
+  assert.strictEqual(html(app), browseHtml, 'the late load did not paint');
   assert.strictEqual(app.get('activeViewId'), B['disney']);
-  const late = mutating(app).filter(r => app.requests.indexOf(r) >= mark);
-  assert.deepStrictEqual(late, [], 'the legacy load wrote nothing');
+  assert.deepStrictEqual(mutating(app), []);
 });
 
-test('coming back after an edit in a legacy tab shows the current saved state', async () => {
+test('coming back after an edit made elsewhere shows the current saved state', async () => {
   const app = await boot();
   await openCol(app, B['sheridan']);
   assert.ok(!html(app).split('<tr').find(r => r.includes('>F.A.S.T.<')).includes('✓ Watched'));
   app.ctx.switchMediaType('movie'); await settle();
-  app.ctx.switchTab('movies'); await settle();
   app.store.watchlist_items.find(r => r.id === 'f-fast').watched = true; // saved elsewhere meanwhile
   await openCol(app, B['sheridan']);
   assert.ok(html(app).split('<tr').find(r => r.includes('>F.A.S.T.<')).includes('✓ Watched'));

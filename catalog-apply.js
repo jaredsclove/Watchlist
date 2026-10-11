@@ -1,9 +1,11 @@
-// ─── Catalog updates (Stage 4a) ───────────────────────────────────────────────
-// Opening a built-in tab (Disney+, 90 Day, Sheridan) never writes. The tab says
-// how many catalog entries are waiting, and Review opens this dialog:
+// ─── Catalog updates (Stage 4a; catalog governance since Stage 5) ─────────────
+// A built-in catalog (Disney+, 90 Day, Sheridan) reaches the library only through
+// this dialog, opened from the Browse bar's chooser. What a catalog already holds
+// is what it governs (library_catalog_shows / library_catalog_films), never where
+// a record is stored. The dialog:
 //   1. a freshness check: config.js read again (no cache); if its catalog for
 //      this tab differs from the one this page loaded, Apply is not offered;
-//   2. a preview from the database (public.catalog_apply without a hash): the
+//   2. a preview from the database (public.library_catalog_apply without a hash): the
 //      exact effects document, computed by running the application and rolling
 //      it back, and its hash;
 //   3. Apply sends the same catalog with that hash; the database commits only if
@@ -37,16 +39,35 @@ function catalogPayloadHash(defaults) {
   return catalogSha256(catalogCanonical(defaults));
 }
 
-function catalogDefaultsOf(collectionId, collections = COLLECTIONS) {
-  const col = collections.find(c => c.id === collectionId);
+// The built-in catalogs (config.js keeps each one's entries under its id).
+const CATALOG_IDS = ['disney', '90day', 'sheridan'];
+
+function catalogDefaultsOf(catalogId, collections = COLLECTIONS) {
+  if (!CATALOG_IDS.includes(catalogId)) return [];
+  const col = collections.find(c => c.id === catalogId);
   return col && Array.isArray(col.defaults) ? col.defaults : [];
 }
 
-// How many of this page's catalog entries the tab doesn't hold yet: a missing key,
-// or a stored TBA date the catalog now dates. The same test the tab used to write
-// with; only a hint (conflicts, for example, stay counted). The preview decides.
-function catalogPendingCount(collectionId, rows) {
-  const defaults = catalogDefaultsOf(collectionId);
+function catalogLabel(catalogId) {
+  return COLLECTIONS.find(c => c.id === catalogId)?.label || catalogId;
+}
+
+// What a catalog governs now: its shows, their seasons and its films, from complete
+// reads (strict paging and counts; a read that can't be completed throws).
+async function catalogGovernedState(catalogId) {
+  const q = `catalog=eq.${encodeURIComponent(catalogId)}`;
+  const [showLinks, filmLinks, rows, shows] = await Promise.all([
+    fetchAllRowsStrict('library_catalog_shows', q), fetchAllRowsStrict('library_catalog_films', q),
+    fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows')]);
+  const showIds = new Set(showLinks.map(l => l.show_id)), filmIds = new Set(filmLinks.map(l => l.item_id));
+  return { rows: rows.filter(r => (r.show_id && showIds.has(r.show_id)) || filmIds.has(r.id)), shows: shows.filter(s => showIds.has(s.id)) };
+}
+
+// How many of this page's catalog entries the catalog doesn't hold yet: a missing key,
+// or a stored TBA date the catalog now dates. Only a hint (conflicts, for example,
+// stay counted). The preview decides.
+function catalogPendingCount(catalogId, rows) {
+  const defaults = catalogDefaultsOf(catalogId);
   if (!defaults.length) return 0;
   const byKey = new Map();
   (rows || []).forEach(r => { if (!byKey.has(r.item_key)) byKey.set(r.item_key, []); byKey.get(r.item_key).push(r); });
@@ -59,23 +80,12 @@ function catalogPendingCount(collectionId, rows) {
   return n;
 }
 
-// The tab's notice (shown in the banner area; it writes nothing).
-function showCatalogNotice(collectionId) {
-  const banner = document.getElementById('banner');
-  if (!banner || activeTabId !== collectionId) return;
-  const td = tabData[collectionId];
-  const n = td && td.loaded ? catalogPendingCount(collectionId, td.rows) : 0;
-  banner.innerHTML = n
-    ? `<div class="banner catalog-banner">${n} catalog ${n === 1 ? 'entry is' : 'entries are'} waiting for this tab. Nothing changes until you review and apply ${n === 1 ? 'it' : 'them'}. <button class="btn" onclick="openCatalogUpdates('${esc(collectionId)}', this)">Review</button></div>`
-    : '';
-}
-
 // ── The permanent entry (Stage 4b): a chooser of the built-in catalogs ──
 // "Catalog updates" in the Browse bar lists each catalog with a hint of how many
 // of its entries the library doesn't hold (catalogPendingCount over a complete
-// read of that catalog's rows; GET only) and opens the dialog below for one.
+// read of what that catalog governs; GET only) and opens the dialog below for one.
 function catalogIds() {
-  return COLLECTIONS.filter(c => catalogDefaultsOf(c.id).length).map(c => c.id);
+  return CATALOG_IDS.filter(id => catalogDefaultsOf(id).length);
 }
 
 function openCatalogChooser(openerEl) {
@@ -94,8 +104,8 @@ function openCatalogChooser(openerEl) {
 async function catalogChooserHint(session, id) {
   let hint;
   try {
-    const rows = await fetchAllRowsStrict(TABLE, `collection=eq.${encodeURIComponent(id)}`);
-    hint = { state: 'ready', n: catalogPendingCount(id, rows) };
+    const st = await catalogGovernedState(id);
+    hint = { state: 'ready', n: catalogPendingCount(id, st.rows) };
   } catch (e) {
     hint = { state: 'failed' };
   }
@@ -110,7 +120,7 @@ function renderCatalogChooser() {
   const hintText = h => h.state === 'reading' ? 'Checking…' : h.state === 'failed' ? 'Couldn’t check (Review still works)'
     : h.n ? `${h.n} ${h.n === 1 ? 'entry' : 'entries'} not in your list yet` : 'Nothing waiting';
   const items = catalogIds().map(id => {
-    const label = COLLECTIONS.find(c => c.id === id)?.label || id;
+    const label = catalogLabel(id);
     return `<li class="manage-item"><div class="manage-line"><span class="manage-name">${esc(label)} catalog</span>
       <span class="manage-meta">${esc(hintText(catalogChooser.hints[id] || { state: 'reading' }))}</span>
       <button class="btn" onclick="catalogChooserReview('${esc(id)}')">Review</button></div></li>`;
@@ -143,10 +153,10 @@ function catalogChooserReview(id) {
 }
 
 // ── Dialog ──
-function openCatalogUpdates(collectionId, openerEl) {
-  if (catalogDialog || !catalogDefaultsOf(collectionId).length) return;
-  catalogDialog = { session: ++catalogSession, collectionId, opener: openerEl || document.activeElement || null,
-    phase: 'checking', error: '', defaults: null, preview: null, approved: null, result: null, readBack: null, check: null };
+function openCatalogUpdates(catalogId, openerEl) {
+  if (catalogDialog || !catalogDefaultsOf(catalogId).length) return;
+  catalogDialog = { session: ++catalogSession, catalogId, opener: openerEl || document.activeElement || null,
+    phase: 'checking', error: '', defaults: null, preview: null, approved: null, result: null, readBack: null, check: null, rows: [] };
   document.getElementById('catalogModalOverlay').style.display = 'flex';
   renderCatalogDialog();
   const box = document.getElementById('catalogModalBox');
@@ -160,15 +170,13 @@ function catalogBusy() {
 
 function closeCatalogUpdates() {
   if (!catalogDialog || catalogBusy()) return;
-  const { opener, collectionId } = catalogDialog;
+  const { opener } = catalogDialog;
   catalogDialog = null;
   document.getElementById('catalogModalOverlay').style.display = 'none';
   document.getElementById('catalogModalBox').innerHTML = '';
-  showCatalogNotice(collectionId);
-  // The notice is redrawn, so its Review button is a new element: focus that one (or,
-  // when nothing is waiting any more, the open tab), never leave focus on the page.
+  // Focus goes back to what opened the dialog, or the Browse bar's button; never the page.
   const back = opener && opener.isConnected ? opener
-    : document.querySelector('#browseBar .catalog-btn') || document.querySelector('#banner .catalog-banner button') || document.querySelector('#tabBar .tab.active');
+    : document.querySelector('#browseBar .catalog-btn') || document.querySelector('#tabBar .tab.active');
   if (back && typeof back.focus === 'function') back.focus();
 }
 
@@ -185,13 +193,13 @@ function catalogKeydown(event) {
 }
 
 // The published config.js, read again without the browser cache, evaluated in
-// isolation (it only declares constants). Returns that tab's catalog.
-async function catalogPublishedDefaults(collectionId) {
+// isolation (it only declares constants). Returns that catalog's entries.
+async function catalogPublishedDefaults(catalogId) {
   const res = await fetch('config.js', { cache: 'no-store' });
   if (!res.ok) throw new Error(`config.js answered ${res.status}`);
   const text = await res.text();
   const collections = new Function(`${text}\n;return COLLECTIONS;`)();
-  return catalogDefaultsOf(collectionId, collections);
+  return catalogDefaultsOf(catalogId, collections);
 }
 
 const catalogLive = session => !!catalogDialog && catalogDialog.session === session;
@@ -202,9 +210,9 @@ async function catalogReview() {
   const d = catalogDialog, session = d.session;
   d.phase = 'checking'; d.error = ''; d.preview = null; d.approved = null; d.result = null; d.readBack = null; d.check = null;
   renderCatalogDialog();
-  const loaded = catalogDefaultsOf(d.collectionId);
+  const loaded = catalogDefaultsOf(d.catalogId);
   try {
-    const published = await catalogPublishedDefaults(d.collectionId);
+    const published = await catalogPublishedDefaults(d.catalogId);
     const [a, b] = await Promise.all([catalogPayloadHash(loaded), catalogPayloadHash(published)]);
     if (!catalogLive(session)) return;
     if (a !== b) { d.phase = 'outdated'; renderCatalogDialog(); return; }
@@ -217,10 +225,11 @@ async function catalogReview() {
   d.phase = 'previewing';
   renderCatalogDialog();
   try {
-    const res = await sbRpc('catalog_apply', { p_collection: d.collectionId, p_defaults: d.defaults });
+    const res = await sbRpc('library_catalog_apply', { p_catalog: d.catalogId, p_defaults: d.defaults });
     if (!catalogLive(session)) return;
     d.preview = res;
     d.phase = 'preview';
+    catalogLoadRows(session);
   } catch (e) {
     if (!catalogLive(session)) return;
     catalogFailed(d, e, false);
@@ -236,7 +245,7 @@ function catalogFailed(d, e, wasApply) {
     if (wasApply) { d.phase = 'unknown'; d.error = info.message; return; }
     d.phase = 'failed'; d.error = info.message; return;
   }
-  if (info.status === 404 && info.pgCode === 'PGRST202') { d.phase = 'absent'; return; }
+  if ((info.status === 404 && info.pgCode === 'PGRST202') || info.code === 'update_required') { d.phase = 'absent'; return; } // (update_required: refused before sending)
   if (info.code === 'catalog_stale') { d.phase = 'stale'; return; }
   if (info.code === 'catalog_busy' || ['55P03', '40P01', '57014'].includes(info.pgCode)) { d.phase = 'busy'; return; }
   d.phase = 'failed'; d.error = info.code ? orgRefusalText(info) : info.message;
@@ -251,7 +260,7 @@ async function catalogApply() {
   renderCatalogDialog();
   let res;
   try {
-    res = await sbRpc('catalog_apply', { p_collection: d.collectionId, p_defaults: d.approved.defaults, p_approved: d.approved.hash });
+    res = await sbRpc('library_catalog_apply', { p_catalog: d.catalogId, p_defaults: d.approved.defaults, p_approved: d.approved.hash });
   } catch (e) {
     if (!catalogLive(session)) return;
     catalogFailed(d, e, true);
@@ -269,10 +278,20 @@ async function catalogApply() {
   d.readBack = { state: 'reading' };
   renderCatalogDialog();
   await catalogVerify(session);
-  // The tab, or the open view (Stage 4b), shows the new state (read again; nothing is written).
-  delete tabData[d.collectionId];
-  if (activeTabId === d.collectionId) loadTab(d.collectionId);
-  else if (activeViewId) reloadOpenView();
+  // The open view shows the new state (read again; nothing is written).
+  if (activeViewId) reloadOpenView();
+}
+
+// Titles for the rows a preview dates (a read, best effort: the entry's key otherwise).
+async function catalogLoadRows(session) {
+  const d = catalogDialog;
+  if (!d || !d.preview || !d.preview.document.entries.some(e => e.kind === 'fill_date')) return;
+  try {
+    const st = await catalogGovernedState(d.catalogId);
+    if (!catalogLive(session)) return;
+    d.rows = st.rows;
+    renderCatalogDialog();
+  } catch (e) { /* titles stay the entries' keys */ }
 }
 
 // ── Comparing the library with the approved outcomes ──
@@ -284,13 +303,13 @@ async function catalogApply() {
 // can't be completed throws, so absence is never inferred from it.
 //
 // Outcome map (effects document field → comparison; receipt value → check):
-//   header: collection = this tab; target.archived = the collection's state now;
+//   header: catalog = this catalog; target.archived = the collection's state now;
 //           version, owner, payload_hash and the entries themselves are bound by
 //           the approved hash (the apply answers with the same hash).
 //   create_show: show_key, tmdb_id (natural key, unique); title; initial_status = status;
 //           receipt show_id = that show.
 //   attach: show_id exists; show_key; status (Complete → On List when this apply reopens it).
-//   insert_season: item_key (unique in the tab); title, season, theme, display_date,
+//   insert_season: item_key (unique in the catalog); title, season, theme, display_date,
 //           date_sort, status, watched, skipped, media_type, tmdb_id, season_number;
 //           show link = the approved show (created ref or existing id);
 //           receipt row_id = that row, receipt show_id = the approved show.
@@ -307,7 +326,7 @@ async function catalogApply() {
 //           membership of the new record, in that collection; not_joined /
 //           no_collection = none at all; receipt membership_id = that membership,
 //           or "none" exactly when not joined.
-//   excluded_conflict: item_key still not stored (reason, conflicting_id: informational).
+//   excluded_conflict: item_key still not stored (reason, conflicting_id / candidates: informational).
 //   noop: item_key still stored; category identified = a stored row with it has a TMDB id.
 //   receipt: exactly one entry per create_show, insert_season, insert_film,
 //           fill_date, reopen and membership entry, no other.
@@ -319,16 +338,14 @@ const CATALOG_COMPARED_FIELDS = {
   insert_film: ['title', 'season', 'theme', 'display_date', 'date_sort', 'status', 'watched', 'media_type', 'tmdb_id']
 };
 
-async function catalogReadState(collectionId, doc) {
-  const filter = `collection=eq.${encodeURIComponent(collectionId)}`;
-  const [rows, shows, target] = await Promise.all([
-    fetchAllRowsStrict(TABLE, filter), fetchAllRowsStrict('tv_shows', filter),
+async function catalogReadState(catalogId, doc) {
+  const [st, target] = await Promise.all([catalogGovernedState(catalogId),
     doc.target ? fetchAllRowsStrict('personal_collections', `id=eq.${encodeURIComponent(doc.target.collection_id)}`) : Promise.resolve([])]);
-  return { rows, shows, target: target[0] || null };
+  return { rows: st.rows, shows: st.shows, target: target[0] || null };
 }
 
-async function catalogCompareOutcomes(collectionId, doc, receipt) {
-  const st = await catalogReadState(collectionId, doc);
+async function catalogCompareOutcomes(catalogId, doc, receipt) {
+  const st = await catalogReadState(catalogId, doc);
   const diffs = [];
   const say = m => diffs.push(m);
   const same = (a, b) => (a ?? null) === (b ?? null);
@@ -342,7 +359,7 @@ async function catalogCompareOutcomes(collectionId, doc, receipt) {
   };
   const rowsWithKey = key => st.rows.filter(r => r.item_key === key);
 
-  if (doc.collection !== collectionId) say('the approved changes are for another catalog');
+  if (doc.catalog !== catalogId) say('the approved changes are for another catalog');
   if (receipt) {
     const want = doc.entries.filter(e => CATALOG_RECEIPT_KINDS.includes(e.kind)).map(e => e.key).sort();
     if (JSON.stringify(want) !== JSON.stringify(Object.keys(receipt).sort())) say('the receipt doesn’t list exactly the approved changes');
@@ -447,7 +464,7 @@ async function catalogVerify(session) {
   d.readBack = { state: 'reading' };
   renderCatalogDialog();
   try {
-    const out = await catalogCompareOutcomes(d.collectionId, d.result.document, d.result.receipt || {});
+    const out = await catalogCompareOutcomes(d.catalogId, d.result.document, d.result.receipt || {});
     if (!catalogLive(session)) return;
     d.readBack = { state: out.matches ? 'verified' : 'differs', differences: out.differences };
   } catch (e) {
@@ -477,8 +494,8 @@ async function catalogCheckState() {
   let res, cmp;
   try {
     [cmp, res] = await Promise.all([
-      catalogCompareOutcomes(d.collectionId, d.approved.document, null),
-      sbRpc('catalog_apply', { p_collection: d.collectionId, p_defaults: d.approved.defaults })]);
+      catalogCompareOutcomes(d.catalogId, d.approved.document, null),
+      sbRpc('library_catalog_apply', { p_catalog: d.catalogId, p_defaults: d.approved.defaults })]);
   } catch (e) {
     if (!catalogLive(session)) return;
     d.phase = 'unknown';
@@ -493,7 +510,6 @@ async function catalogCheckState() {
   d.phase = 'checked';
   renderCatalogDialog();
   // What the library holds now, also in the open view (a read).
-  delete tabData[d.collectionId];
   if (activeViewId) reloadOpenView();
 }
 
@@ -504,17 +520,19 @@ function catalogShowTitle(ref, doc) {
   const s = tvShowsById.get(ref);
   return s ? s.title : ref;
 }
-function catalogRowTitle(rowId, collectionId) {
-  const r = ((tabData[collectionId] || {}).rows || []).find(x => x.id === rowId);
+function catalogRowTitle(rowId) {
+  const r = ((catalogDialog && catalogDialog.rows) || []).find(x => x.id === rowId);
   return r ? `${r.title} · ${r.season}` : null;
 }
 const CATALOG_REASONS = {
   enriched_show_label: 'its label isn’t a plain “Season N” for a TMDB-matched show',
   identity_conflict: 'another saved row already has that identity',
-  linked_to_other_show: 'a saved row with this key belongs to another show'
+  linked_to_other_show: 'a saved row with this key belongs to another show',
+  existing_record: 'something with this name is already on your list outside this catalog; it isn’t joined or copied',
+  ambiguous: 'more than one entry with this name is already on your list outside this catalog'
 };
 
-function catalogDocumentHtml(doc, collectionId) {
+function catalogDocumentHtml(doc, catalogId) {
   const E = kind => doc.entries.filter(e => e.kind === kind);
   const li = (main, meta = '') => `<li class="manage-item"><div class="manage-line"><span class="manage-name">${esc(main)}</span>${meta ? `<span class="manage-meta">${esc(meta)}</span>` : ''}</div></li>`;
   const section = (title, items) => items.length ? `<h3 class="manage-subtitle">${esc(title)} (${items.length})</h3><ul class="manage-list">${items.join('')}</ul>` : '';
@@ -526,7 +544,7 @@ function catalogDocumentHtml(doc, collectionId) {
     section('New films', E('insert_film').map(e => li(e.title, e.display_date))),
     section('Date updates', E('fill_date').map(e => {
       const skipped = e.item === 'film' ? e.tracking.status === 'skipped' : e.tracking.skipped;
-      return li(catalogRowTitle(e.row_id, collectionId) || e.item_key, `${e.old_display} → ${e.new_display}${skipped ? ' (skipped; stays skipped)' : ''}`);
+      return li(catalogRowTitle(e.row_id) || e.item_key, `${e.old_display} → ${e.new_display}${skipped ? ' (skipped; stays skipped)' : ''}`);
     })),
     section('Back to On List', E('reopen').map(e => li(catalogShowTitle(e.show_id, doc), `Complete → On List, because of a new season`))),
     section('Collection', E('membership').map(e => {
@@ -534,8 +552,9 @@ function catalogDocumentHtml(doc, collectionId) {
       return li(title, e.result === 'joined' ? `joins ${collName}` : e.result === 'not_joined' ? `won’t join ${collName} (archived)` : 'no collection');
     })),
     section('Not included — needs review', E('excluded_conflict').map(e => {
-      const d = catalogDefaultsOf(collectionId).find(x => x.k === e.item_key);
-      return li(d ? `${d.t} · ${d.s}` : e.item_key, CATALOG_REASONS[e.reason] || e.reason);
+      const d = catalogDefaultsOf(catalogId).find(x => x.k === e.item_key);
+      const ids = e.candidates && e.candidates.length ? ` (on your list: ${e.candidates.join(', ')})` : '';
+      return li(d ? `${d.t} · ${d.s}` : e.item_key, `${CATALOG_REASONS[e.reason] || e.reason}${ids}`);
     })),
     E('noop').length ? `<p class="manage-hint">${E('noop').length} catalog ${E('noop').length === 1 ? 'entry is' : 'entries are'} already in your library.</p>` : ''
   ].join('');
@@ -545,8 +564,7 @@ function renderCatalogDialog() {
   const box = document.getElementById('catalogModalBox');
   if (!box || !catalogDialog) return;
   const d = catalogDialog;
-  const col = COLLECTIONS.find(c => c.id === d.collectionId);
-  const head = `<h2 class="modal-title" id="catalogTitle">Catalog updates — ${esc(col ? col.label : d.collectionId)}</h2>`;
+  const head = `<h2 class="modal-title" id="catalogTitle">Catalog updates — ${esc(catalogLabel(d.catalogId))}</h2>`;
   const btn = (label, handler, extra = '') => `<button class="btn${extra}" onclick="${handler}">${esc(label)}</button>`;
   const close = catalogBusy() ? '<button class="btn" disabled>Close</button>' : btn('Close', 'closeCatalogUpdates()');
   const msg = (text, actions = '') => `${head}<div class="manage-body"><p class="manage-message">${esc(text)}</p></div><div class="modal-actions">${actions}${close}</div>`;
@@ -574,7 +592,7 @@ function renderCatalogDialog() {
           ? 'These changes aren’t in your library right now. Your earlier request may still finish, or may have been stopped; this can’t be told apart from changes that were applied and later undone. You can apply again: if the earlier request has already made these changes, this one is refused.'
           : `Your library matches neither the approved changes nor the state before them, so the earlier result is still unknown. Compared with the approved changes: ${(d.checkDifferences || []).slice(0, 8).join('; ')}${(d.checkDifferences || []).length > 8 ? '; …' : ''}. The current preview is below.`;
       const showPreview = d.check !== 'present';
-      html = `${head}<div class="manage-body"><p class="manage-message">${esc(text)}</p>${showPreview ? catalogDocumentHtml(d.preview.document, d.collectionId) : ''}</div>
+      html = `${head}<div class="manage-body"><p class="manage-message">${esc(text)}</p>${showPreview ? catalogDocumentHtml(d.preview.document, d.catalogId) : ''}</div>
         <div class="modal-actions">${showPreview && catalogEffectCount(d.preview.document) ? btn('Apply these changes', 'catalogApplyChecked()', ' btn-accent') : ''}${btn('Check current state', 'catalogCheckState()')}${close}</div>`;
       break;
     }
@@ -584,7 +602,7 @@ function renderCatalogDialog() {
       html = `${head}<div class="manage-body"><p class="manage-message">${n
         ? `Applying this catalog would make these changes. Nothing has changed yet.${conflicts ? ` ${conflicts} ${conflicts === 1 ? 'entry is' : 'entries are'} not included; ${conflicts === 1 ? 'it needs' : 'they need'} review.` : ''}`
         : `Nothing to apply: your library already has everything this catalog can add.${conflicts ? ` ${conflicts} ${conflicts === 1 ? 'entry needs' : 'entries need'} review.` : ''}`}</p>
-        ${version}${catalogDocumentHtml(d.preview.document, d.collectionId)}</div>
+        ${version}${catalogDocumentHtml(d.preview.document, d.catalogId)}</div>
         <div class="modal-actions">${n ? btn('Apply these changes', 'catalogApply()', ' btn-accent') : ''}${close}</div>`;
       break;
     }
@@ -598,7 +616,7 @@ function renderCatalogDialog() {
           : rb.state === 'differs' ? `Applied, but reading back found differences (possibly later edits): ${rb.differences.join('; ')}.`
             : `Applied, but the saved records couldn’t be read back to verify (${rb.error}).`;
       html = `${head}<div class="manage-body"><p class="manage-message">${esc(`Applied ${n} ${n === 1 ? 'change' : 'changes'}${conflicts ? `; ${conflicts} ${conflicts === 1 ? 'entry' : 'entries'} not included (listed below)` : ''}.`)}</p>
-        <p class="manage-status" role="status">${esc(rbText)}</p>${version}${catalogDocumentHtml(doc, d.collectionId)}</div>
+        <p class="manage-status" role="status">${esc(rbText)}</p>${version}${catalogDocumentHtml(doc, d.catalogId)}</div>
         <div class="modal-actions">${rb.state === 'unread' || rb.state === 'differs' ? btn('Read again', `catalogVerify(${d.session})`) : ''}${close}</div>`;
       break;
     }

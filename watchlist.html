@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261008-library1">
+<link rel="stylesheet" href="styles.css?v=20261010-stage5">
 </head>
 <body>
 
@@ -40,6 +40,7 @@
 <div class="browse-bar" id="browseBar"></div>
 
 <div class="main">
+  <div id="phaseBanner"></div>
   <div id="noticeBanner"></div>
   <div id="banner"></div>
   <div id="errorBanner"></div>
@@ -79,25 +80,26 @@
      deliberately unversioned (the catalog-refresh workflow reloads it by plain URL). -->
 <script src="config.js"></script>
 <script src="identity.js"></script>
-<script src="api.js?v=20261008-library1"></script>
+<script src="api.js?v=20261010-stage5"></script>
 <script src="ui-helpers.js"></script>
-<script src="backup-restore.js?v=20261008-library1"></script>
-<script src="tabs.js?v=20261008-library1"></script>
-<script src="render.js?v=20261008-library1"></script>
-<script src="row-actions.js?v=20261008-library1"></script>
-<script src="tmdb-search.js?v=20261008-library1"></script>
-<script src="collections-pull.js?v=20261008-library1"></script>
-<script src="universe-pull.js?v=20261008-library1"></script>
-<script src="person-pull.js?v=20261008-library1"></script>
-<script src="refresh-shows.js?v=20261008-library1"></script>
-<script src="tmdb-match.js?v=20261008-library1"></script>
-<script src="derived-views.js?v=20261008-library1"></script>
-<script src="tv-shows.js?v=20261008-library1"></script>
-<script src="organization.js?v=20261008-library1"></script>
-<script src="organization-manage.js?v=20261008-library1"></script>
-<script src="catalog-apply.js?v=20261008-library1"></script>
-<script src="browse-views.js?v=20261008-library1"></script>
-<script src="library.js?v=20261008-library1"></script>
+<script src="backup-restore.js?v=20261010-stage5"></script>
+<script src="backup-format3.js?v=20261010-stage5"></script>
+<script src="tabs.js?v=20261010-stage5"></script>
+<script src="render.js?v=20261010-stage5"></script>
+<script src="row-actions.js?v=20261010-stage5"></script>
+<script src="tmdb-search.js?v=20261010-stage5"></script>
+<script src="collections-pull.js?v=20261010-stage5"></script>
+<script src="universe-pull.js?v=20261010-stage5"></script>
+<script src="person-pull.js?v=20261010-stage5"></script>
+<script src="refresh-shows.js?v=20261010-stage5"></script>
+<script src="tmdb-match.js?v=20261010-stage5"></script>
+<script src="derived-views.js?v=20261010-stage5"></script>
+<script src="tv-shows.js?v=20261010-stage5"></script>
+<script src="organization.js?v=20261010-stage5"></script>
+<script src="organization-manage.js?v=20261010-stage5"></script>
+<script src="catalog-apply.js?v=20261010-stage5"></script>
+<script src="browse-views.js?v=20261010-stage5"></script>
+<script src="library.js?v=20261010-stage5"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -119,10 +121,11 @@
 
 
 // ─── State ────────────────────────────────────────────────────────────────────
-let activeMediaType = 'tv'; // 'tv' | 'movie' — controls which tabs are visible
-let activeViewId = 'watching'; // open derived view (see DERIVED_VIEWS), or null when a collection tab is open
-let activeTabId = null; // open collection id; null while a derived view is open
-let tabData = {}; // { [collectionId]: { rows: [], loaded: false, newKeys: [] } }
+let activeMediaType = 'tv'; // 'tv' | 'movie' — controls which views are visible
+let activeViewId = 'watching'; // the open view (derived or browse)
+let tabData = {}; // per-run caches by name: tabData.films = the movie tools' films (library.js); no storage
+let libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(), seq: 0, epoch: 0 }; // the newest catalog-governance snapshot (library.js)
+let stage5Phase = null; // the database's Stage 5 phase from stage5_capabilities(): 'coexistence' | 'contracted' (null: not read yet / older database)
 let derivedData = null; // { rows, loaded } — cross-TV rows for the derived views, kept apart from tabData
 let derivedLoadSeq = 0; // lets a late derived-view load see that it's been superseded
 let derivedSectionOpen = { uptodate: true, tba: false, alltvTba: false }; // collapsible sections in the derived views (Up to date starts open, TBA sections closed)
@@ -131,7 +134,7 @@ let allTvSeasonVis = 'notskipped'; // All TV Seasons: 'notskipped' (All (except 
 let addOpen = false;
 let tmdbSelectedShow = null; // { id, name } — currently previewed TMDB show
 let tmdbShowSpecials = false;
-let expandedShows = new Set(); // expanded show groups: 'show:<id>' / 'row:<id>' keys on grouped tabs, show ids in Currently Watching
+let expandedShows = new Set(); // expanded shows (show ids) in the views
 let tvShowsById = new Map(); // tv_shows rows by id: a TV season's status is its show's (tv-shows.js)
 let browseData = null; // { rows, showsById, dest, members, loaded } — the read-only browse views' snapshot (browse-views.js), kept apart from tabData and derivedData
 let browseLoadSeq = 0; // lets a late browse-view load see that it's been superseded
@@ -140,7 +143,7 @@ let browsePresentation = 'shows'; // a collection's TV presentation: 'shows' | '
 let browseGrouping = 'separate'; // a collection's grouping: 'separate' | 'combined'; remembered per collection on this device
 let browseSeasonVis = 'notskipped'; // TV seasons (Seasons only): 'notskipped' (All (except Skipped)) | 'all' | 'towatch' | 'watched' | 'skipped'; All (except Skipped) on every entry, never stored
 let browseSectionOpen = {}; // a collection's TBA / Date needs review sections (BROWSE_SECTION_DEFAULTS on every entry)
-let browseOrigin = null; // where Back returns from a collection: { mediaType, viewId (null for a legacy tab), filters }
+let browseOrigin = null; // where Back returns from a collection: { mediaType, viewId, filters }
 let backNavFilters = null; // { view, values }: filters Back puts back on the view it returns to
 let viewFilterMemory = { tag: null, values: {} }; // the open derived or browse view's filter values for this visit, including controls its current mode hides (browse-views.js)
 let personalCollections = null; // personal_collections rows (organization.js); null until loaded
@@ -169,9 +172,9 @@ let matchLatestByRow = {}; // row id → the latest Match call's number for that
 let matchRefreshSeq = 0; // the latest refresh after a Match whose result couldn't be put into the page
 let matchRefreshStamp = null; // what that refresh is for (Retry reads it again)
 let matchRefreshProgress = null; // the refresh after Matches: its outcomes and its open obligations (rows, shows) (tmdb-match.js)
-let matchReadSeq = 0; // every tracked read (tab, row, shows) and every Match call takes the next number when it starts
+let matchReadSeq = 0; // every tracked read (row, shows) and every Match call takes the next number when it starts
 let matchReads = []; // recent tracked reads with their epoch and outcome; any of them can satisfy a refresh obligation
-let matchPublished = { epoch: 0, tabs: {}, rows: {}, shows: {} }; // newest read that published each tab, row and show list (per restore epoch)
+let matchPublished = { epoch: 0, rows: {}, shows: {} }; // newest read that published each row and the show list (per restore epoch)
 
 
 
@@ -226,6 +229,7 @@ let personCollectionNames = null; // custom_collections names: null = not loaded
 // ─── Restore flow ───────────────────────────────────────────────────────────
 let pendingRestoreData = null; // validated backup object, set once file passes checks
 let pendingRestoreAllowV1Reset = false; // true when a format-1 backup is restored into a format-2 database
+let pendingRestoreDbFormat = null; // the database's backup format the restore preview checked against (backup-restore.js)
 let restoreSessionSeq = 0; // the restore being prepared; navigation bumps it (backup-restore.js)
 let restoreInFlight = false; // restore_backup has been sent: navigation no longer abandons the restore
 
@@ -236,6 +240,7 @@ buildTabs();
 switchView(activeViewId);
 updateBackupAgeIndicator();
 loadOrganization(); // the Browse collections selector and watch-with choices; doesn't hold up the first view
+loadStage5Capabilities(); // which backup format this database takes; doesn't hold up the first view
 </script>
 </body>
 </html>

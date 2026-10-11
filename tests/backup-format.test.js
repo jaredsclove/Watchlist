@@ -63,7 +63,7 @@ test('format 2 validation refuses user_id, dangling or cross-collection links, l
   assert.match(variant(b => { b.tables.tv_shows[0].status = 'caughtup'; }), /tv_shows status/);
   assert.match(variant(b => { b.tables.tv_shows.push({ ...b.tables.tv_shows[0], id: uuid('c2') }); b.rowCounts.tv_shows = 2; }), /duplicate identified show/);
   assert.match(variant(b => { delete b.tables.tv_shows; }), /Missing or invalid data for table "tv_shows"/);
-  assert.match(variant(b => { b.formatVersion = 4; }), /Unsupported backup format version \(4\)/);
+  assert.match(variant(b => { b.formatVersion = 5; }), /Unsupported backup format version \(5\)/);
   assert.match(variant(b => { b.formatVersion = 3; }), /Missing or invalid data for table "personal_collections"/);
   assert.match(variant(b => { b.formatVersion = 1; }), /Unexpected table\(s\) for format 1: tv_shows/);
 });

@@ -1,6 +1,8 @@
 // Offline tests for Match to TMDB (tmdb-match.js): the patch built for a confirmed
 // match, conflict detection, and the real open → search → choose → confirm flow
-// run against stubbed TMDB and database calls.
+// run against stubbed TMDB and database calls. Since Stage 5 a confirmed match is
+// one database function call (library_match_season / library_match_film) and what
+// may be matched follows catalog governance (library.js), never storage.
 // Run from the repo root: node tests/tmdb-match.test.js
 // No network, no database: sbFetch is a stub that only records what would be sent.
 const fs = require('fs');
@@ -8,7 +10,19 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'tmdb-search.js', 'tmdb-match.js', 'tv-shows.js'];
+const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'tmdb-search.js', 'tmdb-match.js', 'tv-shows.js', 'library.js', 'organization-manage.js'];
+const CATALOGS = ['disney', 'sheridan', '90day'];
+// Governance as the read views give it (coexistence: derived from where a row is stored).
+function governanceOf(rows) {
+  const shows = new Map(), films = new Map(), kinds = new Map();
+  for (const r of rows) {
+    const c = CATALOGS.includes(r.collection) ? r.collection : null;
+    if (r.show_id) { if (c) shows.set(r.show_id, c); }
+    else { if (c) films.set(r.id, c); kinds.set(r.id, r.collection === 'movies' ? 'genre' : 'other'); }
+  }
+  // (The snapshot speaks for every row and show of the fixture.)
+  return { shows, films, kinds, knownItems: new Set(rows.map(r => r.id)), knownShows: new Set(rows.filter(r => r.show_id).map(r => r.show_id)), seq: 1, epoch: 0 };
+}
 const copy = v => JSON.parse(JSON.stringify(v)); // into this realm, so deepStrictEqual compares values
 
 // Rows as the app stores them
@@ -25,45 +39,53 @@ const RD_SHORT = { id: 443129, title: 'Reservoir Dogs', release_date: '1991-06-0
 const SILO = { id: 125988, name: 'Silo', networks: [{ name: 'Apple TV' }], seasons: [
   { season_number: 0, air_date: null, episode_count: 1 }, { season_number: 1, air_date: '2023-05-04', episode_count: 10 }, { season_number: 2, air_date: '2024-11-14', episode_count: 10 }] };
 
-function makeEnv({ rows = [], tab = 'movies', tmdb = () => ({}), db = {} } = {}) {
+function makeEnv({ rows = [], tmdb = () => ({}), db = {} } = {}) {
   const els = new Map();
-  const el = id => { if (!els.has(id)) els.set(id, { id, innerHTML: '', value: '', classList: { add() {}, remove() {} }, scrollIntoView() {} }); return els.get(id); };
+  const el = id => { if (!els.has(id)) els.set(id, { id, innerHTML: '', value: '', style: {}, classList: { add() {}, remove() {} }, scrollIntoView() {} }); return els.get(id); };
   const log = { writes: [], saved: 0 };
   const ctx = {
     console, setTimeout: () => 0,
     document: { getElementById: el, querySelectorAll: () => [] },
-    tabData: { [tab]: { rows, loaded: true, newKeys: [] } },
+    tabData: {},
     tvShowsById: new Map(),
-    activeTabId: tab,
-    activeViewId: null, libraryPanel: null, // a tab is open, not a view (Stage 4b)
+    // a view is open (All TV / All Movies: the rows its Match controls came from)
+    activeViewId: 'alltv', libraryPanel: null, libraryPanelSeq: 0, actionRows: () => rows, libraryGovernance: governanceOf(rows),
+    isBrowseView: () => false, loadDerivedView() {}, loadBrowseView() {},
+    fetchAllRows: async table => (table === 'tv_shows' ? [] : (() => { throw new Error(`unexpected read ${table}`); })()), // api.js (the show list after a TV match)
+    isFilmRow: r => !!r && (r.media_type === 'movie' || (r.media_type == null && r.season === 'Film')), // browse-views.js
     // page state the Match flow reads (watchlist.html): request stamps and the restore epoch
-    matchRequestSeq: 0, matchLatestByRow: {}, matchRefreshSeq: 0, matchRefreshStamp: null, orgEpoch: 0, matchRefreshProgress: null, matchReadSeq: 0, matchReads: [], matchPublished: { epoch: 0, tabs: {}, rows: {}, shows: {} },
+    matchRequestSeq: 0, matchLatestByRow: {}, matchRefreshSeq: 0, matchRefreshStamp: null, orgEpoch: 0, matchRefreshProgress: null, matchReadSeq: 0, matchReads: [], matchPublished: { epoch: 0, rows: {}, shows: {} },
     tmdbFetch: async p => tmdb(p),
     sbFetch: async (method, p, body) => {
       if (method === 'GET') {
         if (p.startsWith('othertv_shows')) return db.tracked || [];
-        if (/id=eq\./.test(p) && !/collection=/.test(p)) { const id = p.match(/id=eq\.([^&]+)/)[1]; return (db.afterPatch || rows).filter(r => r.id === id).map(r => ({ ...r })); }
+        if (/[?&]id=eq\./.test(p)) { const id = p.match(/[?&]id=eq\.([^&]+)/)[1]; return (db.afterPatch || rows).filter(r => r.id === id).map(r => ({ ...r })); }
         if (/tmdb_id=is\.null&item_key=eq\./.test(p)) return db.sameKey || [];
         return db.sameIdentity || [];
       }
       log.writes.push({ method, path: p, body: body ? copy(body) : null });
       if (db.fail && db.fail(method, p)) throw db.fail(method, p);
-      if (p === 'rpc/match_tv_row') {
+      if (p === 'rpc/library_match_season') {
         if (db.blocked) return { blocked: true, legacy_status: 'watching', target_status: 'complete', legacy_show_id: 'L', target_show_id: 'T' };
         const row = rows.find(r => r.id === body.p_row_id);
         return { blocked: false, row: { ...row, ...body.p_patch, show_id: 'show-silo' }, show_id: 'show-silo' };
       }
-      if (method === 'PATCH') { const id = p.match(/id=eq\.([^&]+)/)[1]; db.afterPatch = rows.map(r => r.id === id ? { ...r, ...body } : r); }
-      return null;
+      if (p === 'rpc/library_match_film') {
+        if (db.filmAnswer) return db.filmAnswer;
+        const row = rows.find(r => r.id === body.p_row_id);
+        const former = row.show_id || null;
+        return { row: { ...row, ...body.p_patch, show_id: null }, former_show_id: former, former_show_deleted: !!former && !db.formerKeepsSeasons, memberships_carried: 0 };
+      }
+      throw new Error(`unexpected write ${method} ${p}`);
     },
     cancelTMDBPreview() {}, renderFilters() {}, renderTable() {},
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'), ctx);
-  // The TV-write helpers from api.js (isTvCollection, sbRpc, …), without its sbFetch.
+  // The database-function helpers from api.js (sbRpc, …), without its sbFetch.
   const api = fs.readFileSync(path.join(__dirname, '..', 'api.js'), 'utf8');
-  vm.runInContext(api.slice(api.indexOf('// ─── TV structural writes'), api.indexOf('async function tmdbFetch')), ctx);
+  vm.runInContext(api.slice(api.indexOf('// ─── Database functions'), api.indexOf('async function tmdbFetch')), ctx);
   ctx.showSaved = () => { log.saved++; };
   ctx.cancelTMDBPreview = () => {}; // the real one (tmdb-search.js) needs a DOM
   const text = id => el(id).innerHTML.replace(/<[^>]+>/g, ' ').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
@@ -76,12 +98,11 @@ const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
 // ── eligibility ──
-test('eligible: unidentified rows on dynamic tabs only; static defaults and identified rows are not', () => {
-  const { ctx } = makeEnv();
-  assert.strictEqual(ctx.isTmdbMatchEligible(manual()), true);
-  assert.strictEqual(ctx.isTmdbMatchEligible(manual({ collection: 'othertv' })), true);
-  assert.strictEqual(ctx.isTmdbMatchEligible(manual({ collection: 'disney' })), false);
-  assert.strictEqual(ctx.isTmdbMatchEligible(manual({ media_type: 'movie', tmdb_id: 841 })), false);
+test('eligible: unidentified rows no catalog governs; governed rows (a governed film, a season of a governed show) and identified rows are not', () => {
+  const rows = [manual({ id: 'a' }), manual({ id: 'b', collection: 'othertv', show_id: 's1' }), manual({ id: 'c', collection: 'disney' }),
+    manual({ id: 'd', collection: 'disney', show_id: 's2' }), manual({ id: 'e', media_type: 'movie', tmdb_id: 841 })];
+  const { ctx } = makeEnv({ rows });
+  assert.deepStrictEqual(rows.map(r => ctx.isTmdbMatchEligible(r)), [true, true, false, false, false]);
 });
 
 // ── patch building ──
@@ -110,7 +131,7 @@ test('TV without a chosen (or valid) season → no patch', () => {
   assert.strictEqual(ctx.buildTmdbMatchPatch(manual(), { mediaType: 'tv', details: SILO, seasonNumber: null }, false), null);
   assert.strictEqual(ctx.buildTmdbMatchPatch(manual(), { mediaType: 'tv', details: SILO, seasonNumber: 7 }, false), null);
 });
-test('Movie on a non-Movies tab (True Crime / Docs) uses the production company, as TMDB adds do', () => {
+test('a film whose theme isn’t a genre (theme_kind other, e.g. True Crime / Docs) uses the production company, as TMDB adds do', () => {
   const { ctx } = makeEnv();
   assert.strictEqual(ctx.buildTmdbMatchPatch(manual({ collection: 'truecrime' }), { mediaType: 'movie', details: DUNE_1984 }, false).theme, 'De Laurentiis');
 });
@@ -153,17 +174,21 @@ test('7. target TV season already on the list → blocked; another season of the
   assert.strictEqual(ctx.findTmdbMatchConflict(row, patch, [s1]), null);
   assert.strictEqual(ctx.findTmdbMatchConflict(row, patch, [s1, s2]).kind, 'identity');
 });
-test('8. new item_key already used by another unmatched row → blocked', () => {
+test('8. a season’s new item_key already used by an unmatched season of the show it joins → blocked; a same-named unmatched film doesn’t block a film (Stage 5)', () => {
   const { ctx } = makeEnv();
-  const legacy = manual({ id: 'row-3', item_key: 'dune|film', title: 'Dune', season: 'Film' });
-  const c = ctx.findTmdbMatchConflict(manual(), ctx.buildTmdbMatchPatch(manual(), { mediaType: 'movie', details: DUNE_2021 }, true), [legacy]);
+  const row = manual({ collection: 'othertv', item_key: 'silo|season 2', show_id: 'show-silo' });
+  const patch = ctx.buildTmdbMatchPatch(row, { mediaType: 'tv', details: SILO, seasonNumber: 2 }, false);
+  const legacy = manual({ id: 'row-3', item_key: 'silo|season 2', title: 'Silo', season: 'Season 2', show_id: 'show-silo' });
+  const c = ctx.findTmdbMatchConflict(row, patch, [legacy], 'show-silo');
   assert.strictEqual(c.kind, 'item_key');
   assert.ok(ctx.tmdbMatchConflictMessage(c).includes('Another unmatched row'));
+  const film = manual({ id: 'row-4', item_key: 'dune|film', title: 'Dune', season: 'Film' });
+  assert.strictEqual(ctx.findTmdbMatchConflict(manual(), ctx.buildTmdbMatchPatch(manual(), { mediaType: 'movie', details: DUNE_2021 }, true), [film]), null);
 });
-test('rows in another collection never block', () => {
+test('the target identity blocks wherever it is saved: identity is library-wide since Stage 5', () => {
   const { ctx } = makeEnv();
   const elsewhere = manual({ id: 'row-4', collection: 'truecrime', media_type: 'movie', tmdb_id: 438631, item_key: 'dune|film' });
-  assert.strictEqual(ctx.findTmdbMatchConflict(manual(), ctx.buildTmdbMatchPatch(manual(), { mediaType: 'movie', details: DUNE_2021 }, true), [elsewhere]), null);
+  assert.strictEqual(ctx.findTmdbMatchConflict(manual(), ctx.buildTmdbMatchPatch(manual(), { mediaType: 'movie', details: DUNE_2021 }, true), [elsewhere]).kind, 'identity');
 });
 test('10. user-owned fields are never in the patch', () => {
   const { ctx } = makeEnv();
@@ -207,7 +232,7 @@ test('12. opening and searching never matches automatically (no write, no target
   assert.strictEqual(row.tmdb_id, null);
 });
 test('12b. choosing a series without a season → Confirm does nothing', async () => {
-  const row = manual({ collection: 'othertv' }); const env = makeEnv({ tab: 'othertv', rows: [row], tmdb: searchStub });
+  const row = manual({ collection: 'othertv' }); const env = makeEnv({ rows: [row], tmdb: searchStub });
   await openAndSearch(env);
   const idx = env.ctx.__tmdbMatch.results.findIndex(r => r.mediaType === 'tv');
   await env.ctx.chooseTmdbMatchResult(idx);
@@ -215,7 +240,7 @@ test('12b. choosing a series without a season → Confirm does nothing', async (
   await env.ctx.confirmTmdbMatch();
   assert.strictEqual(env.log.writes.length, 0);
 });
-test('confirm movie: guarded PATCH of exactly the patch, row updated in place, Saved shown', async () => {
+test('confirm movie: one library_match_film call with exactly the patch and the row’s show (none), row updated in place, Saved shown', async () => {
   const row = manual(); const env = makeEnv({ rows: [row], tmdb: searchStub });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
@@ -223,25 +248,27 @@ test('confirm movie: guarded PATCH of exactly the patch, row updated in place, S
   await env.ctx.confirmTmdbMatch();
   assert.strictEqual(env.log.writes.length, 1);
   const w = env.log.writes[0];
-  assert.strictEqual(w.method, 'PATCH');
-  assert.strictEqual(w.path, 'watchlist_items?id=eq.row-1&tmdb_id=is.null&media_type=is.null&season_number=is.null');
-  assert.strictEqual(w.body.tmdb_id, 438631);
+  assert.deepStrictEqual([w.method, w.path], ['POST', 'rpc/library_match_film']);
+  assert.deepStrictEqual(w.body.p_expected, { show_id: null });
+  assert.strictEqual(w.body.p_row_id, 'row-1');
+  assert.strictEqual(w.body.p_patch.tmdb_id, 438631);
+  assert.ok(!('collection' in w.body.p_patch) && !('theme_kind' in w.body.p_patch), 'no storage, no kind: the database keeps them');
   assert.deepStrictEqual([row.id, row.tmdb_id, row.media_type, row.watched, row.status, row.created_at], ['row-1', 438631, 'movie', true, 'watching', '2026-09-01T10:00:00+00:00']);
   assert.deepStrictEqual(copy(row.watch_with), ['Suzanne']);
   assert.strictEqual(env.log.saved, 1);
 });
 async function matchSiloS1(db) {
   const row = manual({ collection: 'othertv' });
-  const env = makeEnv({ tab: 'othertv', rows: [row], tmdb: searchStub, db });
+  const env = makeEnv({ rows: [row], tmdb: searchStub, db });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.mediaType === 'tv'));
   env.ctx.chooseTmdbMatchSeason(1);
   await env.ctx.confirmTmdbMatch();
   return { row, env, writes: env.log.writes.map(w => `${w.method} ${w.path.split('?')[0]}`) };
 }
-test('confirm TV season on a TV tab → one match_tv_row call with the exact patch and target; the database tracks the show; no other write', async () => {
+test('confirm TV season → one library_match_season call with the exact patch and target; the database tracks the show; no other write', async () => {
   const { row, env, writes } = await matchSiloS1({});
-  assert.deepStrictEqual(writes, ['POST rpc/match_tv_row']);
+  assert.deepStrictEqual(writes, ['POST rpc/library_match_season']);
   const call = env.log.writes[0].body;
   assert.strictEqual(call.p_row_id, 'row-1');
   assert.deepStrictEqual(call.p_target, { tmdb_id: 125988, network: 'Apple TV' });
@@ -252,57 +279,60 @@ test('confirm TV season on a TV tab → one match_tv_row call with the exact pat
 });
 test('confirm TV season, the database finds a conflict (match_conflict 23505) → friendly message, row untouched, no Saved', async () => {
   const conflict = new Error('Supabase error 409: {"code":"23505","message":"match_conflict: identity already on the list as row x"}');
-  const { row, env } = await matchSiloS1({ fail: (m, p) => (p === 'rpc/match_tv_row' ? conflict : null) });
+  const { row, env } = await matchSiloS1({ fail: (m, p) => (p === 'rpc/library_match_season' ? conflict : null) });
   assert.strictEqual(row.tmdb_id, null);
   assert.ok(env.banner().includes('added to this list somewhere else'), env.banner());
   assert.strictEqual(env.log.saved, 0);
 });
 test('confirm TV season, the row was matched elsewhere (not_found) → "changed somewhere else", no Saved', async () => {
   const gone = new Error('Supabase error 404: {"code":"P0002","message":"not_found: unidentified row"}');
-  const { row, env } = await matchSiloS1({ fail: (m, p) => (p === 'rpc/match_tv_row' ? gone : null) });
+  const { row, env } = await matchSiloS1({ fail: (m, p) => (p === 'rpc/library_match_season' ? gone : null) });
   assert.strictEqual(row.tmdb_id, null);
   assert.ok(env.banner().includes('changed somewhere else'), env.banner());
   assert.strictEqual(env.log.saved, 0);
 });
-test('confirm film for a row linked as a TV season → the guarded PATCH also unlinks it (films never link to a show)', async () => {
+test('confirm film for a row linked as a TV season → one library_match_film call naming its show; the database unlinks it and removes the emptied show (one transaction)', async () => {
   const row = manual({ collection: 'truecrime', show_id: 'show-legacy' });
-  const env = makeEnv({ tab: 'truecrime', rows: [row], tmdb: searchStub });
+  const env = makeEnv({ rows: [row], tmdb: searchStub });
+  env.ctx.tvShowsById.set('show-legacy', { id: 'show-legacy' });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
   await env.ctx.confirmTmdbMatch();
-  const patch = env.log.writes.find(w => w.method === 'PATCH');
-  assert.strictEqual(patch.body.show_id, null);
-  assert.strictEqual(patch.body.media_type, 'movie');
-  assert.strictEqual(row.show_id, null);
-  // The former show is removed if it has no seasons left (ON DELETE RESTRICT refuses otherwise).
-  assert.deepStrictEqual(env.log.writes.map(w => `${w.method} ${w.path}`), ['PATCH watchlist_items?id=eq.row-1&tmdb_id=is.null&media_type=is.null&season_number=is.null', 'DELETE tv_shows?id=eq.show-legacy']);
+  assert.deepStrictEqual(env.log.writes.map(w => `${w.method} ${w.path}`), ['POST rpc/library_match_film']);
+  assert.deepStrictEqual(env.log.writes[0].body.p_expected, { show_id: 'show-legacy' });
+  assert.ok(!('show_id' in env.log.writes[0].body.p_patch), 'the database unlinks it');
+  assert.deepStrictEqual([row.show_id, row.media_type], [null, 'movie']);
+  assert.strictEqual(env.ctx.tvShowsById.has('show-legacy'), false, 'the removed show is dropped from the page');
   assert.strictEqual(env.log.saved, 1);
 });
-test('confirm film, the former show still has seasons (ON DELETE RESTRICT, 23001) → matched, no error', async () => {
+test('confirm film, the former show still has seasons → matched, the show kept, no error', async () => {
   const row = manual({ collection: 'truecrime', show_id: 'show-legacy' });
-  const restrict = new Error('Supabase error 409: {"code":"23001","message":"update or delete on table \\"tv_shows\\" violates RESTRICT setting of foreign key constraint"}');
-  const env = makeEnv({ tab: 'truecrime', rows: [row], tmdb: searchStub, db: { fail: (m, p) => (m === 'DELETE' ? restrict : null) } });
+  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { formerKeepsSeasons: true } });
+  env.ctx.tvShowsById.set('show-legacy', { id: 'show-legacy' });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
   await env.ctx.confirmTmdbMatch();
   assert.strictEqual(row.tmdb_id, 438631);
+  assert.strictEqual(env.ctx.tvShowsById.has('show-legacy'), true);
   assert.strictEqual(env.banner(), '');
   assert.strictEqual(env.log.saved, 1);
 });
 test('confirm TV season blocked (target show has another status) → nothing written beyond the call, clear message, no Saved', async () => {
   const { row, env, writes } = await matchSiloS1({ blocked: true });
-  assert.deepStrictEqual(writes, ['POST rpc/match_tv_row']);
+  assert.deepStrictEqual(writes, ['POST rpc/library_match_season']);
   assert.strictEqual(row.tmdb_id, null);
   assert.ok(/Not matched: "Silo" is already on this list as Complete, but this row's show is Watching/.test(env.banner()), env.banner());
   assert.strictEqual(env.log.saved, 0);
 });
-test('confirm film for an unlinked row → the PATCH carries no show_id at all', async () => {
+test('confirm film for an unlinked row → p_expected names no show; the patch carries no show_id at all', async () => {
   const row = manual({ collection: 'truecrime', show_id: null });
-  const env = makeEnv({ tab: 'truecrime', rows: [row], tmdb: searchStub });
+  const env = makeEnv({ rows: [row], tmdb: searchStub });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
   await env.ctx.confirmTmdbMatch();
-  assert.ok(!('show_id' in env.log.writes.find(w => w.method === 'PATCH').body));
+  const w = env.log.writes.find(x => x.path === 'rpc/library_match_film');
+  assert.deepStrictEqual(w.body.p_expected, { show_id: null });
+  assert.ok(!('show_id' in w.body.p_patch));
 });
 test('6b. confirm when the database already has the target identity → no write, clear message', async () => {
   const row = manual();
@@ -315,18 +345,20 @@ test('6b. confirm when the database already has the target identity → no write
   assert.strictEqual(row.tmdb_id, null);
   assert.ok(env.banner().includes('"Dune — Film" is already on this list'), env.banner());
 });
-test('8b. confirm when an unmatched row already uses the new item_key → no write', async () => {
-  const row = manual();
-  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { sameKey: [manual({ id: 'row-3', item_key: 'dune|film', season: 'Film' })] } });
+test('8b. confirm a season when an unmatched season of that show already uses the new item_key → no write', async () => {
+  const row = manual({ collection: 'othertv', show_id: 'show-silo', title: 'silo', item_key: 'silo|season 7' });
+  const env = makeEnv({ rows: [row], tmdb: searchStub,
+    db: { sameKey: [manual({ id: 'row-3', collection: 'othertv', title: 'Silo', item_key: 'silo|season 1', season: 'Season 1', show_id: 'show-silo' })] } });
   await openAndSearch(env);
-  await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 841));
+  await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.mediaType === 'tv'));
+  env.ctx.chooseTmdbMatchSeason(1);
   await env.ctx.confirmTmdbMatch();
   assert.strictEqual(env.log.writes.length, 0);
   assert.ok(env.banner().includes('Another unmatched row'), env.banner());
 });
 test('9. a 23505 from the database (race) → friendly message, row untouched, no Saved', async () => {
   const row = manual();
-  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: m => m === 'PATCH' ? dup() : null } });
+  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: (m, p) => p === 'rpc/library_match_film' ? dup() : null } });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
   await env.ctx.confirmTmdbMatch();
@@ -334,14 +366,14 @@ test('9. a 23505 from the database (race) → friendly message, row untouched, n
   assert.strictEqual(env.log.saved, 0);
   assert.ok(env.banner().includes('added to this list somewhere else just now, so nothing was changed'), env.banner());
 });
-test('row matched elsewhere first (guarded PATCH changes nothing) → reported, not claimed as saved', async () => {
+test('row matched elsewhere first (library_match_film: not_found) → reported, not claimed as saved', async () => {
   const row = manual();
-  const env = makeEnv({ rows: [row], tmdb: searchStub });
+  const gone = new Error('Supabase error 404: {"code":"P0002","message":"not_found: unidentified row"}');
+  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: (m, p) => p === 'rpc/library_match_film' ? gone : null } });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
-  // simulate: the row now has another identity in the database, so the guarded PATCH matched 0 rows
-  env.ctx.sbFetch = async (m, p) => m === 'GET' && /id=eq\.row-1&select/.test(p) ? [{ ...row, media_type: 'movie', tmdb_id: 841 }] : (m === 'GET' ? [] : null);
   await env.ctx.confirmTmdbMatch();
+  assert.strictEqual(row.tmdb_id, null);
   assert.strictEqual(env.log.saved, 0);
   assert.ok(env.banner().includes('changed somewhere else'), env.banner());
 });
@@ -353,46 +385,40 @@ async function confirmDune(env) {
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
   await env.ctx.confirmTmdbMatch();
 }
-test('film: PATCH accepted, then the read-back times out → outcome reported as unconfirmed (never "nothing was matched"), page row untouched, nothing else written', async () => {
+test('film: an answer whose row isn’t the match → reported as changed elsewhere, page row untouched, not claimed as saved', async () => {
+  // (Stage 5: there is no separate read-back; library_match_film answers with the row in the same transaction.)
   const row = manual({ collection: 'truecrime', show_id: 'show-legacy' });
-  const env = makeEnv({ tab: 'truecrime', rows: [row], tmdb: searchStub });
-  const real = env.ctx.sbFetch;
-  env.ctx.sbFetch = async (m, p, b) => {
-    if (m === 'GET' && /^watchlist_items\?id=eq\.row-1&select/.test(p) && env.log.writes.some(w => w.method === 'PATCH')) throw timeoutErr();
-    return real(m, p, b);
-  };
+  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { filmAnswer: { row: { ...row, media_type: 'movie', tmdb_id: 841 } } } });
   await confirmDune(env);
-  assert.deepStrictEqual(env.log.writes.map(w => w.method), ['PATCH'], 'no DELETE of the former show on an unconfirmed result');
-  assert.strictEqual(row.tmdb_id, null);
-  assert.strictEqual(row.show_id, 'show-legacy');
+  assert.deepStrictEqual(env.log.writes.map(w => w.path), ['rpc/library_match_film']);
+  assert.deepStrictEqual([row.tmdb_id, row.show_id], [null, 'show-legacy']);
   assert.strictEqual(env.log.saved, 0);
-  assert.ok(!/nothing was matched|nothing was changed/.test(env.banner()), env.banner());
-  assert.ok(/accepted the match, but the page couldn't read the row back to confirm the result \(Supabase error 500: .*statement timeout.*\)\. It may already be matched: reload the page and check this row before matching it again\./.test(env.banner()), env.banner());
+  assert.ok(env.banner().includes('changed somewhere else'), env.banner());
 });
-test('film: the PATCH itself times out (57014, one statement, cancelled) → "cancelled, nothing was matched", no read-back, row untouched', async () => {
+test('film: library_match_film times out (57014, one transaction, cancelled) → "cancelled, nothing was matched", row untouched', async () => {
   const row = manual();
-  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: m => m === 'PATCH' ? timeoutErr() : null } });
+  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: (m, p) => p === 'rpc/library_match_film' ? timeoutErr() : null } });
   await confirmDune(env);
   assert.strictEqual(row.tmdb_id, null);
   assert.strictEqual(env.log.saved, 0);
   assert.ok(env.banner().includes('didn’t finish the match in time, so it was cancelled and nothing was matched'), env.banner());
 });
-test('film: the PATCH gets no answer (network failure) → "can\'t tell whether it was saved", row untouched', async () => {
+test('film: library_match_film gets no answer (network failure) → "can\'t tell whether it was saved", row untouched', async () => {
   const row = manual();
-  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: m => m === 'PATCH' ? new TypeError('Failed to fetch') : null } });
+  const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: (m, p) => p === 'rpc/library_match_film' ? new TypeError('Failed to fetch') : null } });
   await confirmDune(env);
   assert.strictEqual(row.tmdb_id, null);
   assert.strictEqual(env.log.saved, 0);
   assert.ok(/no answer came back from the database \(Failed to fetch\), so the page can't tell whether it was saved/.test(env.banner()), env.banner());
 });
-test('TV season: match_tv_row times out (57014, one transaction) → "cancelled, nothing was matched"', async () => {
-  const { row, env } = await matchSiloS1({ fail: (m, p) => p === 'rpc/match_tv_row' ? timeoutErr() : null });
+test('TV season: library_match_season times out (57014, one transaction) → "cancelled, nothing was matched"', async () => {
+  const { row, env } = await matchSiloS1({ fail: (m, p) => p === 'rpc/library_match_season' ? timeoutErr() : null });
   assert.strictEqual(row.tmdb_id, null);
   assert.strictEqual(env.log.saved, 0);
   assert.ok(env.banner().includes('didn’t finish the match in time, so it was cancelled and nothing was matched'), env.banner());
 });
-test('TV season: match_tv_row gets no answer (network failure) → "can\'t tell whether it was saved"', async () => {
-  const { row, env } = await matchSiloS1({ fail: (m, p) => p === 'rpc/match_tv_row' ? new TypeError('Failed to fetch') : null });
+test('TV season: library_match_season gets no answer (network failure) → "can\'t tell whether it was saved"', async () => {
+  const { row, env } = await matchSiloS1({ fail: (m, p) => p === 'rpc/library_match_season' ? new TypeError('Failed to fetch') : null });
   assert.strictEqual(row.tmdb_id, null);
   assert.ok(/can't tell whether it was saved/.test(env.banner()), env.banner());
 });

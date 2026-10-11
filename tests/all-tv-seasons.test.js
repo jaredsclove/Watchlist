@@ -356,13 +356,12 @@ test('the show status is a read-only label with a show-scoped tooltip; it follow
 test('Mark watched and Skip on a season row: one function call each for that row id, mirrored, row kept or dropped by the visibility choice', async () => {
   const a = show({ title: 'Alpha' }, [{ num: 1, date: day(-40) }, { num: 2, date: day(-20) }]);
   const app = await createApp({ rows: a.rows, tvShows: [a.show] });
-  app.ctx.switchTab('othertv'); await settle();
   app.ctx.switchView('alltv'); await settle();
   await seasons(app);
   assert.ok(tbody(app).includes(`toggleWatch('${a.rows[0].id}')`) && tbody(app).includes(`setSeasonSkipped('${a.rows[0].id}', true)`));
   await app.ctx.toggleWatch(a.rows[0].id); await settle();
   assert.deepStrictEqual(app.writes().map(r => [r.url.split('/rest/v1/')[1], r.body.p_row_id]), [['rpc/set_season_watched', a.rows[0].id]]);
-  assert.strictEqual(app.get('tabData.othertv.rows').find(r => r.id === a.rows[0].id).watched, true, 'mirrored into the loaded tab');
+  assert.strictEqual(app.get('derivedData.rows').find(r => r.id === a.rows[0].id).watched, true, 'mirrored into the view’s rows');
   assert.ok(tbody(app).includes('✓ Watched') && seasonRows(app).length === 2, 'All seasons: the row stays, now watched');
   app.ctx.setAllTvSeasonVis('towatch'); await settle();
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 2']);

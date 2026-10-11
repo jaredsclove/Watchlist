@@ -1,22 +1,21 @@
 // ─── Match to TMDB ────────────────────────────────────────────────────────────
-// Gives an unidentified row on a dynamic tab (a manual "+ Add entry" row) the TMDB
-// identity the user explicitly picks: search → click a result → for a series, pick
-// the season → confirm a before/after summary. Nothing is guessed from the title,
-// and the first result is never taken automatically. The row is updated in place,
-// so its id, created_at, watched, watch_with, status and tags are kept.
-// Static-tab defaults are not eligible: loadTab reseeds them by item_key, so a
-// rewritten item_key would bring the default back as a duplicate.
+// Gives an unidentified row (one typed by hand) the TMDB identity the user
+// explicitly picks: search → click a result → for a series, pick the season →
+// confirm a before/after summary. Nothing is guessed from the title, and the first
+// result is never taken automatically. The row is updated in place, so its id,
+// created_at, watched, watch_with, status and tags are kept. Entries a catalog
+// governs are not eligible (the same rule as before Stage 5; the database checks it).
 
 function isTmdbMatchEligible(row) {
-  const col = COLLECTIONS.find(c => c.id === row.collection);
-  return !!col?.dynamic && row.tmdb_id == null && row.media_type == null && row.season_number == null;
+  return !!row && row.tmdb_id == null && row.media_type == null && row.season_number == null && governanceKnows(row) && !rowCatalogOf(row);
 }
 
 // The fields a confirmed match writes, in the same shape the app gives rows it adds
 // from TMDB. target: { mediaType: 'movie', details } for a film (TMDB /movie/{id}),
 // or { mediaType: 'tv', details, seasonNumber } for a season (TMDB /tv/{id}).
-// Returns null for a series with no valid season chosen.
-function buildTmdbMatchPatch(row, target, isMoviesTab) {
+// genreTheme: a film's theme is its genre (a film whose theme_kind is 'genre'),
+// otherwise its production company. Returns null for a series with no valid season chosen.
+function buildTmdbMatchPatch(row, target, genreTheme) {
   const d = target.details;
   if (target.mediaType === 'movie') {
     const belongsTo = d.belongs_to_collection;
@@ -24,7 +23,7 @@ function buildTmdbMatchPatch(row, target, isMoviesTab) {
       title: d.title,
       season: 'Film',
       item_key: `${d.title.toLowerCase().trim()}|film`,
-      theme: isMoviesTab
+      theme: genreTheme
         ? ((d.genres && d.genres[0]?.name) || 'Film')
         : ((d.production_companies && d.production_companies[0]?.name) || 'Film'),
       display_date: d.release_date ? formatDisplayDate(d.release_date) : 'TBA',
@@ -57,15 +56,19 @@ function buildTmdbMatchPatch(row, target, isMoviesTab) {
   };
 }
 
-// Another row in the same collection that blocks the match: one that already has
-// the target TMDB identity, or an unidentified row already using the new item_key.
-// Identified rows that merely share the title (a different TMDB id) never block it.
-function findTmdbMatchConflict(row, patch, rows) {
-  const others = rows.filter(r => r.id !== row.id && r.collection === row.collection);
+// Another row that blocks the match: one that already has the target TMDB identity
+// (anywhere in the library), or, for a season, an unmatched row of the show it would
+// join that already uses the new item_key. Identified rows that merely share the
+// title (a different TMDB id) never block it. targetShowId: the show with the
+// target TMDB identity, if any.
+function findTmdbMatchConflict(row, patch, rows, targetShowId) {
+  const others = rows.filter(r => r.id !== row.id);
   const sameIdentity = others.find(r => r.media_type === patch.media_type && r.tmdb_id === patch.tmdb_id &&
     (patch.media_type === 'movie' || r.season_number === patch.season_number));
   if (sameIdentity) return { kind: 'identity', row: sameIdentity };
-  const sameLegacyKey = others.find(r => r.tmdb_id == null && r.item_key === patch.item_key);
+  const sameLegacyKey = patch.media_type === 'tv'
+    ? others.find(r => r.tmdb_id == null && r.item_key === patch.item_key && r.show_id && r.show_id === (targetShowId || row.show_id))
+    : null;
   if (sameLegacyKey) return { kind: 'item_key', row: sameLegacyKey };
   return null;
 }
@@ -85,10 +88,10 @@ function tmdbMatchConflictMessage(conflict) {
 // what is being matched discards it. inFlight: the request number of a match call
 // in progress (Confirm, the seasons and Back wait for it; Cancel doesn't).
 
-// The rows the Match controls came from: the open tab's, or (Stage 4b) the open
-// view's (All TV, All Movies), whose Match panel is the view's "+ Add" panel.
+// The rows the Match controls came from: the open view's (All TV, All Movies), whose
+// Match panel is the view's "+ Add" panel.
 function tmdbMatchRows() {
-  return activeViewId ? actionRows() : (tabData[activeTabId]?.rows || []);
+  return actionRows();
 }
 
 function tmdbMatchRow() {
@@ -96,15 +99,19 @@ function tmdbMatchRow() {
   return m ? tmdbMatchRows().find(r => r.id === m.rowId) : null;
 }
 
-// The kind of row a Match is for decides the search and the theme, as on its tab.
-function tmdbMatchCollection(row) {
-  return COLLECTIONS.find(c => c.id === (row ? row.collection : activeTabId));
+// The kind of row decides the search (films first for a film, series first
+// otherwise) and, for a film, what its theme means.
+function tmdbMatchSearchMode(row) {
+  return row && isFilmRow(row) ? 'movie' : 'tv';
+}
+function tmdbMatchGenreTheme(row) {
+  return !!row && isFilmRow(row) && filmThemeKindOf(row) === 'genre';
 }
 
 function openTmdbMatch(rowId) {
   const row = tmdbMatchRows().find(r => r.id === rowId);
   if (!row || !isTmdbMatchEligible(row)) return;
-  if (activeViewId) openLibraryPanel(isFilmRow(row) ? 'movie' : 'tv', 'match');
+  openLibraryPanel(isFilmRow(row) ? 'movie' : 'tv', 'match');
   cancelTMDBPreview();
   document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
   document.getElementById('tmdbResults').innerHTML = '';
@@ -147,7 +154,7 @@ async function searchTmdbMatch() {
     ]);
     const tvResults = (tvData.results || []).map(r => ({ ...r, mediaType: 'tv' }));
     const movieResults = (movieData.results || []).map(r => ({ ...r, mediaType: 'movie' }));
-    m.results = selectTmdbSearchResults(tvResults, movieResults, tmdbSearchModeFor(tmdbMatchCollection(tmdbMatchRow())));
+    m.results = selectTmdbSearchResults(tvResults, movieResults, tmdbMatchSearchMode(tmdbMatchRow()));
     if (m.results.length === 0) { body.innerHTML = `<div class="tmdb-no-results">No results found for "${esc(query)}".</div>`; return; }
     body.innerHTML = `<div class="tmdb-refresh-summary">Pick the exact title — nothing is matched until you confirm.</div>
       <div class="tmdb-result-list">${m.results.map((r, idx) => {
@@ -197,7 +204,7 @@ function renderTmdbMatchConfirm() {
   if (!m?.target || !row || !body || m.inFlight) return;
   m.proposal = null; // Back from a collection expansion: it no longer applies
   const { mediaType, details } = m.target;
-  const isMoviesTab = !!tmdbMatchCollection(row)?.isMovieTab;
+  const genreTheme = tmdbMatchGenreTheme(row);
   let html = `<div class="tmdb-result-title" style="margin-top:10px">${esc(mediaType === 'movie' ? details.title : details.name)}
     <span class="tmdb-type-tag ${mediaType === 'movie' ? 'tmdb-type-movie' : 'tmdb-type-tv'}">${mediaType === 'movie' ? 'Film' : 'Series'}</span> · TMDB ${details.id}</div>`;
   if (mediaType === 'tv') {
@@ -210,7 +217,7 @@ function renderTmdbMatchConfirm() {
         <span class="tmdb-season-meta">${s.episode_count || 0} episodes · ${s.air_date ? esc(formatDisplayDate(s.air_date)) : 'TBA'}</span>
       </label>`).join('') || '<div class="tmdb-no-results">This series has no seasons on TMDB.</div>');
   }
-  const patch = buildTmdbMatchPatch(row, m.target, isMoviesTab);
+  const patch = buildTmdbMatchPatch(row, m.target, genreTheme);
   if (patch) {
     const line = (label, before, after) => `<div class="modal-row"><span>${esc(label)}</span><span>${before === after ? esc(String(after)) : `${esc(String(before))} → <strong>${esc(String(after))}</strong>`}</span></div>`;
     const tmdbAfter = `${patch.media_type === 'movie' ? 'Film' : 'Series'} ${patch.tmdb_id}${patch.season_number != null ? `, season ${patch.season_number}` : ''}`;
@@ -219,7 +226,7 @@ function renderTmdbMatchConfirm() {
       ${line('Title', row.title, patch.title)}
       ${line('Season', row.season, patch.season)}
       ${line('Date', row.display_date, patch.display_date)}
-      ${line(isMoviesTab ? 'Genre' : 'Network', row.theme, patch.theme)}
+      ${line(mediaType === 'tv' ? 'Network' : genreTheme ? 'Genre' : 'Company', row.theme, patch.theme)}
       ${line('TMDB', 'not matched', tmdbAfter)}
       ${addedTag ? line('Tag added', '—', addedTag) : ''}
       <div class="tmdb-refresh-summary">Kept as is: watched, status, watch with${row.collections?.length ? ', existing tags' : ''}.</div>`;
@@ -239,9 +246,13 @@ async function confirmTmdbMatch(withConfirmation) {
   const m = window.__tmdbMatch;
   const row = tmdbMatchRow();
   if (!m?.target || !row || m.inFlight) return;
-  const isMoviesTab = !!tmdbMatchCollection(row)?.isMovieTab;
-  const patch = buildTmdbMatchPatch(row, m.target, isMoviesTab);
+  const patch = buildTmdbMatchPatch(row, m.target, tmdbMatchGenreTheme(row));
   if (!patch) return;
+  // A film whose theme is a genre stays a film (as before Stage 5; the database refuses it too).
+  if (patch.media_type === 'tv' && tmdbMatchGenreTheme(row)) {
+    showError('A film whose theme is a genre can’t be matched to a TV season. Choose a film result instead. Nothing was changed.');
+    return;
+  }
   let expansion = {};
   if (withConfirmation === true) {
     const p = m.proposal;
@@ -249,30 +260,30 @@ async function confirmTmdbMatch(withConfirmation) {
     expansion = { confirm: p.token };
   }
   // Each call's stamp: a delayed answer is checked against what the page shows now.
-  const stamp = { seq: ++matchRequestSeq, rowId: row.id, epoch: orgEpoch, rowObj: row, collection: row.collection, title: patch.title, viewId: activeViewId };
+  const stamp = { seq: ++matchRequestSeq, rowId: row.id, epoch: orgEpoch, rowObj: row, partition: LIBRARY_PARTITION, title: patch.title, viewId: activeViewId };
   matchLatestByRow[row.id] = stamp.seq;
   // Tracked like a read of the row: when the match is applied to the page it covers the row
   // (a refresh waiting on it is satisfied); otherwise it covers nothing.
-  stamp.read = matchReadStart('match', row.collection, row.id);
+  stamp.read = matchReadStart('match', LIBRARY_PARTITION, row.id);
   m.inFlight = stamp.seq;
   if (m.proposal) renderMatchProposal(m);
-  const viaShowFunction = patch.media_type === 'tv' && isTvCollection(row.collection);
+  const viaShowFunction = patch.media_type === 'tv';
   // How far the match got, so a failure is reported for what actually happened:
-  // 'check' (nothing sent yet), 'write' (the match was sent: match_tv_row or the
-  // guarded PATCH, each one database transaction), 'verify' (the database accepted
-  // the PATCH; the page is reading the row back to see what it now holds).
+  // 'check' (nothing sent yet) or 'write' (the match was sent: library_match_season
+  // or library_match_film, each one database transaction that answers with the row).
   let stage = 'check';
   try {
     // Fresh check against the database (not just this page's copy): does another row
-    // already hold this identity, or an unmatched row already use the new item_key?
+    // already hold this identity, or (a season) an unmatched row of the show it joins
+    // already use the new item_key?
     const identityFilter = `media_type=eq.${patch.media_type}&tmdb_id=eq.${patch.tmdb_id}` +
       (patch.media_type === 'tv' ? `&season_number=eq.${patch.season_number}` : '');
-    const col = `collection=eq.${encodeURIComponent(row.collection)}`;
-    const [sameIdentity, sameKey] = await Promise.all([
-      sbFetch('GET', `${TABLE}?${col}&${identityFilter}&select=*`, null),
-      sbFetch('GET', `${TABLE}?${col}&tmdb_id=is.null&item_key=eq.${encodeURIComponent(patch.item_key)}&select=*`, null)
+    const [sameIdentity, sameKey, targetShows] = await Promise.all([
+      sbFetch('GET', `${TABLE}?${identityFilter}&select=*`, null),
+      sbFetch('GET', `${TABLE}?tmdb_id=is.null&item_key=eq.${encodeURIComponent(patch.item_key)}&select=*`, null),
+      patch.media_type === 'tv' ? sbFetch('GET', `tv_shows?tmdb_id=eq.${patch.tmdb_id}&select=id`, null) : Promise.resolve([])
     ]);
-    const conflict = findTmdbMatchConflict(row, patch, [...(sameIdentity || []), ...(sameKey || [])]);
+    const conflict = findTmdbMatchConflict(row, patch, [...(sameIdentity || []), ...(sameKey || [])], ((targetShows || [])[0] || {}).id);
     if (conflict) { showError(tmdbMatchConflictMessage(conflict)); return; }
 
     // Only a row that is still unmatched is updated; the database's unique indexes
@@ -280,13 +291,12 @@ async function confirmTmdbMatch(withConfirmation) {
     let fresh;
     stage = 'write';
     if (viaShowFunction) {
-      // match_tv_row moves the season to its identified show (checked by Refresh
-      // shows from then on) and re-checks both conflicts in the database.
-      // p_expansion asks the database to refuse (and describe) a match that would
-      // show a target show's other seasons in more collections; the previous
-      // schema has no such parameter, so it's sent only with personal collections.
-      const res = await sbRpc('match_tv_row', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: patch,
-        ...(typeof orgState !== 'undefined' && orgState === 'absent' ? {} : { p_expansion: expansion }) });
+      // library_match_season moves the season to its identified show (checked by
+      // Refresh shows from then on), re-checks the conflicts, refuses a show a catalog
+      // governs, and refuses (and describes) a match that would show the target
+      // show's other seasons in more collections until the user confirms (p_expansion).
+      const res = await sbRpc('library_match_season', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: tmdbMatchAck(m, patch),
+        p_expansion: expansion });
       if (m.inFlight === stamp.seq) m.inFlight = 0;
       // A blocked answer wrote nothing: it's shown only if the panel still shows this request.
       const panelCurrent = window.__tmdbMatch === m && matchLatestByRow[row.id] === stamp.seq && stamp.epoch === orgEpoch;
@@ -305,23 +315,13 @@ async function confirmTmdbMatch(withConfirmation) {
       }
       fresh = res && res.row;
     } else {
-      // A row matched as a film leaves the show it belonged to as a TV season.
-      const formerShowId = row.show_id ?? null;
-      const body = formerShowId != null ? { ...patch, show_id: null } : patch;
-      await sbFetch('PATCH', `${TABLE}?id=eq.${row.id}&tmdb_id=is.null&media_type=is.null&season_number=is.null`, body);
-      stage = 'verify';
-      [fresh] = await sbFetch('GET', `${TABLE}?id=eq.${row.id}&select=*`, null) || [];
-      // A show left with no seasons is removed, like deleting its last season.
-      // The season link's ON DELETE RESTRICT refuses this while any season remains
-      // (restrict_violation 23001; 23503 accepted too).
-      if (formerShowId != null && fresh && fresh.show_id == null) {
-        try {
-          await sbFetch('DELETE', `tv_shows?id=eq.${formerShowId}`, null);
-          tvShowsById.delete(formerShowId);
-        } catch(e) {
-          if (!/23001|23503/.test(String(e.message))) showError(`Matched, but couldn't remove the now-empty show: ${e.message}`);
-        }
-      }
+      // library_match_film: in one transaction the row gets the film identity, a season
+      // leaves its show (keeping that show's collections, archived ones included), and
+      // a show left with no seasons is removed. Refused (nothing written) if the row
+      // changed since this page read it.
+      const res = await sbRpc('library_match_film', { p_row_id: row.id, p_expected: { show_id: row.show_id ?? null }, p_patch: tmdbMatchAck(m, patch) });
+      fresh = res && res.row;
+      if (res && res.former_show_deleted && stamp.epoch === orgEpoch) tvShowsById.delete(res.former_show_id);
     }
     if (m.inFlight === stamp.seq) m.inFlight = 0;
     if (!fresh || fresh.tmdb_id !== patch.tmdb_id || fresh.media_type !== patch.media_type || fresh.season_number !== patch.season_number) {
@@ -333,8 +333,7 @@ async function confirmTmdbMatch(withConfirmation) {
     // replaced by a newer read, no newer match of this row). Otherwise a fresh read,
     // under the current guards, shows what is saved now.
     const inView = !!stamp.viewId && activeViewId === stamp.viewId && actionRows().includes(stamp.rowObj);
-    const stillCurrent = stamp.epoch === orgEpoch && matchLatestByRow[row.id] === stamp.seq
-      && ((tabData[stamp.collection]?.rows || []).includes(stamp.rowObj) || inView);
+    const stillCurrent = stamp.epoch === orgEpoch && matchLatestByRow[row.id] === stamp.seq && inView;
     if (!stillCurrent) {
       if (window.__tmdbMatch === m) { window.__tmdbMatch = null; cancelTMDBPreview(); }
       refreshAfterMatch(stamp, stamp.epoch !== orgEpoch);
@@ -347,7 +346,7 @@ async function confirmTmdbMatch(withConfirmation) {
     matchNotePublished('rows', row.id, stamp.read, row);
     // The season may have joined an existing show, or its show may now be identified.
     if (viaShowFunction) {
-      try { await loadTvShows(row.collection); }
+      try { await loadAllTvShows(); }
       catch(e) { showError(`Matched, but couldn't reload the show list: ${e.message}`); }
     }
   } catch(e) {
@@ -356,13 +355,6 @@ async function confirmTmdbMatch(withConfirmation) {
     // After a restore in this page, an earlier attempt's error is labelled as such.
     const earlier = stamp.epoch !== orgEpoch ? `An earlier match attempt for “${patch.title}”: ` : '';
     const showError = text => window.showError(earlier + text);
-    // The PATCH was accepted (it changes the row only if it was still unmatched), but
-    // the read-back failed: the outcome is unknown, so it isn't reported either way.
-    if (stage === 'verify') {
-      showError(`The database accepted the match, but the page couldn't read the row back to confirm the result (${msg}). `
-        + 'It may already be matched: reload the page and check this row before matching it again.');
-      return;
-    }
     // The match was sent but no database answer came back (a network failure, not an
     // error from the database): it may or may not have been saved.
     if (stage === 'write' && !/^Supabase error \d+:/.test(msg)) {
@@ -370,7 +362,25 @@ async function confirmTmdbMatch(withConfirmation) {
         + 'Reload the page and check this row before matching it again.');
       return;
     }
-    showError(/not_found: unidentified row|match_conflict: the row changed/.test(msg)
+    if (/catalog_candidate/.test(msg) && window.__tmdbMatch === m && stamp.epoch === orgEpoch) {
+      // A built-in catalog record has the name or key this match would give: matched only
+      // once the owner has seen every such record (read now) and confirms they are
+      // different works. A refusal after a confirmation names records not yet seen: all of
+      // them, the confirmed ones included, are shown again for a new confirmation.
+      const info = orgErrorInfo(e);
+      const prev = m.catalogTwins;
+      const again = !!(prev && prev.confirmed && prev.tmdbId === patch.tmdb_id && prev.seasonNumber === patch.season_number);
+      const named = ((info.detail && info.detail.candidates) || []).map(String);
+      const ids = [...new Set([...(again ? prev.confirmed.ids : []), ...named])].sort();
+      m.catalogTwins = { kind: viaShowFunction ? 'show' : 'film', tmdbId: patch.tmdb_id, seasonNumber: patch.season_number,
+        target: { title: patch.title, season: patch.season, mediaType: patch.media_type, itemKey: patch.item_key, rowTitle: row.title },
+        ids, info, records: null, complete: false, readFailed: null, readSeq: 0, confirmed: null, changed: again };
+      renderTmdbMatchTwins(m, true);
+      loadTmdbMatchTwins(m);
+      return;
+    }
+    showError(/match_target_governed|not_eligible|genre_film_season|catalog_candidate/.test(msg) ? orgRefusalText(orgErrorInfo(e))
+      : /not_found: unidentified row|match_conflict: the row changed|match_conflict: This row changed/.test(msg)
       ? 'This row changed somewhere else before the match was saved, so nothing was matched. Reload the page and try again.'
       // Another change to the same collections or show at the same moment: the
       // database refused the match as a whole (re-check or deadlock), so nothing was applied.
@@ -393,22 +403,96 @@ async function confirmTmdbMatch(withConfirmation) {
     if (stamp.read.state === 'pending') matchReadSettle(stamp.read, null, !stamp.read.applied);
   }
 
-  // row.collection is where the row lives; the user may have switched tabs or
-  // views while the checks and writes above were in flight.
+  // The user may have switched views while the checks and writes above were in flight.
   if (window.__tmdbMatch === m) window.__tmdbMatch = null;
-  tabData[row.collection]?.rows.sort((a, b) => a.date_sort.localeCompare(b.date_sort));
   showSaved();
-  // In a view (Stage 4b) the match is reported in its panel and the view is read again.
+  // The match is reported in the view's panel and the view is read again.
   if (stamp.viewId && activeViewId === stamp.viewId) {
     cancelTMDBPreview();
     if (libraryPanel) libraryReport(libraryContext(), `Matched “${patch.title}”.`, false);
     reloadOpenView();
-    return;
   }
-  if (activeTabId !== row.collection) return;
-  cancelTMDBPreview();
-  renderFilters();
-  renderTable();
+}
+
+// The acknowledgement a Match carries: exactly the catalog records the owner saw and
+// confirmed as different works, only for the target they were shown with.
+function tmdbMatchAck(m, patch) {
+  const c = m.catalogTwins && m.catalogTwins.confirmed;
+  return c && c.tmdbId === patch.tmdb_id && c.seasonNumber === patch.season_number ? { ...patch, distinct_from: c.ids } : patch;
+}
+
+// Reads every candidate the database named, with the catalog that governs it (GET only).
+// Confirming is possible only once every one was read and is governed by a catalog; a
+// failed or incomplete read offers Retry, which reads again.
+async function loadTmdbMatchTwins(m) {
+  const t = m && m.catalogTwins;
+  if (!t) return;
+  const seq = ++t.readSeq;
+  t.records = null; t.complete = false; t.readFailed = null;
+  renderTmdbMatchTwins(m);
+  try {
+    if (!t.ids.length) throw new Error('the database named no records');
+    const list = t.ids.map(encodeURIComponent).join(',');
+    const [recs, links] = await Promise.all(t.kind === 'show'
+      ? [sbFetch('GET', `tv_shows?id=in.(${list})&select=*`, null), sbFetch('GET', `library_catalog_shows?show_id=in.(${list})&select=*`, null)]
+      : [sbFetch('GET', `${TABLE}?id=in.(${list})&select=*`, null), sbFetch('GET', `library_catalog_films?item_id=in.(${list})&select=*`, null)]);
+    if (window.__tmdbMatch !== m || m.catalogTwins !== t || t.readSeq !== seq) return;
+    const byId = new Map((recs || []).map(r => [String(r.id), r]));
+    const catalogOf = new Map((links || []).map(l => [String(t.kind === 'show' ? l.show_id : l.item_id), l.catalog]));
+    t.records = t.ids.map(id => ({ id, rec: byId.get(id) || null, catalog: catalogOf.get(id) || null }));
+    t.complete = t.records.every(x => x.rec && x.catalog);
+  } catch (e) {
+    if (window.__tmdbMatch !== m || m.catalogTwins !== t || t.readSeq !== seq) return;
+    t.readFailed = String((e && e.message) || e);
+  }
+  renderTmdbMatchTwins(m);
+}
+
+// The candidates beside the proposed target. Drawn only while the panel shows them
+// (force: the first drawing), so a late read never replaces another step of the panel.
+function renderTmdbMatchTwins(m, force) {
+  const t = m && m.catalogTwins;
+  const body = document.getElementById('tmdbMatchBody');
+  if (!t) return;
+  if (!body) { showError(orgRefusalText(t.info)); return; }
+  if (!force && !document.getElementById('tmdbMatchTwins')) return;
+  const g = t.target, word = t.kind === 'show' ? 'show' : 'film', n = t.ids.length;
+  const targetText = g.mediaType === 'tv'
+    ? `“${esc(g.title)}”, ${esc(g.season)} (TMDB series ${t.tmdbId}, season ${t.seasonNumber})`
+    : `“${esc(g.title)}” (TMDB film ${t.tmdbId})`;
+  const label = c => esc(typeof catalogLabel === 'function' ? catalogLabel(c) : c);
+  const norm = v => String(v || '').trim().toLowerCase();
+  const why = r => t.kind === 'show'
+    ? (norm(r.title) === norm(g.title) ? 'same name' : `same list key (“${esc(r.show_key)}”)`)
+    : (norm(r.title) === norm(g.title) ? 'same name' : `same list key (“${esc(r.item_key)}”)`);
+  const item = x => {
+    if (!x.rec) return `<li>A record this page couldn’t read (it may have been changed or removed)</li>`;
+    const r = x.rec;
+    const ident = r.tmdb_id != null ? `TMDB ${esc(String(r.tmdb_id))}` : 'not matched to TMDB';
+    const when = t.kind === 'film' ? ` · ${esc(r.display_date || r.date_sort || 'no date')}` : '';
+    const gov = x.catalog ? `${label(x.catalog)} catalog` : 'no catalog governs it now';
+    return `<li><strong>${esc(r.title)}</strong>${when} · ${ident} · ${gov} · ${why(r)}</li>`;
+  };
+  const reading = !t.records && !t.readFailed;
+  const ready = !!t.records && t.complete && !t.readFailed && !m.inFlight;
+  const retry = `<button class="btn" onclick="loadTmdbMatchTwins(window.__tmdbMatch)">Retry</button>`;
+  body.innerHTML = `<div class="tmdb-preview" id="tmdbMatchTwins">
+    ${t.changed ? '<div class="tmdb-refresh-summary">The catalog records this match is close to changed since you confirmed. Check them and confirm again.</div>' : ''}
+    <p class="tmdb-expansion">Matching “${esc(g.rowTitle)}” to ${targetText} would give it the name or key of
+      ${n === 1 ? `a built-in catalog ${word}` : `${n} built-in catalog ${word}s`} on your list. Nothing was matched.</p>
+    ${reading ? `<div class="tmdb-refresh-summary">Reading ${n === 1 ? 'that record' : 'those records'}…</div>` : ''}
+    ${t.records ? `<ul class="tmdb-twin-list">${t.records.map(item).join('')}</ul>` : ''}
+    ${t.readFailed ? `<div class="tmdb-refresh-summary">Couldn’t read ${n === 1 ? 'that record' : 'those records'} (${esc(t.readFailed)}), so this can’t be confirmed yet. ${retry}</div>` : ''}
+    ${t.records && !t.complete ? `<div class="tmdb-refresh-summary">Not every one could be read as a catalog ${word}, so this can’t be confirmed. ${retry}</div>` : ''}
+    <div class="tmdb-preview-actions"><button class="btn btn-accent" onclick="confirmTmdbMatchDistinct()"${ready ? '' : ' disabled'}>${m.inFlight ? 'Matching…' : `${n === 1 ? 'It is' : 'They are'} different — match anyway`}</button>
+    <button class="btn" onclick="renderTmdbMatchConfirm()">Back</button></div></div>`;
+}
+async function confirmTmdbMatchDistinct() {
+  const m = window.__tmdbMatch;
+  const t = m && m.catalogTwins;
+  if (!t || !t.records || !t.complete || t.readFailed || m.inFlight) return;
+  t.confirmed = { ids: t.records.map(x => x.id), tmdbId: t.tmdbId, seasonNumber: t.seasonNumber };
+  await confirmTmdbMatch();
 }
 
 // ─── Collection expansion confirmation (Stage 3b-2) ──────────────────────────
@@ -425,7 +509,7 @@ async function showMatchProposal(m, res, row, patch) {
   renderMatchProposal(m);
   const read = orgReadStart();
   try {
-    const colls = await fetchAllRowsStrict('personal_collections');
+    const colls = await readPersonalCollections();
     if (publishCollections(colls, read)) buildBrowseBar();
     p.archived = new Set(colls.filter(c => c.archived_at).map(c => c.id));
   } catch (e) {
@@ -457,10 +541,11 @@ function renderMatchProposal(m) {
     </div>`;
 }
 
-// ─── Tracked reads (shared with tabs.js, tv-shows.js, derived-views.js, row-actions.js) ─
-// Every read of a tab, a row or a show list, every Match call and every edit made
-// on this page takes a number when it starts and records the restore epoch. The
-// newest publication of each tab, row and show list is remembered (by number and
+// ─── Tracked reads (shared with tv-shows.js, derived-views.js, row-actions.js) ─
+// Every read of a row or the show list, every Match call and every edit made on
+// this page takes a number when it starts and records the restore epoch. The
+// whole library is one partition (LIBRARY_PARTITION, tv-shows.js). The newest
+// publication of each row and the show list is remembered (by number and
 // kind; for a row also whether it is present, and the row itself). A read publishes
 // only if it is newer than that in the current epoch; an older read that finishes
 // late, or one from before a restore, publishes nothing. An edit counts as a
@@ -471,12 +556,12 @@ function renderMatchProposal(m) {
 // refresh; a read retired by an edit is void, and the refresh reads again once no
 // edit of that row (or show list) is pending.
 function matchPublishedReset() {
-  if (matchPublished.epoch !== orgEpoch) matchPublished = { epoch: orgEpoch, tabs: {}, rows: {}, shows: {} };
+  if (matchPublished.epoch !== orgEpoch) matchPublished = { epoch: orgEpoch, rows: {}, shows: {} };
 }
 
-function matchReadStart(kind, collection, rowId) {
+function matchReadStart(kind, partition, rowId) {
   matchPublishedReset();
-  const read = { id: ++matchReadSeq, kind, collection, rowId: rowId || null, epoch: orgEpoch, state: 'pending', error: null,
+  const read = { id: ++matchReadSeq, kind, partition, rowId: rowId || null, epoch: orgEpoch, state: 'pending', error: null,
     applied: false, keptRows: null }; // keptRows: rows (or, for '*', show lists) kept because of an edit
   matchReads.push(read);
   if (matchReads.length > 300) { // trim settled history; a pending read or edit is never dropped
@@ -500,22 +585,17 @@ function matchNotePublished(kind, key, read, row) {
   const cur = matchPublished[kind][key];
   if (read.epoch !== orgEpoch || (cur && cur.id > read.id)) return;
   matchPublished[kind][key] = kind === 'rows'
-    ? { id: read.id, kind: read.kind, collection: read.collection, row: row === undefined ? (cur ? cur.row : null) : row }
+    ? { id: read.id, kind: read.kind, partition: read.partition, row: row === undefined ? (cur ? cur.row : null) : row }
     : { id: read.id, kind: read.kind };
 }
 
 const matchPubId = entry => (entry ? entry.id : 0);
 
-function matchMayPublishTab(read) {
-  matchPublishedReset();
-  return read.epoch === orgEpoch && read.id > matchPubId(matchPublished.tabs[read.collection]);
-}
-
 // An edit of this row (kind 'rows', key = row id) or show list (kind 'shows', key =
-// collection) is still pending in the current epoch.
+// partition) is still pending in the current epoch.
 function matchEditPending(kind, key) {
   return matchReads.some(r => r.kind === 'edit' && r.state === 'pending' && r.epoch === orgEpoch
-    && (kind === 'rows' ? r.rowId === key : !r.rowId && r.collection === key));
+    && (kind === 'rows' ? r.rowId === key : !r.rowId && r.partition === key));
 }
 
 // A read of this row / show list that an edit makes stale: one is pending, or one ended after the read started.
@@ -524,41 +604,23 @@ function matchRowEditBlocks(read, rowId) {
   return read.epoch === orgEpoch && (matchEditPending('rows', rowId) || !!(e && e.kind === 'edit' && e.id > read.id));
 }
 
-function matchMayPublishRow(read, collection, rowId) {
+function matchMayPublishRow(read, partition, rowId) {
   matchPublishedReset();
-  return read.epoch === orgEpoch && read.id > Math.max(matchPubId(matchPublished.tabs[collection]), matchPubId(matchPublished.rows[rowId]))
-    && !matchEditPending('rows', rowId);
+  return read.epoch === orgEpoch && read.id > matchPubId(matchPublished.rows[rowId]) && !matchEditPending('rows', rowId);
 }
 
-function matchMayPublishShows(read, collection) {
+function matchMayPublishShows(read, partition) {
   matchPublishedReset();
-  const newest = collection === '*' ? matchPubId(matchPublished.shows['*'])
-    : Math.max(matchPubId(matchPublished.shows[collection]), matchPubId(matchPublished.shows['*']));
-  return read.epoch === orgEpoch && read.id > newest && (collection === '*' || !matchEditPending('shows', collection));
-}
-
-// Rows of a tab that a read newer than this one published (present or gone), for a
-// tab read to keep: { rowId: { row (null = gone), kind } }.
-function matchNewerRows(read, collection) {
-  matchPublishedReset();
-  const out = {};
-  for (const [rowId, e] of Object.entries(matchPublished.rows)) {
-    if (e.collection === collection && (e.id > read.id || matchEditPending('rows', rowId))) out[rowId] = e;
-  }
-  return out;
-}
-
-// An edit of this show list is pending, or one ended after this read started.
-function matchShowsBlockedByEdit(read, collection) {
-  const e = matchPublished.shows[collection];
-  return read.epoch === orgEpoch && (matchEditPending('shows', collection) || !!(e && e.kind === 'edit' && e.id > read.id));
+  const newest = partition === '*' ? matchPubId(matchPublished.shows['*'])
+    : Math.max(matchPubId(matchPublished.shows[partition]), matchPubId(matchPublished.shows['*']));
+  return read.epoch === orgEpoch && read.id > newest && (partition === '*' || !matchEditPending('shows', partition));
 }
 
 // An edit made on this page (rows: key = row id, row = the row as now shown or null if
-// removed; shows: key = collection).
-function matchEditStart(kind, collection, key, row) {
+// removed; shows: key = partition).
+function matchEditStart(kind, partition, key, row) {
   if (typeof orgEpoch === 'undefined') return null;
-  const read = matchReadStart('edit', collection, kind === 'rows' ? key : null);
+  const read = matchReadStart('edit', partition, kind === 'rows' ? key : null);
   matchNotePublished(kind, key, read, row);
   return read;
 }
@@ -579,20 +641,20 @@ function matchEditEnd(read) {
     const id = ++matchReadSeq;
     if (read.rowId) {
       const cur = matchPublished.rows[read.rowId];
-      matchPublished.rows[read.rowId] = { id, kind: 'edit', collection: read.collection, row: cur ? cur.row : null };
-    } else matchPublished.shows[read.collection] = { id, kind: 'edit' };
+      matchPublished.rows[read.rowId] = { id, kind: 'edit', partition: read.partition, row: cur ? cur.row : null };
+    } else matchPublished.shows[read.partition] = { id, kind: 'edit' };
   }
   matchReadSettle(read, null, true);
 }
 
 // ─── After a match that couldn't be put into the page ─────────────────────────
 // The confirmed Match outcomes stay reported; refresh progress is reported apart
-// from them. Each such Match adds obligations — its row, and for a TV collection
-// that collection's shows — to the open refresh; obligations accumulate across
+// from them. Each such Match adds obligations — its row and the show list — to the
+// open refresh; obligations accumulate across
 // Matches until every one is satisfied, and Retry reads every unsatisfied one.
 // An obligation is satisfied by any read that covers it, started after it was
 // opened, in the current restore epoch, and succeeded (the refresh's own reads,
-// a tab read for its rows, a show read for its shows, a Match of the row applied
+// a show read for the shows, a Match of the row applied
 // to the page). While none has succeeded and one is still running it stays
 // pending ("Refreshing…"); when all of them failed, it has failed (the warning
 // with a read-only Retry). "Refreshed." only when every obligation is satisfied.
@@ -625,8 +687,8 @@ function refreshAfterMatch(stamp, restored) {
   if (restored) progress.restored = true;
   matchRefreshStamp = stamp;
   // Open (or re-open) this Match's obligations: only reads started from now on count.
-  const opened = [{ key: `row:${stamp.rowId}`, kind: 'row', collection: stamp.collection, rowId: stamp.rowId }];
-  if (isTvCollection(stamp.collection)) opened.push({ key: `shows:${stamp.collection}`, kind: 'shows', collection: stamp.collection });
+  const opened = [{ key: `row:${stamp.rowId}`, kind: 'row', partition: LIBRARY_PARTITION, rowId: stamp.rowId },
+    { key: `shows:${LIBRARY_PARTITION}`, kind: 'shows', partition: LIBRARY_PARTITION }];
   const units = opened.map(u => (progress.units[u.key] = { ...u, since: matchReadSeq, state: 'pending', error: null }));
   progress.state = 'pending';
   matchRefreshNotice(progress);
@@ -635,32 +697,23 @@ function refreshAfterMatch(stamp, restored) {
 
 // Reads the given obligations (read only) and the collections (best effort).
 function matchRefreshRead(units) {
-  const reads = units.map(u => (u.kind === 'row' ? matchReadRow(u) : loadTvShows(u.collection).catch(() => {})));
+  const reads = units.map(u => (u.kind === 'row' ? matchReadRow(u) : loadAllTvShows().catch(() => {})));
   if (orgState !== 'absent') {
     const read = orgReadStart();
-    reads.push(fetchAllRowsStrict('personal_collections').then(c => { if (publishCollections(c, read)) buildBrowseBar(); },
+    reads.push(readPersonalCollections().then(c => { if (publishCollections(c, read)) buildBrowseBar(); },
       () => markOrgStale('collections', read)));
   }
   return Promise.allSettled(reads).then(() => matchRefreshReevaluate());
 }
 
 function matchReadRow(unit) {
-  const read = matchReadStart('row', unit.collection, unit.rowId);
+  const read = matchReadStart('row', unit.partition, unit.rowId);
   return sbFetch('GET', `${TABLE}?id=eq.${unit.rowId}&select=*`, null).then(rows => {
     const now = (rows || [])[0] || null;
-    if (!matchMayPublishRow(read, unit.collection, unit.rowId)) {
+    if (!matchMayPublishRow(read, unit.partition, unit.rowId)) {
       // Retired. An edit made it stale: it covers nothing (a current read follows).
       matchReadSettle(read, null, matchRowEditBlocks(read, unit.rowId));
       return;
-    }
-    const td = tabData[unit.collection];
-    if (td && td.loaded) {
-      const i = td.rows.findIndex(r => r.id === unit.rowId);
-      if (now && i >= 0) td.rows[i] = now;
-      else if (now) td.rows.push(now);
-      else if (i >= 0) td.rows.splice(i, 1);
-      td.rows.sort((a, b) => String(a.date_sort).localeCompare(String(b.date_sort)));
-      if (activeTabId === unit.collection) { renderFilters(); renderTable(); }
     }
     matchNotePublished('rows', unit.rowId, read, now);
     matchReadSettle(read, null);
@@ -668,9 +721,8 @@ function matchReadRow(unit) {
 }
 
 function matchReadCovers(read, unit) {
-  if (unit.kind === 'shows') return read.kind === 'shows' && (read.collection === unit.collection
-    || (read.collection === '*' && !(read.keptRows && read.keptRows.has(unit.collection))));
-  if (read.kind === 'tab') return read.collection === unit.collection && !(read.keptRows && read.keptRows.has(unit.rowId));
+  if (unit.kind === 'shows') return read.kind === 'shows' && (read.partition === unit.partition
+    || (read.partition === '*' && !(read.keptRows && read.keptRows.has(unit.partition))));
   if (read.kind === 'row') return read.rowId === unit.rowId;
   return read.kind === 'match' && read.rowId === unit.rowId && read.applied;
 }
@@ -702,7 +754,7 @@ function matchRefreshEvaluate(progress) {
       // Nothing covers it (its read was retired by an edit): read again once no edit of it is pending.
       u.state = 'pending';
       const editing = matchReads.some(r => r.kind === 'edit' && r.state === 'pending' && r.epoch === orgEpoch
-        && (u.kind === 'row' ? r.rowId === u.rowId : r.collection === u.collection && !r.rowId));
+        && (u.kind === 'row' ? r.rowId === u.rowId : r.partition === u.partition && !r.rowId));
       if (!editing) { u.since = matchReadSeq; rereads.push(u); }
     }
     else { u.state = 'failed'; u.error = covering[covering.length - 1].error; failed = failed || u; }
@@ -712,9 +764,8 @@ function matchRefreshEvaluate(progress) {
   progress.state = failed ? 'failed' : units.every(u => u.state === 'ok') ? 'done' : 'pending';
   progress.error = failed ? failed.error : null;
   matchRefreshNotice(progress);
-  // The refreshed data is shown now: its collection's tab, or a view drawn across collections (All TV,
-  // Currently Watching, Coming Soon, Browse), which draws from the same row and show caches.
-  if (progress.state === 'done' && before !== 'done' && (units.some(u => u.collection === activeTabId) || activeViewId)) { renderFilters(); renderTable(); }
+  // The refreshed data is shown now in the open view, which draws from the same row and show caches.
+  if (progress.state === 'done' && before !== 'done' && activeViewId) { renderFilters(); renderTable(); }
   if (rereads.length) matchRefreshRead(rereads);
 }
 

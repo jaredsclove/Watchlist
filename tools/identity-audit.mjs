@@ -104,9 +104,9 @@ export function gradeMovie(row, movie, candidates = []) {
   if (row.season !== 'Film') add('C', `movie row has season label "${row.season}"`);
   if (row.season_number != null) add('D', 'movie row has a season_number');
 
-  // The Movies tab stores TMDB genres[0] as theme; other tabs store a company name.
+  // A film whose theme is a genre stores TMDB genres[0]; any other stores a company name.
   const genres = (movie.genres || []).map(x => x.name);
-  if (row.collection === 'movies') {
+  if (filmThemeIsGenre(row)) {
     if ((row.theme === 'Documentary') !== genres.includes('Documentary')) add('C', `documentary mismatch: stored theme "${row.theme}", TMDB genres [${genres.join(', ')}]`);
     else if (genres.length && !genres.includes(row.theme)) add('B', `stored genre "${row.theme}" not in TMDB genres [${genres.join(', ')}]`);
   }
@@ -121,6 +121,23 @@ export function gradeMovie(row, movie, candidates = []) {
     }
   }
   return result(f, same.map(c => `${c.id} "${c.title}" (${c.release_date || 'no date'})`));
+}
+
+// Where a row is placed, for exceptions and labels: its storage before the Stage 5
+// contraction (row.collection); after it, the catalog that governs it (row.catalog, read
+// from library_catalog_shows / library_catalog_films), or 'library' when none does. For the
+// built-in catalogs the two values are the same, so tools/identity-exceptions.json's
+// "collection" binding keeps its meaning.
+export function rowPlace(row) {
+  if (row.collection !== undefined) return row.collection;
+  return row.catalog || 'library';
+}
+
+// What a film's theme means: theme_kind after the contraction ('genre' or 'other');
+// before it, a film stored in Movies has a genre theme.
+export function filmThemeIsGenre(row) {
+  if (row.theme_kind !== undefined) return row.theme_kind === 'genre';
+  return row.collection === 'movies';
 }
 
 // show: TMDB /tv/{id}?append_to_response=alternative_titles, or null if TMDB has no such id.
@@ -146,7 +163,7 @@ export function provisionalSeason(row, show, today) {
 
 // ─── Owner-approved exceptions (tools/identity-exceptions.json) ──────────────
 // An exception turns one specific C finding of one identified row into B (never A)
-// while every value it is bound to still matches: collection, media type, TMDB id,
+// while every value it is bound to still matches: collection (rowPlace), media type, TMDB id,
 // season (where it has one), the local value and TMDB's value. It never applies to
 // a D, to a provisional season, or to any other finding.
 
@@ -182,7 +199,7 @@ export function validateExceptions(doc) {
   return doc.exceptions;
 }
 
-const sameTarget = (e, row) => e.collection === row.collection && e.media_type === row.media_type && e.tmdb_id === row.tmdb_id
+const sameTarget = (e, row) => e.collection === rowPlace(row) && e.media_type === row.media_type && e.tmdb_id === row.tmdb_id
   && (EXCEPTION_KINDS[e.kind].seasonal ? e.season_number === row.season_number : true);
 
 // Report lines for the exceptions file. applied: Map id → [{ label, grade }] for the rows
@@ -197,7 +214,7 @@ export function exceptionReport(exceptions, applied, identified) {
         : `  applied      ${e.id} → ${h.label} (grade ${h.grade})`).join('\n');
     }
     const target = `${e.collection} tv ${e.tmdb_id}${e.season_number !== undefined ? ' s' + e.season_number : ''}`;
-    const onRow = identified.some(r => r.collection === e.collection && r.media_type === e.media_type && r.tmdb_id === e.tmdb_id
+    const onRow = identified.some(r => rowPlace(r) === e.collection && r.media_type === e.media_type && r.tmdb_id === e.tmdb_id
       && (e.season_number === undefined || r.season_number === e.season_number));
     return `  not applied  ${e.id} (${target}): ${onRow ? 'the row no longer has exactly this finding with the bound values; review or retire it' : 'no identified row with this identity'}`;
   });
@@ -341,6 +358,12 @@ async function main() {
   console.log(`Started: ${new Date().toISOString()}`);
 
   const rows = await fetchAllRows(cfg, cfg.TABLE);
+  if (rows.length && rows.every(r => r.collection === undefined)) {
+    // Contracted (Stage 5): no storage; the governing catalog comes from the read views (GET).
+    const [shows, films] = [await fetchAllRows(cfg, 'library_catalog_shows'), await fetchAllRows(cfg, 'library_catalog_films')];
+    const byShow = new Map(shows.map(x => [x.show_id, x.catalog])), byFilm = new Map(films.map(x => [x.item_id, x.catalog]));
+    for (const r of rows) r.catalog = (r.show_id ? byShow.get(r.show_id) : byFilm.get(r.id)) || null;
+  }
   const identified = rows.filter(r => r.tmdb_id != null);
   console.log(`${cfg.TABLE} rows fetched: ${rows.length} (identified: ${identified.length}, legacy/unidentified: ${rows.length - identified.length})\n`);
 
@@ -350,9 +373,9 @@ async function main() {
   const applied = new Map();
   for (const row of identified) {
     const res = await auditRow(row, tmdb, exceptions);
-    for (const id of res.exceptions || []) applied.set(id, [...(applied.get(id) || []), { label: `${row.collection} | ${row.title} ${row.season || ''} | tv ${row.tmdb_id} s${row.season_number}`, grade: res.grade }]);
+    for (const id of res.exceptions || []) applied.set(id, [...(applied.get(id) || []), { label: `${rowPlace(row)} | ${row.title} ${row.season || ''} | tv ${row.tmdb_id} s${row.season_number}`, grade: res.grade }]);
     counts[res.grade]++;
-    const label = `${row.collection} | ${row.title} ${row.season || ''} | ${row.media_type} ${row.tmdb_id}${row.season_number != null ? ' s' + row.season_number : ''} | ${row.id}`;
+    const label = `${rowPlace(row)} | ${row.title} ${row.season || ''} | ${row.media_type} ${row.tmdb_id}${row.season_number != null ? ' s' + row.season_number : ''} | ${row.id}`;
     if (res.grade !== 'A') flagged.push(`${res.grade}  ${label}\n${res.findings.map(([g, w]) => `     [${g}] ${w}`).join('\n')}`);
     if (res.sameTitle.length) ambiguous.push(`${res.grade}  ${label}\n     same-title works on TMDB: ${res.sameTitle.join('; ')}`);
   }

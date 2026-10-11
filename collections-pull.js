@@ -52,10 +52,10 @@ async function addPulledCollectionMovies() {
   if (!data) return;
   // The tab this preview belongs to, captured before any await: the TMDB lookups
   // below take a while, and the user may switch tabs or views meanwhile.
-  const collectionId = toolCollectionId(); // the open tab, or All Movies' panel (library.js)
+  const collectionId = toolCollectionId(); // All Movies' panel (library.js)
   if (!collectionId) return;
   const tool = toolContext(collectionId);
-  const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
+  const isMoviesTab = true; // films a tool adds carry genre themes (theme_kind 'genre')
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-movie-id]');
   const moviesById = {};
   data.movies.forEach(m => moviesById[m.id] = m);
@@ -87,7 +87,6 @@ async function addPulledCollectionMovies() {
     const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
     const dateSort = details.release_date || '2099-01-01';
     toInsert.push({
-      collection: collectionId,
       item_key: key,
       title: summary.title,
       season: 'Film',
@@ -113,7 +112,7 @@ async function addPulledCollectionMovies() {
   }
 
   try {
-    const inserted = await sbFetch('POST', TABLE, toInsert);
+    const inserted = await libraryInsertFilms(toInsert);
     toolCachePush(tool, inserted);
     showSaved();
     if (toolContextLive(tool)) resetTMDBSearchUI();
@@ -207,10 +206,10 @@ async function addRefreshedCollectionMovies() {
   const data = window.__refreshCollectionsData || [];
   // The tab this preview belongs to, captured before any await: the TMDB lookups
   // below take a while, and the user may switch tabs or views meanwhile.
-  const collectionId = toolCollectionId(); // the open tab, or All Movies' panel (library.js)
+  const collectionId = toolCollectionId(); // All Movies' panel (library.js)
   if (!collectionId) return;
   const tool = toolContext(collectionId);
-  const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
+  const isMoviesTab = true; // films a tool adds carry genre themes (theme_kind 'genre')
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-collection-idx]');
   const toInsert = [];
   const failedTitles = [];
@@ -234,7 +233,6 @@ async function addRefreshedCollectionMovies() {
     const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
     const dateSort = details.release_date || '2099-01-01';
     toInsert.push({
-      collection: collectionId,
       item_key: key,
       title: summary.title,
       season: 'Film',
@@ -260,7 +258,7 @@ async function addRefreshedCollectionMovies() {
   }
 
   try {
-    const inserted = await sbFetch('POST', TABLE, toInsert);
+    const inserted = await libraryInsertFilms(toInsert);
     toolCachePush(tool, inserted);
     showSaved();
     if (toolContextLive(tool)) resetTMDBSearchUI();

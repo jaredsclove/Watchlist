@@ -63,7 +63,7 @@ const sqlShowKey = (collection, itemKey) => {
 const isTvRow = r => TV_COLLECTIONS.includes(r.collection) && (r.media_type === 'tv' || (r.media_type == null && (r.season || '') !== 'Film'));
 const validDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
 class DbError extends Error {
-  constructor(code, message) { super(message); this.code = code; }
+  constructor(code, message, detail = null) { super(message); this.code = code; this.detail = detail; }
 }
 const HTTP_FOR = { '22023': 400, '23505': 409, P0002: 404, '23000': 409, '40001': 409, '55000': 400 };
 
@@ -208,7 +208,12 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
   // its hash (canonical JSON, SHA-256), preview by undoing every write, apply
   // only when the effects hash equals p_approved (catalog_stale otherwise), and
   // the execution receipt.
-  function catalogApply({ p_collection: coll, p_defaults: defs, p_approved: approved }) {
+  // v5 (Stage 5's library_catalog_apply): the same steps on what the catalog governs
+  // (here: its storage, as in coexistence), plus the collision rule — an entry that
+  // would create a record while a record this catalog doesn't govern has the same
+  // key or title is excluded for review (existing_record / ambiguous, with the
+  // candidates); effects document version 5.1 with `catalog`.
+  function catalogApply({ p_collection: coll, p_defaults: defs, p_approved: approved }, v5 = false) {
     if (!BUILTIN.includes(coll)) throw new DbError('22023', `invalid_input: ${coll} has no built-in catalog`);
     if (app.catalogBusyNext) { app.catalogBusyNext--; throw new DbError('P0001', 'catalog_busy: The database was busy, so nothing was changed. Review again in a moment.'); }
     const snap = { w: clone(items()), s: clone(shows()), m: clone(store.collection_memberships || []) };
@@ -226,8 +231,31 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
     fills.sort((a, b) => cmpC(a.row_id, b.row_id));
     // Only defaults whose key no row of this tab holds (the tab-open rule, as the SQL does).
     const heldKeys = new Set(items().filter(r => r.collection === coll).map(r => r.item_key));
+    let missing = defs.filter(d => !heldKeys.has(d.k));
+    const collisions = [];
+    if (v5) {
+      const norm = t => String(t || '').trim().toLowerCase();
+      const excluded = new Set();
+      const groups = new Map();
+      for (const d of missing.filter(x => x.s !== 'Film')) {
+        const k = sqlShowKey(coll, d.k);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(d);
+      }
+      for (const [k, ds] of groups) {
+        if (shows().some(x => x.collection === coll && x.show_key === k)) continue;
+        const title = (ds.find(d => String(d.k).split('|')[0] === k) || ds[0]).t;
+        const cands = shows().filter(x => x.collection !== coll && (x.show_key === k || norm(x.title) === norm(title))).map(x => x.id).sort(cmpC);
+        if (cands.length) ds.forEach(d => { excluded.add(d.k); collisions.push({ item_key: d.k, reason: cands.length > 1 ? 'ambiguous' : 'existing_record', candidates: cands }); });
+      }
+      for (const d of missing.filter(x => x.s === 'Film')) {
+        const cands = items().filter(r => isFilmRow(r) && r.collection !== coll && (r.item_key === d.k || norm(r.title) === norm(d.t))).map(r => r.id).sort(cmpC);
+        if (cands.length) { excluded.add(d.k); collisions.push({ item_key: d.k, reason: cands.length > 1 ? 'ambiguous' : 'existing_record', candidates: cands }); }
+      }
+      missing = missing.filter(d => !excluded.has(d.k));
+    }
     let res;
-    try { res = seedDefaults(coll, defs.filter(d => !heldKeys.has(d.k))); } catch (e) { undo(); throw e; }
+    try { res = seedDefaults(coll, missing); } catch (e) { undo(); throw e; }
     for (const f of fills) { const w = items().find(r => r.id === f.row_id); w.display_date = f.new_display; w.date_sort = f.new_sort; }
     const insertedRows = res.inserted.map(r => items().find(x => x.id === r.id));
     const created = shows().filter(x => !showIdsBefore.has(x.id)).sort((a, b) => cmpC(a.show_key, b.show_key) || cmpC(a.id, b.id));
@@ -277,22 +305,34 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       receipt[`membership:${ref}`] = { membership_id: memId || 'none' };
     }
     for (const c of res.conflicts) entries.push({ kind: 'excluded_conflict', key: `excluded_conflict:${c.item_key}`, item_key: c.item_key, reason: c.reason, conflicting_id: c.conflicting_row_id || c.row_id || null });
+    for (const c of collisions) entries.push({ kind: 'excluded_conflict', key: `excluded_conflict:${c.item_key}`, item_key: c.item_key, reason: c.reason, candidates: c.candidates });
     const touched = new Set(entries.filter(e => ['insert_season', 'insert_film', 'fill_date', 'excluded_conflict'].includes(e.kind)).map(e => e.item_key));
     const identified = new Set([...(res.identified || []).map(x => x.item_key),
       ...items().filter(r => r.collection === coll && r.tmdb_id != null).map(r => r.item_key)]);
     for (const d of defs) if (!touched.has(d.k)) entries.push({ kind: 'noop', key: `noop:${d.k}`, item_key: d.k, category: identified.has(d.k) ? 'identified' : 'present' });
     const rank = ['create_show', 'attach', 'insert_season', 'insert_film', 'fill_date', 'reopen', 'membership', 'excluded_conflict', 'noop'];
     entries.sort((a, b) => rank.indexOf(a.kind) - rank.indexOf(b.kind) || cmpC(a.key, b.key));
-    const document = { version: '4a.1', owner: 'owner-1', collection: coll, payload_hash: sha256(canonical(defs)),
-      target: target ? { collection_id: target.id, archived: !!target.archived_at } : null, entries };
+    const document = v5
+      ? { version: '5.1', owner: 'owner-1', catalog: coll, payload_hash: sha256(canonical(defs)),
+          target: target ? { collection_id: target.id, archived: !!target.archived_at } : null, entries }
+      : { version: '4a.1', owner: 'owner-1', collection: coll, payload_hash: sha256(canonical(defs)),
+          target: target ? { collection_id: target.id, archived: !!target.archived_at } : null, entries };
     const hash = sha256(canonical(document));
     if (approved == null) { undo(); return { mode: 'preview', document, hash }; }
     if (hash !== approved) { undo(); throw new DbError('P0001', 'catalog_stale: Your library or the catalog changed since this preview, so nothing was changed. Review again.'); }
     app.catalogApplied = (app.catalogApplied || 0) + 1;
     return { mode: 'applied', document, hash, receipt, applied_at: new Date().toISOString() };
   }
+  // After the contraction every old storage-shaped function refuses (db/phase5c_contract.sql).
+  const stage5OldFunction = name => {
+    if (app.stage5 === 'contracted') throw new DbError('P0001', 'client_outdated: This page is out of date. Reload it. Nothing was changed.');
+  };
   const handlers = {
-    add_tv_seasons({ p_collection: coll, p_show: show, p_seasons: seasons }) {
+    add_tv_seasons({ p_collection: coll, p_show: show, p_seasons: seasons, p_target_show: targetShow = null }, internal = false) {
+      if (!internal) stage5OldFunction('add_tv_seasons');
+      if (!internal && app.stage5 && show && show.tmdb_id != null && shows().some(x => x.tmdb_id === show.tmdb_id && x.collection !== coll)) {
+        throw new DbError('23505', 'duplicate key value violates unique constraint "tv_shows_library_identity_key"');
+      }
       const tmdb = show.tmdb_id ?? null;
       const key = show.show_key || '';
       if (!TV_COLLECTIONS.includes(coll)) throw new DbError('22023', `invalid_input: ${coll} is not a TV collection`);
@@ -323,7 +363,8 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
         const r = addToEnriched(enriched, seasons);
         return { show_id: enriched.id, show_created: false, inserted: clone(r.inserted), existing: r.existing, rejected: r.rejected, reopened: r.reopened, show_status: enriched.status };
       }
-      const { show: target, created } = lockOrCreateShow(coll, tmdb, key, show.title.trim(), show.initial_status || 'confirmed');
+      const { show: target, created } = targetShow ? { show: shows().find(x => x.id === targetShow), created: false }
+        : lockOrCreateShow(coll, tmdb, key, show.title.trim(), show.initial_status || 'confirmed');
       const inserted = [], existing = [], rejected = [];
       for (const s of seasons) {
         const found = items().find(r => r.collection === coll && (tmdb != null
@@ -354,6 +395,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
     // seasons would land on another show or a new one; otherwise add_tv_seasons'
     // own rules apply, in one transaction.
     add_tv_seasons_to_show({ p_show_id: id, p_expected: exp, p_seasons: seasons }) {
+      stage5OldFunction('add_tv_seasons_to_show');
       if (app.stage !== 'final') throw new DbError('55000', `not_available: add_tv_seasons_to_show is not available in stage ${app.stage}`);
       if (!id || !exp || typeof exp !== 'object' || !exp.collection || !exp.show_key) throw new DbError('22023', 'invalid_input: the show id and the show as the page showed it are required');
       if (!Array.isArray(seasons) || !seasons.length) throw new DbError('22023', 'invalid_input: seasons must be a non-empty list');
@@ -368,7 +410,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       const undo = () => { store.watchlist_items = snap.w; store.tv_shows = snap.s; if (store.collection_memberships) store.collection_memberships = snap.m; store.othertv_shows = snap.o; };
       let res;
       try {
-        res = handlers.add_tv_seasons({ p_collection: show.collection, p_show: { tmdb_id: byNumber ? show.tmdb_id : null, title: show.title, show_key: show.show_key, network: exp.network || '' }, p_seasons: seasons });
+        res = handlers.add_tv_seasons({ p_collection: show.collection, p_show: { tmdb_id: byNumber ? show.tmdb_id : null, title: show.title, show_key: show.show_key, network: exp.network || '' }, p_seasons: seasons }, true);
       } catch (e) { undo(); throw e; }
       if (res.show_id !== id || res.show_created) {
         undo();
@@ -381,6 +423,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
     // identity is a show anywhere, or the key / identity is taken there; every season
     // must be added (create_conflict). Never joins or changes an existing show.
     create_tv_show({ p_show: show, p_seasons: seasons }) {
+      stage5OldFunction('create_tv_show');
       if (app.stage !== 'final') throw new DbError('55000', `not_available: create_tv_show is not available in stage ${app.stage}`);
       if (!show || typeof show !== 'object') throw new DbError('22023', 'invalid_input: show');
       const tmdb = show.tmdb_id ?? null, key = String(show.show_key || '').trim(), title = String(show.title || '').trim();
@@ -394,7 +437,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       shows().push(created);
       org.newShow(created);
       let res;
-      try { res = handlers.add_tv_seasons({ p_collection: 'othertv', p_show: { tmdb_id: tmdb, title, show_key: key, network: show.network || '' }, p_seasons: seasons }); }
+      try { res = handlers.add_tv_seasons({ p_collection: 'othertv', p_show: { tmdb_id: tmdb, title, show_key: key, network: show.network || '' }, p_seasons: seasons }, true); }
       catch (e) { undo(); throw e; }
       if (res.show_id !== created.id || res.inserted.length !== seasons.length) {
         undo();
@@ -407,7 +450,12 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       if (app.catalog4a) throw new DbError('P0001', 'catalog_apply_required: Catalog updates are now reviewed and applied explicitly. Reload the page. Nothing was changed.');
       return seedDefaults(coll, defs);
     },
-    catalog_apply(body) { return catalogApply(body); },
+    catalog_apply(body) {
+      stage5OldFunction('catalog_apply');
+      // Stage 5a: an old page's catalog application is refused; its preview still works.
+      if (app.stage5 && body.p_approved != null) throw new DbError('P0001', 'client_outdated: Catalog updates are applied from the updated page now. Reload the page. Nothing was changed.');
+      return catalogApply(body);
+    },
     delete_tv_season({ p_row_id: id }) {
       const r = items().find(x => x.id === id && isTvRow(x));
       if (!r) throw new DbError('P0002', 'not_found: TV season');
@@ -422,7 +470,8 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       }
       return { deleted_row_id: id, show_id: show ? show.id : null, show_deleted: showDeleted };
     },
-    match_tv_row({ p_row_id: id, p_target: target, p_patch: patch, p_expansion: expansion }) {
+    match_tv_row({ p_row_id: id, p_target: target, p_patch: patch, p_expansion: expansion }, internal = false) {
+      if (!internal) stage5OldFunction('match_tv_row');
       const tmdb = target.tmdb_id, n = patch.season_number;
       const key = String(patch.title || '').trim().toLowerCase();
       if (!Number.isInteger(tmdb) || !Number.isInteger(n) || n < 0 || !key || patch.media_type !== 'tv' || patch.tmdb_id !== tmdb
@@ -477,6 +526,128 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       track(r.collection, tmdb, patch.title.trim(), target.network ?? patch.theme ?? '');
       return { blocked: false, row: clone(r), show_id: targetId };
     },
+    // ── Stage 5 (db/phase5a_expand.sql): the library_* functions, storage-free
+    // signatures over the coexistence store (storage stays internal here). ──
+    // ── the catalog collision rule from the other side (db/phase5a_expand.sql lib_catalog_twins) ──
+    __twins(kind, key, title, distinct = []) {
+      const norm = t => String(t || '').trim().toLowerCase();
+      const pool = kind === 'show' ? shows().filter(x => BUILTIN.includes(x.collection) && (x.show_key === key || norm(x.title) === norm(title)))
+        : items().filter(x => isFilmRow(x) && BUILTIN.includes(x.collection) && (x.item_key === key || norm(x.title) === norm(title)));
+      return pool.map(x => x.id).filter(x => !(distinct || []).includes(x)).sort();
+    },
+    __refuseTwins(ids, kind, outcome) {
+      if (!ids.length) return;
+      const k = kind === 'show' ? 'show' : 'film';
+      throw new DbError('P0001', `catalog_candidate: A built-in catalog ${k} with this name is on your list (it may be the same ${k}), so nothing was ${outcome}. Look at it again.`, { candidates: ids });
+    },
+    library_add_seasons({ p_show_id: id, p_expected: exp, p_seasons: seasons }) {
+      if (!id || !exp || typeof exp !== 'object' || !exp.show_key || !('tmdb_id' in exp) || !('catalog' in exp)) throw new DbError('22023', 'invalid_input: the show id and the show as the page showed it (tmdb_id, show_key, catalog) are required');
+      if (!Array.isArray(seasons) || !seasons.length) throw new DbError('22023', 'invalid_input: seasons must be a non-empty list');
+      const show = shows().find(x => x.id === id);
+      if (!show) throw new DbError('P0001', 'target_missing: This show is no longer on your list, so nothing was added.');
+      const catalog = BUILTIN.includes(show.collection) ? show.collection : null;
+      if ((show.tmdb_id ?? null) !== (exp.tmdb_id ?? null) || show.show_key !== exp.show_key || catalog !== (exp.catalog ?? null)) {
+        throw new DbError('P0001', 'target_changed: This show changed since you chose it, so nothing was added. Look at it again.');
+      }
+      const byNumber = show.tmdb_id != null && !catalog;
+      if (seasons.some(x => (x && x.season_number != null) !== byNumber)) throw new DbError('22023', `invalid_input: this show takes ${byNumber ? 'TMDB seasons' : 'seasons by label'}`);
+      const snap = { w: clone(items()), s: clone(shows()), m: clone(store.collection_memberships || []), o: clone(store.othertv_shows) };
+      const undo = () => { store.watchlist_items = snap.w; store.tv_shows = snap.s; if (store.collection_memberships) store.collection_memberships = snap.m; store.othertv_shows = snap.o; };
+      let res;
+      // A governed TMDB-matched show takes labels through the enriched-show rule (looked up by key, as the SQL's join does).
+      const enriched = show.tmdb_id != null && !byNumber;
+      try { res = handlers.add_tv_seasons({ p_collection: show.collection, p_show: { tmdb_id: byNumber ? show.tmdb_id : null, title: show.title, show_key: show.show_key, network: exp.network || '' }, p_seasons: seasons, p_target_show: enriched ? null : id }, true); }
+      catch (e) { undo(); throw e; }
+      if (res.show_id !== id || res.show_created) { undo(); throw new DbError('P0001', 'target_changed: These seasons would not have been added to the show you chose, so nothing was added. Look at it again.'); }
+      return res;
+    },
+    library_create_show({ p_show: show, p_seasons: seasons }) {
+      if (!show || typeof show !== 'object') throw new DbError('22023', 'invalid_input: show');
+      const tmdb = show.tmdb_id ?? null, key = String(show.show_key || '').trim(), title = String(show.title || '').trim();
+      const distinct = Array.isArray(show.distinct_from) ? show.distinct_from : [];
+      if (!title || !key) throw new DbError('22023', 'invalid_input: show title and show_key are required');
+      if (!Array.isArray(seasons) || !seasons.length) throw new DbError('22023', 'invalid_input: seasons must be a non-empty list');
+      if (tmdb != null && shows().some(x => x.tmdb_id === tmdb)) throw new DbError('P0001', 'show_exists: This show is already on your list, so nothing was added. Look at it again.');
+      if (tmdb == null && shows().some(x => x.tmdb_id == null && x.show_key === key && !distinct.includes(x.id))) throw new DbError('P0001', 'show_exists: A show with this name is already on your list, so nothing was added. Look at it again.');
+      // Coexistence: the per-storage key of where new shows go still applies.
+      if (app.stage5 !== 'contracted' && tmdb == null && shows().some(x => x.collection === 'othertv' && x.tmdb_id == null && x.show_key === key)) throw new DbError('P0001', 'show_exists: This show is already on your list, so nothing was added. Look at it again.');
+      handlers.__refuseTwins(handlers.__twins('show', key, title, distinct), 'show', 'added');
+      const snap = { w: clone(items()), s: clone(shows()), m: clone(store.collection_memberships || []), o: clone(store.othertv_shows) };
+      const undo = () => { store.watchlist_items = snap.w; store.tv_shows = snap.s; if (store.collection_memberships) store.collection_memberships = snap.m; store.othertv_shows = snap.o; };
+      const created = { id: newId(), collection: 'othertv', title, show_key: key, tmdb_id: tmdb, status: show.initial_status || 'confirmed' };
+      shows().push(created);
+      org.newShow(created);
+      let res;
+      try { res = handlers.add_tv_seasons({ p_collection: 'othertv', p_show: { tmdb_id: tmdb, title, show_key: key, network: show.network || '' }, p_seasons: seasons, p_target_show: created.id }, true); }
+      catch (e) { undo(); throw e; }
+      if (res.show_id !== created.id || res.inserted.length !== seasons.length) { undo(); throw new DbError('P0001', 'create_conflict: Not every season could be added to the new show, so nothing was added. Look at it again.'); }
+      app.created = (app.created || 0) + 1;
+      return { ...res, show_created: true };
+    },
+    library_add_films({ p_films: films }) {
+      if (!Array.isArray(films) || !films.length) throw new DbError('22023', 'invalid_input: films must be a non-empty list');
+      if (films.some(f => !f || !Number.isInteger(f.tmdb_id) || !String(f.title || '').trim() || !/\|film$/.test(f.item_key || '') || !validDate(f.date_sort))) throw new DbError('22023', 'invalid_input: film');
+      const results = [], inserted = [];
+      films.forEach((f, i) => {
+        const have = items().find(r => r.media_type === 'movie' && r.tmdb_id === f.tmdb_id);
+        if (have) { results.push({ index: i, outcome: 'existing', id: have.id }); return; }
+        const twins = handlers.__twins('film', f.item_key, f.title, f.distinct_from);
+        if (twins.length) { results.push({ index: i, outcome: 'catalog_candidate', candidates: twins }); return; }
+        const r = insertRow({ collection: 'movies', item_key: f.item_key, title: f.title.trim(), season: 'Film', theme: f.theme || '', display_date: f.display_date || '',
+          date_sort: f.date_sort, status: f.status || 'confirmed', watched: !!f.watched, watch_with: f.watch_with || [], collections: f.collections || [],
+          tmdb_collection_id: f.tmdb_collection_id ?? null, tmdb_collection_name: f.tmdb_collection_name ?? null, media_type: 'movie', tmdb_id: f.tmdb_id });
+        results.push({ index: i, outcome: 'inserted', id: r.id });
+        inserted.push(clone(r));
+      });
+      return { results, inserted };
+    },
+    library_create_film({ p_film: f }) {
+      if (!f || f.tmdb_id != null || !String(f.title || '').trim() || !/\|film$/.test(f.item_key || '') || !validDate(f.date_sort)) throw new DbError('22023', 'invalid_input: film');
+      const distinct = Array.isArray(f.distinct_from) ? f.distinct_from : [];
+      if (items().some(r => isFilmRow(r) && r.tmdb_id == null && r.item_key === f.item_key && !distinct.includes(r.id))) throw new DbError('P0001', 'film_exists: A film with this name is already on your list, so nothing was added. Look at it again.');
+      if (app.stage5 !== 'contracted' && items().some(r => r.collection === 'movies' && r.tmdb_id == null && r.item_key === f.item_key)) throw new DbError('P0001', 'film_exists: A film with this name is already on your list, so nothing was added. Look at it again.');
+      handlers.__refuseTwins(handlers.__twins('film', f.item_key, f.title, distinct), 'film', 'added');
+      const r = insertRow({ collection: 'movies', item_key: f.item_key, title: f.title.trim(), season: 'Film', theme: f.theme || '', display_date: f.display_date || '',
+        date_sort: f.date_sort, status: f.status || 'confirmed', watched: !!f.watched });
+      return { id: r.id, row: clone(r) };
+    },
+    library_match_season({ p_row_id: id, p_target: target, p_patch: patch, p_expansion: expansion = {} }) {
+      const r = items().find(x => x.id === id && x.tmdb_id == null && x.media_type == null && x.season_number == null);
+      if (!r) throw new DbError('P0002', 'not_found: unidentified row');
+      const governed = isFilmRow(r) ? BUILTIN.includes(r.collection) : BUILTIN.includes((shows().find(s => s.id === r.show_id) || {}).collection);
+      if (governed) throw new DbError('P0001', 'not_eligible: Entries of a built-in catalog can\'t be matched to TMDB here. Nothing was changed.');
+      if (isFilmRow(r) && r.collection === 'movies') throw new DbError('P0001', 'genre_film_season: A film whose theme is a genre can\'t be matched to a TV season. Nothing was changed.');
+      const t = shows().find(s => s.tmdb_id === target.tmdb_id);
+      if (t && BUILTIN.includes(t.collection)) throw new DbError('P0001', 'match_target_governed: This TMDB show is part of a built-in catalog on your list, so this row wasn\'t matched to it. Nothing was changed.');
+      if (!t) handlers.__refuseTwins(handlers.__twins('show', String(patch.title || '').trim().toLowerCase(), patch.title, patch.distinct_from), 'show', 'matched');
+      if (patch && 'distinct_from' in patch) { patch = { ...patch }; delete patch.distinct_from; }
+      if (app.stage5 !== 'contracted' && t && t.collection !== r.collection) throw new DbError('P0001', 'match_conflict: This TMDB show is already on your list in a part this update can\'t join yet, so nothing was matched.');
+      return handlers.match_tv_row({ p_row_id: id, p_target: target, p_patch: patch, p_expansion: expansion }, true);
+    },
+    library_match_film({ p_row_id: id, p_expected: exp, p_patch: patch }) {
+      if (!exp || typeof exp !== 'object' || !('show_id' in exp) || !patch || patch.media_type !== 'movie' || patch.season !== 'Film' || !Number.isInteger(patch.tmdb_id)
+          || patch.item_key !== `${String(patch.title || '').trim().toLowerCase()}|film` || !validDate(patch.date_sort)) throw new DbError('22023', 'invalid_input: match patch');
+      const r = items().find(x => x.id === id && x.tmdb_id == null && x.media_type == null && x.season_number == null);
+      if (!r) throw new DbError('P0002', 'not_found: unidentified row');
+      const former = shows().find(s => s.id === r.show_id) || null;
+      if ((isFilmRow(r) && BUILTIN.includes(r.collection)) || (former && BUILTIN.includes(former.collection))) throw new DbError('P0001', 'not_eligible: Entries of a built-in catalog can\'t be matched to TMDB here. Nothing was changed.');
+      if ((r.show_id ?? null) !== (exp.show_id ?? null)) throw new DbError('P0001', 'match_conflict: This row changed somewhere else before the match was saved, so nothing was matched.');
+      if (items().some(x => x.media_type === 'movie' && x.tmdb_id === patch.tmdb_id)) throw new DbError('P0001', 'match_conflict: This TMDB film is already on your list, so nothing was matched.');
+      handlers.__refuseTwins(handlers.__twins('film', patch.item_key, patch.title, patch.distinct_from).filter(x => x !== r.id), 'film', 'matched');
+      Object.assign(r, { title: patch.title.trim(), season: 'Film', item_key: patch.item_key, theme: patch.theme ?? r.theme, display_date: patch.display_date ?? r.display_date,
+        date_sort: patch.date_sort, tmdb_collection_id: patch.tmdb_collection_id ?? null, tmdb_collection_name: patch.tmdb_collection_name ?? null,
+        ...(patch.collections ? { collections: clone(patch.collections) } : {}), media_type: 'movie', tmdb_id: patch.tmdb_id, season_number: null, show_id: null });
+      let deleted = false;
+      if (former) {
+        org.collectionsOfShow(former.id).forEach(c => org.add(c, { item_id: r.id }));
+        if (!items().some(x => x.show_id === former.id)) { shows().splice(shows().indexOf(former), 1); org.dropShow(former.id); deleted = true; }
+      }
+      app.filmMatches = (app.filmMatches || 0) + 1;
+      return { row: clone(r), former_show_id: former ? former.id : null, former_show_deleted: deleted, memberships_carried: former ? org.collectionsOfItem(r.id).length : 0 };
+    },
+    library_catalog_apply({ p_catalog: coll, p_defaults: defs, p_approved: approved }) {
+      return catalogApply({ p_collection: coll, p_defaults: defs, p_approved: approved }, true);
+    },
     set_show_status({ p_show_id: id, p_status: status }) {
       requireAuthoritative('set_show_status');
       if (!TV_STATUSES.includes(status)) throw new DbError('22023', `invalid_input: status ${status}`);
@@ -506,7 +677,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
     try { return response(200, fn(body)); }
     catch (e) {
       if (!(e instanceof DbError)) throw e;
-      return response(HTTP_FOR[e.code] || 400, { code: e.code, details: null, hint: null, message: e.message });
+      return response(HTTP_FOR[e.code] || 400, { code: e.code, details: e.detail ? JSON.stringify(e.detail) : null, hint: null, message: e.message });
     }
   }]));
 }
@@ -631,7 +802,7 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            trigger, cascades, Match keeping memberships, watch-with checks,
 //            is_film on reads, format 3 only in restore_backup
 //   rows:    initial watchlist_items rows (the fake database)
-//   tmdb:    path => response body for TMDB requests (default: 404)
+//   tmdb:    path => response body for TMDB requests (default: 404; { __status } an HTTP error; throw: network failure)
 //   width:   window.innerWidth (default 1200)
 //   countOverride: total reported in Content-Range (simulates a count mismatch)
 //   tvShows: tv_shows rows (the fake database has the TV-show schema, backup
@@ -647,7 +818,7 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, stage = 'final', org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true, catalog4a = true, configText = null, addToShow = true } = {}) {
+  orgWrite = true, catalog4a = true, configText = null, addToShow = true, stage5 = 'coexistence', recoveryArchive = 'active' } = {}) {
   const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
   if (!format1) store.tv_shows = clone(tvShows || []);
   const requests = [];
@@ -656,7 +827,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   const consoleErrors = [];
   const selectors = {};
   let nextId = 1;
-  const app = { store, requests, selectors, consoleErrors, countOverride, stage, catalog4a, configText, addToShow };
+  const app = { store, requests, selectors, consoleErrors, countOverride, stage, catalog4a, configText, addToShow, stage5, recoveryArchive };
   if (store.tv_shows) linkFixtureRows(store, () => `new-${nextId++}`);
 
   // ── personal organization (db/phase3b_org.sql) ──
@@ -764,6 +935,28 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   // table with the backup's rows in one step, as the real function does.
   app.rpcHandlers = {
     restore_backup: body => {
+      const b = body.p_backup;
+      if (app.stage5 === 'contracted') {
+        if (b.formatVersion !== 4) return pgError(400, '22023', `restore_invalid: format ${b.formatVersion} backups ${b.formatVersion === 3 ? 'are converted in the page first' : 'can\'t be restored here'}; nothing was changed`);
+        if (b.recovery && !b.conversion) return pgError(400, 'P0001', 'recovery_not_accepted: a recovery section belongs only to a converted format-3 backup; nothing was changed');
+        if (b.recovery && app.recoveryArchive !== 'active') return pgError(400, 'P0001', 'recovery_not_accepted: the recovery archive has been retired, so a recovery section can\'t be kept; convert the file again without it. Nothing was changed.');
+        const t = b.tables;
+        const showCat = new Map(t.catalog_show_links.map(l => [l.show_id, l.catalog])), filmCat = new Map(t.catalog_film_links.map(l => [l.item_id, l.catalog]));
+        const mapS = new Map(((b.recovery || {}).storage_map || {}).shows?.map(x => [x.id, x.collection]) || []);
+        const mapC = new Map(((b.recovery || {}).storage_map || {}).personal_collections?.map(x => [x.id, x.legacy_source]) || []);
+        const shows = t.tv_shows.map(sh => ({ ...sh, collection: showCat.get(sh.id) || mapS.get(sh.id) || 'othertv' }));
+        const byShow = new Map(shows.map(sh => [sh.id, sh.collection]));
+        store.tv_shows = clone(shows);
+        store.watchlist_items = clone(t.watchlist_items.map(({ theme_kind, ...r }) => ({ ...r,
+          collection: r.show_id ? byShow.get(r.show_id) : filmCat.get(r.id) || (theme_kind === 'genre' ? 'movies' : 'othertv') })));
+        store.personal_collections = clone(t.personal_collections.map(({ catalog_id, presentation_key, ...c }) => ({ ...c, legacy_source: mapC.has(c.id) ? mapC.get(c.id) : (presentation_key ?? catalog_id) })));
+        for (const k of ['custom_collections', 'collection_memberships', 'watch_with_choices']) store[k] = clone(t[k]);
+        store.othertv_shows = clone((b.recovery || {}).othertv_shows || []);
+        // The link rows as restored (ids, origin, created_at kept), for the governance reads.
+        store.__links = { shows: clone(t.catalog_show_links), films: clone(t.catalog_film_links) };
+        app.restored = (app.restored || 0) + 1;
+        return response(200, { formatVersion: 4, restored: Object.fromEntries(Object.keys(t).map(k => [k, t[k].length])), recovery: b.recovery ? 'archived' : 'none' });
+      }
       if (orgOn && body.p_backup.formatVersion !== 3) {
         return pgError(400, '22023', `restore_invalid: format ${body.p_backup.formatVersion} backups ${body.p_backup.formatVersion === 2 ? 'predate personal collections' : 'predate TV shows'} and can't be restored here`);
       }
@@ -779,6 +972,10 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   // fake database (not through the page): preview, then apply with its hash.
   app.applyCatalog = async (coll, defs) => {
     const d = clone(defs || app.get(`COLLECTIONS.find(c => c.id === ${JSON.stringify(coll)}).defaults`));
+    if (app.stage5) { // Stage 5: library_catalog_apply (the old catalog_apply refuses applies)
+      const p = await app.rpcHandlers.library_catalog_apply({ p_catalog: coll, p_defaults: d }).json();
+      return app.rpcHandlers.library_catalog_apply({ p_catalog: coll, p_defaults: d, p_approved: p.hash }).json();
+    }
     const p = await app.rpcHandlers.catalog_apply({ p_collection: coll, p_defaults: d }).json();
     return app.rpcHandlers.catalog_apply({ p_collection: coll, p_defaults: d, p_approved: p.hash }).json();
   };
@@ -811,7 +1008,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const TMDB_BASE = vm.runInContext('TMDB_BASE', ctx), SUPABASE_URL = vm.runInContext('SUPABASE_URL', ctx);
     if (url.startsWith(TMDB_BASE)) {
       const p = url.slice(TMDB_BASE.length);
-      const out = tmdb ? tmdb(p) : undefined;
+      const out = tmdb ? tmdb(p) : undefined; // (a thrown error is a network failure)
+      if (out && out.__status) return response(out.__status, { status_message: 'simulated' }); // { __status: 500 }: an HTTP error
       return out === undefined ? response(404, { status_message: 'not found' }) : response(200, out);
     }
     const prefix = `${SUPABASE_URL}/rest/v1/`;
@@ -819,6 +1017,73 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const u = new URL(url);
     const table = u.pathname.split('/').pop();
     const params = [...u.searchParams.entries()];
+    // ── Stage 5 (db/phase5a_expand.sql, db/phase5c_contract.sql) ──
+    const contracted = app.stage5 === 'contracted';
+    if (contracted) {
+      const retired = k => k === 'collection' || k === 'legacy_source';
+      const select = (u.searchParams.get('select') || '').split(',');
+      if (params.some(([k]) => retired(k)) || select.some(retired)) return pgError(400, '42703', `column ${table}.collection does not exist`);
+      const bodies = Array.isArray(body) ? body : body ? [body] : [];
+      if (!u.pathname.includes('/rpc/') && bodies.some(b => b && Object.keys(b).some(retired))) return pgError(400, 'PGRST204', `Could not find the 'collection' column of '${table}' in the schema cache`);
+      if (table === 'othertv_shows') return response(404, { code: 'PGRST205', message: "Could not find the table 'public.othertv_shows' in the schema cache" });
+      const guard = () => pgError(400, 'P0001', 'library_write_required: This change is made only through the app\'s library functions. Reload the page. Nothing was changed.');
+      if (method === 'POST' && ['watchlist_items', 'tv_shows', 'catalog_show_links', 'catalog_film_links'].includes(table)) return guard();
+      if (method === 'PATCH' && table === 'watchlist_items' && body) {
+        const prot = ['id', 'media_type', 'tmdb_id', 'season_number', 'season', 'item_key', 'show_id', 'theme_kind'];
+        const targets = store.watchlist_items.filter(r => matches(r, params));
+        if (targets.some(r => prot.some(k => k in body && JSON.stringify(body[k]) !== JSON.stringify(k === 'theme_kind' ? (isFilmRow(r) ? (r.collection === 'movies' ? 'genre' : 'other') : null) : r[k] ?? null)))) return guard();
+      }
+      if (method === 'PATCH' && table === 'tv_shows' && body && ['id', 'tmdb_id', 'show_key'].some(k => k in body)) return guard();
+    }
+    if (u.pathname.includes('/rpc/') && table === 'stage5_capabilities') {
+      if (!app.stage5) return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.stage5_capabilities in the schema cache' });
+      return response(200, { stage5: 1, phase: app.stage5, backup_format: contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none' });
+    }
+    if (u.pathname.includes('/rpc/') && /^library_/.test(table) && !app.stage5) {
+      return response(404, { code: 'PGRST202', details: null, hint: null, message: `Could not find the function public.${table} in the schema cache` });
+    }
+    const CATALOGS = ['disney', '90day', 'sheridan'];
+    const VIEWS = {
+      library_catalog_shows: () => (store.tv_shows || []).filter(sh => CATALOGS.includes(sh.collection))
+        .map(sh => ({ id: sh.id, show_id: sh.id, catalog: sh.collection, catalog_key: sh.show_key, origin: 'migrated_from_storage' })),
+      library_catalog_films: () => store.watchlist_items.filter(r => isFilmRow(r) && CATALOGS.includes(r.collection))
+        .map(r => ({ id: r.id, item_id: r.id, catalog: r.collection, entry_key: r.item_key, origin: 'migrated_from_storage' })),
+      library_film_theme_kinds: () => store.watchlist_items.filter(isFilmRow).map(r => ({ id: r.id, item_id: r.id, theme_kind: r.collection === 'movies' ? 'genre' : 'other' })),
+      library_collection_catalogs: () => (store.personal_collections || []).filter(c => CATALOGS.includes(c.legacy_source)).map(c => ({ id: c.id, collection_id: c.id, catalog: c.legacy_source })),
+      library_collection_presentation: () => (store.personal_collections || []).filter(c => [...CATALOGS, 'truecrime'].includes(c.legacy_source))
+        .map(c => ({ id: c.id, collection_id: c.id, presentation_key: c.legacy_source })),
+      ...(contracted ? {
+        // Derived from storage (the harness keeps it internally); a restored link keeps its own id, origin and created_at.
+        catalog_show_links: () => VIEWS.library_catalog_shows().map(({ id, ...l }) => {
+          const kept = ((store.__links || {}).shows || []).find(x => x.show_id === l.show_id && x.catalog === l.catalog);
+          return kept ? clone(kept) : { ...l, id: `0b000000-0000-4000-8000-${l.show_id.replace(/[^0-9a-f]/g, '').slice(-12).padStart(12, '0')}`, created_at: '2026-10-10T00:00:00+00:00' };
+        }),
+        catalog_film_links: () => VIEWS.library_catalog_films().map(({ id, ...l }) => {
+          const kept = ((store.__links || {}).films || []).find(x => x.item_id === l.item_id && x.catalog === l.catalog);
+          return kept ? clone(kept) : { ...l, id: `0b100000-0000-4000-8000-${l.item_id.replace(/[^0-9a-f]/g, '').slice(-12).padStart(12, '0')}`, created_at: '2026-10-10T00:00:00+00:00' };
+        })
+      } : {})
+    };
+    const shape = (t, r) => {
+      if (!contracted) return r;
+      if (t === 'watchlist_items') { const { collection, ...x } = r; return { ...x, theme_kind: isFilmRow(r) ? (collection === 'movies' ? 'genre' : 'other') : null }; }
+      if (t === 'tv_shows') { const { collection, ...x } = r; return x; }
+      if (t === 'personal_collections') { const { legacy_source, ...x } = r; return { ...x, catalog_id: CATALOGS.includes(legacy_source) ? legacy_source : null,
+        presentation_key: [...CATALOGS, 'truecrime'].includes(legacy_source) ? legacy_source : null }; }
+      return r;
+    };
+    if (app.stage5 && VIEWS[table] && method === 'GET') {
+      let found = VIEWS[table]().filter(r => matches(r, params));
+      const range = req.headers.Range;
+      if (range) {
+        found = found.slice().sort((a, b) => cmpC(String(a.id), String(b.id)));
+        const [from, to] = range.split('-').map(Number);
+        const page = found.slice(from, to + 1);
+        const cr = page.length ? `${from}-${from + page.length - 1}/${found.length}` : `*/${found.length}`;
+        return response(206, clone(page), { 'content-range': cr });
+      }
+      return response(200, clone(found));
+    }
     if (u.pathname.includes('/rpc/')) {
       const handler = table === 'catalog_apply' && !app.catalog4a ? null : app.rpcHandlers[table];
       if (table === 'add_tv_seasons_to_show' && !app.addToShow) {
@@ -838,8 +1103,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     if (!rowsOf) return response(404, { code: 'PGRST205', message: `Could not find the table 'public.${table}' in the schema cache` });
 
     if (method === 'GET') {
-      let found = rowsOf.filter(r => matches(r, params));
-      if (orgOn && table === 'watchlist_items') found = found.map(r => ({ ...r, is_film: isFilmRow(r) })); // generated column
+      const withGenerated = orgOn && table === 'watchlist_items' ? rowsOf.map(r => ({ ...r, is_film: isFilmRow(r) })) : rowsOf; // generated column
+      let found = withGenerated.map(r => shape(table, r)).filter(r => matches(r, params));
       const select = u.searchParams.get('select');
       if (select && select !== '*' && select !== 'id') {
         const cols = select.split(',');
@@ -945,6 +1210,19 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   await settle();
 
   app.writes = () => requests.filter(r => r.method !== 'GET');
+  // Requests that name a retired storage field or an old storage-shaped function
+  // (Stage 5 A13): a filter or select on collection / legacy_source, a body carrying
+  // either, or add_tv_seasons / add_tv_seasons_to_show / create_tv_show / match_tv_row / catalog_apply.
+  app.storageRequests = () => requests.filter(r => {
+    if (!/\/rest\/v1\//.test(r.url)) return false;
+    const u = new URL(r.url);
+    const name = u.pathname.split('/').pop();
+    if (['add_tv_seasons', 'add_tv_seasons_to_show', 'create_tv_show', 'match_tv_row', 'catalog_apply', 'seed_tv_defaults'].includes(name)) return true;
+    const retired = k => k === 'collection' || k === 'legacy_source' || k === 'othertv_shows';
+    if ([...u.searchParams.keys()].some(retired) || (u.searchParams.get('select') || '').split(',').some(retired) || retired(name)) return true;
+    const scan = v => v && typeof v === 'object' && (Array.isArray(v) ? v.some(scan) : Object.keys(v).some(k => retired(k) || (k !== 'p_backup' && scan(v[k]))));
+    return scan(r.body);
+  });
   app.html = () => registry.get('tbody').innerHTML + '\n' + registry.get('cardList').innerHTML;
   return app;
 }
@@ -967,7 +1245,7 @@ function runner(title) {
           passed++;
           console.log(`  ok   ${t.name}`);
         } catch (e) {
-          console.log(`  FAIL ${t.name}\n       ${e && e.stack ? e.stack.split('\n').slice(0, 3).join('\n       ') : e}`);
+          console.log(`  FAIL ${t.name}\n       ${e && e.stack ? e.stack.split('\n').slice(0, process.env.TEST_VERBOSE ? 40 : 3).join('\n       ') : e}`);
         }
       }
       console.log(`${title}: ${passed}/${tests.length} passed`);

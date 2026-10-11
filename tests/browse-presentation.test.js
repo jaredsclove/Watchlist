@@ -104,7 +104,8 @@ const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"
 const READ_ONLY = new Set(['toggleFilterPill', 'toggleBrowseShow', 'setBrowseMedia', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
   'renderTable', 'toggleFilters', 'browseBack', 'openBrowseCollection', 'loadBrowseView',
   'openManage']); // Stage 3b-2: opens the Manage collections dialog (organization only, never tracking)
-const mutating = app => app.requests.filter(r => r.method !== 'GET' || /\/rpc\//.test(r.url) || !r.url.includes('/rest/v1/'));
+// (The GET of rpc/stage5_capabilities is the read-only phase check made at startup.)
+const mutating = app => app.requests.filter(r => r.method !== 'GET' || (/\/rpc\//.test(r.url) && !r.url.endsWith('/rpc/stage5_capabilities')) || !r.url.includes('/rest/v1/'));
 const J = (app, expr) => JSON.parse(JSON.stringify(app.get(expr)));
 
 // ─── Controls ─────────────────────────────────────────────────────────────────

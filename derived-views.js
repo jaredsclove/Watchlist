@@ -1,9 +1,8 @@
 // ─── Derived TV views: Currently Watching, All TV, Coming Soon ───────────────
-// Views over every TV collection's seasons and shows (tv_shows). They are not
-// collections: nothing here writes a `collection` value, seeds defaults, calls
-// TMDB, or touches backup/restore. While one is open, activeViewId holds its id
-// and activeTabId is null. Edits go through the show and season actions
-// (tv-shows.js, row-actions.js), by the show's or the row's real id.
+// Views over every TV season and show (tv_shows) in the library. They store
+// nothing of their own, seed nothing, call no TMDB and touch no backup or restore.
+// While one is open, activeViewId holds its id. Edits go through the show and
+// season actions (tv-shows.js, row-actions.js), by the show's or the row's real id.
 // Defined here rather than in config.js so the catalog-refresh workflow's
 // config.js cache handling is unaffected.
 const DERIVED_VIEWS = [
@@ -13,16 +12,10 @@ const DERIVED_VIEWS = [
 ];
 
 // ─── Row rules (pure) ─────────────────────────────────────────────────────────
-function tvCollectionIds() {
-  return COLLECTIONS.filter(c => c.mediaType === 'tv').map(c => c.id);
-}
-
-// A TV season row from a TV collection. Excludes films: truecrime rows with
-// media_type 'movie', and legacy/static rows labelled 'Film'.
+// A TV season row (tv-shows.js isTvSeason): never a film (media_type 'movie', or a
+// row without an identity labelled 'Film').
 function isTvViewRow(r) {
-  if (!r || !tvCollectionIds().includes(r.collection)) return false;
-  if (r.media_type === 'tv') return true;
-  return r.media_type == null && r.season !== 'Film';
+  return !!r && (r.media_type === 'tv' || (r.media_type == null && (r.season || '') !== 'Film'));
 }
 
 // Dynamic rows store TMDB's TBA as 'TBA' / '2099-01-01'; static rows use free
@@ -74,15 +67,6 @@ function compareSeasons(a, b) {
   return seasonOrder(a, b) || cmpStr(a.id, b.id);
 }
 
-// One show per collection: TMDB identity when present, otherwise the title.
-function showGroupKey(r) {
-  return `${r.collection}|${r.tmdb_id != null ? `tmdb:${r.tmdb_id}` : `title:${(r.title || '').trim().toLowerCase()}`}`;
-}
-
-function collectionLabel(id) {
-  return COLLECTIONS.find(c => c.id === id)?.label || id;
-}
-
 function compareTitles(a, b) {
   return (a || '').localeCompare(b || '', undefined, { sensitivity: 'base' });
 }
@@ -90,7 +74,7 @@ function compareTitles(a, b) {
 // Watching shows (tv_shows.status), each with its seasons in sorted order, its up
 // next season and whether it is Up to date (none of its remaining seasons has
 // aired). Up to date is a state, not a stored status. Both lists are A–Z by
-// title, then collection. `shows` is a Map or list of tv_shows rows.
+// title, then show id. `shows` is a Map or list of tv_shows rows.
 function deriveCurrentlyWatching(rows, shows, today) {
   const seasonsByShow = new Map();
   rows.forEach(r => {
@@ -107,7 +91,6 @@ function deriveCurrentlyWatching(rows, shows, today) {
     const item = {
       key: show.id,
       show,
-      collection: show.collection,
       title: show.title,
       seasons,
       upNext,
@@ -117,7 +100,6 @@ function deriveCurrentlyWatching(rows, shows, today) {
     (item.upToDate ? upToDate : active).push(item);
   }
   const byTitle = (a, b) => compareTitles(a.title, b.title)
-    || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
     || cmpStr(a.key, b.key);
   return { active: active.sort(byTitle), upToDate: upToDate.sort(byTitle) };
 }
@@ -125,7 +107,7 @@ function deriveCurrentlyWatching(rows, shows, today) {
 // Every show with at least one linked season, whatever its status, each with its
 // seasons in sorted order and its up next season. Up to date only for a Watching
 // show (the same rule as Currently Watching); no other status ever gets it.
-// A–Z by title, then collection, then show id. TV rows that can't be listed —
+// A–Z by title, then show id. TV rows that can't be listed —
 // unlinked, or linked to a show that wasn't loaded — are counted, never guessed
 // into a group.
 function deriveAllTv(rows, shows, today) {
@@ -147,7 +129,6 @@ function deriveAllTv(rows, shows, today) {
     items.push({
       key: show.id,
       show,
-      collection: show.collection,
       title: show.title,
       seasons,
       upNext,
@@ -156,7 +137,6 @@ function deriveAllTv(rows, shows, today) {
     });
   }
   items.sort((a, b) => compareTitles(a.title, b.title)
-    || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
     || cmpStr(a.key, b.key));
   return { items, unlinked, missingShow };
 }
@@ -227,16 +207,14 @@ function allTvSeasonVisible(r, show, vis) {
 }
 
 // The seasons of the given All TV shows (deriveAllTv items, already filtered by
-// Search / Source / show Status) that pass the visibility choice and rowMatches
+// Search / Theme / Year / show Status) that pass the visibility choice and rowMatches
 // (the theme filter), split before any sorting: genuine TBA (text or
 // sentinel; wins over a guessed date_sort), dates needing review (not TBA, no
-// valid date) and dated seasons, oldest first. Ties: title, season order,
-// collection, row id.
+// valid date) and dated seasons, oldest first. Ties: title, season order, row id.
 function deriveAllTvSeasons(items, vis, rowMatches = () => true) {
   const rows = items.flatMap(it => it.seasons.filter(r => allTvSeasonVisible(r, it.show, vis) && rowMatches(r)));
   const tieOrder = (a, b) => compareTitles(a.title, b.title)
     || seasonOrder(a, b)
-    || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
     || cmpStr(a.id, b.id);
   const tba = rows.filter(isTbaRow).sort(tieOrder);
   const review = rows.filter(r => !isTbaRow(r) && !isValidDateSort(r.date_sort)).sort(tieOrder);
@@ -271,7 +249,6 @@ function deriveComingSoon(rows, shows, today) {
   const order = (a, b) => cmpStr(a.date_sort, b.date_sort)
     || compareTitles(a.title, b.title)
     || seasonOrder(a, b)
-    || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
     || cmpStr(a.id, b.id);
   return {
     dated: eligible.filter(r => !isTbaRow(r) && (r.date_sort || '') >= today).sort(order),
@@ -281,11 +258,12 @@ function deriveComingSoon(rows, shows, today) {
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
 function tvRowsFilter() {
-  return `collection=in.(${tvCollectionIds().map(id => encodeURIComponent(`"${id}"`)).join(',')})`;
+  return 'is_film=eq.false';
 }
 
-// Paginated, exact-count-checked reads of every TV collection's rows and of every
-// show. GET only: no seeding, no TBA refresh. Refetched each time a view is entered.
+// Paginated, exact-count-checked reads of every TV season, every show and the
+// catalog governance. GET only: no seeding, no TBA refresh. Refetched each time a
+// view is entered.
 async function loadDerivedView() {
   const viewId = activeViewId;
   if (!viewId) return;
@@ -297,10 +275,11 @@ async function loadDerivedView() {
   paintDerivedMessage('Loading…', false);
   const showsRead = typeof matchReadStart === 'function' ? matchReadStart('shows', '*') : null; // tracked (tmdb-match.js)
   try {
-    const [rows, shows] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows')]);
+    const [rows, shows, gov] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows'), readGovernance()]);
     publishAllTvShows(showsRead, shows);
     if (showsRead) matchReadSettle(showsRead, null);
     if (seq !== derivedLoadSeq || activeViewId !== viewId) return;
+    publishGovernance(governanceCovers(gov, rows, shows));
     derivedData = { rows: rows.filter(isTvViewRow), loaded: true };
     renderFilters();
     renderTable();
@@ -428,10 +407,11 @@ function updateDerivedTableHeader() {
 
 // Dynamic tabs store the network (TV) or genre (Movies) as the theme; static tabs
 // use themed badges. Either is a filter pill for the view's theme filter (render.js).
-function themeBadgeHtml(collectionId, theme, owner = '') {
+// catalog: the catalog that governs the row or show (library.js), or null. A
+// catalog's themes have their own badge styles; anything else is a network colour.
+function themeBadgeHtml(catalog, theme, owner = '') {
   if (!theme) return '';
-  const col = COLLECTIONS.find(c => c.id === collectionId);
-  const look = col?.dynamic ? { cls: 'badge', attrs: networkBadgeStyle(theme) } : { cls: `badge ${badgeClass(theme)}` };
+  const look = catalog ? { cls: `badge ${badgeClass(theme)}` } : { cls: 'badge', attrs: networkBadgeStyle(theme) };
   return filterPillHtml('theme', theme, theme, { ...look, title: `Filter by “${theme}”`, owner });
 }
 
@@ -492,7 +472,7 @@ function renderCurrentlyWatching(today, keep) {
   document.getElementById('cardList').innerHTML = cardHtml;
 }
 
-// All TV: every show with a linked season, filtered by title, source and show
+// All TV: every show with a linked season, filtered by title, theme, year and show
 // status; the show count is shows, not seasons.
 // Shows: Theme matches any stored season and Progress applies; Seasons: Theme
 // applies to each season (Progress is a Shows filter and isn't shown there).
@@ -532,7 +512,7 @@ function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '', fYear = 
   document.getElementById('cardList').innerHTML = cardHtml;
 }
 
-// All TV, Seasons: the seasons of the shows that pass Search / Source / show
+// All TV, Seasons: the seasons of the shows that pass Search / Theme / Year / show
 // Status, narrowed by the Seasons-only visibility choice. Dated seasons oldest
 // first under year headers; genuine TBA and dates needing review in one
 // collapsed section, labelled and counted separately.
@@ -604,7 +584,7 @@ function allTvSeasonRowHtml(r, today, needsReview) {
   const reviewTag = needsReview ? '<span class="review-tag">date needs review</span>' : '';
   const statusPill = `<span class="status-pill s-${status}" title="Show status — applies to every season of ${esc(r.title)}. Switch to Shows to change it.">${esc(statusOptionLabel(status))}</span>`;
   const releaseOpts = { requireReleased: true, today };
-  const badges = `${themeBadgeHtml(r.collection, r.theme, r.id)} ${duplicateShowTagHtml(showOfRow(r))}`;
+  const badges = themeBadgeHtml(rowCatalogOf(r), r.theme, r.id);
   const row = `<tr class="${rowClass}">
       <td>
         <span class="show-title">${esc(r.title)}</span>
@@ -654,7 +634,7 @@ function derivedShowHtml(item, today) {
   const isExpanded = expandedShows.has(key);
   const keyArg = esc(key).replace(/'/g, "\\'");
   const theme = (upNext || seasons[0]).theme;
-  const badges = `${themeBadgeHtml(item.collection, theme, key)} ${duplicateShowTagHtml(show)}`;
+  const badges = themeBadgeHtml(showCatalogOf(show), theme, key);
 
   const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;
@@ -675,7 +655,7 @@ function derivedShowHtml(item, today) {
   // All TV (Stage 4b): an expanded show also offers Match (an eligible row), Delete (a row
   // that isn't a built-in catalog entry; those have Skip / Keep) and Add season.
   const allTv = activeViewId === 'alltv';
-  const subOpts = r => ({ isNew: false, showMatch: allTv && isTmdbMatchEligible(r), showDelete: allTv && !isDefaultRow(r),
+  const subOpts = r => ({ isNew: false, showMatch: allTv && isTmdbMatchEligible(r), showDelete: allTv && editPolicyOf(r).deleteEffect === 'delete',
     deleteTitle: 'Delete this season', requireReleased: true, today });
   const addSeasonBtn = allTv ? `<button class="btn btn-link" onclick="event.stopPropagation(); openAddSeason('${keyArg}')">+ Add season…</button>` : '';
   const watchCell = inProgress ? seasonWatchControlHtml(upNext, { ...releaseOpts, stopPropagation: true }, false) : '<span class="confirmed-lbl">—</span>';
@@ -779,7 +759,7 @@ function renderComingSoon(today, keep) {
   document.getElementById('cardList').innerHTML = cardHtml;
 }
 
-// Source/date details, the show's status as a label, and Skip only: Coming
+// Date details, the show's status as a label, and Skip only: Coming
 // Soon is about availability, so there is no status menu, watch control or delete.
 function comingSoonRowHtml(r, today) {
   const status = displayStatus(r);
@@ -793,7 +773,7 @@ function comingSoonRowHtml(r, today) {
         <span class="season-lbl"> · ${esc(r.season)}</span>
         ${todayTag}
       </td>
-      <td>${themeBadgeHtml(r.collection, r.theme, r.id)} ${duplicateShowTagHtml(showOfRow(r))}</td>
+      <td>${themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)}</td>
       <td class="date-cell">${esc(r.display_date)}</td>
       <td>${statusPill}</td>
       <td>${skip}</td>
@@ -807,7 +787,7 @@ function comingSoonRowHtml(r, today) {
         </div>
       </div>
       <div class="card-meta">
-        ${themeBadgeHtml(r.collection, r.theme, r.id)} ${duplicateShowTagHtml(showOfRow(r))}
+        ${themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)}
         <span class="card-date">${esc(r.display_date)}</span>
       </div>
       <div class="card-actions">${statusPill} ${skip}</div>

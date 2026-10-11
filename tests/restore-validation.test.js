@@ -10,7 +10,7 @@ const assert = require('assert');
 
 const ctx = {};
 vm.createContext(ctx);
-for (const f of ['config.js', 'backup-restore.js']) {
+for (const f of ['config.js', 'backup-restore.js', 'backup-format3.js']) { // (format 1–3 rules live in backup-format3.js since Stage 5)
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'), ctx);
 }
 const validate = ctx.validateBackupObject;

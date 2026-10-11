@@ -50,7 +50,7 @@ test('a failed restore call reports that nothing was changed and stops', async (
   app.failNext(r => r.url.includes('/rpc/restore_backup'));
   const before = app.requests.length;
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
-  const after = app.requests.slice(before);
+  const after = app.requests.slice(before).filter(r => !r.url.endsWith('/rpc/stage5_capabilities')); // (the phase is read again before sending)
   assert.strictEqual(after.length, 1, 'no verification reads after a failed restore');
   assert.deepStrictEqual(app.store.watchlist_items.map(r => r.id), [uuid('a1'), uuid('a2')]);
   const html = app.el('restoreModalBox').innerHTML;
@@ -68,6 +68,59 @@ test('verification still compares every field after the restore call', async () 
   };
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
   assert.match(app.el('restoreModalBox').innerHTML, /verification failed/);
+});
+
+// Known timestamp columns match the same instant written another way; nothing else is loosened.
+test('field comparison: timestamp columns compare by instant (to the microsecond); other values exactly', async () => {
+  const { app } = await setup();
+  const cmp = (a, b, types = { created_at: 'timestamp', archived_at: 'timestamp?', title: 'text' }) =>
+    Array.from(app.ctx.compareRowFields(a, b, types));
+  const ts = (a, b, type) => cmp({ created_at: a }, { created_at: b }, type ? { created_at: type } : undefined);
+  // equivalent representations
+  assert.deepStrictEqual(ts('2026-10-11T04:32:05.325Z', '2026-10-11T04:32:05.325+00:00'), []);
+  assert.deepStrictEqual(ts('2026-10-11T04:32:05.325000Z', '2026-10-11T04:32:05.325+00:00'), []);
+  assert.deepStrictEqual(ts('2026-10-11T04:32:05Z', '2026-10-11T04:32:05.000+00:00'), []);
+  assert.deepStrictEqual(ts('2026-10-11T06:32:05.123456+02:00', '2026-10-11T04:32:05.123456+00:00'), []);
+  assert.deepStrictEqual(ts('2026-10-11T00:02:05-0430', '2026-10-11T04:32:05+00:00'), []);
+  assert.deepStrictEqual(cmp({ archived_at: '2026-01-01T00:00:00Z' }, { archived_at: '2026-01-01T00:00:00+00:00' }), []);
+  // genuinely different instants, including one microsecond and a different offset
+  assert.deepStrictEqual(ts('2026-10-11T04:32:05.325Z', '2026-10-11T04:32:05.325001+00:00'), ['created_at']);
+  assert.deepStrictEqual(ts('2026-10-11T04:32:05.325Z', '2026-10-11T05:32:05.325+00:00'), ['created_at']);
+  assert.deepStrictEqual(ts('2026-10-11T04:32:05.325+01:00', '2026-10-11T04:32:05.325+00:00'), ['created_at']);
+  // years 0000–0099 keep their literal year (never read as 1900–1999), and still normalize among themselves
+  assert.deepStrictEqual(ts('0026-01-01T00:00:00Z', '1926-01-01T00:00:00+00:00'), ['created_at']);
+  assert.deepStrictEqual(ts('0000-01-01T00:00:00Z', '1900-01-01T00:00:00+00:00'), ['created_at']);
+  assert.deepStrictEqual(ts('0099-12-31T23:59:59.5Z', '1999-12-31T23:59:59.5+00:00'), ['created_at']);
+  assert.deepStrictEqual(ts('0026-01-01T00:00:00Z', '0026-01-01T00:00:00.000000+00:00'), []);
+  assert.deepStrictEqual(ts('0026-01-01T01:00:00+01:00', '0026-01-01T00:00:00+00:00'), []);
+  assert.deepStrictEqual(ts('0000-01-01T00:30:00+01:00', '-0001-12-31T23:30:00+00:00'), ['created_at'], 'a crossing into year −1 is not a supported form');
+  // null and invalid values: never equal to a timestamp; identical text still equal
+  assert.deepStrictEqual(cmp({ archived_at: null }, { archived_at: null }), []);
+  assert.deepStrictEqual(cmp({ archived_at: null }, { archived_at: '2026-01-01T00:00:00+00:00' }), ['archived_at']);
+  assert.deepStrictEqual(cmp({ archived_at: '2026-01-01T00:00:00Z' }, { archived_at: null }), ['archived_at']);
+  assert.deepStrictEqual(ts('not a time', '2026-01-01T00:00:00+00:00'), ['created_at']);
+  assert.deepStrictEqual(ts('2026-02-30T00:00:00Z', '2026-03-02T00:00:00+00:00'), ['created_at']);
+  assert.deepStrictEqual(ts('2026-01-01T00:00:00', '2026-01-01T00:00:00+00:00'), ['created_at'], 'no offset: not comparable');
+  assert.deepStrictEqual(ts('2026-01-01T00:00:00.1234567Z', '2026-01-01T00:00:00.123456+00:00'), ['created_at'], 'beyond microseconds: not comparable');
+  assert.deepStrictEqual(ts('not a time', 'not a time'), []);
+  // only known timestamp columns: the same pair under a text column, or with no types, still differs
+  assert.deepStrictEqual(ts('2026-10-11T04:32:05.325Z', '2026-10-11T04:32:05.325+00:00', 'text'), ['created_at']);
+  assert.deepStrictEqual(Array.from(app.ctx.compareRowFields({ created_at: '2026-10-11T04:32:05.325Z' }, { created_at: '2026-10-11T04:32:05.325+00:00' })), ['created_at']);
+  // an ordinary non-timestamp mismatch is still reported next to an equivalent timestamp
+  assert.deepStrictEqual(cmp({ title: 'A', created_at: '2026-10-11T04:32:05.325Z' }, { title: 'B', created_at: '2026-10-11T04:32:05.325+00:00' }), ['title']);
+});
+
+test('native restore: created_at returned in the database’s form verifies; a different instant does not', async () => {
+  for (const [back, verified] of [['2026-01-01T00:00:00+00:00', true], ['2026-01-01T00:00:01+00:00', false]]) {
+    const { app, backup } = await setup();
+    backup.tables.watchlist_items[0].created_at = '2026-01-01T00:00:00.000Z';
+    app.rpcHandlers.restore_backup = body => {
+      app.store.watchlist_items = body.p_backup.tables.watchlist_items.map(r => ({ ...r, created_at: back }));
+      return { ok: true, status: 200, text: async () => '{}', json: async () => ({}), headers: { get: () => null } };
+    };
+    await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
+    assert.match(app.el('restoreModalBox').innerHTML, verified ? /restored and verified/ : /verification failed[\s\S]*created_at/);
+  }
 });
 
 T.run();

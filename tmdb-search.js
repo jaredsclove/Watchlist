@@ -1,14 +1,6 @@
 const TMDB_SEARCH_LIMIT = 6;
 
-// Which kind of search hits a tab is for: 'movie' (Movies), 'mixed' (a tab that
-// deliberately holds both series and films, e.g. True Crime / Docs) or 'tv'.
-function tmdbSearchModeFor(col) {
-  if (col?.isMovieTab) return 'movie';
-  if (col?.mixedMedia) return 'mixed';
-  return 'tv';
-}
-
-// Picks the search hits to show. 'movie' and 'tv' list the tab's own type first and
+// Picks the search hits to show. 'movie' and 'tv' list that type first and
 // use any room left for the other type, so the other type can't crowd it out;
 // 'mixed' keeps the original split of up to 4 series then up to 4 films. Each type
 // stays in TMDB's relevance order, and the list is capped at TMDB_SEARCH_LIMIT.
@@ -32,8 +24,8 @@ async function searchTMDB() {
     ]);
     const tvResults = (tvData.results || []).map(r => ({ ...r, mediaType: 'tv' }));
     const movieResults = (movieData.results || []).map(r => ({ ...r, mediaType: 'movie' }));
-    // The "+ Add" panel of a view (library.js) searches by its media; a tab by its kind.
-    const mode = libraryPanel && !activeTabId ? (libraryPanel.media === 'movie' ? 'movie' : 'tv') : tmdbSearchModeFor(COLLECTIONS.find(c => c.id === activeTabId));
+    // The "+ Add" panel (library.js) searches by its media.
+    const mode = libraryPanel && libraryPanel.media === 'movie' ? 'movie' : 'tv';
     const results = selectTmdbSearchResults(tvResults, movieResults, mode);
 
     if (results.length === 0) {
@@ -97,85 +89,9 @@ function getTMDBPreviewContainer() {
   return document.getElementById('tmdbInlinePreview') || document.getElementById('tmdbPreview');
 }
 
+// The preview of a chosen result belongs to the view's "+ Add" panel (library.js).
 function renderTMDBPreview() {
-  if (libraryPanel && !activeTabId) { libraryRenderPreview(); return; } // a view's "+ Add" panel (library.js)
-  const previewEl = getTMDBPreviewContainer();
-  if (!previewEl || !tmdbSelectedShow || !tmdbSelectedShow.details) return;
-  const details = tmdbSelectedShow.details;
-  const existingRows = tabData[activeTabId]?.rows || [];
-  const showKeyBase = tmdbSelectedShow.name.toLowerCase().trim();
-
-  if (tmdbSelectedShow.mediaType === 'movie') {
-    const isMoviesTab = COLLECTIONS.find(c => c.id === activeTabId)?.isMovieTab;
-    const network = isMoviesTab
-      ? ((details.genres && details.genres[0]?.name) || 'Film')
-      : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
-    const key = `${showKeyBase}|film`;
-    const alreadyAdded = isAlreadyAdded(existingRows, { itemKey: key, mediaType: 'movie', tmdbId: tmdbSelectedShow.id });
-    const date = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
-    const runtime = details.runtime ? `${details.runtime} min` : '';
-    const belongsTo = details.belongs_to_collection;
-    previewEl.innerHTML = `
-      <div class="tmdb-preview">
-        <div class="tmdb-preview-header">
-          <div>
-            <div class="tmdb-preview-title">${esc(tmdbSelectedShow.name)}</div>
-            <div class="tmdb-result-meta">${esc(network)}</div>
-          </div>
-        </div>
-        ${belongsTo ? `<div class="tmdb-collection-note">🔗 Part of <strong>${esc(cleanCollectionName(belongsTo.name))}</strong> — you can pull the rest of this collection after adding.</div>` : ''}
-        <div class="tmdb-season-row ${alreadyAdded?'already-added':''}">
-          <input type="checkbox" ${alreadyAdded?'disabled':'checked'} data-season="film" id="szn_film">
-          <span class="tmdb-season-name">Film</span>
-          <span class="tmdb-season-meta">${esc(runtime)}${runtime?' · ':''}${esc(date)}</span>
-          ${alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}
-        </div>
-        <div class="tmdb-preview-actions">
-          <button class="btn btn-accent" onclick="addSelectedTMDBSeasons()">Add film</button>
-          <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
-        </div>
-      </div>
-    `;
-    return;
-  }
-
-  const network = (details.networks && details.networks[0]?.name) || 'Unknown';
-
-  let seasons = (details.seasons || []).filter(s => tmdbShowSpecials || s.season_number !== 0);
-  seasons.sort((a,b) => a.season_number - b.season_number);
-
-  const rowsHtml = seasons.map(s => {
-    const seasonLabel = s.season_number === 0 ? 'Specials' : `Season ${s.season_number}`;
-    const key = `${showKeyBase}|${seasonLabel.toLowerCase()}`;
-    const alreadyAdded = isAlreadyAdded(existingRows, { itemKey: key, mediaType: 'tv', tmdbId: tmdbSelectedShow.id, seasonNumber: s.season_number });
-    const date = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
-    return `<div class="tmdb-season-row ${alreadyAdded?'already-added':''}">
-      <input type="checkbox" ${alreadyAdded?'disabled':'checked'} data-season="${s.season_number}" id="szn_${s.season_number}">
-      <span class="tmdb-season-name">${esc(seasonLabel)}</span>
-      <span class="tmdb-season-meta">${s.episode_count||0} episodes · ${esc(date)}</span>
-      ${alreadyAdded ? '<span class="tmdb-already-tag">Already added</span>' : ''}
-    </div>`;
-  }).join('');
-
-  previewEl.innerHTML = `
-    <div class="tmdb-preview">
-      <div class="tmdb-preview-header">
-        <div>
-          <div class="tmdb-preview-title">${esc(tmdbSelectedShow.name)}</div>
-          <div class="tmdb-result-meta">${esc(network)}</div>
-        </div>
-        <label class="tmdb-specials-toggle">
-          <input type="checkbox" id="tmdbSpecialsToggle" ${tmdbShowSpecials?'checked':''} onchange="toggleTMDBSpecials()">
-          Include specials
-        </label>
-      </div>
-      ${rowsHtml || '<div class="tmdb-no-results">No seasons found.</div>'}
-      <div class="tmdb-preview-actions">
-        <button class="btn btn-accent" onclick="addSelectedTMDBSeasons()">Add selected seasons</button>
-        <button class="btn" onclick="cancelTMDBPreview()">Cancel</button>
-      </div>
-    </div>
-  `;
+  if (libraryPanel) libraryRenderPreview();
 }
 
 function toggleTMDBSpecials() {
@@ -201,119 +117,6 @@ function resetTMDBSearchUI() {
   if (queryEl) queryEl.value = '';
 }
 
-async function addSelectedTMDBSeasons() {
-  if (libraryPanel && !activeTabId) return librarySubmitSelection(); // a view's "+ Add" panel (library.js)
-  if (!tmdbSelectedShow || !tmdbSelectedShow.details) return;
-  // Captured before any await: switching tabs or views clears tmdbSelectedShow
-  // and changes activeTabId while the writes are in flight.
-  const collectionId = activeTabId;
-  if (!collectionId) return;
-  const showId = tmdbSelectedShow.id;
-  const details = tmdbSelectedShow.details;
-  const showName = tmdbSelectedShow.name;
-  const showKeyBase = showName.toLowerCase().trim();
-  const isMovie = tmdbSelectedShow.mediaType === 'movie';
-
-  let toInsert = [];
-  let network;
-
-  if (isMovie) {
-    const previewContainer = getTMDBPreviewContainer();
-    const cb = previewContainer?.querySelector('input[type="checkbox"][data-season="film"]');
-    if (!cb || !cb.checked || cb.disabled) { cancelTMDBPreview(); return; }
-    // for the Movies tab, use genre as theme; for True Crime/Docs (movies mixed in there) fall back to production company
-    const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
-    if (isMoviesTab) {
-      network = (details.genres && details.genres[0]?.name) || 'Film';
-    } else {
-      network = (details.production_companies && details.production_companies[0]?.name) || 'Film';
-    }
-    const key = `${showKeyBase}|film`;
-    const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
-    const dateSort = details.release_date || '2099-01-01';
-    const belongsTo = details.belongs_to_collection;
-    toInsert.push({
-      collection: collectionId,
-      item_key: key,
-      title: showName,
-      season: 'Film',
-      theme: network,
-      display_date: displayDate,
-      date_sort: dateSort,
-      watched: false,
-      status: 'confirmed',
-      tmdb_collection_id: belongsTo ? belongsTo.id : null,
-      tmdb_collection_name: belongsTo ? belongsTo.name : null,
-      collections: belongsTo ? [belongsTo.name] : [],
-      media_type: 'movie',
-      tmdb_id: showId,
-      season_number: null
-    });
-  } else {
-    network = (details.networks && details.networks[0]?.name) || 'Unknown';
-    const previewContainer = getTMDBPreviewContainer();
-    const checkboxes = previewContainer ? previewContainer.querySelectorAll('input[type="checkbox"][data-season]') : [];
-    const seasonsByNum = {};
-    (details.seasons || []).forEach(s => seasonsByNum[s.season_number] = s);
-
-    checkboxes.forEach(cb => {
-      if (!cb.checked || cb.disabled) return;
-      const num = parseInt(cb.dataset.season, 10);
-      const s = seasonsByNum[num];
-      if (!s) return;
-      const seasonLabel = num === 0 ? 'Specials' : `Season ${num}`;
-      const key = `${showKeyBase}|${seasonLabel.toLowerCase()}`;
-      const displayDate = s.air_date ? formatDisplayDate(s.air_date) : 'TBA';
-      const dateSort = s.air_date || '2099-01-01';
-      toInsert.push({
-        collection: collectionId,
-        item_key: key,
-        title: showName,
-        season: seasonLabel,
-        theme: network,
-        display_date: displayDate,
-        date_sort: dateSort,
-        watched: false,
-        status: 'confirmed',
-        media_type: 'tv',
-        tmdb_id: showId,
-        season_number: num
-      });
-    });
-  }
-
-  if (toInsert.length === 0) { cancelTMDBPreview(); return; }
-
-  // TV seasons on a TV tab go through add_tv_seasons, which links them to their
-  // show (an identified show is then checked by Refresh shows).
-  const viaShowFunction = !isMovie && isTvCollection(collectionId);
-  let outcome = null;
-  try {
-    if (viaShowFunction) {
-      outcome = await addTvSeasonRows(collectionId, toInsert, inserted => tabData[collectionId]?.rows.push(...inserted));
-    } else {
-      const inserted = await sbFetch('POST', TABLE, toInsert);
-      if (inserted) tabData[collectionId]?.rows.push(...inserted);
-    }
-    tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
-
-
-    showSaved();
-    if (activeTabId === collectionId) {
-      resetTMDBSearchUI();
-      renderFilters();
-      renderTable();
-    }
-    if (outcome) showTvAddOutcome(outcome);
-  } catch(e) {
-    if (viaShowFunction) {
-      tabData[collectionId]?.rows.sort((a,b) => a.date_sort.localeCompare(b.date_sort));
-      if (activeTabId === collectionId) renderTable();
-    }
-    if (isDuplicateKeyError(e)) {
-      showError(duplicateInsertMessage('try searching again for a fresh check'));
-    } else {
-      showError(e.message);
-    }
-  }
+function addSelectedTMDBSeasons() {
+  if (libraryPanel) return librarySubmitSelection();
 }

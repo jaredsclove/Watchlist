@@ -1,12 +1,12 @@
-// Offline tests for Catalog updates (Stage 4a, catalog-apply.js) in the
-// whole-page harness: built-in tabs only read (entry, reload, Retry, after a
-// restore); the notice; the freshness check; the preview and the exact apply
+// Offline tests for Catalog updates (catalog-apply.js; Stage 4a, applied through
+// library_catalog_apply since Stage 5) in the whole-page harness: the views only
+// read (entry, reload, Retry, after a restore); the chooser's hint; the freshness check; the preview and the exact apply
 // request; the receipt and the bounded read-back (verified or differences);
 // stale, busy and refused answers; unknown outcomes (no resend, no attribution,
 // apply-then-reversal indistinguishable); archived targets and conflicts in the
-// dialog; a database without Stage 4a; format-3 backups after an application.
-// The database rules themselves are checked on PGlite (db/test/t_4a_catalog.sql);
-// the harness's catalog_apply is an independent stand-in.
+// dialog; a database without the Stage 5 functions; format-3 backups after an application.
+// The database rules themselves are checked on PGlite (db/test/t_4a_catalog.sql,
+// db/test/t_5a_expand.sql); the harness's library_catalog_apply is an independent stand-in.
 // Run from the repo root: node tests/catalog-apply.test.js
 const assert = require('assert');
 const { createApp, runner, settle } = require('./app-harness');
@@ -16,8 +16,9 @@ const test = T.test;
 const writes = app => app.writes().map(r => `${r.method} ${r.url.split('/rest/v1/')[1].split('?')[0]}`);
 const box = app => app.el('catalogModalBox').innerHTML;
 const text = app => box(app).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
-const rpcCalls = app => app.requests.filter(r => r.url.includes('/rpc/catalog_apply'));
-const openTab = async (app, id) => { app.ctx.switchTab(id); await settle(); };
+const rpcCalls = app => app.requests.filter(r => r.url.includes('/rpc/library_catalog_apply'));
+// The dialog opens from the Browse bar in any view (Stage 5: no storage tabs).
+const openView = async app => { app.ctx.switchView('alltv'); await settle(); };
 
 // Sheridan with its catalog applied, then: one season and one film missing again,
 // one season's date and one film's date back to TBA (the catalog now dates them).
@@ -36,29 +37,32 @@ async function behind(opts = {}) {
 }
 
 // ── Read-only tabs ──
-test('entry, reload, Retry and the post-restore reload of a built-in tab only read, even with catalog entries waiting', async () => {
+test('entry, reload, Retry and the post-restore reload of the views and the collection only read, even with catalog entries waiting; the chooser counts them', async () => {
   const { app } = await behind();
-  await openTab(app, 'sheridan');
-  app.ctx.loadTab('sheridan'); await settle();
-  app.failNext(r => r.method === 'GET' && r.url.includes('collection=eq.sheridan'));
-  app.ctx.loadTab('sheridan'); await settle();
-  app.ctx.loadTab('sheridan'); await settle(); // Retry
+  await openView(app);
+  app.ctx.loadDerivedView(); await settle();
+  app.failNext(r => r.method === 'GET' && r.url.includes('/library_catalog_shows?'));
+  app.ctx.loadDerivedView(); await settle();
+  app.ctx.loadDerivedView(); await settle(); // Retry
+  app.ctx.openBrowseCollection(app.browseId('sheridan')); await settle();
   app.ctx.finishRestoreAndReload(); await settle();
   assert.deepStrictEqual(app.writes(), []);
-  assert.ok(app.el('banner').innerHTML.includes('4 catalog entries are waiting'), app.el('banner').innerHTML);
+  app.ctx.openCatalogChooser(null); await settle();
+  assert.match(text(app), /Sheridan catalog[^A-Z]*4 entries not in your list yet/);
+  assert.deepStrictEqual(app.writes(), []);
 });
 
 // ── Review, apply, receipt, read-back ──
-test('review: freshness check, then a preview; Apply sends the same catalog with the preview hash; receipt read back as verified; the tab reloads by GET', async () => {
+test('review: freshness check, then a preview; Apply sends the same catalog with the preview hash; receipt read back as verified; the view reloads by GET', async () => {
   const { app, seasonDef, filmDef, missingSeason, missingFilm } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   const t = text(app);
   assert.match(t, /Applying this catalog would make these changes\. Nothing has changed yet\./);
   assert.match(t, /New seasons \(1\)/); assert.match(t, /New films \(1\)/); assert.match(t, /Date updates \(2\)/);
   assert.match(t, /TBA → /);
   assert.ok(app.requests.some(r => r.url === 'config.js'), 'config.js read again');
-  assert.deepStrictEqual(writes(app), ['POST rpc/catalog_apply'], 'the preview is the only call so far');
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_catalog_apply'], 'the preview is the only call so far');
   const previewHash = app.get('catalogDialog.preview.hash');
   assert.strictEqual(rpcCalls(app)[0].body.p_approved, undefined);
   await app.ctx.catalogApply(); await settle();
@@ -67,7 +71,7 @@ test('review: freshness check, then a preview; Apply sends the same catalog with
   assert.deepStrictEqual(apply.body.p_defaults, rpcCalls(app)[0].body.p_defaults);
   assert.match(text(app), /Applied 4 changes\./);
   assert.match(text(app), /Verified: every applied change was read back as approved\./);
-  assert.deepStrictEqual(writes(app), ['POST rpc/catalog_apply', 'POST rpc/catalog_apply'], 'read-back and reload are GETs');
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_catalog_apply', 'POST rpc/library_catalog_apply'], 'read-back and reload are GETs');
   const rc = app.get('catalogDialog.result.receipt');
   assert.ok(app.store.watchlist_items.some(r => r.id === rc[Object.keys(rc).find(k => k.startsWith('insert_film:'))].row_id && r.item_key === missingFilm.k));
   assert.ok(app.store.watchlist_items.some(r => r.item_key === missingSeason.k));
@@ -78,7 +82,7 @@ test('review: freshness check, then a preview; Apply sends the same catalog with
 
 test('read-back reports differences instead of "verified" when a record changed after the commit', async () => {
   const { app, seasonDef } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   const g = app.hold(readBackRead);
   const done = app.ctx.catalogApply();
@@ -93,19 +97,20 @@ test('a page whose catalog is older than the published one offers no Apply and c
   const fs = require('fs');
   const cfg = fs.readFileSync(require('path').join(__dirname, '..', 'config.js'), 'utf8').replace('k:"yellowstone|season 1",t:"Yellowstone"', 'k:"yellowstone|season 1",t:"Yellowstone (renamed)"');
   const { app } = await behind({ configText: cfg });
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   assert.match(text(app), /This page has an older catalog than the one published\. Reload the page and review again\. Nothing was changed\./);
   assert.strictEqual(rpcCalls(app).length, 0);
   assert.ok(!box(app).includes('catalogApply()'));
 });
 
-// The read-back's complete read of the tab's rows (Range-paginated, unlike the tab load).
-const readBackRead = r => r.method === 'GET' && r.url.includes('/watchlist_items?') && r.url.includes('collection=eq.sheridan') && !!r.headers.Range;
+// The read-back's complete read of the rows (Range-paginated, strict, every row: the
+// governance views then say which the catalog governs). The view's own reload filters by kind.
+const readBackRead = r => r.method === 'GET' && r.url.includes('/watchlist_items?') && !r.url.includes('is_film=') && !!r.headers.Range;
 
 test('read-back compares every approved value: a new film’s later title, status and watched changes are reported, not verified', async () => {
   const { app, missingFilm } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   const g = app.hold(readBackRead);
   const done = app.ctx.catalogApply();
@@ -120,10 +125,10 @@ test('read-back compares every approved value: a new film’s later title, statu
 
 test('read-back: an incomplete receipt and a membership in another collection are differences', async () => {
   const { app, missingFilm } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
-  const real = app.rpcHandlers.catalog_apply;
-  app.rpcHandlers.catalog_apply = body => {
+  const real = app.rpcHandlers.library_catalog_apply;
+  app.rpcHandlers.library_catalog_apply = body => {
     const res = real(body);
     if (body.p_approved == null) return res;
     return { ...res, text: async () => { const j = JSON.parse(await res.text()); delete j.receipt[Object.keys(j.receipt).find(k => k.startsWith('fill_date:'))]; return JSON.stringify(j); } };
@@ -142,7 +147,7 @@ test('read-back: an incomplete receipt and a membership in another collection ar
 
 test('check state after a lost reply: a different exact date on the approved row is not "present"; the differences are named; nothing resent', async () => {
   const { app, seasonDef } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   loseReply(app, { commit: false });
   await app.ctx.catalogApply(); await settle();
@@ -157,7 +162,7 @@ test('check state after a lost reply: a different exact date on the approved row
 
 test('check state: "present" needs every approved outcome exactly; a committed apply whose new film was later edited is not "present"', async () => {
   const { app, missingFilm } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   loseReply(app, { commit: true });
   await app.ctx.catalogApply(); await settle();
@@ -193,13 +198,13 @@ async function rich({ archived = false } = {}) {
 }
 // Applies through the dialog; mutate(store, result) runs right after the commit, before the read-back.
 async function verifyAfter(app, mutate) {
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
-  const real = app.rpcHandlers.catalog_apply;
-  app.rpcHandlers.catalog_apply = body => {
+  const real = app.rpcHandlers.library_catalog_apply;
+  app.rpcHandlers.library_catalog_apply = body => {
     const res = real(body);
     if (body.p_approved == null) return res;
-    app.rpcHandlers.catalog_apply = real;
+    app.rpcHandlers.library_catalog_apply = real;
     return { ...res, text: async () => { const j = JSON.parse(await res.text()); mutate(app.store, j); return JSON.stringify(j); } };
   };
   await app.ctx.catalogApply(); await settle();
@@ -224,8 +229,10 @@ const AUDIT = [
   ['attach status (reopened show)', (st, j, x) => { st.tv_shows.find(y => y.id === x.B.id).status = 'watching'; }, 'status differs'],
   ['reopen: show not On List', (st, j, x) => { st.tv_shows.find(y => y.id === x.B.id).status = 'skipped'; }, 'is not On List'],
   ...SEASON_FIELDS.map(f => [`insert_season ${f}`, (st, j, x) => { const r = rowByKey(st, x.bDrop.item_key); r[f] = flip(r[f]); }, `${f} differ`]),
-  ['insert_season show link', (st, j, x) => { rowByKey(st, x.bDrop.item_key).show_id = x.A.id; }, 'not linked to the approved show'],
-  ...FILM_FIELDS.map(f => [`insert_film ${f}`, (st, j, x) => { const r = rowByKey(st, x.missingFilmDef.k); r[f] = flip(r[f]); }, `${f} differ`]),
+  // (Stage 5: a row moved to a show the catalog doesn't govern is outside what the read-back reads: "not found".)
+  ['insert_season show link', (st, j, x) => { rowByKey(st, x.bDrop.item_key).show_id = x.A.id; }, 'not found'],
+  // (A film whose kind changes is no longer a governed film — the database's link refuses that — so "not found".)
+  ...FILM_FIELDS.map(f => [`insert_film ${f}`, (st, j, x) => { const r = rowByKey(st, x.missingFilmDef.k); r[f] = flip(r[f]); }, ['season', 'media_type'].includes(f) ? 'not found' : `${f} differ`]),
   ['insert_film show link', (st, j, x) => { rowByKey(st, x.missingFilmDef.k).show_id = x.B.id; }, 'linked to a show'],
   ['fill_date season date', (st, j, x) => { rowByKey(st, x.seasonFillDef.k).display_date = 'Dec 31, 2030'; }, 'the date is Dec 31, 2030'],
   ['fill_date season sort date', (st, j, x) => { rowByKey(st, x.seasonFillDef.k).date_sort = '2030-12-31'; }, 'the date is'],
@@ -285,7 +292,7 @@ test('verification reads are strict: an empty membership answer without an exact
 
 test('check state uses the same comparison: a lost committed apply whose dated season’s show was later Skipped is not "present"; an incomplete read stays unknown', async () => {
   const x = await rich();
-  await openTab(x.app, 'sheridan');
+  await openView(x.app);
   x.app.ctx.openCatalogUpdates('sheridan'); await settle();
   loseReply(x.app, { commit: true });
   await x.app.ctx.catalogApply(); await settle();
@@ -304,7 +311,7 @@ test('check state uses the same comparison: a lost committed apply whose dated s
 // ── Refusals ──
 test('stale: a film Skip between preview and apply → refused, nothing written; Review again shows the new preview', async () => {
   const { app, filmDef } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   app.store.watchlist_items.find(r => r.item_key === filmDef.k).status = 'skipped';
   const before = JSON.stringify(app.store.watchlist_items);
@@ -317,7 +324,7 @@ test('stale: a film Skip between preview and apply → refused, nothing written;
 
 test('busy: nothing written, no automatic retry', async () => {
   const { app } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   app.catalogBusyNext = 1;
   const before = JSON.stringify(app.store.watchlist_items);
@@ -329,17 +336,17 @@ test('busy: nothing written, no automatic retry', async () => {
 
 // ── Unknown outcomes ──
 function loseReply(app, { commit }) {
-  const real = app.rpcHandlers.catalog_apply;
-  app.rpcHandlers.catalog_apply = body => {
+  const real = app.rpcHandlers.library_catalog_apply;
+  app.rpcHandlers.library_catalog_apply = body => {
     if (body.p_approved == null) return real(body);
-    app.rpcHandlers.catalog_apply = real;
+    app.rpcHandlers.library_catalog_apply = real;
     if (commit) real(body);
     throw new TypeError('Failed to fetch');
   };
 }
 test('no reply after a committed apply: unknown, never resent; Check current state says the library holds the changes without saying who made them', async () => {
   const { app } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   loseReply(app, { commit: true });
   await app.ctx.catalogApply(); await settle();
@@ -352,7 +359,7 @@ test('no reply after a committed apply: unknown, never resent; Check current sta
 
 test('no reply and nothing committed: "aren’t in your library right now", never "not applied"; the same as applied-then-undone; applying again is the owner’s choice', async () => {
   const { app } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   loseReply(app, { commit: false });
   await app.ctx.catalogApply(); await settle();
@@ -367,7 +374,7 @@ test('no reply and nothing committed: "aren’t in your library right now", neve
 
 test('applied, then undone elsewhere: Check current state can’t tell it from never applied', async () => {
   const { app } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   const snapshot = JSON.parse(JSON.stringify({ w: app.store.watchlist_items, s: app.store.tv_shows, m: app.store.collection_memberships }));
   loseReply(app, { commit: true });
@@ -381,7 +388,7 @@ test('applied, then undone elsewhere: Check current state can’t tell it from n
 test('archived target: the preview says new items won’t join it; the receipt has no membership and the read-back verifies that', async () => {
   const { app } = await behind();
   app.store.personal_collections.find(c => c.legacy_source === 'sheridan').archived_at = '2026-10-08T00:00:00+00:00';
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   assert.match(text(app), /won’t join Sheridan \(archived\)/);
   await app.ctx.catalogApply(); await settle();
@@ -400,7 +407,7 @@ test('conflicts are listed as not included and reported as such after applying',
   const drop = rows.find(r => r.show_id === mayor.id && r.media_type == null);
   const missing = rows.filter(r => r.season === 'Film').at(-1);
   const app = await createApp({ rows: rows.filter(r => r !== drop && r !== missing), tvShows: shows });
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   assert.match(text(app), /1 entry is not included; it needs review\./);
   assert.match(text(app), /Not included — needs review \(1\)/);
@@ -413,27 +420,24 @@ test('an identified row holding a catalog key keeps it a no-op (the harness foll
   app.store.watchlist_items.push({ id: 'zz-identified', collection: 'sheridan', item_key: missingFilm.k, title: missingFilm.t, season: 'Film', theme: 'Drama',
     display_date: missingFilm.d, date_sort: missingFilm.ds, status: 'confirmed', watched: false, media_type: 'movie', tmdb_id: 990001, season_number: null,
     show_id: null, skipped: false, watch_with: [], collections: [] });
-  await openTab(app, 'sheridan');
+  await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   const doc = app.get('catalogDialog.preview.document');
   assert.ok(!doc.entries.some(e => e.kind === 'insert_film' || e.kind === 'membership'), JSON.stringify(doc.entries.filter(e => e.kind !== 'noop')));
   assert.strictEqual(doc.entries.find(e => e.key === `noop:${missingFilm.k}`).category, 'identified');
 });
 
-test('closing the dialog returns keyboard focus to the redrawn Review button, or to the open tab once nothing is waiting', async () => {
+test('closing the dialog returns keyboard focus to what opened it, or to the Browse bar’s Catalog updates button when that is gone', async () => {
   const { app } = await behind();
-  await openTab(app, 'sheridan');
+  await openView(app);
   const focused = [];
-  const realGet = app.ctx.document.getElementById;
-  app.ctx.document.querySelector = sel => (sel === '#banner .catalog-banner button' && app.el('banner').innerHTML.includes('Review') ? { focus: () => focused.push('review') }
-    : sel === '#tabBar .tab.active' ? { focus: () => focused.push('tab') } : null);
-  app.ctx.openCatalogUpdates('sheridan', { isConnected: false }); await settle();
+  app.ctx.document.querySelector = sel => (sel === '#browseBar .catalog-btn' ? { focus: () => focused.push('catalog-btn') } : null);
+  app.ctx.openCatalogUpdates('sheridan', { isConnected: true, focus: () => focused.push('opener') }); await settle();
   app.ctx.closeCatalogUpdates(); await settle();
   app.ctx.openCatalogUpdates('sheridan', { isConnected: false }); await settle();
   await app.ctx.catalogApply(); await settle();
   app.ctx.closeCatalogUpdates(); await settle();
-  assert.deepStrictEqual(focused, ['review', 'tab']);
-  app.ctx.document.getElementById = realGet;
+  assert.deepStrictEqual(focused, ['opener', 'catalog-btn']);
 });
 
 test('a redraw keeps keyboard focus inside the dialog (preview → applied); conflicts show the catalog title and label', async () => {
@@ -445,7 +449,7 @@ test('a redraw keeps keyboard focus inside the dialog (preview → applied); con
   for (const r of rows.filter(x => x.show_id === mayor.id)) { const m = /^Season (\d+)$/.exec(r.season); if (m) Object.assign(r, { media_type: 'tv', tmdb_id: 97951, season_number: Number(m[1]) }); }
   const drop = rows.find(r => r.show_id === mayor.id && r.media_type == null);
   const app = await createApp({ rows: rows.filter(r => r !== drop), tvShows: shows });
-  await openTab(app, 'sheridan');
+  await openView(app);
   const boxEl = app.el('catalogModalBox');
   let focusedBox = 0;
   boxEl.focus = () => { focusedBox++; };
@@ -461,12 +465,12 @@ test('a redraw keeps keyboard focus inside the dialog (preview → applied); con
 });
 
 // ── Compatibility ──
-test('a database without Stage 4a: tabs still only read; Review says catalog updates aren’t available, nothing written', async () => {
-  const { app } = await behind({ catalog4a: false });
-  await openTab(app, 'sheridan');
+test('a database without the Stage 5 functions: Review says catalog updates aren’t available, nothing written, the Stage 4a function never called', async () => {
+  const { app } = await behind({ stage5: null });
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   assert.match(text(app), /Catalog updates aren’t available on this database yet\. Nothing was changed\./);
-  assert.deepStrictEqual(app.writes().filter(r => !r.url.includes('/rpc/catalog_apply')), []);
+  assert.deepStrictEqual(app.writes().filter(r => !r.url.includes('/rpc/library_catalog_apply')), []);
+  assert.ok(!app.requests.some(r => r.url.includes('/rpc/catalog_apply')));
 });
 
 test('a backup taken after an application is format 3 and holds the applied rows (validation and restore: db/test/t_4a_catalog.sql, real ids)', async () => {

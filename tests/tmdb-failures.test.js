@@ -1,6 +1,7 @@
 // Offline tests for how TMDB lookup failures are reported: the message helpers in
-// ui-helpers.js, and the real refresh / pull / add flows run against stubbed TMDB
-// and database calls.
+// ui-helpers.js, the movie tools' refresh / pull / add flows run against stubbed
+// TMDB and database calls, and Refresh shows in the whole-page harness (Stage 5:
+// it runs in the "+ Add" panel on a complete library read).
 // Run from the repo root: node tests/tmdb-failures.test.js
 // No network, no database. Nothing here can write anywhere: sbFetch is a stub
 // that only records what would have been sent.
@@ -10,10 +11,12 @@ const vm = require('vm');
 const assert = require('assert');
 
 const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'refresh-shows.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'library.js'];
+const { createApp, settle } = require('./app-harness');
 
-// A fresh sandbox per test. tmdb(path) decides each TMDB response: return a value,
-// or throw via fail(status) / down().
-function makeEnv({ tmdb, tracked = [], rows = [], tab = 'othertv', checkboxes = [] }) {
+// A fresh sandbox per test, as All Movies' "+ Add" panel with its tools prepared
+// (the films cache filled from a complete read). tmdb(path) decides each TMDB
+// response: return a value, or throw via fail(status) / down().
+function makeEnv({ tmdb, rows = [], checkboxes = [] }) {
   const els = new Map();
   const el = id => {
     if (!els.has(id)) els.set(id, { id, innerHTML: '', value: '', classList: { add() {}, remove() {} }, scrollIntoView() {} });
@@ -23,19 +26,21 @@ function makeEnv({ tmdb, tracked = [], rows = [], tab = 'othertv', checkboxes = 
   const ctx = {
     console, setTimeout: () => 0,
     document: { getElementById: el, querySelectorAll: () => checkboxes },
-    tabData: { [tab]: { rows, loaded: true, newKeys: [] } },
-    activeTabId: tab,
-    activeViewId: null, libraryPanel: null, orgEpoch: 0, // page state the tool context reads (Stage 4b, library.js)
+    tabData: { films: { rows, loaded: true, newKeys: [], known: rows.slice() } },
+    // page state the tool context reads (library.js): All Movies with its prepared panel
+    activeViewId: 'allmovies', orgEpoch: 0,
+    libraryPanel: { session: 1, media: 'movie', mode: 'tools', viewId: 'allmovies', epoch: 0, toolsReady: true },
     tmdbShowSpecials: false,
     tmdbFetch: async p => { log.tmdbCalls++; return tmdb(p); },
-    sbFetch: async (method, p, body) => {
-      if (method === 'GET' && p.startsWith('tv_shows?')) {
-        if (!/collection=eq\.[^&]+&select=id,title,tmdb_id/.test(p)) throw new Error(`unexpected show read ${p}`);
-        return tracked;
-      }
-      if (method === 'POST') { log.posts.push({ table: p, body: JSON.parse(JSON.stringify(body)) }); return body.map((r, i) => ({ id: `new-${i}`, ...r })); }
-      throw new Error(`unexpected ${method} ${p}`);
+    sbFetch: async (method, p) => { throw new Error(`unexpected ${method} ${p}`); },
+    // Films are added through library_add_films (body: the films, recorded as sent).
+    sbRpc: async (name, body) => {
+      if (name !== 'library_add_films') throw new Error(`unexpected rpc ${name}`);
+      log.posts.push({ table: `rpc/${name}`, body: JSON.parse(JSON.stringify(body.p_films)) });
+      const inserted = body.p_films.map((r, i) => ({ id: `new-${i}`, ...r }));
+      return { results: inserted.map((r, i) => ({ index: i, outcome: 'inserted', id: r.id })), inserted };
     },
+    showNotice() {}, isBrowseView: id => id === 'allmovies', loadBrowseView() {},
     cancelTMDBPreview: () => { log.cancelled++; },
     resetTMDBSearchUI: () => { log.reset++; },
     renderFilters() {}, renderTable() {},
@@ -90,39 +95,45 @@ test('add note: partial and total', () => {
   assert.ok(env.ctx.tmdbAddFailureNote(1, ['A'], 'film').includes('the selected film, so nothing was added'));
 });
 
-// ── Refresh shows ──
+// ── Refresh shows (whole page: All TV's "+ Add" panel) ──
+function libraryOf(rows) {
+  const tvShows = shows.map(sh => ({ id: `show-${sh.tmdb_id}`, collection: 'othertv', title: sh.title, show_key: sh.title.toLowerCase(), tmdb_id: sh.tmdb_id, status: 'confirmed' }));
+  return { tvShows, rows: rows.map(r => ({ theme: 'Net', status: 'confirmed', watched: false, skipped: false, watch_with: [], collections: [], ...r, show_id: `show-${r.tmdb_id}` })) };
+}
+async function refreshShows({ rows = showRows, tmdb }) {
+  const app = await createApp({ ...libraryOf(rows), tmdb: p => p.startsWith('/tv/') ? tmdb(p) : undefined });
+  app.ctx.switchView('alltv'); await settle();
+  app.ctx.openLibraryPanel('tv', 'refresh'); await settle();
+  await app.ctx.libraryRefreshShows(); await settle();
+  assert.deepStrictEqual(app.writes(), [], 'checking writes nothing');
+  return app.el('tmdbPreview').innerHTML.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/’/g, "'").replace(/\s+/g, ' ').trim();
+}
+const status = code => ({ __status: code });
 test('Refresh shows: all lookups succeed, nothing new → true "up to date"', async () => {
-  const env = makeEnv({ tracked: shows, rows: showRows, tmdb: p => tvDetails(+p.split('/')[2]) });
-  await env.ctx.refreshShows();
-  assert.ok(env.preview().startsWith("✓ Everything's up to date"), env.preview());
+  const p = await refreshShows({ tmdb: p => tvDetails(+p.split('/')[2]) });
+  assert.ok(p.startsWith("Everything's up to date"), p);
 });
 test('Refresh shows: every lookup fails (HTTP 500) → outage message, no "up to date"', async () => {
-  const env = makeEnv({ tracked: shows, rows: showRows, tmdb: () => fail(500) });
-  await env.ctx.refreshShows();
-  assert.strictEqual(env.preview(), "Couldn't check TMDB right now. 3 of 3 show lookups failed. Nothing was changed.");
+  assert.strictEqual(await refreshShows({ tmdb: () => status(500) }), "Couldn't check TMDB right now. 3 of 3 show lookups failed. Nothing was changed.");
 });
 test('Refresh shows: network down → outage message', async () => {
-  const env = makeEnv({ tracked: shows, rows: showRows, tmdb: () => down() });
-  await env.ctx.refreshShows();
-  assert.ok(env.preview().startsWith("Couldn't check TMDB right now."), env.preview());
+  const p = await refreshShows({ tmdb: () => down() });
+  assert.ok(p.startsWith("Couldn't check TMDB right now."), p);
 });
 test('Refresh shows: partial failure, nothing new → incomplete warning, no "up to date"', async () => {
-  const env = makeEnv({ tracked: shows, rows: showRows, tmdb: p => p === '/tv/2' ? fail(503) : tvDetails(+p.split('/')[2]) });
-  await env.ctx.refreshShows();
-  assert.ok(!env.preview().includes('Everything'), env.preview());
-  assert.ok(env.preview().includes('Checked 2 of 3 shows. 1 TMDB lookup failed (Bravo)'), env.preview());
+  const p = await refreshShows({ tmdb: p => p === '/tv/2' ? status(503) : tvDetails(+p.split('/')[2]) });
+  assert.ok(!p.includes('Everything'), p);
+  assert.ok(p.includes('Checked 2 of 3 shows. 1 TMDB lookup failed (Bravo)'), p);
 });
 test('Refresh shows: partial failure still shows new seasons and TBA→date updates from shows that loaded', async () => {
-  const rows = [seasonRow(1, 'Alpha'), { ...seasonRow(3, 'Charlie'), display_date: 'TBA', date_sort: '2099-01-01' }];
-  const env = makeEnv({ tracked: shows, rows, tmdb: p => {
-    if (p === '/tv/2') fail(500);
+  const rows = [seasonRow(1, 'Alpha'), seasonRow(2, 'Bravo'), { ...seasonRow(3, 'Charlie'), display_date: 'TBA', date_sort: '2099-01-01' }];
+  const p = await refreshShows({ rows, tmdb: p => {
+    if (p === '/tv/2') return status(500);
     if (p === '/tv/1') return { id: 1, seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-05-01', episode_count: 6 }] };
     return { id: 3, seasons: [{ season_number: 1, air_date: '2026-11-26' }] };
   } });
-  await env.ctx.refreshShows();
-  const p = env.preview();
-  assert.ok(p.includes('Checked 2 of 3 shows') && p.includes('New seasons found') && p.includes('Season 2'), p);
-  assert.ok(p.includes('Charlie — Season 1: TBA → Nov 26, 2026'), p);
+  assert.ok(p.includes('Checked 2 of 3 shows') && p.includes('Alpha') && p.includes('Season 2'), p);
+  assert.ok(p.includes('Charlie · Season 1 TBA → Nov 26, 2026'), p);
 });
 
 // ── Refresh collections ──
@@ -132,17 +143,17 @@ const collRows = [
 ];
 const collection = id => ({ id, name: id === 100 ? 'Alpha Collection' : 'Bravo Collection', parts: [{ id: id === 100 ? 11 : 21, title: id === 100 ? 'A' : 'B', release_date: '2001-01-01' }] });
 test('Refresh collections: all lookups succeed, nothing new → true "up to date"', async () => {
-  const env = makeEnv({ tab: 'movies', rows: collRows, tmdb: p => collection(+p.split('/')[2]) });
+  const env = makeEnv({ rows: collRows, tmdb: p => collection(+p.split('/')[2]) });
   await env.ctx.refreshCollections();
   assert.ok(env.preview().startsWith("✓ Everything's up to date"), env.preview());
 });
 test('Refresh collections: every lookup fails → outage message', async () => {
-  const env = makeEnv({ tab: 'movies', rows: collRows, tmdb: () => fail(500) });
+  const env = makeEnv({ rows: collRows, tmdb: () => fail(500) });
   await env.ctx.refreshCollections();
   assert.strictEqual(env.preview(), "Couldn't check TMDB right now. 2 of 2 collection lookups failed. Nothing was changed.");
 });
 test('Refresh collections: partial failure → incomplete warning naming the collection', async () => {
-  const env = makeEnv({ tab: 'movies', rows: collRows, tmdb: p => p === '/collection/200' ? down() : collection(100) });
+  const env = makeEnv({ rows: collRows, tmdb: p => p === '/collection/200' ? down() : collection(100) });
   await env.ctx.refreshCollections();
   assert.ok(!env.preview().includes('Everything'), env.preview());
   assert.ok(env.preview().includes('Checked 1 of 2 collections. 1 TMDB lookup failed (Bravo)'), env.preview());
@@ -150,7 +161,7 @@ test('Refresh collections: partial failure → incomplete warning naming the col
 
 // ── Universe pull ──
 test('Universe: outage → TMDB error, not "Couldn\'t find on TMDB"', async () => {
-  const env = makeEnv({ tab: 'movies', rows: [], tmdb: () => fail(500) });
+  const env = makeEnv({ rows: [], tmdb: () => fail(500) });
   await env.ctx.pullUniverse('mcu');
   const n = vm.runInContext('UNIVERSE_LISTS.mcu.titles.length', env.ctx);
   assert.strictEqual(env.preview(), `Couldn't check TMDB right now. ${n} of ${n} title lookups failed. Nothing was changed.`);
@@ -159,7 +170,7 @@ test('Universe: outage → TMDB error, not "Couldn\'t find on TMDB"', async () =
 test('Universe: a genuine 404 is "not found"; a failed request is reported separately', async () => {
   const titles = vm.runInContext('UNIVERSE_LISTS.mcu.titles', makeEnv({ tmdb: () => ({}) }).ctx);
   const [first, second] = [titles[0], titles[1]];
-  const env = makeEnv({ tab: 'movies', rows: [], tmdb: p => {
+  const env = makeEnv({ rows: [], tmdb: p => {
     if (p === `/movie/${first.id}`) fail(404);
     if (p === `/movie/${second.id}`) fail(503);
     return { id: +p.split('/')[2], title: 'X', release_date: '2010-01-01' };
@@ -176,7 +187,7 @@ const pullData = { collectionId: 109076, collectionName: 'Lost Boys', tmdbCollec
   movies: [{ id: 13489, title: 'Lost Boys: The Tribe' }, { id: 46812, title: 'Lost Boys: The Thirst' }] };
 const movieDetails = id => ({ id, genres: [{ name: 'Horror' }], release_date: '2008-07-29' });
 function pullEnv(tmdb) {
-  const env = makeEnv({ tab: 'movies', rows: [], tmdb, checkboxes: pullData.movies.map(m => cb({ movieId: String(m.id) })) });
+  const env = makeEnv({ rows: [], tmdb, checkboxes: pullData.movies.map(m => cb({ movieId: String(m.id) })) });
   env.ctx.__pullCollectionData = pullData;
   return env;
 }
@@ -204,7 +215,7 @@ test('Pull collection Apply: all lookups succeed → both inserted, no warning (
   assert.strictEqual(env.banner(), '');
 });
 test('Refresh collections Apply: 1 of 2 fails → 1 inserted + warning', async () => {
-  const env = makeEnv({ tab: 'movies', rows: [], tmdb: p => p === '/movie/2' ? fail(500) : movieDetails(1),
+  const env = makeEnv({ rows: [], tmdb: p => p === '/movie/2' ? fail(500) : movieDetails(1),
     checkboxes: [cb({ collectionIdx: '0', movieId: '1' }), cb({ collectionIdx: '0', movieId: '2' })] });
   env.ctx.__refreshCollectionsData = [{ collectionId: 5, collectionName: 'X Collection', newOnes: [{ id: 1, title: 'One' }, { id: 2, title: 'Two' }] }];
   await env.ctx.addRefreshedCollectionMovies();
@@ -212,7 +223,7 @@ test('Refresh collections Apply: 1 of 2 fails → 1 inserted + warning', async (
   assert.ok(env.banner().includes('Added 1 of 2 selected films') && env.banner().includes('Two'), env.banner());
 });
 test('Universe Apply: every lookup fails → nothing written, clear error', async () => {
-  const env = makeEnv({ tab: 'movies', rows: [], tmdb: () => fail(502),
+  const env = makeEnv({ rows: [], tmdb: () => fail(502),
     checkboxes: [cb({ tmdbId: '1', title: 'One' }), cb({ tmdbId: '2', title: 'Two' })] });
   env.ctx.__universePullKey = 'mcu';
   await env.ctx.addPulledUniverseMovies();
@@ -221,7 +232,7 @@ test('Universe Apply: every lookup fails → nothing written, clear error', asyn
   assert.ok(env.banner().includes('nothing was added'), env.banner());
 });
 test('Person Apply: 1 of 2 fails → 1 inserted + warning', async () => {
-  const env = makeEnv({ tab: 'movies', rows: [], tmdb: p => p === '/movie/2' ? down() : movieDetails(1),
+  const env = makeEnv({ rows: [], tmdb: p => p === '/movie/2' ? down() : movieDetails(1),
     checkboxes: [cb({ tmdbId: '1', title: 'One' }), cb({ tmdbId: '2', title: 'Two' })] });
   env.ctx.__personPullName = 'Someone';
   await env.ctx.addPulledPersonMovies();
@@ -230,7 +241,7 @@ test('Person Apply: 1 of 2 fails → 1 inserted + warning', async () => {
   assert.ok(env.banner().includes("Added 1 of 2 selected films. Couldn't load TMDB details for Two"), env.banner());
 });
 test('Apply with nothing selected still just closes the preview (unchanged)', async () => {
-  const env = makeEnv({ tab: 'movies', rows: [], tmdb: () => ({}), checkboxes: [] });
+  const env = makeEnv({ rows: [], tmdb: () => ({}), checkboxes: [] });
   env.ctx.__personPullName = 'Someone';
   await env.ctx.addPulledPersonMovies();
   assert.strictEqual(env.log.cancelled, 1);

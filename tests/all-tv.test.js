@@ -78,11 +78,11 @@ test('entering All TV makes GET requests only: TV rows and every show, paginated
   app.ctx.switchView('alltv'); await settle();
   const reqs = app.requests.slice(before);
   assert.ok(reqs.length >= 2 && reqs.every(r => r.method === 'GET'), 'reads only');
-  assert.ok(reqs.some(r => r.url.includes('/rest/v1/watchlist_items?') && r.url.includes('collection=in.') && r.headers.Range));
+  assert.ok(reqs.some(r => r.url.includes('/rest/v1/watchlist_items?') && r.url.includes('is_film=eq.false') && r.headers.Range));
   assert.ok(reqs.some(r => r.url.includes('/rest/v1/tv_shows?') && r.headers.Range));
   assert.ok(!reqs.some(r => /rpc\/|themoviedb/.test(r.url)));
   assert.strictEqual(app.writes().length, 0);
-  assert.strictEqual(app.get('activeTabId'), null);
+  assert.strictEqual(app.get('typeof activeTabId'), 'undefined', 'no storage tab state (Stage 5)');
   assert.strictEqual(app.get('tabData.disney'), undefined, 'no collection tab was loaded');
 });
 
@@ -104,7 +104,7 @@ test('a reported-count mismatch or a failed read shows Retry, never a partial li
 test('a late All TV response never draws after leaving the view or over a newer view', async () => {
   const s = show({ title: 'Alpha', status: 'watching' }, [{ num: 1 }]);
   const app = await createApp({ rows: s.rows, tvShows: [s.show] });
-  const g = app.hold(r => r.method === 'GET' && r.url.includes('collection=in.'));
+  const g = app.hold(r => r.method === 'GET' && r.url.includes('is_film=eq.false'));
   app.ctx.switchView('alltv');
   await g.reached;
   app.ctx.switchView('comingsoon'); await settle();
@@ -273,14 +273,13 @@ test('show status: one set_show_status call by real id; the show leaves the defa
   assert.deepStrictEqual(titlesShown(app), [], 'leaves the Skipped filter when it is no longer Skipped');
 });
 
-test('Watched and Skip from All TV: one function call each by row id, mirrored into a loaded tab; a failure rolls back', async () => {
+test('Watched and Skip from All TV: one function call each by row id, mirrored into the view’s rows; a failure rolls back', async () => {
   const s = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, date: day(-30) }, { num: 2, date: day(-3) }]);
   const app = await createApp({ rows: s.rows, tvShows: [s.show] });
-  app.ctx.switchTab('othertv'); await settle();
   app.ctx.switchView('alltv'); await settle();
   await app.ctx.toggleWatch(s.rows[0].id); await settle();
   assert.deepStrictEqual(app.writes().map(r => r.url.split('/rest/v1/')[1]), ['rpc/set_season_watched']);
-  assert.strictEqual(app.get('tabData.othertv.rows').find(r => r.id === s.rows[0].id).watched, true, 'mirrored to the tab cache');
+  assert.strictEqual(app.get('derivedData.rows').find(r => r.id === s.rows[0].id).watched, true, 'mirrored into the view’s rows');
   assert.ok(app.el('tbody').innerHTML.includes('Season 2 · '), 'up next advanced');
   await app.ctx.setSeasonSkipped(s.rows[1].id, true); await settle();
   assert.strictEqual(app.writes()[1].body.p_row_id, s.rows[1].id);
@@ -348,8 +347,9 @@ test('no request from All TV ever uses alltv as a collection; actions never writ
     assert.ok(!/alltv/.test(r.url), r.url);
     assert.ok(!(r.body && JSON.stringify(r.body).includes('"collection"')), 'no collection written');
   }
-  app.ctx.addEntry(); await settle(); // no active collection: nothing happens
+  assert.strictEqual(typeof app.ctx.addEntry, 'undefined', 'the storage tabs’ add form is gone (Stage 5)');
   assert.strictEqual(app.writes().length, 2);
+  assert.deepStrictEqual(app.storageRequests(), [], 'no request names a storage value');
 });
 
 T.run();

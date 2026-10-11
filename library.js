@@ -1,62 +1,122 @@
-// ─── The library without sources (Stage 4b) ───────────────────────────────────
+// ─── The library (Stage 4b; without storage since Stage 5) ──────────────────────
 // Everything is reached from TV (Currently Watching, All TV, Coming Soon), Movies
-// (All Movies) and Browse; the old storage tabs are gone from the page. Where a
-// record is stored (its `collection`, the old tab) stays in the database but is
-// internal: this file is the only place the interface asks about it, and its rules
-// below are exactly the ones the tabs had. Nothing here moves, merges or
-// reclassifies a record.
+// (All Movies) and Browse. No record has a storage: what decides how a record may
+// be edited is the built-in catalog that governs it (catalog governance, read from
+// library_catalog_shows / library_catalog_films), and what a film's theme means
+// (library_film_theme_kinds). This file holds those rules; they give exactly the
+// answers the old storage rules gave. Governance is not a provenance record.
 //
 // Adding: the "+ Add" panel searches TMDB or takes an entry by hand. Before
 // anything is sent it reads the whole library (complete reads, or nothing is
 // sent) and decides where the addition goes:
-//   * a show already on the list gets its seasons through the database function
-//     add_tv_seasons_to_show, which refuses (and writes nothing) if that show is
-//     gone or changed, instead of creating another one;
-//   * a genuinely new show goes to the internal place for new shows (LIBRARY_NEW_TV)
-//     through add_tv_seasons, a new film to LIBRARY_NEW_FILM;
-//   * an identity found more than once, or only a matching title, is shown and the
-//     user chooses; nothing is merged or guessed.
+//   * a show already on the list gets its seasons through library_add_seasons,
+//     which refuses (and writes nothing) if that show is gone or changed, instead
+//     of creating another one (the intended parent, not exactly-once delivery);
+//   * a genuinely new show is created with all its seasons, or not at all, by
+//     library_create_show; a new film by library_add_films / library_create_film;
+//   * a matching title is shown and the user chooses; "add as new" sends the ids of
+//     the same-named unmatched records the page showed (distinct_from), so a repeat
+//     or a race is refused, never a second copy. Nothing is merged or guessed.
 // Results are never merged into what the page shows: the open view is read again
 // (only while it is still the view and the restore epoch the request started in).
 // Collections are a separate, optional step after a creation, reported separately.
 
-const LIBRARY_BUILTIN = ['disney', '90day', 'sheridan'];
-const LIBRARY_NEW_TV = 'othertv';
-const LIBRARY_NEW_FILM = 'movies';
+// The movie tools' cache of films (tabData; not a storage): see libraryPrepareMovieTools.
+const TOOL_FILMS = 'films';
 
-function libraryStorageLabel(id) {
-  return COLLECTIONS.find(c => c.id === id)?.label || id;
+// ─── Catalog governance (read with every view and library read) ───────────────
+// A snapshot: { shows: Map(show_id → catalog), films: Map(item_id → catalog),
+// kinds: Map(item_id → 'genre' | 'other'), knownShows / knownItems: the shows and rows
+// read in the same operation (what the snapshot can speak for), seq, epoch }.
+// Each read takes its number and the restore epoch when it starts. Only a read newer
+// than the published snapshot, in the current epoch, publishes; an older read that
+// finishes late never replaces newer governance. A record the published snapshot
+// doesn't cover has no known policy: it is neither deleted nor matched (editPolicyOf).
+let governanceReadSeq = 0;
+
+async function readGovernance() {
+  const seq = ++governanceReadSeq, epoch = orgEpoch;
+  const [shows, films, kinds] = await Promise.all([fetchAllRowsStrict('library_catalog_shows'),
+    fetchAllRowsStrict('library_catalog_films'), fetchAllRowsStrict('library_film_theme_kinds')]);
+  return { shows: new Map(shows.map(x => [x.show_id, x.catalog])), films: new Map(films.map(x => [x.item_id, x.catalog])),
+    kinds: new Map(kinds.map(x => [x.item_id, x.theme_kind])), knownShows: new Set(), knownItems: new Set(), seq, epoch };
 }
 
-// ─── Editing rules (exactly what the tabs did) ────────────────────────────────
-// × on a row of the page's built-in catalog skips it (a TV season: the season's
-// skip flag; a film: its status) and never deletes it; anything else is deleted
-// after a confirmation. Match only for an unidentified row outside the built-in
-// catalogs (isTmdbMatchEligible).
+// The rows and shows read together with a snapshot: what it can speak for.
+function governanceCovers(gov, rows, shows) {
+  (rows || []).forEach(r => gov.knownItems.add(r.id));
+  (shows || []).forEach(s => gov.knownShows.add(s.id));
+  return gov;
+}
+
+function publishGovernance(gov) {
+  if (!gov || gov.epoch !== orgEpoch || gov.seq <= (libraryGovernance.seq || 0)) return false;
+  libraryGovernance = gov;
+  return true;
+}
+
+// After a restore nothing read before it speaks for the data: no record has a known
+// policy until a read in the new epoch publishes one.
+function resetGovernance() {
+  libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(),
+    seq: governanceReadSeq, epoch: orgEpoch };
+}
+
+// Whether the published snapshot speaks for this record (a season through its show).
+function governanceKnows(r) {
+  const g = libraryGovernance;
+  return !!r && !!g.knownShows && (r.show_id ? g.knownShows.has(r.show_id) : g.knownItems.has(r.id));
+}
+
+// The catalog that governs a show, or a row (a season through its show; a film itself).
+function showCatalogOf(show) {
+  return show ? libraryGovernance.shows.get(show.id) || null : null;
+}
+function rowCatalogOf(r) {
+  if (!r) return null;
+  return (r.show_id ? libraryGovernance.shows.get(r.show_id) : libraryGovernance.films.get(r.id)) || null;
+}
+// What a film's theme means: 'genre' or 'other' (null for a TV season or an unknown row).
+function filmThemeKindOf(r) {
+  return r ? libraryGovernance.kinds.get(r.id) || null : null;
+}
+
+// ─── Editing rules (exactly the old storage rules, by governance) ─────────────
+// A catalog entry: governed, and its key is in that catalog's current list (this
+// page's config.js). × skips it (a TV season: the season's skip flag; a film: its
+// status) and never deletes it; anything else is deleted after a confirmation.
+function isCatalogEntry(r) {
+  const c = rowCatalogOf(r);
+  return !!c && catalogDefaultsOf(c).some(d => d.k === r.item_key);
+}
+
 function editPolicyOf(r) {
-  const isDefault = isDefaultRow(r);
+  // Unknown governance never permits a delete or a Match (a read that can speak for the record decides).
+  if (!governanceKnows(r)) return { isDefault: null, matchable: false, deleteEffect: 'unknown' };
+  const isDefault = isCatalogEntry(r);
   return { isDefault, matchable: isTmdbMatchEligible(r), deleteEffect: isDefault ? (isTvSeason(r) ? 'skip' : 'skip-film') : 'delete' };
 }
 
 // How seasons are added to a show already on the list: 'tmdb' (TMDB seasons) for
-// an identified show outside the built-in catalogs; 'label' (by label) for an
-// identified built-in show (a plain "Season N" becomes TMDB season N, any other
-// label is held for review) and for a show without a TMDB identity.
+// an identified show no catalog governs; 'label' (by label) for a governed
+// TMDB-matched show (a plain "Season N" becomes TMDB season N, any other label is
+// held for review) and for a show without a TMDB identity.
 function showAddKind(show) {
-  return show.tmdb_id != null && !LIBRARY_BUILTIN.includes(show.collection) ? 'tmdb' : 'label';
+  return show.tmdb_id != null && !showCatalogOf(show) ? 'tmdb' : 'label';
 }
 
-// A hint only: the page's catalog has an entry for this show. Being stored with a
-// built-in catalog doesn't mean the catalog covers it.
+// A hint only: the governing catalog's current list has an entry for this show.
+// Being governed doesn't mean the catalog will supply more seasons.
 function catalogListingOf(show) {
-  if (!LIBRARY_BUILTIN.includes(show.collection)) return null;
-  const listed = catalogDefaultsOf(show.collection).some(d => d.s !== 'Film' && tvShowKey(show.collection, d.k) === show.show_key);
-  return listed ? libraryStorageLabel(show.collection) : null;
+  const c = showCatalogOf(show);
+  if (!c) return null;
+  const listed = catalogDefaultsOf(c).some(d => d.s !== 'Film' && catalogShowKey(c, d.k) === show.show_key);
+  return listed ? catalogLabel(c) : null;
 }
 
 // The show as the page shows it: the database refuses if it no longer matches.
 function libraryExpected(show, network) {
-  return { collection: show.collection, tmdb_id: show.tmdb_id ?? null, show_key: show.show_key, network: network || '' };
+  return { tmdb_id: show.tmdb_id ?? null, show_key: show.show_key, catalog: showCatalogOf(show), network: network || '' };
 }
 
 function librarySeasonLabel(n) {
@@ -71,7 +131,7 @@ function libraryTmdbSeason(show, s, network) {
     display_date: s.air_date ? formatDisplayDate(s.air_date) : 'TBA', date_sort: s.air_date || '2099-01-01', season_number: s.season_number };
 }
 
-// A season by label for a show (its stored show key: the database finds the show by it).
+// A season by label for a show (its stored show key: the database checks it).
 function libraryLabelSeason(show, label, displayDate, theme) {
   const l = String(label || '').trim();
   return { item_key: `${show.show_key}|${l.toLowerCase()}`, title: show.title, season: l, theme: theme || '',
@@ -90,53 +150,49 @@ function libraryNewShowSeasons(tmdbId, name, details, nums) {
 }
 
 // ─── Reading the library ──────────────────────────────────────────────────────
-// Every row and every show, complete or not at all (fetchAllRowsStrict). It is a
-// read, not a lock: something can change between it and a write, which is why
-// additions to an existing show are checked again by the database.
+// Every row, every show and the governance, complete or not at all
+// (fetchAllRowsStrict). It is a read, not a lock: something can change between it
+// and a write, which is why every addition is checked again by the database.
 async function readLibrary() {
-  const [rows, shows] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows')]);
+  const [rows, shows, gov] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'), readGovernance()]);
+  publishGovernance(governanceCovers(gov, rows, shows));
   return { rows, shows, showsById: new Map(shows.map(s => [s.id, s])) };
 }
 
 // Where a TMDB series goes. existing: one show has this identity; ambiguous: more
-// than one; similar: none has it, but unidentified shows have the same title; new.
+// than one (the database allows one since Stage 5; kept for safety); similar: none
+// has it, but unidentified shows have the same title; new.
 function routeTvResult(lib, tmdbId, name) {
   const same = lib.shows.filter(s => s.tmdb_id === tmdbId);
   if (same.length > 1) return { kind: 'ambiguous', candidates: same };
   if (same.length === 1) return { kind: 'existing', show: same[0] };
-  const t = String(name || '').trim().toLowerCase();
-  const similar = lib.shows.filter(s => s.tmdb_id == null && String(s.title || '').trim().toLowerCase() === t);
+  const similar = librarySimilarShows(lib, name, String(name || '').toLowerCase().trim());
   return similar.length ? { kind: 'similar', candidates: similar } : { kind: 'new' };
 }
 
-// Where a TMDB film goes: present (the identity is already saved, anywhere),
-// similar (an unidentified film with the same title), or new.
+// What a new record must be acknowledged against (the database refuses it otherwise:
+// show_exists / film_exists / catalog_candidate): unmatched records with the same
+// title, and records a catalog governs with the same title or key. The ids the page
+// showed go with "add as new" as distinct_from: works the owner confirmed as different.
+const libraryNorm = t => String(t || '').trim().toLowerCase();
+function librarySimilarShows(lib, title, key) {
+  return lib.shows.filter(s => (s.tmdb_id == null && (libraryNorm(s.title) === libraryNorm(title) || s.show_key === key))
+    || (showCatalogOf(s) && (libraryNorm(s.title) === libraryNorm(title) || s.show_key === key)));
+}
+function librarySimilarFilms(lib, title, key) {
+  return lib.rows.filter(r => isFilmRow(r) && ((r.tmdb_id == null && (libraryNorm(r.title) === libraryNorm(title) || r.item_key === key))
+    || (rowCatalogOf(r) && (libraryNorm(r.title) === libraryNorm(title) || r.item_key === key))));
+}
+const libraryIds = list => list.map(x => x.id).sort();
+
+// Where a TMDB film goes: present (the identity is already saved), similar (an
+// unidentified film with the same title), or new.
 function routeFilmResult(lib, tmdbId, title) {
   const films = lib.rows.filter(isFilmRow);
   const same = films.filter(r => r.media_type === 'movie' && r.tmdb_id === tmdbId);
   if (same.length) return { kind: 'present', rows: same };
-  const t = String(title || '').trim().toLowerCase();
-  const similar = films.filter(r => r.tmdb_id == null && String(r.title || '').trim().toLowerCase() === t);
+  const similar = librarySimilarFilms(lib, title, `${String(title || '').toLowerCase().trim()}|film`);
   return similar.length ? { kind: 'similar', rows: similar } : { kind: 'new' };
-}
-
-// ─── Duplicates (the one place storage is shown) ──────────────────────────────
-// Two records with one TMDB identity are never merged automatically; the marker
-// says so and its tooltip names where each one is stored.
-function duplicateShowTagHtml(show) {
-  if (!show || show.tmdb_id == null) return '';
-  const same = [...tvShowsById.values()].filter(s => s.tmdb_id === show.tmdb_id);
-  if (same.length < 2) return '';
-  const where = same.map(s => libraryStorageLabel(s.collection)).join(', ');
-  return `<span class="dup-tag" title="${esc(`${same.length} records on your list have this TMDB identity (stored under: ${where}). They are not merged automatically.`)}">Duplicate on your list</span>`;
-}
-
-function duplicateFilmTagHtml(r, rows) {
-  if (!r || r.media_type !== 'movie' || r.tmdb_id == null) return '';
-  const same = (rows || []).filter(x => x.media_type === 'movie' && x.tmdb_id === r.tmdb_id);
-  if (same.length < 2) return '';
-  const where = same.map(x => libraryStorageLabel(x.collection)).join(', ');
-  return `<span class="dup-tag" title="${esc(`${same.length} records on your list have this TMDB identity (stored under: ${where}). They are not merged automatically.`)}">Duplicate on your list</span>`;
 }
 
 // ─── Year filter (All TV, All Movies) ─────────────────────────────────────────
@@ -196,7 +252,7 @@ function libraryFailure(e, what, feature = 'Adding to an existing show') {
     return { unknown: true, text: `${what}: no clear answer came back (${info.message}), so it isn’t confirmed. The list may or may not show it now, and an earlier request may still complete. Check before adding again. If you reload, this page won’t know whether that request finished.` };
   }
   if (info.status === 404 && info.pgCode === 'PGRST202') return { text: `${feature} isn’t available on this database. Nothing was added.` };
-  if (/^(target_missing|target_changed|show_exists|create_conflict)$/.test(info.code)) return { text: orgRefusalText(info) };
+  if (/^(target_missing|target_changed|show_exists|create_conflict|film_exists|client_outdated|library_write_required|update_required|catalog_candidate)$/.test(info.code)) return { text: orgRefusalText(info) };
   if (/^(55P03|57014)$/.test(info.pgCode)) return { text: `${what}: the database didn’t finish in time, so it was cancelled. Nothing was added.` };
   if (info.pgCode === '23505') return { text: `${what}: it’s already on your list (added somewhere else just now). Nothing was added.` };
   return { text: `${what} was refused (${info.message}). Nothing was added.` };
@@ -210,7 +266,7 @@ const LIBRARY_REVIEW_TEXT = {
   identified_row_same_key: 'an entry with the same name is already saved, so it needs review'
 };
 
-// The answer of add_tv_seasons / add_tv_seasons_to_show, item by item.
+// The answer of library_add_seasons / library_create_show, item by item.
 function libraryAddText(res, title) {
   const inserted = (res.inserted || []).map(r => `“${r.season}”`);
   const parts = [inserted.length ? `Added ${libraryList(inserted)} to “${title}”.` : `Nothing new was added to “${title}”.`];
@@ -353,12 +409,13 @@ function libraryRenderPreview() {
     const meta = `Film · ${d.release_date ? formatDisplayDate(d.release_date) : 'TBA'}`;
     if (route.kind === 'present') {
       p.bound = null;
-      previewEl.innerHTML = `<div class="tmdb-preview">${header(meta)}<div class="tmdb-refresh-summary">Already on your list${route.rows.length > 1 ? ` (${route.rows.length} records — see “Duplicate on your list” in All Movies)` : ''}. Nothing to add.</div>${actions('', '')}</div>`;
+      previewEl.innerHTML = `<div class="tmdb-preview">${header(meta)}<div class="tmdb-refresh-summary">Already on your list${route.rows.length > 1 ? ` (${route.rows.length} records)` : ''}. Nothing to add.</div>${actions('', '')}</div>`;
       return;
     }
     if (route.kind === 'similar') {
       p.bound = null;
-      previewEl.innerHTML = `<div class="tmdb-preview">${header(meta)}<div class="tmdb-refresh-summary">A film called “${esc(route.rows[0].title)}” is already on your list, not matched to TMDB. It may be the same film; nothing is merged.</div>
+      p.similarShown = libraryIds(route.rows);
+      previewEl.innerHTML = `<div class="tmdb-preview">${header(meta)}<div class="tmdb-refresh-summary">A film called “${esc(route.rows[0].title)}” is already on your list${route.rows[0].tmdb_id == null ? ', not matched to TMDB' : ''}${rowCatalogOf(route.rows[0]) ? ` (in the ${esc(catalogLabel(rowCatalogOf(route.rows[0])))} catalog)` : ''}. It may be the same film; nothing is merged.</div>
         <div class="tmdb-preview-actions"><button class="btn" onclick="libraryChoose(${sel.id}, 'movie', null, true)">Add as a new film anyway</button><button class="btn" onclick="cancelTMDBPreview()">Cancel</button></div></div>`;
       return;
     }
@@ -372,6 +429,7 @@ function libraryRenderPreview() {
   const details = sel.details;
   const network = (details.networks && details.networks[0]?.name) || 'Unknown';
   let route = routeTvResult(p.lib, sel.id, sel.name);
+  if (route.kind === 'similar') p.similarShown = libraryIds(route.candidates);
   if (choice && choice.showId) {
     const s = p.lib.showsById.get(choice.showId);
     route = s ? { kind: 'existing', show: s } : route;
@@ -381,14 +439,14 @@ function libraryRenderPreview() {
     p.bound = null;
     previewEl.innerHTML = `<div class="tmdb-preview">${header(network)}<div class="tmdb-refresh-summary">This show is on your list more than once (nothing is merged automatically). Choose which one to add seasons to:</div>
       ${route.candidates.map(s => `<div class="tmdb-season-row"><span class="tmdb-season-name">${esc(s.title)}</span>
-        <span class="tmdb-season-meta">${esc(statusOptionLabel(s.status))} · ${p.lib.rows.filter(r => r.show_id === s.id).length} seasons · stored under ${esc(libraryStorageLabel(s.collection))}</span>
+        <span class="tmdb-season-meta">${esc(statusOptionLabel(s.status))} · ${p.lib.rows.filter(r => r.show_id === s.id).length} seasons</span>
         <button class="btn" onclick="libraryChoose(${sel.id}, 'tv', '${esc(s.id)}')">Use this one</button></div>`).join('')}${actions('', '')}</div>`;
     return;
   }
   if (route.kind === 'similar') {
     p.bound = null;
     const s = route.candidates[0];
-    previewEl.innerHTML = `<div class="tmdb-preview">${header(network)}<div class="tmdb-refresh-summary">“${esc(s.title)}” is already on your list, not matched to TMDB. It may be the same show; nothing is merged.</div>
+    previewEl.innerHTML = `<div class="tmdb-preview">${header(network)}<div class="tmdb-refresh-summary">“${esc(s.title)}” is already on your list${s.tmdb_id == null ? ', not matched to TMDB' : ''}${showCatalogOf(s) ? ` (in the ${esc(catalogLabel(showCatalogOf(s)))} catalog)` : ''}. It may be the same show; nothing is merged.</div>
       <div class="tmdb-preview-actions" style="flex-wrap:wrap">
         <button class="btn" onclick="openAddSeason('${esc(s.id)}')">Add a season to “${esc(s.title)}” by hand</button>
         <button class="btn" onclick="libraryChoose(${sel.id}, 'tv', null, true)">Add as a new show</button>
@@ -431,7 +489,8 @@ function libraryRenderPreview() {
 // An explicit choice for an ambiguous or similar result (never made automatically).
 function libraryChoose(tmdbId, mediaType, showId, asNew) {
   if (!libraryPanel) return;
-  libraryPanel.choice = { tmdbId, mediaType, showId: showId || null, asNew: !!asNew };
+  // "Add as new": the records the preview showed are acknowledged as different works.
+  libraryPanel.choice = { tmdbId, mediaType, showId: showId || null, asNew: !!asNew, ack: asNew ? (libraryPanel.similarShown || []).slice() : [] };
   renderTMDBPreview();
 }
 
@@ -461,18 +520,25 @@ async function librarySubmitSelection() {
     catch (e) { libraryReport(ctx, `Couldn’t read your whole list (${e.message}), so nothing was added.`, true); return; }
     if (!libraryLive(ctx.session)) return;
     p.lib = lib;
+    const ack = p.choice && p.choice.asNew ? p.choice.ack || [] : [];
+    // A similar record that appeared after the preview (not acknowledged) means the preview no longer applies.
+    const unacknowledged = sel.mediaType === 'movie'
+      ? libraryIds(librarySimilarFilms(lib, name, `${name.toLowerCase().trim()}|film`)).filter(id => !ack.includes(id))
+      : libraryIds(librarySimilarShows(lib, name, name.toLowerCase().trim())).filter(id => !ack.includes(id));
     const now = sel.mediaType === 'movie'
-      ? (p.choice && p.choice.asNew ? 'new' : routeFilmResult(lib, sel.id, name).kind)
-      : bound.kind === 'existing' ? (lib.showsById.get(bound.showId) ? 'existing' : 'gone') : routeTvResult(lib, sel.id, name).kind;
+      ? (routeFilmResult(lib, sel.id, name).kind === 'present' ? 'present' : unacknowledged.length ? 'similar' : 'new')
+      : bound.kind === 'existing' ? (lib.showsById.get(bound.showId) ? 'existing' : 'gone')
+      : (routeTvResult(lib, sel.id, name).kind === 'existing' || routeTvResult(lib, sel.id, name).kind === 'ambiguous') ? 'existing'
+      : unacknowledged.length ? 'similar' : 'new';
     const same = bound.kind === 'existing'
       ? now === 'existing' && JSON.stringify(libraryExpected(lib.showsById.get(bound.showId), bound.expected.network)) === JSON.stringify(bound.expected)
-      : bound.kind === 'new-show' ? now === 'new' || (now === 'similar' && p.choice && p.choice.asNew) : now === 'new';
+      : now === 'new';
     if (!same) {
       libraryReport(ctx, 'Your list changed since this preview, so nothing was added. Look at it again.', true);
       renderTMDBPreview();
       return;
     }
-    if (sel.mediaType === 'movie') return await libraryAddFilm(ctx, libraryFilmFromTmdb(sel.id, name, details));
+    if (sel.mediaType === 'movie') return await libraryAddFilm(ctx, { ...libraryFilmFromTmdb(sel.id, name, details), ...(ack.length ? { distinct_from: ack } : {}) });
     if (bound.kind === 'existing') {
       const show = lib.showsById.get(bound.showId);
       const byNum = new Map((details.seasons || []).map(s => [s.season_number, s]));
@@ -480,7 +546,7 @@ async function librarySubmitSelection() {
       return await librarySendToShow(ctx, show, seasons, bound.expected.network);
     }
     return await libraryNewShow(ctx, { tmdb_id: sel.id, title: name, show_key: name.toLowerCase().trim(),
-      network: (details.networks && details.networks[0]?.name) || 'Unknown' }, libraryNewShowSeasons(sel.id, name, details, nums));
+      network: (details.networks && details.networks[0]?.name) || 'Unknown', ...(ack.length ? { distinct_from: ack } : {}) }, libraryNewShowSeasons(sel.id, name, details, nums));
   } finally {
     if (libraryPanel === p) p.busy = false;
   }
@@ -488,7 +554,7 @@ async function librarySubmitSelection() {
 
 function libraryFilmFromTmdb(tmdbId, name, details) {
   const belongsTo = details.belongs_to_collection;
-  return { collection: LIBRARY_NEW_FILM, item_key: `${name.toLowerCase().trim()}|film`, title: name, season: 'Film',
+  return { item_key: `${name.toLowerCase().trim()}|film`, title: name, season: 'Film',
     theme: (details.genres && details.genres[0]?.name) || 'Film',
     display_date: details.release_date ? formatDisplayDate(details.release_date) : 'TBA', date_sort: details.release_date || '2099-01-01',
     watched: false, status: 'confirmed', tmdb_collection_id: belongsTo ? belongsTo.id : null, tmdb_collection_name: belongsTo ? belongsTo.name : null,
@@ -501,7 +567,7 @@ function libraryFilmFromTmdb(tmdbId, name, details) {
 async function librarySendToShow(ctx, show, seasons, network) {
   let res;
   try {
-    res = await sbRpc('add_tv_seasons_to_show', { p_show_id: show.id, p_expected: libraryExpected(show, network), p_seasons: seasons });
+    res = await sbRpc('library_add_seasons', { p_show_id: show.id, p_expected: libraryExpected(show, network), p_seasons: seasons });
   } catch (e) {
     if (!libraryAnswerCurrent(ctx, show.title)) return { failed: true };
     const f = libraryFailure(e, `Adding to “${show.title}”`);
@@ -521,14 +587,15 @@ async function librarySendToShow(ctx, show, seasons, network) {
   return { res };
 }
 
-// A new show, through create_tv_show: created where new shows go (LIBRARY_NEW_TV)
-// with all its seasons, or refused (show_exists / create_conflict, nothing written)
-// when a show with this identity or key is there by then. It never joins a show.
+// A new show, through library_create_show: created with all its seasons, or refused
+// (show_exists / create_conflict, nothing written) when a show with this identity,
+// or an unmatched one with this key the page didn't show (distinct_from), is there
+// by then. It never joins a show.
 async function libraryNewShow(ctx, showInfo, seasons) {
   if (!seasons.length) return;
   let res;
   try {
-    res = await sbRpc('create_tv_show', { p_show: showInfo, p_seasons: seasons });
+    res = await sbRpc('library_create_show', { p_show: showInfo, p_seasons: seasons });
   } catch (e) {
     if (!libraryAnswerCurrent(ctx, showInfo.title)) return;
     const f = libraryFailure(e, `Adding “${showInfo.title}”`, 'Adding a new show');
@@ -538,7 +605,7 @@ async function libraryNewShow(ctx, showInfo, seasons) {
   }
   if (!libraryAnswerCurrent(ctx, showInfo.title)) return;
   libraryAfterWrite(ctx);
-  if (!res || !res.show_created) { // not expected from create_tv_show; never reported as a new show
+  if (!res || !res.show_created) { // not expected from library_create_show; never reported as a new show
     libraryReport(ctx, `The answer didn’t confirm a new show “${showInfo.title}”. Check your list before adding again.`, true);
     return;
   }
@@ -546,22 +613,42 @@ async function libraryNewShow(ctx, showInfo, seasons) {
   libraryReport(ctx, libraryAddText(res, showInfo.title), false, libraryMembershipHtml(ctx, { show_id: res.show_id }, showInfo.title));
 }
 
-async function libraryAddFilm(ctx, row) {
-  let inserted;
+// A film: from TMDB through library_add_films (already on the list: reported, not
+// added again), or typed by hand through library_create_film (distinct_from: the
+// same-named unmatched films the page showed).
+async function libraryAddFilm(ctx, film, distinctFrom) {
+  let saved;
   try {
-    inserted = await sbFetch('POST', TABLE, [row]);
+    if (film.tmdb_id != null) {
+      const res = await sbRpc('library_add_films', { p_films: [film] });
+      const out = res && res.results && res.results[0];
+      if (!libraryAnswerCurrent(ctx, film.title)) return;
+      if (out && out.outcome === 'catalog_candidate') {
+        libraryAfterWrite(ctx);
+        libraryReport(ctx, `A built-in catalog film with this name is on your list (it may be the same film), so “${film.title}” wasn’t added. Look at it again.`, true);
+        return;
+      }
+      if (!out || out.outcome !== 'inserted') {
+        libraryAfterWrite(ctx);
+        libraryReport(ctx, `“${film.title}” is already on your list (added somewhere else just now). Nothing was added.`, true);
+        return;
+      }
+      saved = { id: out.id };
+    } else {
+      const res = await sbRpc('library_create_film', { p_film: { ...film, distinct_from: distinctFrom || [] } });
+      if (!libraryAnswerCurrent(ctx, film.title)) return;
+      saved = res && res.id ? { id: res.id } : null;
+    }
   } catch (e) {
-    if (!libraryAnswerCurrent(ctx, row.title)) return;
-    const f = libraryFailure(e, `Adding “${row.title}”`);
+    if (!libraryAnswerCurrent(ctx, film.title)) return;
+    const f = libraryFailure(e, `Adding “${film.title}”`, 'Adding a film');
     if (!f.unknown) libraryAfterWrite(ctx);
     libraryReport(ctx, f.text, true);
     return;
   }
-  if (!libraryAnswerCurrent(ctx, row.title)) return;
-  const saved = inserted && inserted[0];
   showSaved();
   libraryAfterWrite(ctx);
-  libraryReport(ctx, `Added “${row.title}”.`, false, saved ? libraryMembershipHtml(ctx, { item_id: saved.id }, row.title) : '');
+  libraryReport(ctx, `Added “${film.title}”.`, false, saved ? libraryMembershipHtml(ctx, { item_id: saved.id }, film.title) : '');
 }
 
 // After any answer in the same epoch: the open view and the panel's library are read again.
@@ -581,7 +668,7 @@ function libraryMembershipHtml(ctx, target, title) {
   if (!colls.length) return '';
   libraryPanel.memberTarget = { ...target, title };
   return `<div class="library-members"><span class="tmdb-refresh-summary">Also add “${esc(title)}” to collections (optional):</span>
-    ${colls.map(c => `<label class="ww-option"><input type="checkbox" data-collection="${esc(c.collectionId)}"> ${esc(c.label)}</label>`).join('')}
+    ${colls.map(c => `<label class="ww-option"><input type="checkbox" data-collection-id="${esc(c.collectionId)}"> ${esc(c.label)}</label>`).join('')}
     <button class="btn" onclick="libraryAddMemberships()">Add to collections</button></div>`;
 }
 
@@ -593,7 +680,7 @@ async function libraryAddMemberships() {
   const target = p.memberTarget;
   const box = document.getElementById('libraryOutcome');
   const chosen = [];
-  (box ? box.querySelectorAll('input[type="checkbox"][data-collection]') : []).forEach(cb => { if (cb.checked) chosen.push(cb.dataset.collection); });
+  (box ? box.querySelectorAll('input[type="checkbox"][data-collection-id]') : []).forEach(cb => { if (cb.checked) chosen.push(cb.dataset.collectionId); });
   if (!chosen.length) return;
   const ctx = libraryContext();
   p.membersBusy = true;
@@ -640,8 +727,11 @@ function libraryManualFilmHtml() {
 
 const libraryVal = id => (document.getElementById(id)?.value || '').trim();
 
-// A new show typed in by hand (no TMDB identity; it can be matched later). A show
-// with the same title already on the list is pointed out first; nothing is merged.
+// A new show typed in by hand (no TMDB identity; it can be matched later). Shows
+// with the same title already on the list are pointed out first; nothing is
+// merged. "Add as a new show" sends the ids of the same-named unmatched shows it
+// showed (distinct_from): a different work with the same name can be kept, and a
+// repeat or a race is refused instead of making a second copy.
 async function libraryManualShow() {
   const p = libraryPanel;
   if (!p || p.busy) return;
@@ -657,33 +747,34 @@ async function libraryManualShow() {
     if (!libraryLive(ctx.session)) return;
     p.lib = lib;
     const key = `${title.toLowerCase()}|${season.toLowerCase()}`;
+    const showKey = key.split('|')[0];
     const t = title.toLowerCase();
-    const similar = lib.shows.filter(s => String(s.title || '').trim().toLowerCase() === t);
-    // A show typed by hand is kept apart from others only by its name: a second
-    // unmatched show with the same name can't be created next to an existing one
-    // (the database would add the season to it). Never reinterpret "new show" as
-    // "add to that show": offer that explicitly, through the checked path.
-    const occupant = lib.shows.find(s => s.collection === LIBRARY_NEW_TV && s.tmdb_id == null && s.show_key === tvShowKey(LIBRARY_NEW_TV, key));
-    if (occupant) {
-      const note = document.getElementById('libraryManualNote');
-      if (note) note.innerHTML = `<div class="tmdb-refresh-summary">A separate new show called “${esc(title)}” can’t be added: “${esc(occupant.title)}” is already on your list without a TMDB match, and two such shows can’t be kept apart. Nothing was added. You can add the season to it instead.</div>
-        <div class="tmdb-preview-actions"><button class="btn" onclick="openAddSeason('${esc(occupant.id)}')">Add a season to “${esc(occupant.title)}”</button></div>`;
-      p.manualConfirm = null;
-      return;
-    }
-    if (similar.length && p.manualConfirm !== key) {
-      p.manualConfirm = key;
+    // Every same-titled show, and any show the database would ask about (librarySimilarShows):
+    // the ids the page shows here are what "Add as a new show" acknowledges.
+    const similar = [...new Map([...lib.shows.filter(s => String(s.title || '').trim().toLowerCase() === t),
+      ...librarySimilarShows(lib, title, showKey)].map(s => [s.id, s])).values()];
+    const sameKey = libraryIds(similar);
+    const confirmed = p.manualConfirm && p.manualConfirm.key === key ? p.manualConfirm : null;
+    if (similar.length && (!confirmed || sameKey.some(id => !confirmed.ids.includes(id)))) {
+      p.manualConfirm = { key, ids: sameKey };
       const note = document.getElementById('libraryManualNote');
       if (note) note.innerHTML = `<div class="tmdb-refresh-summary">“${esc(similar[0].title)}” is already on your list${similar.length > 1 ? ` (${similar.length} times)` : ''}. Add a season to it, or add a separate new show? Nothing is merged.</div>
         <div class="tmdb-preview-actions" style="flex-wrap:wrap">${similar.map(s => `<button class="btn" onclick="openAddSeason('${esc(s.id)}')">Add a season to “${esc(s.title)}”${similar.length > 1 ? ` (${esc(statusOptionLabel(s.status))})` : ''}</button>`).join('')}
         <button class="btn" onclick="libraryManualShow()">Add as a new show</button></div>`;
       return;
     }
-    await libraryNewShow(ctx, { tmdb_id: null, title, show_key: tvShowKey(LIBRARY_NEW_TV, key), network: theme },
+    libraryClearManualNote(p); // the question is answered: sent once with the records it listed
+    await libraryNewShow(ctx, { tmdb_id: null, title, show_key: showKey, network: theme, distinct_from: sameKey },
       [{ item_key: key, title, season, theme, display_date: date, date_sort: parseDate(date) }]);
   } finally {
     if (libraryPanel === p) p.busy = false;
   }
+}
+
+function libraryClearManualNote(p) {
+  p.manualConfirm = null;
+  const note = document.getElementById('libraryManualNote');
+  if (note) note.innerHTML = '';
 }
 
 async function libraryManualFilm() {
@@ -700,17 +791,21 @@ async function libraryManualFilm() {
     if (!libraryLive(ctx.session)) return;
     p.lib = lib;
     const key = `${title.toLowerCase()}|film`;
-    const similar = lib.rows.filter(r => isFilmRow(r) && String(r.title || '').trim().toLowerCase() === title.toLowerCase());
-    if (similar.length && p.manualConfirm !== key) {
-      p.manualConfirm = key;
+    const similar = [...new Map([...lib.rows.filter(r => isFilmRow(r) && String(r.title || '').trim().toLowerCase() === title.toLowerCase()),
+      ...librarySimilarFilms(lib, title, key)].map(r => [r.id, r])).values()];
+    const sameKey = libraryIds(similar); // what "Add as a new film" acknowledges
+    const confirmed = p.manualConfirm && p.manualConfirm.key === key ? p.manualConfirm : null;
+    if (similar.length && (!confirmed || sameKey.some(id => !confirmed.ids.includes(id)))) {
+      p.manualConfirm = { key, ids: sameKey };
       const note = document.getElementById('libraryManualNote');
       if (note) note.innerHTML = `<div class="tmdb-refresh-summary">A film called “${esc(similar[0].title)}” is already on your list. Add another one anyway? Nothing is merged.</div>
         <div class="tmdb-preview-actions"><button class="btn" onclick="libraryManualFilm()">Add as a new film</button></div>`;
       return;
     }
+    libraryClearManualNote(p);
     // A film is labelled 'Film' (All Movies lists exactly those and identified films).
-    await libraryAddFilm(ctx, { collection: LIBRARY_NEW_FILM, item_key: key, title, season: 'Film', theme, display_date: date,
-      date_sort: parseDate(date), watched: false, status: 'confirmed' });
+    await libraryAddFilm(ctx, { item_key: key, title, season: 'Film', theme, display_date: date,
+      date_sort: parseDate(date), watched: false, status: 'confirmed' }, sameKey);
   } finally {
     if (libraryPanel === p) p.busy = false;
   }
@@ -907,7 +1002,7 @@ async function libraryApplyRefresh() {
       const byNum = new Map(f.fresh.map(s => [s.season_number, s]));
       let res;
       try {
-        res = await sbRpc('add_tv_seasons_to_show', { p_show_id: show.id, p_expected: libraryExpected(show, network),
+        res = await sbRpc('library_add_seasons', { p_show_id: show.id, p_expected: libraryExpected(show, network),
           p_seasons: nums.filter(n => byNum.has(n)).map(n => libraryTmdbSeason(show, byNum.get(n), network)) });
       } catch (e) {
         const fl = libraryFailure(e, `“${show.title}”`);
@@ -955,6 +1050,7 @@ async function libraryApplyRefresh() {
 // return=representation), so "no row matched" is told apart from a change.
 // Errors as sbFetch reports them.
 async function libraryPatchReturning(path, body) {
+  await requireWritablePhase();
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method: 'PATCH',
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
@@ -967,31 +1063,27 @@ async function libraryPatchReturning(path, body) {
 }
 
 // ─── Movie tools (Refresh collections, MCU, person collections, Pull rest) ────
-// The existing tools add films to the internal place for films. In All Movies they
-// work on that storage's rows (read first, GET only), and report in the panel.
+// The tools add films (genre themes, theme_kind 'genre') and run in All Movies on a
+// complete library read; they report in the panel.
 function toolCollectionId() {
-  if (activeTabId) return activeTabId;
-  return libraryPanel && libraryPanel.media === 'movie' && libraryPanel.viewId === activeViewId && libraryPanel.toolsReady ? LIBRARY_NEW_FILM : null;
+  return libraryPanel && libraryPanel.media === 'movie' && libraryPanel.viewId === activeViewId && libraryPanel.toolsReady ? TOOL_FILMS : null;
 }
 
-// The tool's context: still current while the same tab is open, or the same panel
-// in the same view and restore epoch.
+// The tool's context: still current while the same panel is open in the same view and restore epoch.
 function toolContext(collectionId) {
-  return { collectionId, tab: activeTabId, session: libraryPanel ? libraryPanel.session : 0, viewId: activeViewId, epoch: orgEpoch };
+  return { collectionId, session: libraryPanel ? libraryPanel.session : 0, viewId: activeViewId, epoch: orgEpoch };
 }
 
 function toolContextLive(t) {
-  if (t.tab) return activeTabId === t.collectionId;
   return libraryLive(t.session) && t.epoch === orgEpoch;
 }
 
-// After a tool's write: the tab redraws (the old way) or the open view is read again.
+// After a tool's write: the open view is read again.
 function toolFinished(t) {
-  if (t.tab) { if (activeTabId === t.collectionId) { cancelTMDBPreview(); renderFilters(); renderTable(); } return; }
   if (t.epoch === orgEpoch && activeViewId === t.viewId) reloadOpenView();
 }
 
-// Rows a tool adds go into the storage cache only within the epoch they were read in.
+// Rows a tool adds go into its cache only within the epoch they were read in.
 function toolCachePush(t, rows) {
   if (!rows || t.epoch !== orgEpoch) return;
   const td = tabData[t.collectionId];
@@ -1001,33 +1093,46 @@ function toolCachePush(t, rows) {
   }
 }
 
-// What a tool compares a TMDB film with to say "already added": in All Movies, the
-// films' own storage (by TMDB identity, or by name for its unmatched films, as on
-// the old tab) plus every TMDB-identified film stored anywhere else; on a tab,
-// that tab's rows. A film stored elsewhere is never written by a tool.
+// What a tool compares a TMDB film with to say "already added": the films whose
+// theme is a genre (the old Movies list: by TMDB identity, or by name for its
+// unmatched films) plus every TMDB-identified film anywhere. Tag backfills touch
+// only the first group (td.rows), as before.
 function toolKnownRows(collectionId) {
   const td = tabData[collectionId];
   return (td && (td.known || td.rows)) || [];
 }
 
-// In All Movies a tool runs only on a complete read of the whole library (strict
-// paging and counts); a failed or incomplete read lets nothing be imported.
+// Films added by a tool, through library_add_films: each one inserted, or reported
+// as already on the list (added elsewhere meanwhile); never changed, never twice.
+async function libraryInsertFilms(rows) {
+  const res = await sbRpc('library_add_films', { p_films: rows });
+  const existing = (res.results || []).filter(x => x.outcome === 'existing').length;
+  const twins = (res.results || []).filter(x => x.outcome === 'catalog_candidate').map(x => rows[x.index] && rows[x.index].title).filter(Boolean);
+  const notes = [];
+  if (existing) notes.push(`${existing} of these ${existing === 1 ? 'film was' : 'films were'} already on your list (added somewhere else meanwhile), so ${existing === 1 ? 'it wasn’t' : 'they weren’t'} added again.`);
+  if (twins.length) notes.push(`Not added: ${twins.join(', ')} — a built-in catalog film with the same name is on your list (it may be the same film). If it’s a different film, add it from Search.`);
+  if (notes.length) showNotice(notes.join(' '));
+  return res.inserted || [];
+}
+
+// A tool runs only on a complete read of the whole library (strict paging and
+// counts, with the governance); a failed or incomplete read lets nothing be imported.
 async function libraryPrepareMovieTools() {
   const p = libraryPanel;
   if (!p || p.media !== 'movie') return false;
   const session = p.session, epoch = orgEpoch;
   p.toolsReady = false;
-  delete tabData[LIBRARY_NEW_FILM];
+  delete tabData[TOOL_FILMS];
   let all;
-  try { all = await fetchAllRowsStrict(TABLE); }
+  try { all = (await readLibrary()).rows; }
   catch (e) {
     if (libraryLive(session)) libraryReport(libraryContext(), `Couldn’t read your whole list (${e.message}), so this tool can’t run right now. Nothing was changed.`, true);
     return false;
   }
   if (!libraryLive(session) || epoch !== orgEpoch) return false;
-  const own = all.filter(r => r.collection === LIBRARY_NEW_FILM).sort((a, b) => String(a.date_sort).localeCompare(String(b.date_sort)));
-  const elsewhere = all.filter(r => r.collection !== LIBRARY_NEW_FILM && r.media_type === 'movie' && r.tmdb_id != null);
-  tabData[LIBRARY_NEW_FILM] = { rows: own, loaded: true, newKeys: [], known: own.concat(elsewhere) };
+  const own = all.filter(r => isFilmRow(r) && filmThemeKindOf(r) === 'genre').sort((a, b) => String(a.date_sort).localeCompare(String(b.date_sort)));
+  const elsewhere = all.filter(r => !own.includes(r) && r.media_type === 'movie' && r.tmdb_id != null);
+  tabData[TOOL_FILMS] = { rows: own, loaded: true, newKeys: [], known: own.concat(elsewhere) };
   p.toolsReady = true;
   return true;
 }
@@ -1048,7 +1153,7 @@ async function libraryRefreshPerson(name) {
   return libraryMovieTool('person-refresh', name);
 }
 
-// From a film's ⋯ menu in All Movies: its franchise, into the films' storage.
+// From a film's ⋯ menu in All Movies (a film whose theme is a genre): its franchise.
 async function libraryPullRest(rowId, collectionId, name) {
   if (activeViewId !== ALL_MOVIES_VIEW.id) return;
   openLibraryPanel('movie', 'tools');
@@ -1057,8 +1162,8 @@ async function libraryPullRest(rowId, collectionId, name) {
 }
 
 // ─── Delete or skip from a view ───────────────────────────────────────────────
-// The tabs' rules (editPolicyOf): a built-in catalog TV season is skipped, a
-// built-in catalog film gets status Skipped after a confirmation, anything else is
+// The editing rules (editPolicyOf): a catalog TV season is skipped, a catalog film
+// gets status Skipped after a confirmation, anything else is
 // deleted after a confirmation (a TV season through delete_tv_season, which also
 // removes a show left empty). The row leaves the view at once and comes back if
 // the delete is refused; an unclear answer is reported as such, never as done.
@@ -1067,6 +1172,11 @@ async function delRowInView(id) {
   const row = rows.find(r => r.id === id);
   if (!row) return;
   const policy = editPolicyOf(row);
+  if (policy.deleteEffect === 'unknown') {
+    showNotice(`This page couldn’t confirm whether “${row.title}” is a built-in catalog entry, so nothing was deleted. The list has been read again; try again.`);
+    if (typeof reloadOpenView === 'function') reloadOpenView();
+    return;
+  }
   if (policy.deleteEffect === 'skip') { await setSeasonSkipped(id, true); return; }
   if (policy.deleteEffect === 'skip-film') {
     if (!confirm(`Skip “${row.title}”? It’s part of a built-in catalog, so it is marked Skipped rather than deleted.`)) return;
@@ -1078,7 +1188,7 @@ async function delRowInView(id) {
   const viewId = activeViewId, epoch = orgEpoch;
   const idx = rows.indexOf(row);
   rows.splice(idx, 1);
-  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', row.collection, id, null) : null;
+  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', LIBRARY_PARTITION, id, null) : null;
   renderTable();
   try {
     if (isTvSeason(row)) {

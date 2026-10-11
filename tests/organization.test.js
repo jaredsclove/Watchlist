@@ -1,6 +1,6 @@
 // Offline tests for personal organization (Stage 3b-1): the Browse selector loads
 // your collections at startup without holding up the first view; collections list
-// their members (never the storage tab); archived collections are hidden and a
+// their members (never storage); archived collections are hidden and a
 // renamed one keeps its device layout; watch-with shows labels and stores tokens;
 // backup format 3 and its validation; format 2 refused before anything happens;
 // Match never applies a collection expansion silently; and the app against a
@@ -125,7 +125,7 @@ test('a collection archived after the selector loaded: entering it says it isn�
 });
 
 // ── membership, not storage ──
-test('collections list their members only: a removed membership hides a show there but not in its tab or All TV; members stored elsewhere appear (without a storage badge since Stage 4b)', async () => {
+test('collections list their members only: a removed membership hides a show there but not in All TV; members stored elsewhere appear (no storage badge)', async () => {
   const data = library();
   const app = await boot(data);
   const andor = data.shows.find(s => s.title === 'Andor');
@@ -140,8 +140,6 @@ test('collections list their members only: a removed membership hides a show the
   await open(app, B.sheridan);
   assert.ok(titles(app).includes('Severance') && !html(app).includes('source-badge'), 'a show stored in Other TV, listed in Sheridan; storage isn’t shown');
   assert.strictEqual(writes(app).length, 0, 'the collection views wrote nothing');
-  app.ctx.switchTab('disney'); await settle(); // (the legacy tab seeds its missing defaults, as before)
-  assert.ok(app.el('tbody').innerHTML.includes('Andor'), 'the legacy tab still shows what it stores');
   app.ctx.switchView('alltv'); await settle();
   assert.ok(app.el('tbody').innerHTML.includes('Andor'));
 });
@@ -163,14 +161,13 @@ test('watch-with: labels from your choices, tokens in the data; an archived choi
   app.store.watch_with_choices.find(c => c.token === 'Kids').archived_at = TS;
   await app.ctx.loadOrganization(); await settle();
   app.ctx.switchMediaType('movie'); await settle();
-  app.ctx.switchTab('movies'); await settle();
+  app.ctx.switchView('allmovies'); await settle();
   const body = app.el('tbody').innerHTML;
   assert.ok(body.includes('>Rina S.</button>') && !body.includes('>Rina</button>'), 'the tag shows the label');
   assert.ok(/<option value="Rina">Rina S\.<\/option>/.test(app.el('filtersRow').innerHTML), 'the filter offers the label and filters by token');
   // Stage 3b-2: an archived choice still used in the list can be filtered on (Archived group), never assigned.
-  const [activeOpts, archivedGroup = ''] = app.el('filtersRow').innerHTML.split('<optgroup label="Archived">');
-  assert.ok(!/<option value="Kids">/.test(activeOpts), 'an archived choice isn’t offered among the choices');
-  assert.ok(/<option value="Kids">Kids<\/option>/.test(archivedGroup), 'an archived choice in use is listed under Archived for filtering');
+  // (All Movies' filter lists only choices in use, an archived one marked: tests/browse-views.test.js.)
+  assert.ok(/<option value="Kids">Kids \(archived\)<\/option>/.test(app.el('filtersRow').innerHTML), 'an archived choice in use is listed, marked, for filtering');
   const wind = data.rows.find(r => r.title === 'Wind River');
   const picker = app.get(`watchWithPickerHtml('${wind.id}', ['Rina', 'Kids'])`);
   assert.ok(picker.includes('value="Kids" checked') && picker.includes('> Kids (archived)</label>'), 'still visible (marked, untickable) where it is used');
@@ -262,12 +259,12 @@ test('Match asks the database to refuse a collection expansion; the expansion is
   const legacy = film({ title: 'Target Show', collection: 'truecrime', media_type: null, tmdb_id: null, item_key: 'target show|film' });
   const app = await boot(all(target, legacy));
   app.store.collection_memberships.push({ id: uuid('0d', 950), collection_id: coll(app, 'disney').id, show_id: null, item_id: legacy.id, created_at: TS });
-  app.ctx.switchTab('truecrime'); await settle();
+  app.ctx.switchMediaType('movie'); await settle(); // the unidentified film is in All Movies
   const before = JSON.stringify([app.store.watchlist_items, app.store.collection_memberships, app.store.tv_shows]);
   app.addEl('tmdbMatchBody');
   await matchAsTv(app, legacy.id, 4000);
   const calls = writes(app);
-  assert.deepStrictEqual(calls.map(r => new URL(r.url).pathname.split('/').pop()), ['match_tv_row']);
+  assert.deepStrictEqual(calls.map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_season']);
   assert.deepStrictEqual(calls[0].body.p_expansion, {});
   // Stage 3b-2: the expansion is described for confirmation (tests/match-expansion.test.js covers the flow).
   const panel = app.el('tmdbMatchBody').innerHTML;
@@ -277,23 +274,24 @@ test('Match asks the database to refuse a collection expansion; the expansion is
   assert.strictEqual(JSON.stringify([app.store.watchlist_items, app.store.collection_memberships, app.store.tv_shows]), before, 'nothing changed');
 });
 
-test('Match without an expansion keeps the row in its collections; a TV season matched as a film keeps its show’s collections after the two requests', async () => {
+test('Match without an expansion keeps the row in its collections; a TV season matched as a film keeps its show’s collections (one library_match_film call)', async () => {
   const doc = show({ title: 'Doc Series', collection: 'truecrime' }, ['Season 1', 'Season 2']);
   const app = await boot(all(doc));
   app.store.collection_memberships.push({ id: uuid('0d', 960), collection_id: coll(app, 'sheridan').id, show_id: doc.show.id, item_id: null, created_at: TS });
-  app.ctx.switchTab('truecrime'); await settle();
+  app.ctx.switchView('alltv'); await settle();
   const s1 = doc.rows[0];
   app.ctx.__tmdbMatch = { rowId: s1.id, results: [], target: { mediaType: 'movie', details: { id: 5555, title: 'Doc Film', release_date: '2020-01-01', genres: [], production_companies: [], belongs_to_collection: null } } };
   await app.ctx.confirmTmdbMatch(); await settle();
   const ofFilm = app.store.collection_memberships.filter(m => m.item_id === s1.id).map(m => m.collection_id).sort();
   assert.deepStrictEqual(ofFilm, [coll(app, 'sheridan').id, coll(app, 'truecrime').id].sort());
-  assert.ok(app.store.tv_shows.some(s => s.id === doc.show.id), 'the show keeps its other season (the DELETE is refused, 23001)');
+  assert.ok(app.store.tv_shows.some(s => s.id === doc.show.id), 'the show keeps its other season');
+  assert.deepStrictEqual(writes(app).map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_film'], 'one transaction (Stage 5)');
   assert.strictEqual(app.store.collection_memberships.filter(m => m.show_id === doc.show.id).length, 2, 'the show keeps its collections');
   assert.ok(!writes(app).some(r => r.body && JSON.stringify(r.body).includes('is_film')), 'the app never sends is_film');
 });
 
 // ── database without personal collections (previous schema) ──
-test('without personal collections: the selector is unavailable (never the storage tabs), backup is format 2, watch-with uses the configured list, Match sends no new parameter', async () => {
+test('without personal collections: the selector is unavailable (never the storage tabs), backup is format 2, watch-with uses the configured list', async () => {
   const data = library();
   const app = await boot(data, { org: false });
   assert.strictEqual(app.get('orgState'), 'absent');
@@ -303,12 +301,7 @@ test('without personal collections: the selector is unavailable (never the stora
   const b = await app.run('buildBackupObject()');
   assert.strictEqual(b.formatVersion, 2);
   assert.deepStrictEqual(JSON.parse(app.get('JSON.stringify(watchWithChoiceList().map(c => c.token))')), Array.from(app.get('WATCH_WITH_OPTIONS')));
-  const legacy = film({ title: 'Solo Doc', collection: 'truecrime', media_type: null, tmdb_id: null, item_key: 'solo doc|film' });
-  const app2 = await boot(all(legacy), { org: false });
-  app2.ctx.switchTab('truecrime'); await settle();
-  await matchAsTv(app2, legacy.id, 4100);
-  const call = writes(app2).find(r => r.url.includes('match_tv_row'));
-  assert.ok(call && !('p_expansion' in call.body));
+  // (Match against a database without the Stage 5 functions is covered in tests/stage5-app.test.js.)
 });
 
 // ── organization refresh (review finding 1) ──
@@ -331,14 +324,13 @@ async function restoreThrough(app, b) {
 }
 
 test('after a restore the selector and watch-with labels come from the restored data (changed ids, names, labels)', async () => {
-  const app = await boot();
-  app.ctx.switchMediaType('movie'); await settle();
-  app.ctx.switchTab('movies'); await settle();
+  const app = await boot(); // Restore runs from a TV view (All Movies hides it since Stage 4b)
   const { b, oldId, freshId } = await restoredBackup(app);
   await restoreThrough(app, b);
+  app.ctx.switchMediaType('movie'); await settle();
   assert.ok(options(app).some(([v, t]) => v === `browse:${freshId}` && t === 'Disney+ (restored)'), JSON.stringify(options(app)));
   assert.ok(!options(app).some(([v]) => v === `browse:${oldId}`), 'the restored-away collection is gone from the selector');
-  assert.ok(app.el('tbody').innerHTML.includes('>Rina (restored)</button>'), 'the open Movies tab shows the restored label');
+  assert.ok(app.el('tbody').innerHTML.includes('>Rina (restored)</button>'), 'All Movies shows the restored label');
   assert.ok(/<option value="Rina">Rina \(restored\)<\/option>/.test(app.el('filtersRow').innerHTML));
 });
 
@@ -364,7 +356,7 @@ test('watch-with controls drawn before the choices load are redrawn when the loa
   const g = app.hold(r => r.url.includes('/watch_with_choices?'));
   const loading = app.ctx.loadOrganization();
   app.ctx.switchMediaType('movie'); await settle();
-  app.ctx.switchTab('movies'); await settle();
+  app.ctx.switchView('allmovies'); await settle();
   assert.ok(app.el('tbody').innerHTML.includes('>Suzanne</button>'), 'fallback before the choices arrive');
   g.release(); await loading; await settle();
   assert.ok(app.el('tbody').innerHTML.includes('>Suzanne B.</button>'), 'redrawn with the loaded label');
@@ -462,9 +454,7 @@ for (const withBrowse of [false, true]) {
     const data = library();
     const app = await boot(data);
     const dune = data.rows.find(r => r.title === 'Dune');
-    app.ctx.switchMediaType('movie'); await settle();
-    app.ctx.switchTab('movies'); await settle();
-    await restoreChangedChoices(app);
+    await restoreChangedChoices(app); // from a TV view (All Movies hides Restore)
     if (withBrowse) {
       // The choices read is still in flight when a collection view reads collections successfully; then it fails.
       const g = app.hold(r => r.url.includes('/watch_with_choices?'));
@@ -474,10 +464,11 @@ for (const withBrowse of [false, true]) {
       await open(app, B.sheridan);
       assert.ok(app.get('orgCollectionsSeq') > loadSeq, 'the collection view published newer collections than the failing load');
       g.fail(); await settle();
-      app.ctx.switchTab('movies'); await settle();
+      app.ctx.switchView('allmovies'); await settle();
     } else {
       app.failNext(r => r.url.includes('/watch_with_choices?'));
       app.ctx.finishRestoreAndReload(); await settle();
+      app.ctx.switchMediaType('movie'); await settle();
     }
     const picker = pickerOf(app, dune.id);
     assert.ok(!/value="Alone"/.test(picker), 'the removed choice is not offered: ' + picker);
@@ -515,52 +506,50 @@ test('while the post-restore choices read is pending the controls say loading (n
 // ── unfinished work during a watch-with refresh; Retry beside the filter (third review) ──
 // The watch-with filter control (replaced in place; the fake DOM doesn't propagate that to its parent's markup).
 const wwFilter = app => (app.el('fWatchWithWrap') && app.el('fWatchWithWrap').innerHTML) || app.el('filtersRow').innerHTML;
+// Stage 5: unfinished work lives in All Movies' "+ Add" panel (a hand-entered film; a search with a preview).
 async function moviesWithUnfinishedWork(app) {
   app.ctx.switchMediaType('movie'); await settle();
-  app.ctx.switchTab('movies'); await settle();
-  app.ctx.toggleAdd(); await settle();
+  app.ctx.openLibraryPanel('movie', 'manual'); await settle();
   app.el('nTitle').value = 'Unfinished title';
   app.el('nDate').value = 'Jan 1, 2031';
-  app.el('tmdbQuery').value = 'dune part three';
-  app.el('tmdbResults').innerHTML = '<div class="tmdb-result">a chosen search result</div>';
-  app.el('tmdbPreview').innerHTML = '<div class="tmdb-preview">an open preview</div>';
+  app.__panelSession = app.get('libraryPanel.session');
 }
 function assertWorkKept(app, when) {
   assert.strictEqual(app.el('nTitle') && app.el('nTitle').value, 'Unfinished title', `add-entry title kept (${when})`);
   assert.strictEqual(app.el('nDate').value, 'Jan 1, 2031', `add-entry date kept (${when})`);
-  assert.strictEqual(app.el('tmdbQuery').value, 'dune part three', `TMDB query kept (${when})`);
-  assert.ok(app.el('tmdbResults').innerHTML.includes('a chosen search result'), `TMDB results kept (${when})`);
-  assert.ok(app.el('tmdbPreview').innerHTML.includes('an open preview'), `TMDB preview kept (${when})`);
+  assert.strictEqual(app.get('libraryPanel && libraryPanel.session'), app.__panelSession, `the same panel stays open (${when})`);
 }
 
-test('a delayed startup choices read doesn’t erase an open Add entry form or TMDB search/preview', async () => {
+test('a delayed startup choices read doesn’t erase an open “+ Add” panel or its unfinished entry', async () => {
   const app = await boot();
   app.run("watchWithChoices = null; watchWithState = 'loading'; orgChoicesSeq = 0");
   const g = app.hold(r => r.url.includes('/watch_with_choices?'));
   const loading = app.ctx.loadOrganization();
   await moviesWithUnfinishedWork(app);
-  assert.match(wwFilter(app), /Watch-with choices are loading/);
   g.release(); await loading; await settle();
-  assert.ok(/<option value="Rina">Rina<\/option>/.test(wwFilter(app)), 'the filter now offers the choices');
+  assert.ok(/<option value="Rina">Rina<\/option>/.test(wwFilter(app)), 'the filter offers the choices in use');
   assertWorkKept(app, 'after the delayed read');
 });
 
+// Stage 5: All Movies' watch-with filter lists the values in use (it needs no choice list),
+// so the Retry for failed choices is on each film's picker; the storage tab's filter Retry is retired.
 for (const emptyList of [false, true]) {
-  test(`a failed choices read shows Retry beside the Movies filter (${emptyList ? 'no rows visible' : 'rows visible'}); Retry recovers; unfinished work is kept`, async () => {
-    const app = await boot();
+  test(`a failed choices read (${emptyList ? 'no rows visible' : 'rows visible'}): the pickers say unavailable with Retry; Retry recovers; unfinished work is kept`, async () => {
+    const data = library();
+    const app = await boot(data);
+    const dune = data.rows.find(r => r.title === 'Dune');
     await moviesWithUnfinishedWork(app);
     if (emptyList) { app.el('fSearch').value = 'no film has this title'; app.ctx.renderTable(); }
     app.failNext(r => r.url.includes('/watch_with_choices?'));
     app.run("invalidateOrganization()");
     await app.ctx.loadOrganization(); await settle();
-    const filters = wwFilter(app);
-    assert.match(filters, /Watch-with choices couldn’t be loaded/);
-    assert.match(filters, /<button class="btn" onclick="loadOrganization\(\)" aria-label="Retry loading watch-with choices">Retry<\/button>/);
-    if (emptyList) assert.ok(!/class="ww-option"/.test(app.el('tbody').innerHTML) && !/more-popover/.test(app.el('tbody').innerHTML), 'no rows (so no row Retry) are visible');
+    assert.strictEqual(app.get('watchWithState'), 'unavailable');
+    assert.match(pickerOf(app, dune.id), /Watch-with choices couldn’t be loaded[\s\S]*onclick="loadOrganization\(\)">Retry/);
+    if (emptyList) assert.ok(!/class="ww-option"/.test(app.el('tbody').innerHTML) && !/more-popover/.test(app.el('tbody').innerHTML), 'no rows are visible');
     assertWorkKept(app, 'after the failure');
     await app.ctx.loadOrganization(); await settle();
-    assert.ok(/<option value="Rina">Rina<\/option>/.test(wwFilter(app)), 'recovered');
-    assert.ok(!/aria-label="Retry loading watch-with choices"/.test(wwFilter(app)));
+    assert.strictEqual(app.get('watchWithState'), 'ready');
+    assert.ok(/<input type="checkbox"/.test(pickerOf(app, dune.id)), 'recovered');
     if (emptyList) assert.strictEqual(app.el('fSearch').value, 'no film has this title', 'the filter search is kept');
     assertWorkKept(app, 'after Retry');
   });
@@ -568,7 +557,8 @@ for (const emptyList of [false, true]) {
 
 test('views without watch-with controls aren’t redrawn when choices arrive or change', async () => {
   const app = await boot();
-  for (const go of [() => app.ctx.switchView('watching'), () => app.ctx.switchTab('disney')]) {
+  // (A collection view does redraw: it shows watch-with labels on its films.)
+  for (const go of [() => app.ctx.switchView('watching'), () => app.ctx.switchView('comingsoon'), () => app.ctx.switchView('alltv')]) {
     go(); await settle();
     let draws = 0;
     const real = app.ctx.renderTable, realF = app.ctx.renderFilters;
@@ -586,13 +576,13 @@ test('Match refused by a concurrent change (40001 re-check, deadlock victim, loc
     ['40P01', 'deadlock detected'], ['55P03', 'canceling statement due to lock timeout'], ['57014', 'canceling statement due to statement timeout']]) {
     const legacy = film({ title: 'Race Doc', collection: 'truecrime', media_type: null, tmdb_id: null, item_key: 'race doc|film' });
     const app = await boot(all(legacy));
-    app.ctx.switchTab('truecrime'); await settle();
-    app.rpcHandlers.match_tv_row = () => ({ ok: false, status: 409, text: async () => JSON.stringify({ code, message }), json: async () => ({ code, message }), headers: { get: () => null } });
+    app.ctx.switchMediaType('movie'); await settle();
+    app.rpcHandlers.library_match_season = () => ({ ok: false, status: 409, text: async () => JSON.stringify({ code, message }), json: async () => ({ code, message }), headers: { get: () => null } });
     await matchAsTv(app, legacy.id, 4200);
     assert.match(app.get('document.getElementById("errorBanner").innerHTML'), ['55P03', '57014'].includes(code)
       ? /The database didn’t finish the match in time, so it was cancelled and nothing was matched\. Another change may have been using the same rows; try again\./
       : /Something else was changing the same show or collections at that moment, so nothing was matched\. Try again\./, code);
-    assert.deepStrictEqual(writes(app).map(r => new URL(r.url).pathname.split('/').pop()), ['match_tv_row']);
+    assert.deepStrictEqual(writes(app).map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_season']);
   }
 });
 

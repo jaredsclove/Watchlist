@@ -1,5 +1,6 @@
-// Offline tests for which TMDB search hits the manual search shows per tab:
-// tmdbSearchModeFor() and selectTmdbSearchResults() in tmdb-search.js.
+// Offline tests for which TMDB search hits the manual search shows:
+// selectTmdbSearchResults() in tmdb-search.js (the "+ Add" panel searches by its
+// media) and Match's mode by the row (tmdbMatchSearchMode in tmdb-match.js).
 // Run from the repo root: node tests/search-selection.test.js
 // No network. The classic scripts are loaded into one sandbox the same way the
 // page loads them (shared global scope).
@@ -10,13 +11,12 @@ const assert = require('assert');
 
 const ctx = {};
 vm.createContext(ctx);
-for (const f of ['config.js', 'tmdb-search.js']) {
+for (const f of ['config.js', 'tmdb-search.js', 'tmdb-match.js']) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'), ctx);
 }
 // Results are copied into this realm's arrays so deepStrictEqual compares values, not prototypes.
 const select = (...args) => Array.from(ctx.selectTmdbSearchResults(...args));
-const modeFor = ctx.tmdbSearchModeFor;
-const tab = id => vm.runInContext(`COLLECTIONS.find(c => c.id === ${JSON.stringify(id)})`, ctx);
+vm.runInContext(`function isFilmRow(r) { return !!r && (r.media_type === 'movie' || (r.media_type == null && r.season === 'Film')); }`, ctx);
 
 // TMDB /search responses for "Dune" (page 1, TMDB's own order, trimmed), tagged the way searchTMDB tags them
 const tv = ['Dune: Prophecy', "Frank Herbert's Children of Dune", "Frank Herbert's Dune", 'H24', 'China: The Making of a Nation', 'Be Dune Teen', 'Fly Tales']
@@ -28,11 +28,11 @@ const labels = list => list.map(r => `${r.mediaType}:${r.title || r.name}`);
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
-test('tab modes: Movies → movie, Other TV → tv, True Crime / Docs → mixed', () => {
-  assert.strictEqual(modeFor(tab('movies')), 'movie');
-  assert.strictEqual(modeFor(tab('othertv')), 'tv');
-  assert.strictEqual(modeFor(tab('truecrime')), 'mixed');
-  assert.strictEqual(modeFor(undefined), 'tv');
+test('Match searches by the row: films first for a film, series first for a TV season (Stage 5: no storage decides)', () => {
+  assert.strictEqual(ctx.tmdbMatchSearchMode({ media_type: null, season: 'Film' }), 'movie');
+  assert.strictEqual(ctx.tmdbMatchSearchMode({ media_type: null, season: 'Season 1' }), 'tv');
+  assert.strictEqual(ctx.tmdbMatchSearchMode(null), 'tv');
+  assert.ok(!('tmdbSearchModeFor' in ctx), 'the per-tab mode is gone');
 });
 test('Movies: films fill the list; TV cannot crowd out Dune: Part Two', () => {
   const out = select(tv, movies, 'movie');
@@ -44,22 +44,22 @@ test('Movies: TV only fills room the films leave', () => {
   assert.deepStrictEqual(labels(select(tv, movies.slice(0, 2), 'movie')),
     ['movie:Dune', 'movie:Dune', 'tv:Dune: Prophecy', "tv:Frank Herbert's Children of Dune", "tv:Frank Herbert's Dune", 'tv:H24']);
 });
-test('TV tab: series come first and fill the list', () => {
+test('TV (a TV season’s Match, the + Add panel’s TV search): series come first and fill the list', () => {
   const out = select(tv, movies, 'tv');
   assert.strictEqual(out.length, 6);
   assert.ok(out.every(r => r.mediaType === 'tv'));
 });
-test('TV tab: films only fill room the series leave', () => {
+test('TV: films only fill room the series leave', () => {
   assert.deepStrictEqual(labels(select(tv.slice(0, 1), movies, 'tv')),
     ['tv:Dune: Prophecy', 'movie:Dune', 'movie:Dune', 'movie:Dune: Part Two', 'movie:Dune: Part Three', 'movie:Anatomy of a Fall']);
 });
-test('True Crime / Docs: original mixed split (up to 4 series, then films) is unchanged', () => {
+test('mixed (the former True Crime / Docs tab’s split, no longer chosen since Stage 5): up to 4 series, then films, unchanged', () => {
   const out = select(tv, movies, 'mixed');
   assert.deepStrictEqual(labels(out), ['tv:Dune: Prophecy', "tv:Frank Herbert's Children of Dune", "tv:Frank Herbert's Dune", 'tv:H24', 'movie:Dune', 'movie:Dune']);
   // same as the old rule for every tab
   assert.deepStrictEqual(out, [...tv.slice(0, 4), ...movies.slice(0, 4)].slice(0, 6));
 });
-test('True Crime / Docs: films still appear when there are few series', () => {
+test('mixed: films still appear when there are few series', () => {
   assert.deepStrictEqual(labels(select(tv.slice(0, 1), movies, 'mixed')),
     ['tv:Dune: Prophecy', 'movie:Dune', 'movie:Dune', 'movie:Dune: Part Two', 'movie:Dune: Part Three']);
 });

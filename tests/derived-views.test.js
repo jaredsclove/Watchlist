@@ -129,7 +129,7 @@ test('films and unlinked rows are never in Currently Watching; the same title in
   const unlinked = { ...a.rows[0], id: nid('u'), show_id: null };
   const { active } = await cw({ rows: [...a.rows, ...b.rows, unlinked, film()], shows: [a.show, b.show] });
   assert.strictEqual(active.length, 2);
-  assert.deepStrictEqual(Array.from(active, x => x.collection), ['othertv', 'truecrime'], 'A–Z, then collection label');
+  assert.deepStrictEqual(Array.from(active, x => x.key), [a.show.id, b.show.id].sort(), 'A–Z, then show id (Stage 5: storage plays no part)');
   assert.ok(active.every(x => x.seasons.length === 1));
 });
 
@@ -225,57 +225,48 @@ test('render: Coming Soon has Skip only — no status menu, no watch control, no
   assert.ok(!tbody(app).includes(`setSeasonSkipped('${s.rows[0].id}'`));
 });
 
-// ─── Rendering: collection tabs ───────────────────────────────────────────────
-test('flat tab (Disney+): TV rows get the show control and Skip; × on a built-in season means Skip; films stay row-level', async () => {
+// ─── Rendering: catalog entries in the library views (Stage 5: no storage tabs) ─
+test('All TV and All Movies: × on a catalog season means Skip; a catalog film is Skipped after a confirmation; films keep the row status control', async () => {
   const app0 = await createApp();
   await app0.applyCatalog('disney');
   const app = await createApp({ rows: app0.store.watchlist_items, tvShows: app0.store.tv_shows });
-  app.ctx.switchTab('disney'); await settle();
-  const rows = app.get('tabData.disney.rows');
-  const tvRow = rows.find(r => r.season !== 'Film' && !r.skipped);
-  const filmRow = rows.find(r => r.season === 'Film');
+  const tvRow = app0.store.watchlist_items.find(r => r.season !== 'Film' && !r.skipped && r.collection === 'disney');
+  const filmRow = app0.store.watchlist_items.find(r => r.season === 'Film' && r.collection === 'disney' && r.status !== 'skipped');
+  app.ctx.switchView('alltv'); await settle();
+  app.el('fStatus').value = 'all'; app.ctx.renderTable();
+  app.ctx.toggleDerivedShow(tvRow.show_id); await settle();
   const html = tbody(app);
   assert.ok(html.includes(`setShowStatusById('${tvRow.show_id}'`));
   assert.ok(html.includes(`setSeasonSkipped('${tvRow.id}', true)`));
-  assert.ok(html.includes(`setStatus('${filmRow.id}'`), 'films keep the row status control');
-  assert.ok(html.includes('title="Skip this season"'));
-  await app.ctx.delRow(tvRow.id); await settle();
+  assert.strictEqual(app.get(`editPolicyOf(derivedData.rows.find(r => r.id === ${JSON.stringify(tvRow.id)})).deleteEffect`), 'skip', 'a catalog entry (governed show, listed key)');
+  await app.ctx.delRowInView(tvRow.id); await settle();
   assert.deepStrictEqual(app.writes().map(r => r.url.split('/rest/v1/')[1]), ['rpc/set_season_skipped']);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === tvRow.id).skipped, true, 'skipped, not deleted');
+  app.ctx.switchMediaType('movie'); await settle();
+  app.el('fStatus').value = 'all'; app.el('fWatch').value = ''; app.ctx.renderTable();
+  assert.ok(tbody(app).includes(`setStatus('${filmRow.id}'`), 'films keep the row status control');
+  app.ctx.confirm = () => true;
+  await app.ctx.delRowInView(filmRow.id); await settle();
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === filmRow.id).status, 'skipped', 'skipped, not deleted');
+  assert.ok(!app.writes().some(r => r.method === 'DELETE'));
 });
 
-test('grouped tab: one group per show (by show_id) with the show control; seasons have Skip / Keep + Watched; True Crime films unchanged', async () => {
+test('All TV groups by show_id with the show control; expanded seasons have Skip / Keep + Watched and no row-level status', async () => {
   const s = show({ title: 'Grouped', status: 'watching', collection: 'truecrime' }, [{ num: 1, w: true }, { num: 2, date: day(-1) }]);
-  const f = film();
-  const app = await createApp({ rows: [...s.rows, f], tvShows: [s.show] });
-  app.ctx.switchTab('truecrime'); await settle();
-  app.ctx.toggleShowExpand(`show:${s.show.id}`); await settle();
+  const app = await createApp({ rows: [...s.rows, film()], tvShows: [s.show] });
+  app.ctx.switchView('alltv'); await settle();
+  app.ctx.toggleDerivedShow(s.show.id); await settle();
   const html = tbody(app);
-  assert.strictEqual((html.match(/show-group-row/g) || []).length, 2, 'the show and the film');
   assert.ok(html.includes(`setShowStatusById('${s.show.id}'`));
   assert.ok(html.includes(`setSeasonSkipped('${s.rows[1].id}', true)`));
   assert.ok(html.includes(`toggleWatch('${s.rows[1].id}')`));
-  assert.ok(html.includes(`setStatus('${f.id}'`), 'the film keeps its row-level status');
   assert.ok(!html.includes(`setStatus('${s.rows[0].id}'`), 'no row-level status for a season');
 });
 
-test('grouped tab filters: "Watching only" lists every Watching show; "Up to date only" just the up-to-date ones', async () => {
-  const p = show({ title: 'Progress', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-3) }]);
-  const u = show({ title: 'Current', status: 'watching', tmdb_id: 101 }, [{ num: 1, w: true }]);
-  const o = show({ title: 'Listed', status: 'confirmed', tmdb_id: 102 }, [{ num: 1 }]);
-  const app = await createApp({ rows: [...p.rows, ...u.rows, ...o.rows], tvShows: [p.show, u.show, o.show] });
-  app.ctx.switchTab('othertv'); await settle();
-  const titles = () => [...tbody(app).matchAll(/<span class="show-title">([^<]+)<\/span>/g)].map(m => m[1]);
-  app.el('fWatch').value = '';
-  app.el('fStatus').value = 'watching'; app.ctx.renderTable();
-  assert.deepStrictEqual(titles(), ['Progress', 'Current']);
-  app.el('fStatus').value = 'uptodate'; app.ctx.renderTable();
-  assert.deepStrictEqual(titles(), ['Current']);
-  app.el('fStatus').value = ''; app.ctx.renderTable();
-  assert.deepStrictEqual(titles(), ['Progress', 'Current', 'Listed'], 'Watching in progress, Watching up to date, then On List');
-});
+// (Retired with the storage tabs in Stage 5: the grouped tab's "Up to date only"
+// status filter; Currently Watching's Up to date section covers it.)
 
-test('the season status column is never read for TV: scrambling it changes no view or tab', async () => {
+test('the season status column is never read for TV: scrambling it changes no view', async () => {
   const p = show({ title: 'A', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-3) }, { num: 3, tba: true }]);
   const q = show({ title: 'B', status: 'maybe', tmdb_id: 101 }, [{ num: 1, date: day(4) }, { num: 2, s: true }]);
   const render = async scramble => {
@@ -284,7 +275,7 @@ test('the season status column is never read for TV: scrambling it changes no vi
     const app = await createApp({ rows, tvShows: data.shows.map(s => ({ ...s })) });
     const out = [tbody(app), app.el('statsRow').innerHTML];
     app.ctx.switchView('comingsoon'); await settle(); out.push(tbody(app));
-    app.ctx.switchTab('othertv'); await settle(); app.el('fWatch').value = ''; app.ctx.renderTable(); out.push(tbody(app), app.el('statsRow').innerHTML);
+    app.ctx.switchView('alltv'); await settle(); app.ctx.renderTable(); out.push(tbody(app), app.el('statsRow').innerHTML);
     return out.join('\n');
   };
   const a = await render('skipped'), b = await render('watching'), c = await render('complete');

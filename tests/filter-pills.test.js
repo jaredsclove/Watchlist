@@ -342,18 +342,10 @@ test('Currently Watching and Coming Soon filter by theme too, with choices from 
   assert.ok(readsOnly(app));
 });
 
-// ─── Legacy tabs ──────────────────────────────────────────────────────────────
-test('legacy tabs: the same pills show their selected state; collection tags update the person-collection refresh link (in All Movies too since Stage 4b)', async () => {
+// ─── The person-collection refresh link ───────────────────────────────────────
+test('All Movies: a collection-tag pill updates the person-collection refresh link; watch-with pills filter by token with the current label; no pill writes (Stage 5: no storage tabs)', async () => {
   const app = await boot();
-  app.ctx.switchTab('othertv'); await settle();
-  app.el('fWatch').value = ''; app.ctx.renderTable();
-  click(app, 'theme', 'Netflix');
-  assert.strictEqual(app.el('fTheme').value, 'Netflix');
-  assert.ok(pressed(app).length > 0 && pressed(app).every(p => p === 'theme:Netflix'));
-  click(app, 'theme', 'Netflix');
-  assert.deepStrictEqual(pressed(app), []);
   app.ctx.switchMediaType('movie'); await settle();
-  app.ctx.switchTab('movies'); await settle();
   app.el('fWatch').value = ''; app.ctx.renderTable();
   const writes = app.writes().length;
   let linkCalls = 0;
@@ -361,13 +353,11 @@ test('legacy tabs: the same pills show their selected state; collection tags upd
   app.ctx.updateCollectionRefreshLink = () => { linkCalls++; };
   click(app, 'collection', 'Star Wars');
   assert.strictEqual(app.el('fCollection').value, 'Star Wars');
-  assert.strictEqual(linkCalls, 1, 'the legacy tab’s refresh link is updated');
+  assert.strictEqual(linkCalls, 1, 'All Movies offers the refresh link');
   click(app, 'watchwith', 'Rina');
   assert.ok(/data-filter-value="Rina"[^>]*aria-pressed="true"[^>]*>Rina R\.</.test(html(app)), 'token filter, renamed label');
-  app.ctx.switchView('allmovies'); await settle();
   click(app, 'collection', 'Star Wars');
-  assert.strictEqual(app.el('fCollection').value, 'Star Wars');
-  assert.strictEqual(linkCalls, 2, 'All Movies offers the refresh link too');
+  assert.strictEqual(app.el('fCollection').value, '');
   app.ctx.updateCollectionRefreshLink = original;
   assert.strictEqual(app.writes().length, writes, 'no write from any pill');
 });

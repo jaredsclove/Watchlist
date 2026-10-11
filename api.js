@@ -1,4 +1,24 @@
+// The Stage 5 page writes only to a database whose phase it has read
+// (stage5_capabilities): coexistence or contracted. A missing or unrecognized phase
+// authorizes nothing; an unknown one is read again (GET) once before a write. The
+// refusal is raised before anything is sent and is formatted as a database refusal
+// (code update_required), so every caller reports that nothing was changed.
+const STAGE5_WRITABLE_PHASES = ['coexistence', 'contracted'];
+function stage5Refusal(text) {
+  return new Error(`Supabase error 412: ${JSON.stringify({ code: 'P0001', details: null, hint: null, message: `update_required: ${text}` })}`);
+}
+async function requireWritablePhase() {
+  if (STAGE5_WRITABLE_PHASES.includes(stage5Phase)) return stage5Phase;
+  let cap;
+  try { cap = await stage5Capabilities(); }
+  catch (e) { throw stage5Refusal('The database’s update state couldn’t be read, so nothing was changed. Try again.'); }
+  stage5Phase = cap && STAGE5_WRITABLE_PHASES.includes(cap.phase) ? cap.phase : null;
+  if (!stage5Phase) throw stage5Refusal('This page needs a database update that hasn’t been made yet, so nothing was changed.');
+  return stage5Phase;
+}
+
 async function sbFetch(method, path, body) {
+  if (method !== 'GET') await requireWritablePhase();
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method,
     headers: {
@@ -22,7 +42,7 @@ async function sbFetch(method, path, body) {
 // Content-Range response header (e.g. "0-249/1284") to know the true total
 // row count rather than guessing from page size. Deterministic id.asc order
 // so paging and later verification are stable. `filter` (optional) is a
-// PostgREST filter such as "collection=in.(...)"; the exact-count check then
+// PostgREST filter such as "is_film=eq.false"; the exact-count check then
 // applies to the filtered rows. Backup calls this without one. `select`
 // (optional) is a comma-separated column list; backups pass their exact columns.
 async function fetchAllRows(table, filter, select = '*') {
@@ -126,69 +146,21 @@ async function fetchAllRowsStrict(table, filter, pageSize = BACKUP_PAGE_SIZE) {
   return rows;
 }
 
-// ─── TV structural writes (TV-show migration) ────────────────────────────────
-// TV seasons are added, matched and deleted through database functions that
-// keep every season linked to its show in tv_shows (show status: tv-shows.js).
-// Mirrors private.tv_collections() and private.tv_is_tv_row() in db/tv_model.sql.
-const TV_COLLECTION_IDS = ['disney', '90day', 'sheridan', 'othertv', 'truecrime'];
-function isTvCollection(collectionId) {
-  return TV_COLLECTION_IDS.includes(collectionId);
-}
-function isTvSeasonRow(collectionId, mediaType, season) {
-  return isTvCollection(collectionId) && (mediaType === 'tv' || (mediaType == null && (season || '') !== 'Film'));
-}
-// The show a legacy (unidentified) season belongs to: private.tv_show_key().
-function tvShowKey(collectionId, itemKey) {
+// ─── Database functions ───────────────────────────────────────────────────────
+// Every structural write (adding, creating, matching, deleting TV seasons, films
+// and catalog entries) goes through a database function that checks it in one
+// transaction (library.js, tmdb-match.js, catalog-apply.js). Where a record was
+// once stored is not part of any request since Stage 5.
+
+// A catalog entry's show key (private.tv_show_key in the database): the entry
+// key's prefix, unless a reviewed override for that catalog applies.
+function catalogShowKey(catalogId, itemKey) {
   const prefix = String(itemKey || '').split('|')[0];
-  return SHOW_KEY_OVERRIDES[`${collectionId}|${prefix}`] || prefix;
+  return SHOW_KEY_OVERRIDES[`${catalogId}|${prefix}`] || prefix;
 }
-// Why a season of a TMDB-matched built-in show wasn't added (db/rpc.sql).
-const TV_REVIEW_REASONS = ['enriched_show_label', 'identity_conflict'];
 
 function sbRpc(fn, args) {
   return sbFetch('POST', `rpc/${fn}`, args);
-}
-
-// Adds TV season rows (shaped like a direct watchlist_items insert) through
-// add_tv_seasons, one call per show; each call is atomic, and the function also
-// reopens a Complete show that gets a genuinely new season (Refresh shows finds
-// identified shows in tv_shows). onInserted(rows) runs after each call, so rows
-// already added stay in the page if a later call fails. Returns
-// { inserted, alreadyListed, rejected, review: [{season, reason}], reopened: [show titles] }.
-// review lists seasons of a TMDB-matched built-in show that weren't added and need
-// a person to look at them (a label that isn't a plain "Season N", or a conflict).
-async function addTvSeasonRows(collectionId, rows, onInserted) {
-  const groups = new Map();
-  for (const r of rows) {
-    const showKey = r.tmdb_id != null ? r.item_key.slice(0, r.item_key.lastIndexOf('|')) : tvShowKey(collectionId, r.item_key);
-    const id = r.tmdb_id != null ? `tmdb:${r.tmdb_id}` : `key:${showKey}`;
-    if (!groups.has(id)) {
-      groups.set(id, { show: { tmdb_id: r.tmdb_id ?? null, title: r.title, show_key: showKey, network: r.theme || '' }, seasons: [] });
-    }
-    groups.get(id).seasons.push({
-      item_key: r.item_key, title: r.title, season: r.season, theme: r.theme, display_date: r.display_date,
-      date_sort: r.date_sort, season_number: r.tmdb_id != null ? r.season_number : null
-    });
-  }
-  const outcome = { inserted: 0, alreadyListed: 0, rejected: 0, review: [], reopened: [] };
-  for (const g of groups.values()) {
-    const res = await sbRpc('add_tv_seasons', { p_collection: collectionId, p_show: g.show, p_seasons: g.seasons });
-    outcome.alreadyListed += (res.existing || []).length;
-    for (const x of res.rejected || []) {
-      if (TV_REVIEW_REASONS.includes(x.reason)) outcome.review.push({ season: x.season || x.item_key, reason: x.reason, title: g.show.title });
-      else outcome.rejected++;
-    }
-    const show = tvShowsById.get(res.show_id);
-    if (show) show.status = res.show_status;
-    else tvShowsById.set(res.show_id, { id: res.show_id, collection: collectionId, title: g.show.title, show_key: g.show.show_key,
-      tmdb_id: g.show.tmdb_id, status: res.show_status });
-    if (res.reopened) outcome.reopened.push(tvShowsById.get(res.show_id).title);
-    if (res.inserted && res.inserted.length) {
-      outcome.inserted += res.inserted.length;
-      onInserted(res.inserted);
-    }
-  }
-  return outcome;
 }
 
 async function tmdbFetch(path) {

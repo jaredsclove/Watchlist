@@ -12,9 +12,11 @@
 // (the previous schema) gets "Collections unavailable" and the configured
 // watch-with choices; nothing falls back to the storage tabs.
 
-// Device layout keys of the four collections that existed before personal
-// collections, kept so their remembered Shows/Seasons and grouping survive.
-// Every other collection uses its stable id. Renaming or archiving changes neither.
+// Device layout keys of the four collections from before personal collections, by
+// their presentation key (library_collection_presentation: how the page presents a
+// collection it has always known; never where anything is placed), so their
+// remembered Shows/Seasons and grouping survive. Every other collection uses its
+// stable id. Renaming or archiving changes neither.
 const ORG_LAYOUT_KEYS = {
   disney: 'watchlist_browse_layout_disney',
   sheridan: 'watchlist_browse_layout_sheridan',
@@ -87,26 +89,10 @@ function watchWithSignature() {
   return JSON.stringify([watchWithState, !!orgChoicesStale, watchWithChoiceList(), (watchWithChoices || []).map(c => [c.token, c.label, !!c.archived_at])]);
 }
 
-// Only what shows watch-with is redrawn, and nothing else is rebuilt: in the
-// Movies tab the watch-with filter is replaced in place (keeping its value when
-// still offered, and keyboard focus) and the rows are redrawn with any open
-// picker reopened — the Add entry form, the TMDB search, results and preview, and
-// the other filters are untouched. A browse view redraws its read-only rows (they
-// show watch-with labels). Other views have no watch-with controls.
+// Only what shows watch-with is redrawn, and nothing else is rebuilt: a browse
+// view (All Movies, collections) redraws its rows (they show watch-with labels and
+// pickers). Other views have no watch-with controls.
 function redrawForWatchWith() {
-  const col = activeTabId ? COLLECTIONS.find(c => c.id === activeTabId) : null;
-  if (col && col.isMovieTab && tabData[activeTabId] && tabData[activeTabId].loaded) {
-    const wrap = document.getElementById('fWatchWithWrap');
-    if (wrap) {
-      const prev = document.getElementById('fWatchWith');
-      const focused = document.activeElement && typeof document.activeElement.closest === 'function'
-        && document.activeElement.closest('#fWatchWithWrap');
-      wrap.innerHTML = watchWithFilterControlHtml(prev ? prev.value : '');
-      if (focused) { const el = document.getElementById('fWatchWith'); if (el && typeof el.focus === 'function') el.focus(); }
-    }
-    redrawRowsKeepingPicker();
-    return;
-  }
   if (isBrowseView(activeViewId) && browseData && browseData.loaded) renderTable();
 }
 
@@ -133,6 +119,7 @@ function redrawRowsKeepingPicker() {
 // loading until the post-restore read arrives.
 function invalidateOrganization() {
   orgEpoch++;
+  if (typeof resetGovernance === 'function') resetGovernance(); // governance read before the restore speaks for nothing now
   orgCollectionsSeq = 0;
   orgChoicesSeq = 0;
   orgCollectionsStale = 0;
@@ -160,7 +147,7 @@ async function loadOrganization() {
     setWatchWith(() => { watchWithState = 'absent'; });
     buildBrowseBar();
   };
-  const collections = fetchAllRowsStrict('personal_collections').then(rows => {
+  const collections = readPersonalCollections().then(rows => {
     if (publishCollections(rows, read)) buildBrowseBar();
   }, e => {
     if (!current()) return;
@@ -188,16 +175,27 @@ function compareCollections(a, b) {
   return (a.sort_order - b.sort_order) || compareTitles(a.name, b.name) || cmpStr(a.id, b.id);
 }
 
-// A collection as a browse destination.
+// Every personal collection, with the catalog whose new records it receives (c.catalog:
+// 'disney' / '90day' / 'sheridan', or null), read completely or not at all.
+async function readPersonalCollections() {
+  const [rows, catalogs, presentation] = await Promise.all([fetchAllRowsStrict('personal_collections'),
+    fetchAllRowsStrict('library_collection_catalogs'), fetchAllRowsStrict('library_collection_presentation')]);
+  const byId = new Map(catalogs.map(x => [x.collection_id, x.catalog]));
+  const shown = new Map(presentation.map(x => [x.collection_id, x.presentation_key]));
+  return rows.map(c => ({ ...c, catalog: byId.get(c.id) || null, presentation: shown.get(c.id) || null }));
+}
+
+// A collection as a browse destination. A catalog's collection keeps the device
+// layout key it had before personal collections; any other uses its stable id.
 function browseDestFromCollection(c) {
-  const source = c.legacy_source || null;
+  const catalog = c.catalog || null;
   return {
     id: BROWSE_VIEW_PREFIX + c.id,
     collectionId: c.id,
     label: c.name,
-    legacySource: source,
-    note: source ? ORG_COLLECTION_NOTES[source] : undefined,
-    layoutKey: ORG_LAYOUT_KEYS[source] || `watchlist_browse_layout_id_${c.id}`,
+    catalog,
+    note: c.presentation ? ORG_COLLECTION_NOTES[c.presentation] : undefined,
+    layoutKey: ORG_LAYOUT_KEYS[c.presentation] || `watchlist_browse_layout_id_${c.id}`,
     archived: !!c.archived_at
   };
 }

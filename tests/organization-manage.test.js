@@ -710,8 +710,7 @@ test('watch-with choices: create (token ww:<id>), rename, archive; an archived o
 
 test('a stale page offering an archived choice: the database refuses the update, the row is unchanged, the choices are read again', async () => {
   const app = await boot();
-  app.ctx.switchMediaType('movie'); await settle();
-  app.ctx.switchTab('movies'); await settle();
+  app.ctx.switchMediaType('movie'); await settle(); // All Movies (Stage 5: no storage tabs)
   const wind = rowByTitle(app, 'Wind River');
   app.store.watch_with_choices.find(c => c.token === 'Suzanne').archived_at = TS; // archived elsewhere; this page still offers it
   const i = app.requests.length;

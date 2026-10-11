@@ -1,4 +1,5 @@
-// Offline tests for Stage 4b, the library without sources (library.js and the
+// Offline tests for the library without sources (Stage 4b; storage-free since
+// Stage 5: library.js and the
 // views that use it), in the whole-page harness: no storage tabs, badges or Source
 // filters; the "+ Add" panel's routing (a show already on the list, ambiguous and
 // similar results, new shows and films) and the exact requests it sends; the three
@@ -8,9 +9,9 @@
 // change while a request is out; Refresh shows (one call per show, partial results
 // kept); collections after a creation (a separate step); Year; duplicates; All
 // Movies' and All TV's actions; Catalog updates from the Browse bar.
-// The database function itself is checked on PGlite (db/test/t_4b_add_to_show.sql,
-// tools/db-rehearsal-4b.mjs); the harness's add_tv_seasons_to_show is an
-// independent stand-in.
+// The database functions themselves are checked on PGlite (db/test/t_5a_expand.sql,
+// db/test/t_5c_contract.sql, tools/db-rehearsal-5.mjs); the harness's library_*
+// functions are independent stand-ins.
 // Run from the repo root: node tests/library.test.js
 const assert = require('assert');
 const { createApp, runner, settle } = require('./app-harness');
@@ -137,29 +138,34 @@ test('opening every view, the + Add panel in each mode and the Catalog updates c
 });
 
 // ─── The editing rules (unchanged) ────────────────────────────────────────────
-test('editing rules and add kinds reproduce the tabs exactly: catalog entries skip, Match only for unidentified rows outside the catalogs', async () => {
+test('editing rules and add kinds follow catalog governance (Stage 5): catalog entries skip, Match only for unidentified rows no catalog governs', async () => {
   const probe = await createApp();
   const defSeason = probe.get("COLLECTIONS.find(c => c.id === 'disney').defaults.find(d => d.s !== 'Film')");
   const defFilm = probe.get("COLLECTIONS.find(c => c.id === 'disney').defaults.find(d => d.s === 'Film')");
+  const listed = probe.get(`catalogShowKey('disney', ${JSON.stringify(defSeason.k)})`);
   const app = await boot();
+  // Governance as read from library_catalog_shows / library_catalog_films (here: the coexistence views over storage).
+  assert.strictEqual(app.ctx.showAddKind(showOf(app, 'Severance')), 'tmdb', 'identified, no catalog');
+  assert.strictEqual(app.ctx.showAddKind(showOf(app, 'Tulsa King')), 'label', 'governed by Sheridan');
+  assert.strictEqual(app.ctx.showAddKind(showOf(app, 'Andor')), 'label', 'no TMDB identity');
+  assert.strictEqual(app.get(`showCatalogOf(tvShowsById.get(${JSON.stringify(showOf(app, 'Andor').id)}))`), 'disney');
+  app.run(`libraryGovernance = { shows: new Map([['gx', 'disney']]), films: new Map([['gf', 'disney']]), kinds: new Map(),
+    knownShows: new Set(['gx', 'ungoverned']), knownItems: new Set(['gf']), seq: 1e9, epoch: orgEpoch }`);
   const P = r => app.ctx.editPolicyOf(r);
-  const base = { collection: 'disney', media_type: null, tmdb_id: null, season_number: null, show_id: 'x' };
-  assert.strictEqual(P({ ...base, item_key: defSeason.k, season: defSeason.s }).deleteEffect, 'skip');
-  assert.strictEqual(P({ ...base, item_key: defFilm.k, season: 'Film', show_id: null }).deleteEffect, 'skip-film');
-  assert.strictEqual(P({ ...base, item_key: 'not in the catalog|season 1', season: 'Season 1' }).deleteEffect, 'delete', 'built-in storage alone is not a catalog entry');
-  assert.strictEqual(P({ ...base, item_key: 'x|season 1', season: 'Season 1' }).matchable, false, 'no Match in built-in storage');
-  assert.strictEqual(P({ ...base, collection: 'othertv', item_key: 'x|season 1', season: 'Season 1' }).matchable, true);
-  assert.strictEqual(app.ctx.showAddKind(showOf(app, 'Severance')), 'tmdb');
-  assert.strictEqual(app.ctx.showAddKind(showOf(app, 'Tulsa King')), 'label');
-  assert.strictEqual(app.ctx.showAddKind(showOf(app, 'Andor')), 'label');
-  assert.strictEqual(app.ctx.catalogListingOf({ collection: 'disney', show_key: 'zz not in any catalog' }), null, 'stored with a catalog is not listed by it');
-  assert.strictEqual(app.ctx.catalogListingOf({ collection: 'othertv', show_key: 'andor' }), null, 'no catalog outside the built-in ones');
-  const listed = probe.get(`tvShowKey('disney', COLLECTIONS.find(c => c.id === 'disney').defaults.find(d => d.s !== 'Film').k)`);
-  assert.strictEqual(app.ctx.catalogListingOf({ collection: 'disney', show_key: listed }), 'Disney+');
+  const base = { media_type: null, tmdb_id: null, season_number: null };
+  assert.strictEqual(P({ ...base, id: 'r1', show_id: 'gx', item_key: defSeason.k, season: defSeason.s }).deleteEffect, 'skip');
+  assert.strictEqual(P({ ...base, id: 'gf', show_id: null, item_key: defFilm.k, season: 'Film' }).deleteEffect, 'skip-film');
+  assert.strictEqual(P({ ...base, id: 'r2', show_id: 'gx', item_key: 'not in the catalog|season 1', season: 'Season 1' }).deleteEffect, 'delete', 'governed alone is not a catalog entry');
+  assert.strictEqual(P({ ...base, id: 'r3', show_id: 'gx', item_key: 'x|season 1', season: 'Season 1' }).matchable, false, 'no Match into or out of a governed show');
+  assert.strictEqual(P({ ...base, id: 'r4', show_id: 'ungoverned', item_key: 'x|season 1', season: 'Season 1' }).matchable, true);
+  assert.strictEqual(P({ ...base, id: 'r5', show_id: 'ungoverned', item_key: defSeason.k, season: defSeason.s }).deleteEffect, 'delete', 'a catalog key outside a governed show is no catalog entry');
+  assert.strictEqual(app.ctx.catalogListingOf({ id: 'gx', show_key: 'zz not in any catalog' }), null, 'governed but not listed');
+  assert.strictEqual(app.ctx.catalogListingOf({ id: 'ungoverned', show_key: listed }), null, 'no catalog governs it');
+  assert.strictEqual(app.ctx.catalogListingOf({ id: 'gx', show_key: listed }), 'Disney+');
 });
 
 // ─── Adding to a show already on the list ─────────────────────────────────────
-test('a TMDB result already on the list (identified, outside the catalogs): its seasons go to that show through add_tv_seasons_to_show', async () => {
+test('a TMDB result already on the list (identified, outside the catalogs): its seasons go to that show through library_add_seasons', async () => {
   const app = await boot();
   await allTv(app); await openPanel(app);
   await choose(app, 95396, 'Severance');
@@ -169,10 +175,11 @@ test('a TMDB result already on the list (identified, outside the catalogs): its 
   tick(app, [3]);
   const before = app.store.tv_shows.length;
   await app.ctx.addSelectedTMDBSeasons(); await settle();
-  const [call] = rpc(app, 'add_tv_seasons_to_show');
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body)), { p_show_id: sev.id, p_expected: { collection: 'othertv', tmdb_id: 95396, show_key: 'severance', network: 'Apple TV' },
+  const [call] = rpc(app, 'library_add_seasons');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body)), { p_show_id: sev.id, p_expected: { tmdb_id: 95396, show_key: 'severance', catalog: null, network: 'Apple TV' },
     p_seasons: [{ item_key: 'severance|season 3', title: 'Severance', season: 'Season 3', theme: 'Apple TV', display_date: 'TBA', date_sort: '2099-01-01', season_number: 3 }] });
-  assert.strictEqual(rpc(app, 'add_tv_seasons').length, 0, 'never the create path');
+  assert.strictEqual(rpc(app, 'library_create_show').length, 0, 'never the create path');
+  assert.deepStrictEqual(app.storageRequests(), [], 'no storage value sent');
   assert.strictEqual(app.store.tv_shows.length, before);
   assert.ok(app.store.watchlist_items.some(r => r.show_id === sev.id && r.season_number === 3));
   assert.match(outcome(app), /Added “Season 3” to “Severance”\./);
@@ -190,8 +197,8 @@ test('a TMDB result whose show is a built-in, TMDB-matched show: no TMDB add; Ad
   app.ctx.openAddSeason(tk.id); await settle(); await settle();
   type(app, { nSeason: 'Season 2', nDate: 'Sep 15, 2024', nTheme: 'Paramount+' });
   await app.ctx.librarySubmitSeason(); await settle();
-  const [call] = rpc(app, 'add_tv_seasons_to_show');
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body.p_expected)), { collection: 'sheridan', tmdb_id: 153312, show_key: 'tulsa king', network: '' });
+  const [call] = rpc(app, 'library_add_seasons');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body.p_expected)), { tmdb_id: 153312, show_key: 'tulsa king', catalog: 'sheridan', network: '' });
   assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body.p_seasons)), [{ item_key: 'tulsa king|season 2', title: 'Tulsa King', season: 'Season 2', theme: 'Paramount+', display_date: 'Sep 15, 2024', date_sort: '2024-09-15' }]);
   const added = app.store.watchlist_items.find(r => r.show_id === tk.id && r.season === 'Season 2');
   assert.ok(added && added.season_number === 2 && added.tmdb_id === 153312, 'the enriched-show join made it season 2');
@@ -220,7 +227,7 @@ test('a legacy show (built-in or not): Add season by hand joins it by its stored
     const r = app.store.watchlist_items.find(x => x.show_id === s.id && x.season === 'Season 2');
     assert.ok(r && r.tmdb_id == null && r.season_number == null && r.item_key === `${s.show_key}|season 2`, title);
   }
-  assert.strictEqual(rpc(app, 'add_tv_seasons').length, 0);
+  assert.strictEqual(rpc(app, 'library_create_show').length, 0);
 });
 
 test('an identified show outside the catalogs gets TMDB seasons from Add season (never a hand-typed season, which would make a second show)', async () => {
@@ -232,7 +239,7 @@ test('an identified show outside the catalogs gets TMDB seasons from Add season 
   assert.ok(!app.el('libraryBody').innerHTML.includes('id="nSeason"'), 'no label field');
   app.el('librarySeasonPick').querySelectorAll = () => [{ checked: true, disabled: false, dataset: { season: '3' } }];
   await app.ctx.librarySubmitSeason(); await settle();
-  assert.deepStrictEqual(rpc(app, 'add_tv_seasons_to_show').map(r => r.body.p_seasons[0].season_number), [3]);
+  assert.deepStrictEqual(rpc(app, 'library_add_seasons').map(r => r.body.p_seasons[0].season_number), [3]);
 });
 
 test('the show changed after the preview but before sending (seen by the fresh read): nothing is sent', async () => {
@@ -242,7 +249,7 @@ test('the show changed after the preview but before sending (seen by the fresh r
   tick(app, [3]);
   showOf(app, 'Severance').show_key = 'severance (renamed)';
   await app.ctx.addSelectedTMDBSeasons(); await settle();
-  assert.strictEqual(rpc(app, 'add_tv_seasons_to_show').length, 0);
+  assert.strictEqual(rpc(app, 'library_add_seasons').length, 0);
   assert.match(outcome(app), /Your list changed since this preview, so nothing was added/);
 });
 
@@ -252,7 +259,7 @@ test('the show is deleted while the request is on its way: the database refuses 
   await choose(app, 95396, 'Severance');
   tick(app, [3]);
   const sev = showOf(app, 'Severance');
-  const gate = app.hold(r => r.url.endsWith('/rpc/add_tv_seasons_to_show'));
+  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons'));
   const done = app.ctx.addSelectedTMDBSeasons();
   await reached(gate);
   app.store.watchlist_items = app.store.watchlist_items.filter(r => r.show_id !== sev.id);
@@ -271,7 +278,7 @@ test('a Match in between gives the show another identity: refused (target_change
   const local = showOf(app, 'Local Show');
   app.ctx.openAddSeason(local.id); await settle(); await settle();
   type(app, { nSeason: 'Season 2', nDate: 'TBA 2027', nTheme: '' });
-  const gate = app.hold(r => r.url.endsWith('/rpc/add_tv_seasons_to_show'));
+  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons'));
   const done = app.ctx.librarySubmitSeason();
   await reached(gate);
   local.tmdb_id = 888; local.show_key = 'local show'; // what a Match of its only season can do
@@ -285,7 +292,7 @@ test('an answer naming another show is not reported as an addition to the chosen
   const app = await boot();
   await allTv(app);
   const andor = showOf(app, 'Andor');
-  app.rpcHandlers.add_tv_seasons_to_show = () => ({ ok: true, status: 200, text: async () => JSON.stringify({ show_id: 'someone-else', show_created: false, inserted: [], existing: [], rejected: [] }) });
+  app.rpcHandlers.library_add_seasons = () => ({ ok: true, status: 200, text: async () => JSON.stringify({ show_id: 'someone-else', show_created: false, inserted: [], existing: [], rejected: [] }) });
   app.ctx.openAddSeason(andor.id); await settle(); await settle();
   type(app, { nSeason: 'Season 2', nDate: 'TBA 2027', nTheme: '' });
   await app.ctx.librarySubmitSeason(); await settle();
@@ -293,14 +300,22 @@ test('an answer naming another show is not reported as an addition to the chosen
   assert.ok(!/Added/.test(outcome(app)));
 });
 
-test('a database without add_tv_seasons_to_show: says so, nothing added, and never falls back to add_tv_seasons', async () => {
-  const app = await boot(library(), { addToShow: false });
+test('a database without the Stage 5 functions: the views say so (never an incomplete list), nothing can be added, and no older function is used', async () => {
+  const app = await boot(library(), { stage5: null });
+  assert.match(banners(app), /needs a database update|Couldn.t load every TV row/);
   await allTv(app); await openPanel(app);
-  await choose(app, 95396, 'Severance');
-  tick(app, [3]);
-  await app.ctx.addSelectedTMDBSeasons(); await settle();
-  assert.strictEqual(rpc(app, 'add_tv_seasons').length, 0);
-  assert.match(outcome(app), /Adding to an existing show isn’t available on this database\. Nothing was added\./);
+  assert.match(app.el('libraryState').innerHTML + outcome(app), /Couldn’t read your whole list|couldn’t be read/i);
+  assert.deepStrictEqual(app.writes(), [], 'nothing sent');
+  // A library function answering 404 (removed after the page loaded) is reported, never replaced by an older one.
+  const app2 = await boot();
+  await allTv(app2); await openPanel(app2);
+  await choose(app2, 95396, 'Severance');
+  tick(app2, [3]);
+  const gone = { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.library_add_seasons in the schema cache' };
+  app2.rpcHandlers.library_add_seasons = () => ({ ok: false, status: 404, text: async () => JSON.stringify(gone), json: async () => gone, headers: { get: () => null } });
+  await app2.ctx.addSelectedTMDBSeasons(); await settle();
+  assert.deepStrictEqual(app2.writes().map(r => r.url.split('/rpc/')[1]), ['library_add_seasons'], 'one attempt, no fallback');
+  assert.match(outcome(app2), /Adding to an existing show isn’t available on this database\. Nothing was added\./);
 });
 
 test('no clear answer (network failure): reported as unconfirmed, never resent, no "Saved"; a later read doesn’t resolve it', async () => {
@@ -309,14 +324,14 @@ test('no clear answer (network failure): reported as unconfirmed, never resent, 
   await choose(app, 95396, 'Severance');
   tick(app, [3]);
   let saved = 0; app.ctx.showSaved = () => { saved++; };
-  const gate = app.hold(r => r.url.endsWith('/rpc/add_tv_seasons_to_show'));
+  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons'));
   const done = app.ctx.addSelectedTMDBSeasons();
   await reached(gate); gate.fail(); await done; await settle();
-  assert.strictEqual(rpc(app, 'add_tv_seasons_to_show').length, 1, 'sent once');
+  assert.strictEqual(rpc(app, 'library_add_seasons').length, 1, 'sent once');
   assert.strictEqual(saved, 0);
   assert.match(outcome(app), /no clear answer came back[\s\S]*isn’t confirmed[\s\S]*an earlier request may still complete[\s\S]*If you reload, this page won’t know whether that request finished/);
   app.ctx.loadDerivedView(); await settle();
-  assert.strictEqual(rpc(app, 'add_tv_seasons_to_show').length, 1, 'still not resent');
+  assert.strictEqual(rpc(app, 'library_add_seasons').length, 1, 'still not resent');
 });
 
 // ─── Ambiguous and similar results ────────────────────────────────────────────
@@ -331,11 +346,11 @@ test('one TMDB identity on two records: nothing is sent until the user picks one
   assert.match(preview(app), /Adds seasons to “The Bear”, already on your list/);
   tick(app, [9]);
   await app.ctx.addSelectedTMDBSeasons(); await settle();
-  assert.deepStrictEqual(rpc(app, 'add_tv_seasons_to_show').map(r => r.body.p_show_id), [other.id]);
+  assert.deepStrictEqual(rpc(app, 'library_add_seasons').map(r => r.body.p_show_id), [other.id]);
   assert.strictEqual(app.store.watchlist_items.filter(r => r.tmdb_id === 136315 && r.season_number === 9).length, 1);
 });
 
-test('a TMDB show whose title matches an unidentified show: an explicit choice; "Add as a new show" goes to create_tv_show, which refuses a show whose seasons would collide (no empty second show)', async () => {
+test('a TMDB show whose title matches an unidentified show: an explicit choice; "Add as a new show" goes to library_create_show, which refuses a show whose seasons would collide (no empty second show)', async () => {
   const app = await boot();
   await allTv(app); await openPanel(app);
   await choose(app, 888, 'Local Show');
@@ -345,9 +360,11 @@ test('a TMDB show whose title matches an unidentified show: an explicit choice; 
   assert.match(preview(app), /Adds a new show to your list/);
   tick(app, [1]);
   await app.ctx.addSelectedTMDBSeasons(); await settle();
-  const [call] = rpc(app, 'create_tv_show');
+  const [call] = rpc(app, 'library_create_show');
   assert.strictEqual(rpc(app, 'add_tv_seasons').length, 0);
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body.p_show)), { tmdb_id: 888, title: 'Local Show', show_key: 'local show', network: 'BBC' });
+  // "Add as a new show" acknowledges the unmatched show the preview listed (distinct_from).
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body.p_show)), { tmdb_id: 888, title: 'Local Show', show_key: 'local show', network: 'BBC',
+    distinct_from: [showOf(app, 'Local Show').id] });
   // Its "Season 1" key is already held by the unmatched Local Show's season, so the new show can't hold it:
   // refused as a whole (the old create path would have left an empty second show).
   assert.strictEqual(app.store.tv_shows.filter(s => s.title === 'Local Show').length, 1);
@@ -355,13 +372,13 @@ test('a TMDB show whose title matches an unidentified show: an explicit choice; 
 });
 
 // ─── New items, collections after them ────────────────────────────────────────
-test('a new TMDB show goes to the internal place for new shows (create_tv_show, othertv); collections are offered as a separate, optional step', async () => {
+test('a new TMDB show goes to the internal place for new shows (library_create_show, othertv); collections are offered as a separate, optional step', async () => {
   const app = await boot();
   await allTv(app); await openPanel(app);
   await choose(app, 777, 'Brand New');
   tick(app, [1, 2]);
   await app.ctx.addSelectedTMDBSeasons(); await settle();
-  const [call] = rpc(app, 'create_tv_show');
+  const [call] = rpc(app, 'library_create_show');
   assert.ok(!('p_collection' in call.body), 'the database decides where new shows go');
   assert.deepStrictEqual(call.body.p_seasons.map(s => [s.item_key, s.season_number]), [['brand new|season 1', 1], ['brand new|season 2', 2]]);
   const created = showOf(app, 'Brand New');
@@ -372,7 +389,7 @@ test('a new TMDB show goes to the internal place for new shows (create_tv_show, 
   const sheridan = app.store.personal_collections.find(c => c.legacy_source === 'sheridan');
   const disney = app.store.personal_collections.find(c => c.legacy_source === 'disney');
   app.store.personal_collections.find(c => c.id === disney.id).archived_at = '2026-10-08T00:00:00Z'; // archived meanwhile: refused
-  app.el('libraryOutcome').querySelectorAll = () => [{ checked: true, dataset: { collection: sheridan.id } }, { checked: true, dataset: { collection: disney.id } }];
+  app.el('libraryOutcome').querySelectorAll = () => [{ checked: true, dataset: { collectionId: sheridan.id } }, { checked: true, dataset: { collectionId: disney.id } }];
   const rowsBefore = app.store.watchlist_items.length;
   await app.ctx.libraryAddMemberships(); await settle();
   assert.deepStrictEqual(rpc(app, 'org_add_membership').map(r => [r.body.p_collection_id, r.body.p_show_id]), [[sheridan.id, created.id], [disney.id, created.id]]);
@@ -380,7 +397,7 @@ test('a new TMDB show goes to the internal place for new shows (create_tv_show, 
   assert.strictEqual(app.store.watchlist_items.length, rowsBefore, 'the addition itself is kept');
 });
 
-test('a new film (TMDB) goes to the films’ internal place; one already saved anywhere is "Already on your list"', async () => {
+test('a new film (TMDB) goes through library_add_films with no storage; one already saved anywhere is "Already on your list"', async () => {
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle();
   await openPanel(app, 'movie');
@@ -388,9 +405,9 @@ test('a new film (TMDB) goes to the films’ internal place; one already saved a
   assert.match(preview(app), /Already on your list/);
   await choose(app, 999, 'New Film', 'movie');
   await app.ctx.addSelectedTMDBSeasons(); await settle();
-  const post = app.writes().find(r => r.method === 'POST' && r.url.includes('/watchlist_items'));
-  assert.strictEqual(post.body[0].collection, 'movies');
-  assert.strictEqual(post.body[0].media_type, 'movie');
+  const [post] = rpc(app, 'library_add_films');
+  assert.deepStrictEqual([post.body.p_films[0].tmdb_id, post.body.p_films[0].media_type, post.body.p_films[0].theme], [999, 'movie', 'Comedy']);
+  assert.deepStrictEqual(app.storageRequests(), [], 'no storage value sent');
   assert.match(outcome(app), /Added “New Film”\./);
   assert.ok(app.html().includes('New Film'), 'All Movies read again');
 });
@@ -405,13 +422,14 @@ test('a film by hand is labelled Film, so All Movies lists it; a same-title film
   assert.strictEqual(app.writes().length, 0);
   type(app, { nTitle: 'Handmade', nTheme: 'Drama', nDate: 'Mar 3, 2021' });
   await app.ctx.libraryManualFilm(); await settle();
-  const post = app.writes().find(r => r.method === 'POST');
-  assert.deepStrictEqual([post.body[0].collection, post.body[0].season, post.body[0].item_key, post.body[0].date_sort], ['movies', 'Film', 'handmade|film', '2021-03-03']);
+  const [post] = rpc(app, 'library_create_film');
+  assert.deepStrictEqual([post.body.p_film.season, post.body.p_film.item_key, post.body.p_film.date_sort, post.body.p_film.distinct_from], ['Film', 'handmade|film', '2021-03-03', []]);
+  assert.deepStrictEqual(app.storageRequests(), []);
   app.el('fWatch').value = ''; app.ctx.renderTable();
   assert.ok(app.html().includes('Handmade'), 'listed in All Movies');
 });
 
-test('a show by hand goes to othertv without an identity; a same-title show is pointed out first (add a season to it, or a separate show)', async () => {
+test('a show by hand is created without an identity (library_create_show); a same-title show is pointed out first (add a season to it, or a separate show)', async () => {
   const app = await boot();
   await allTv(app); await openPanel(app, 'tv', 'manual');
   type(app, { nTitle: 'Andor', nSeason: 'Season 1', nTheme: 'Disney+', nDate: 'Nov 1, 2022' });
@@ -420,7 +438,7 @@ test('a show by hand goes to othertv without an identity; a same-title show is p
   assert.strictEqual(app.writes().length, 0);
   type(app, { nTitle: 'Hand Show', nSeason: 'Season 1', nTheme: 'BBC', nDate: 'Jan 5, 2023' });
   await app.ctx.libraryManualShow(); await settle();
-  const [call] = rpc(app, 'create_tv_show');
+  const [call] = rpc(app, 'library_create_show');
   assert.strictEqual(call.body.p_show.tmdb_id, null);
   assert.strictEqual(call.body.p_seasons[0].item_key, 'hand show|season 1');
   assert.ok(app.ctx.isTmdbMatchEligible(app.store.watchlist_items.find(r => r.title === 'Hand Show')), 'it can be matched later');
@@ -440,13 +458,13 @@ test('Refresh shows checks every identified show that takes TMDB seasons, one pr
   app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [];
   // The Bear (whichever record comes first) is deleted while the calls are out: refused, the next call still runs.
   const target = app.get('libraryPanel.refresh.found')[bearIdx].show.id;
-  const gate = app.hold(r => r.url.endsWith('/rpc/add_tv_seasons_to_show') && r.body.p_show_id === target);
+  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons') && r.body.p_show_id === target);
   const done = app.ctx.libraryApplyRefresh();
   await reached(gate);
   app.store.watchlist_items = app.store.watchlist_items.filter(r => r.show_id !== target);
   app.store.tv_shows = app.store.tv_shows.filter(s => s.id !== target);
   gate.release(); await done; await settle();
-  const calls = rpc(app, 'add_tv_seasons_to_show');
+  const calls = rpc(app, 'library_add_seasons');
   assert.strictEqual(calls.length, 2);
   assert.match(outcome(app), /Added “Season 3” to “Severance”\./);
   assert.match(outcome(app), /“The Bear”: This show is no longer on your list, so nothing was added\./);
@@ -461,10 +479,10 @@ test('Refresh shows: an unclear answer stops sending; earlier results stay repor
   app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = found.map((f, i) => ({ checked: true, dataset: { showIdx: String(i), season: String(f.fresh[0].season_number) } }));
   app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [];
   let k = 0;
-  const gate = app.hold(r => r.url.endsWith('/rpc/add_tv_seasons_to_show') && ++k === 2);
+  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons') && ++k === 2);
   const done = app.ctx.libraryApplyRefresh();
   await reached(gate); gate.fail(); await done; await settle();
-  assert.strictEqual(rpc(app, 'add_tv_seasons_to_show').length, 2, `no call after the unclear one (of ${found.length})`);
+  assert.strictEqual(rpc(app, 'library_add_seasons').length, 2, `no call after the unclear one (of ${found.length})`);
   assert.match(outcome(app), /Added “Season/);
   assert.match(outcome(app), /no clear answer came back[\s\S]*Nothing more was sent\./);
 });
@@ -475,7 +493,7 @@ test('an answer that arrives after a restore is set aside: the view is read agai
   await allTv(app); await openPanel(app);
   await choose(app, 95396, 'Severance');
   tick(app, [3]);
-  const gate = app.hold(r => r.url.endsWith('/rpc/add_tv_seasons_to_show'));
+  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons'));
   const done = app.ctx.addSelectedTMDBSeasons();
   await reached(gate);
   app.ctx.invalidateOrganization(); app.ctx.finishRestoreAndReload(); await settle(); // what a completed restore does (the epoch moves on)
@@ -484,7 +502,7 @@ test('an answer that arrives after a restore is set aside: the view is read agai
   gate.release(); await done; await settle();
   assert.match(banners(app), /answered afterwards\. The list has been read again\. This doesn’t show whether the addition ran before or after the restore/);
   assert.ok(app.requests.slice(gets).some(r => r.method === 'GET' && r.url.includes('/watchlist_items?')), 'read again');
-  assert.strictEqual(rpc(app, 'add_tv_seasons_to_show').length, 1);
+  assert.strictEqual(rpc(app, 'library_add_seasons').length, 1);
 });
 
 test('leaving the view while a request is out: the panel closes, nothing is painted into the next view, the result is still reported', async () => {
@@ -492,7 +510,7 @@ test('leaving the view while a request is out: the panel closes, nothing is pain
   await allTv(app); await openPanel(app);
   await choose(app, 95396, 'Severance');
   tick(app, [3]);
-  const gate = app.hold(r => r.url.endsWith('/rpc/add_tv_seasons_to_show'));
+  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons'));
   const done = app.ctx.addSelectedTMDBSeasons();
   await reached(gate);
   app.ctx.switchView('comingsoon'); await settle();
@@ -510,7 +528,7 @@ test('the panel closed in the same view while a request is out: the result is re
   await choose(app, 95396, 'Severance');
   tick(app, [3]);
   const sev = showOf(app, 'Severance');
-  const gate = app.hold(r => r.url.endsWith('/rpc/add_tv_seasons_to_show'));
+  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons'));
   const done = app.ctx.addSelectedTMDBSeasons();
   await reached(gate);
   app.ctx.closeLibraryPanel();
@@ -545,7 +563,7 @@ test('All TV: Delete on a season that isn’t a catalog entry (delete_tv_season 
   assert.ok(!app.html().includes('Local Show'));
 });
 
-test('All TV: Match from an expanded show sends match_tv_row for that row and reads the view again', async () => {
+test('All TV: Match from an expanded show sends library_match_season for that row and reads the view again', async () => {
   const app = await boot();
   await allTv(app);
   const local = showOf(app, 'Local Show');
@@ -558,9 +576,9 @@ test('All TV: Match from an expanded show sends match_tv_row for that row and re
   app.ctx.chooseTmdbMatchSeason(1); await settle();
   const gets = app.requests.length;
   await app.ctx.confirmTmdbMatch(); await settle();
-  assert.deepStrictEqual(rpc(app, 'match_tv_row').map(r => r.body.p_row_id), [row.id]);
+  assert.deepStrictEqual(rpc(app, 'library_match_season').map(r => r.body.p_row_id), [row.id]);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === row.id).tmdb_id, 888);
-  assert.ok(app.requests.slice(gets).some(r => r.method === 'GET' && r.url.includes('collection=in.')), 'All TV read again');
+  assert.ok(app.requests.slice(gets).some(r => r.method === 'GET' && r.url.includes('is_film=eq.false')), 'All TV read again');
   assert.match(outcome(app), /Matched “Local Show”\./);
 });
 
@@ -597,7 +615,7 @@ test('All Movies: a failed status change is put back and not reported as saved',
   assert.strictEqual(saved, 0);
 });
 
-test('All Movies: Pull rest of a franchise runs in the panel against the films’ storage and adds there', async () => {
+test('All Movies: Pull rest of a franchise runs in the panel against the whole library and adds through library_add_films', async () => {
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle();
   app.el('fWatch').value = ''; app.ctx.renderTable();
@@ -606,8 +624,9 @@ test('All Movies: Pull rest of a franchise runs in the panel against the films�
   assert.match(preview(app), /Dune[\s\S]*Already added[\s\S]*Dune: Part Two/);
   app.selectors['#tmdbPreview input[type="checkbox"][data-movie-id]'] = [{ checked: true, disabled: false, dataset: { movieId: '693134' } }];
   await app.ctx.addPulledCollectionMovies(); await settle();
-  const post = app.writes().find(r => r.method === 'POST');
-  assert.deepStrictEqual([post.body[0].collection, post.body[0].tmdb_id, post.body[0].tmdb_collection_id], ['movies', 693134, 726871]);
+  const [post] = rpc(app, 'library_add_films');
+  assert.deepStrictEqual([post.body.p_films[0].tmdb_id, post.body.p_films[0].tmdb_collection_id], [693134, 726871]);
+  assert.deepStrictEqual(app.storageRequests(), []);
   assert.ok(app.html().includes('Dune: Part Two'), 'All Movies read again');
 });
 
@@ -634,50 +653,74 @@ test('Year: All TV Shows keeps a show with any season of that year (all its seas
   assert.ok(app.html().includes('Film 2019') && !app.html().includes('Film 2024'));
 });
 
-test('duplicates: one TMDB identity on two records is marked on each, its tooltip naming their storage; a single record isn’t', async () => {
-  const app = await boot();
+test('no duplicate marker or storage name in All TV (Stage 5: one record per TMDB identity, enforced by the database)', async () => {
+  const app = await boot(); // (the fixture's two The Bear records predate that rule; each is drawn as its own record)
   await allTv(app);
-  const bears = (app.html().match(/Duplicate on your list/g) || []).length;
-  assert.ok(bears >= 2, 'both The Bear records');
-  assert.match(app.html(), /stored under: (Disney\+, Other TV|Other TV, Disney\+)/);
-  app.el('fSearch').value = 'severance'; app.ctx.renderTable();
-  assert.ok(!app.html().includes('Duplicate on your list'));
+  assert.ok(!app.html().includes('Duplicate on your list') && !app.html().includes('stored under'));
 });
 
 // ─── Catalog updates from the Browse bar ──────────────────────────────────────
 test('Catalog updates from the Browse bar: hints by GET, Review opens the dialog for that catalog, and an apply reads the open view again', async () => {
   const app = await boot();
   await allTv(app);
+  const before = app.requests.length;
   app.ctx.openCatalogChooser(null); await settle();
-  assert.ok(app.requests.some(r => r.method === 'GET' && r.url.includes('collection=eq.sheridan')));
+  assert.ok(app.requests.slice(before).some(r => r.method === 'GET' && r.url.includes('/library_catalog_shows?')), 'hints from the governance views');
+  assert.ok(app.requests.slice(before).every(r => r.method === 'GET' && !r.url.includes('collection=')));
   app.ctx.catalogChooserReview('sheridan');
   for (let i = 0; i < 20 && app.get('catalogDialog.phase') !== 'preview'; i++) await settle();
   assert.strictEqual(app.get('catalogChooser'), null);
-  assert.strictEqual(app.get('catalogDialog.collectionId'), 'sheridan');
+  assert.strictEqual(app.get('catalogDialog.catalogId'), 'sheridan');
   assert.match(app.el('catalogModalBox').innerHTML, /Catalog updates — Sheridan/);
   const gets = app.requests.length;
   await app.ctx.catalogApply(); await settle();
-  assert.deepStrictEqual(rpc(app, 'catalog_apply').length, 2, 'preview, then apply');
-  assert.ok(app.requests.slice(gets).some(r => r.method === 'GET' && r.url.includes('collection=in.')), 'All TV read again');
+  assert.deepStrictEqual(rpc(app, 'library_catalog_apply').length, 2, 'preview, then apply');
+  assert.strictEqual(rpc(app, 'catalog_apply').length, 0, 'never the Stage 4a function');
+  assert.ok(app.requests.slice(gets).some(r => r.method === 'GET' && r.url.includes('is_film=eq.false')), 'All TV read again');
   assert.ok(app.html().includes(app.get("COLLECTIONS.find(c => c.id === 'sheridan').defaults.find(d => d.s !== 'Film').t")), 'the applied shows are listed');
 });
 
 // ─── Review fixes (2026-10-08) ────────────────────────────────────────────────
-test('a show by hand named like an unmatched show already stored with new shows: "new show" is refused, nothing sent; adding to it is offered through the checked path', async () => {
+test('a show by hand named like an unmatched show: pointed out first, nothing sent; "Add as a new show" sends the ids shown (distinct_from); adding a season is the checked alternative', async () => {
+  for (const phase of ['coexistence', 'contracted']) {
+    const app = await boot(library(), { stage5: phase });
+    await allTv(app); await openPanel(app, 'tv', 'manual');
+    const local = showOf(app, 'Local Show');
+    type(app, { nTitle: 'Local Show', nSeason: 'Season 2', nTheme: 'BBC', nDate: 'Jan 5, 2023' });
+    await app.ctx.libraryManualShow(); await settle();
+    assert.strictEqual(app.writes().length, 0, `${phase}: nothing sent on the first press`);
+    const note = app.el('libraryManualNote').innerHTML;
+    assert.match(note, /“Local Show” is already on your list\. Add a season to it, or add a separate new show\? Nothing is merged\./);
+    assert.ok(note.includes(`openAddSeason('${local.id}')`) && note.includes('libraryManualShow()'));
+    await app.ctx.libraryManualShow(); await settle(); // the explicit choice
+    const [call] = rpc(app, 'library_create_show');
+    assert.deepStrictEqual(Array.from(call.body.p_show.distinct_from), [local.id], `${phase}: the unmatched record the page showed`);
+    if (phase === 'coexistence') {
+      // Until contraction the database still keeps one unmatched show per name where new shows are stored (a 5a limitation).
+      assert.match(outcome(app), /already on your list, so nothing was added/);
+      assert.strictEqual(app.store.tv_shows.filter(s => s.title === 'Local Show').length, 1);
+    } else {
+      assert.strictEqual(app.store.tv_shows.filter(s => s.title === 'Local Show').length, 2, 'a separate show, on request');
+    }
+  }
+  const app = await boot();
+  await allTv(app);
+  app.ctx.openAddSeason(showOf(app, 'Local Show').id); await settle(); await settle();
+  type(app, { nSeason: 'Season 2', nDate: 'Jan 5, 2023', nTheme: 'BBC' });
+  await app.ctx.librarySubmitSeason(); await settle();
+  assert.deepStrictEqual(rpc(app, 'library_add_seasons').map(r => r.body.p_show_id), [showOf(app, 'Local Show').id]);
+  assert.strictEqual(rpc(app, 'library_create_show').length, 0);
+});
+
+test('a repeated "Add as a new show" after another same-named show appeared is asked again, never sent with an outdated list', async () => {
   const app = await boot();
   await allTv(app); await openPanel(app, 'tv', 'manual');
   type(app, { nTitle: 'Local Show', nSeason: 'Season 2', nTheme: 'BBC', nDate: 'Jan 5, 2023' });
   await app.ctx.libraryManualShow(); await settle();
-  await app.ctx.libraryManualShow(); await settle(); // asking again changes nothing
-  assert.strictEqual(app.writes().length, 0, 'nothing sent');
-  const note = app.el('libraryManualNote').innerHTML;
-  assert.match(note, /A separate new show called “Local Show” can’t be added[\s\S]*Nothing was added/);
-  assert.ok(note.includes(`openAddSeason('${showOf(app, 'Local Show').id}')`) && !note.includes('libraryManualShow()'), 'only the explicit, checked alternative');
-  app.ctx.openAddSeason(showOf(app, 'Local Show').id); await settle(); await settle();
-  type(app, { nSeason: 'Season 2', nDate: 'Jan 5, 2023', nTheme: 'BBC' });
-  await app.ctx.librarySubmitSeason(); await settle();
-  assert.deepStrictEqual(rpc(app, 'add_tv_seasons_to_show').map(r => r.body.p_show_id), [showOf(app, 'Local Show').id]);
-  assert.strictEqual(rpc(app, 'add_tv_seasons').length, 0);
+  app.store.tv_shows.push({ id: 'show-late', collection: 'truecrime', title: 'Local Show', show_key: 'local show', tmdb_id: null, status: 'pending' });
+  await app.ctx.libraryManualShow(); await settle();
+  assert.strictEqual(app.writes().length, 0, 'the list it was confirmed against changed: asked again');
+  assert.match(app.el('libraryManualNote').innerHTML, /\(2 times\)/);
 });
 
 test('a new show whose name or identity is taken while the request is out: refused (show_exists); nothing added and the show that appeared is untouched', async () => {
@@ -688,16 +731,16 @@ test('a new show whose name or identity is taken while the request is out: refus
       { id: 'show-race', collection: 'truecrime', title: 'Brand New', show_key: 'brand new', tmdb_id: 777, status: 'pending' }]]) {
     const app = await boot();
     await allTv(app);
-    const gate = app.hold(r => r.url.endsWith('/rpc/create_tv_show'));
+    const gate = app.hold(r => r.url.endsWith('/rpc/library_create_show'));
     const [done] = await fill(app); // the request's promise, not awaited until released
     await reached(gate);
     app.store.tv_shows.push({ ...appear });
     const rows = app.store.watchlist_items.length;
     gate.release(); await done; await settle();
-    assert.match(outcome(app), /This show is already on your list, so nothing was added\./, label);
+    assert.match(outcome(app), /already on your list, so nothing was added\./, label);
     assert.strictEqual(app.store.watchlist_items.length, rows, `${label}: no season added`);
     assert.deepStrictEqual(JSON.parse(JSON.stringify(app.store.tv_shows.find(x => x.id === 'show-race'))), appear, `${label}: the show that appeared is unchanged`);
-    assert.strictEqual(rpc(app, 'add_tv_seasons').length + rpc(app, 'add_tv_seasons_to_show').length, 0, `${label}: never added to it`);
+    assert.strictEqual(rpc(app, 'library_add_seasons').length, 0, `${label}: never added to it`);
     assert.ok(!outcome(app).includes('collections (optional)'));
   }
 });
@@ -847,7 +890,7 @@ test('Refresh shows whose only call has no clear answer: no "Saved"; reported as
   app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = [{ checked: true, dataset: { showIdx: '0', season: '3' } }];
   app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [];
   let saved = 0; app.ctx.showSaved = () => { saved++; };
-  const gate = app.hold(r => r.url.endsWith('/rpc/add_tv_seasons_to_show'));
+  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons'));
   const done = app.ctx.libraryApplyRefresh();
   await reached(gate); gate.fail(); await done; await settle();
   assert.strictEqual(saved, 0);

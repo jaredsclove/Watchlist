@@ -1,18 +1,17 @@
 // ─── Browse collections and All Movies (read-only cross-media views) ─────────
 // A collection destination (Disney+, Sheridan, 90 Day, True Crime / Docs, …; your
 // personal collections, organization.js) shows its member TV shows (with every
-// stored season) and films together, and All Movies shows every saved film,
-// wherever it is stored. Membership is the stored list of members only: where a
-// row is stored, tags, themes, titles and TMDB credits add nothing (since Stage 4b
-// storage isn't shown at all). The loader only reads; a collection's controls only
+// stored season) and films together, and All Movies shows every saved film.
+// Membership is the stored list of members only: tags, themes, titles, catalogs and
+// TMDB credits add nothing. The loader only reads; a collection's controls only
 // search, filter, expand and navigate. All Movies (Stage 4b) also has the film
 // actions — status, watched, watch-with, Match, delete — by the row's real id
 // (row-actions.js, library.js); TV is changed in All TV. A collection can list TV as
 // Shows or Seasons and show TV and films Separate or Combined (remembered per
 // collection on this device); Shows and Movies only are A–Z, Seasons is oldest
 // first. While one of these is open,
-// activeViewId holds its id ('browse:<collection id>') and activeTabId is null;
-// its rows live in browseData, apart from tabData and derivedData. Defined here
+// activeViewId holds its id ('browse:<collection id>');
+// its rows live in browseData, apart from derivedData. Defined here
 // rather than in config.js so the catalog-refresh workflow's config.js cache
 // handling is unaffected.
 const ALL_MOVIES_VIEW = { id: 'allmovies', label: 'All Movies', icon: '🎞️', mediaType: 'movie' };
@@ -68,9 +67,7 @@ function uniqueById(rows) {
 }
 
 function compareFilms(a, b) {
-  return compareTitles(a.title, b.title)
-    || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
-    || cmpStr(a.id, b.id);
+  return compareTitles(a.title, b.title) || cmpStr(a.id, b.id);
 }
 
 // The members of one collection (members: { showIds, filmIds }, organization.js):
@@ -101,7 +98,6 @@ function deriveBrowseCollection(rows, showsById, members, today) {
     return {
       key: id,
       show,
-      collection: show.collection,
       title: show.title,
       seasons,
       upNext,
@@ -110,7 +106,6 @@ function deriveBrowseCollection(rows, showsById, members, today) {
     };
   });
   shows.sort((a, b) => compareTitles(a.title, b.title)
-    || compareTitles(collectionLabel(a.collection), collectionLabel(b.collection))
     || cmpStr(a.key, b.key));
   return { shows, films: films.sort(compareFilms), badLinks, unclassified: 0 };
 }
@@ -137,23 +132,18 @@ function browseEntryTitle(e) {
 function browseEntryId(e) {
   return e.kind === 'show' ? e.item.key : e.row.id;
 }
-function browseEntrySource(e) {
-  return collectionLabel(e.kind === 'show' ? e.item.collection : e.row.collection);
-}
-// A–Z: title, TV before film, source, id.
+// A–Z: title, TV before film, id.
 function compareBrowseAz(a, b) {
   return compareTitles(browseEntryTitle(a), browseEntryTitle(b))
     || (a.kind === 'film') - (b.kind === 'film')
-    || compareTitles(browseEntrySource(a), browseEntrySource(b))
     || cmpStr(browseEntryId(a), browseEntryId(b));
 }
 // Undated and equal-date ties: title, TV before film, season order (two
-// seasons), source, row id.
+// seasons), row id.
 function compareBrowseTie(a, b) {
   return compareTitles(browseEntryTitle(a), browseEntryTitle(b))
     || (a.kind === 'film') - (b.kind === 'film')
     || (a.kind === 'season' && b.kind === 'season' ? seasonOrder(a.row, b.row) : 0)
-    || compareTitles(browseEntrySource(a), browseEntrySource(b))
     || cmpStr(a.row.id, b.row.id);
 }
 // Chronological: classified before sorting. Genuine TBA (text or sentinel, whatever
@@ -453,9 +443,10 @@ async function loadBrowseView() {
   try {
     const isCollection = isBrowseCollectionView(viewId);
     const orgRead = orgReadStart();
-    const [rows, shows, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
-      ...(isCollection ? [fetchAllRowsStrict('personal_collections'), fetchAllRowsStrict('collection_memberships')] : [])]);
+    const [rows, shows, gov, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
+      readGovernance(), ...(isCollection ? [readPersonalCollections(), fetchAllRowsStrict('collection_memberships')] : [])]);
     if (seq !== browseLoadSeq || activeViewId !== viewId) return;
+    publishGovernance(governanceCovers(gov, rows, shows));
     let dest = null, members = null;
     if (isCollection) {
       if (publishCollections(collections, orgRead)) buildBrowseBar();
@@ -498,7 +489,7 @@ function browseHeadHtml() {
   }
   const backTo = (browseOrigin ? browseOrigin.mediaType : activeMediaType) === 'movie' ? 'Movies' : 'TV';
   if (!dest) return `<div class="browse-head"><button class="btn browse-back" onclick="browseBack()">← Back to ${backTo}</button></div>`;
-  const icon = COLLECTIONS.find(c => c.id === dest.legacySource)?.icon || '';
+  const icon = dest.catalog ? COLLECTIONS.find(c => c.id === dest.catalog)?.icon || '' : '';
   const notes = [dest.note, `Read-only: the shows and films in your ${dest.label} collection. Change shows in All TV and films in All Movies.`].filter(Boolean);
   return `<div class="browse-head">
       <button class="btn browse-back" onclick="browseBack()">← Back to ${backTo}</button>
@@ -772,7 +763,7 @@ function browseShowHtml(item, today, combined) {
   const isExpanded = expandedShows.has(key);
   const keyArg = esc(key).replace(/'/g, "\\'");
   const theme = (upNext || seasons[0]).theme;
-  const badges = `${themeBadgeHtml(item.collection, theme, key)} ${duplicateShowTagHtml(show)}`;
+  const badges = themeBadgeHtml(showCatalogOf(show), theme, key);
   const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;
   const skippedCount = seasons.length - trackable.length;
@@ -834,7 +825,7 @@ function browseShowHtml(item, today, combined) {
 function browseSeasonEntryHtml(e, today, combined) {
   const { row: r, show } = e;
   const dimClass = show.status === 'skipped' || r.skipped ? 'row-skipped' : show.status === 'maybe' ? 'row-maybe' : '';
-  const badges = `${themeBadgeHtml(r.collection, r.theme, r.id)} ${duplicateShowTagHtml(show)}`;
+  const badges = themeBadgeHtml(rowCatalogOf(r), r.theme, r.id);
   const kindTag = combined ? '<span class="ro-tag">TV</span>' : '';
   const statusHtml = browseStatusPillHtml(show.status, `Show status — applies to every season of ${show.title}`);
   const skippedHtml = r.skipped ? '<span class="ro-tag">Season skipped</span>' : '';
@@ -866,7 +857,7 @@ function browseSeasonEntryHtml(e, today, combined) {
 // watch-with choices as filter pills (they filter the list; they change nothing).
 function browseFilmHtml(r, today) {
   const dimClass = r.status === 'skipped' ? 'row-skipped' : r.status === 'maybe' ? 'row-maybe' : '';
-  const badges = `${themeBadgeHtml(r.collection, r.theme, r.id)} ${duplicateFilmTagHtml(r, browseData ? browseData.rows : [])}`;
+  const badges = themeBadgeHtml(rowCatalogOf(r), r.theme, r.id);
   const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
   const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
   const statusHtml = browseStatusPillHtml(r.status, 'Film status');
@@ -904,14 +895,14 @@ function allMoviesFilmHtml(r, today, films) {
   const policy = editPolicyOf(r);
   const isSkipped = r.status === 'skipped';
   const dimClass = isSkipped ? 'row-skipped' : r.status === 'maybe' ? 'row-maybe' : '';
-  const badges = `${themeBadgeHtml(r.collection, r.theme, r.id)} ${duplicateFilmTagHtml(r, films)}`;
+  const badges = themeBadgeHtml(rowCatalogOf(r), r.theme, r.id);
   const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
   const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
   const statusCell = `<select class="status-select s-${esc(r.status)}" onchange="setStatus('${r.id}', this.value, this)" aria-label="Status of ${esc(r.title)}">${statusOptionsHtml(r.status)}</select>`;
   const watchBtn = isSkipped ? '<span class="confirmed-lbl">—</span>'
     : `<button class="watch-btn${r.watched ? ' watched' : ''}" onclick="toggleWatch('${r.id}')">${r.watched ? '✓ Watched' : 'Mark watched'}</button>`;
   const franchise = cleanCollectionName(r.tmdb_collection_name || '');
-  const pullBtn = r.tmdb_collection_id && r.collection === LIBRARY_NEW_FILM
+  const pullBtn = r.tmdb_collection_id && filmThemeKindOf(r) === 'genre'
     ? `<div class="popover-section-label" style="margin-top:8px">Collection</div><button class="popover-action" onclick="libraryPullRest('${r.id}', ${r.tmdb_collection_id}, '${esc(franchise).replace(/'/g, "\\'")}')">🔗 Pull rest of ${esc(franchise || 'collection')}</button>` : '';
   const matchBtn = policy.matchable
     ? `<div class="popover-section-label" style="margin-top:8px">TMDB</div><button class="popover-action" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : '';

@@ -9,7 +9,7 @@ async function pullUniverse(universeKey) {
 
   const td = tabData[toolCollectionId()];
   const existingRows = toolKnownRows(toolCollectionId()); // library-wide in All Movies (library.js)
-  const ownRows = new Set(td?.rows || []); // the universe tag is added only to films stored here
+  const ownRows = new Set(td?.rows || []); // the universe tag is added only to films whose theme is a genre
   const found = [];
   const notFound = [];
   const ambiguous = []; // { title, candidates } — more than one TMDB film has this exact title
@@ -147,10 +147,10 @@ async function addPulledUniverseMovies() {
   const universe = UNIVERSE_LISTS[universeKey];
   // The tab this preview belongs to, captured before any await: the TMDB lookups
   // below take a while, and the user may switch tabs or views meanwhile.
-  const collectionId = toolCollectionId(); // the open tab, or All Movies' panel (library.js)
+  const collectionId = toolCollectionId(); // All Movies' panel (library.js)
   if (!collectionId) return;
   const tool = toolContext(collectionId);
-  const isMoviesTab = COLLECTIONS.find(c => c.id === collectionId)?.isMovieTab;
+  const isMoviesTab = true; // films a tool adds carry genre themes (theme_kind 'genre')
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
   const toInsert = [];
   const failedTitles = [];
@@ -173,7 +173,6 @@ async function addPulledUniverseMovies() {
     const belongsTo = details.belongs_to_collection;
     const collections = belongsTo ? [belongsTo.name, universe?.label || universeKey] : [universe?.label || universeKey];
     toInsert.push({
-      collection: collectionId,
       item_key: key,
       title,
       season: 'Film',
@@ -199,7 +198,7 @@ async function addPulledUniverseMovies() {
   }
 
   try {
-    const inserted = await sbFetch('POST', TABLE, toInsert);
+    const inserted = await libraryInsertFilms(toInsert);
     toolCachePush(tool, inserted);
     showSaved();
     if (toolContextLive(tool)) resetTMDBSearchUI();
