@@ -3,13 +3,17 @@
 //   * the phase read at startup (stage5_capabilities, GET) and the notice when it is absent;
 //   * no request ever names a storage value or a retired function, in either phase
 //     (the request scan), and no app script refers to one (the source scan, with its
-//     allowlist); the format-3 module is the one place that knows the old shape;
+//     allowlist); the format-3 module is the one place that knows the old shape, and it
+//     sends no request;
 //   * the main flows against a contracted database: reads, additions, Match, catalog
 //     updates, memberships, backup format 4 and its restore, a format-3 restore
 //     converted in the page (with or without the recovery section);
 //   * phase transitions while a backup, restore or write is being prepared: consistent
 //     success or a safe refusal, never a partial backup file, a fallback write or an
 //     automatic retry of an unknown outcome;
+//   * the 5c clean-up (G8): backup and restore only on a contracted database; at
+//     coexistence, without Stage 5 or with an unknown phase there is no file and no
+//     restore, and no format probe; only a format-4 document is ever sent;
 //   * catalog conflicts shown with their candidates, never resolved by the page (U7);
 //     Match into a show a catalog governs is refused and changes nothing (U1).
 // The database side is checked on PGlite (db/test/t_5a_expand.sql, db/test/t_5c_contract.sql,
@@ -18,7 +22,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { createApp, runner, settle } = require('./app-harness');
+const { createApp, runner, settle, legacyBackupFixture } = require('./app-harness');
 
 const T = runner('stage5-app');
 const test = T.test;
@@ -140,14 +144,21 @@ for (const phase of ['coexistence', 'contracted']) {
     await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/rpc/org_add_membership`, { method: 'POST', headers: {}, body: JSON.stringify({ p_collection_id: sheridan.id, p_show_id: lib.sev.id, p_item_id: null }) });
     noStorage(app);
     noRefusal(app);
-    // A backup: format 4 once contracted (no storage); format 3 during coexistence, which reads the
-    // storage columns by design (GET only, the format-3 shape kept until the contraction).
+    // A backup: format 4 once contracted (no storage). During coexistence there is none since the
+    // 5c clean-up (G8): no file, only the phase read, never a storage column or othertv_shows.
     const before = app.requests.length;
-    const b = await app.ctx.buildBackupObject();
-    assert.strictEqual(b.formatVersion, phase === 'contracted' ? 4 : 3);
+    if (phase === 'contracted') {
+      const b = await app.ctx.buildBackupObject();
+      assert.strictEqual(b.formatVersion, 4);
+    } else {
+      const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
+      assert.match(res, /makes backups only of the updated database \(format 4\), so no file was made/);
+      assert.deepStrictEqual(app.requests.slice(before).map(r => `${r.method} ${r.url.split('/rest/v1/')[1].split('?')[0]}`), ['GET rpc/stage5_capabilities']);
+    }
     const backupReads = app.requests.slice(before);
     assert.ok(backupReads.every(r => r.method === 'GET'));
-    if (phase === 'contracted') noStorage(app);
+    noStorage(app);
+    assert.ok(!app.requests.some(r => /othertv_shows|legacy_source|[?&,=]collection\b/.test(r.url)), 'no retired table or column in any request');
     assert.deepStrictEqual([...new Set(writes(app).map(w => w.split(' ')[1]))].sort(),
       ['rpc/library_add_films', 'rpc/library_add_seasons', 'rpc/library_catalog_apply', 'rpc/library_create_show', 'rpc/library_match_film', 'rpc/library_match_season', 'rpc/org_add_membership']);
     assert.ok(app.store.watchlist_items.some(r => r.tmdb_id === 999), 'the film was added');
@@ -156,7 +167,7 @@ for (const phase of ['coexistence', 'contracted']) {
 }
 
 // ─── Source scan (A13, source side) ───────────────────────────────────────────
-test('source scan: no app script but backup-format3.js names a storage value, a retired column or table, or a retired function (allowlisted lines listed)', () => {
+test('source scan: no app script but backup-format3.js names a storage value, a retired column or table, or a retired function (allowlisted lines listed); backup-format3.js sends no request', () => {
   const html = fs.readFileSync(path.join(ROOT, 'watchlist.html'), 'utf8');
   const scripts = [...html.matchAll(/<script src="([^"?]+\.js)[^"]*"/g)].map(m => m[1]).filter(s => !/^https?:/.test(s));
   assert.ok(scripts.includes('library.js') && scripts.includes('backup-format3.js'));
@@ -181,9 +192,11 @@ test('source scan: no app script but backup-format3.js names a storage value, a 
     });
   }
   assert.deepStrictEqual(hits, []);
-  // The one module that knows format 1–3 shapes, and nothing else does.
+  // The one module that knows format 1–3 shapes, and nothing else does. Since the 5c clean-up (G8)
+  // it only reads files: no request of any kind (no fetch, no Supabase call, no table read).
   const f3 = fs.readFileSync(path.join(ROOT, 'backup-format3.js'), 'utf8');
   assert.ok(/othertv_shows/.test(f3) && /legacy_source/.test(f3));
+  assert.deepStrictEqual(f3.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => /fetch\(|sbFetch\(|fetchAllRows\(|SUPABASE_/.test(l)).map(([i, l]) => `${i}: ${l.trim()}`), []);
 });
 
 // ─── Contracted flows ─────────────────────────────────────────────────────────
@@ -235,7 +248,7 @@ test('contracted: backup is format 4 (no storage, theme_kind, governance tables,
 for (const archive of ['active', 'retired']) {
   test(`contracted: a format-3 file is converted in the page (previewed, loss-aware${archive === 'active' ? ', with its recovery section' : ', without a recovery section once the archive is retired'}); only the converted document is sent`, async () => {
     const co = await boot('coexistence');
-    const f3 = await co.app.ctx.buildBackupObject();
+    const f3 = await legacyBackupFixture(co.app, 3); // a format-3 file (the page no longer exports one, G8)
     assert.strictEqual(f3.formatVersion, 3);
     const { app } = await boot('contracted', { recoveryArchive: archive });
     app.ctx.__b = f3;
@@ -260,7 +273,7 @@ for (const archive of ['active', 'retired']) {
 for (const [label, shift, verified] of [['the same instant in the database’s form', 0, true], ['a different instant (1 µs later)', 1, false]]) {
   test(`contracted: converted format-3 restore whose link created_at comes back as ${label} ${verified ? 'verifies' : 'fails verification'}`, async () => {
     const co = await boot('coexistence');
-    const f3 = await co.app.ctx.buildBackupObject();
+    const f3 = await legacyBackupFixture(co.app, 3);
     const { app } = await boot('contracted', { recoveryArchive: 'active' });
     const asDb = ts => ts.replace(/(\.\d{3})Z$/, (m, f) => `${shift ? (f + '00' + shift) : f.replace(/0+$/, '').replace(/\.$/, '')}+00:00`);
     const restore = app.rpcHandlers.restore_backup;
@@ -287,19 +300,20 @@ test('contracted: a format-4 file into a database that is not contracted is refu
   const { app } = await boot('coexistence');
   app.ctx.__b = f4;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
-  assert.match(app.el('restoreModalBox').innerHTML, /format 4, from after the database update; this database hasn’t been updated yet/);
+  assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*restores only into the updated database \(format 4\)/); // the gate comes first since G8
+  assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
   assert.deepStrictEqual(app.writes(), []);
 });
 
 // ─── Phase transitions while something is being prepared (#3) ─────────────────
-test('transition during a backup: the phase changes between the first and last reads → no file, a clear message, nothing written', async () => {
-  const { app } = await boot('coexistence');
+test('transition during a backup: the phase changes (contracted → coexistence) between the first and last reads → no file, a clear message, nothing written', async () => {
+  const { app } = await boot('contracted');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
   const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows?') && r.headers.Range);
   const p = app.ctx.buildBackupObject().then(() => 'made', e => e.message);
   await g.reached;
-  app.stage5 = 'contracted'; // the contraction commits while the backup is being read
+  app.stage5 = 'coexistence'; // a (separately approved) rollback commits while the backup is being read
   g.release();
   const res = await p;
   assert.match(res, /The database was updated while the backup was being read, so no file was made/);
@@ -315,45 +329,46 @@ test('transition: the phase can’t be read (HTTP 500) → no backup file and no
   assert.deepStrictEqual(app.writes(), []);
 });
 
-test('transition after a restore was previewed: the safety backup finds the database updated → aborted before any download or restore call', async () => {
-  const { app } = await boot('coexistence');
+test('transition after a restore was previewed: the safety backup finds the database changed → aborted before any download or restore call', async () => {
+  const { app } = await boot('contracted');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
-  const f3 = await app.ctx.buildBackupObject();
-  app.ctx.__b = f3;
+  const f4 = await app.ctx.buildBackupObject();
+  app.ctx.__b = f4;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore database/);
-  app.stage5 = 'contracted';
+  app.stage5 = 'coexistence'; // a (separately approved) rollback after the preview
   await app.ctx.executeRestore(); await settle();
-  assert.match(app.el('restoreModalBox').innerHTML, /The database was updated after this restore was prepared, so nothing was changed/);
+  assert.match(app.el('restoreModalBox').innerHTML, /Restore aborted[\s\S]*Couldn't create a safety backup of your current data, so nothing was changed/);
   assert.strictEqual(downloads, 0, 'no safety file');
   assert.ok(!app.requests.some(r => r.url.endsWith('/rpc/restore_backup')));
 });
 
-test('transition after the safety backup was confirmed: the phase is read again before sending; a changed phase sends nothing (no conversion, no retry); the safety file stays named', async () => {
-  const { app } = await boot('coexistence');
-  const f3 = await app.ctx.buildBackupObject();
-  app.ctx.__b = f3;
-  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 3');
-  app.stage5 = 'contracted';
+test('transition after the safety backup was confirmed: the phase is read again before sending; a changed phase sends nothing (no conversion, no retry)', async () => {
+  const { app } = await boot('contracted');
+  const f4 = await app.ctx.buildBackupObject();
+  app.ctx.__b = f4;
+  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 4');
+  app.stage5 = 'coexistence';
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle(); await settle();
   assert.strictEqual(app.requests.filter(r => r.url.endsWith('/rpc/restore_backup')).length, 0, 'nothing sent');
   assert.match(app.el('restoreModalBox').innerHTML, /Restore not sent[\s\S]*changed after this restore was prepared, so nothing was sent and nothing was changed/);
   // (The database itself refuses a format-3 document once contracted: db/test/t_5c_contract.sql.)
+  // ("Restore not sent" doesn't name the safety file; the failed-call, verification-failure and success messages do.)
 });
 
 test('a database without the Stage 5 update (or one rolled back meanwhile): no restore is offered, nothing is sent at any step, and no write of any kind leaves the page', async () => {
-  const { app } = await boot('coexistence');
+  const { app } = await boot('contracted');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
-  const b = await app.ctx.buildBackupObject();
+  const b = await app.ctx.buildBackupObject(); // a format-4 file
   await allTv(app);                                   // the page loaded while the database was updated …
   app.stage5 = null;                                  // … then the expansion was rolled back
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*needs a database update/);
   assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
-  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 3');
+  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 4');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore not sent[\s\S]*couldn’t be confirmed/);
   // Ordinary writes: the cached phase is cleared on a failed check, so every write is refused before sending.
@@ -363,6 +378,154 @@ test('a database without the Stage 5 update (or one rolled back meanwhile): no r
   await app.ctx.setShowStatusById(sev.show_id, 'complete'); await settle();
   assert.deepStrictEqual(app.writes(), [], 'no write of any kind');
   assert.strictEqual(downloads, 0);
+});
+
+// ─── The 5c clean-up (G8): backup and restore only on a contracted database ───
+const pathOf = r => `${r.method} ${r.url.split('/rest/v1/')[1].split('?')[0]}`;
+const fileOf = obj => ({ text: async () => JSON.stringify(obj) });
+const modalText = app => app.el('restoreModalBox').innerHTML.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+
+test('G8 N1: coexistence: Backup makes no file; only the phase is read (no table, no storage column, no othertv_shows); nothing written', async () => {
+  const { app } = await boot('coexistence');
+  let downloads = 0;
+  app.ctx.downloadJSON = () => { downloads++; };
+  const before = app.requests.length;
+  await app.ctx.handleBackupClick(); await settle();
+  assert.strictEqual(downloads, 0, 'no file');
+  assert.match(app.el('errorBanner').innerHTML, /Backup failed: This page makes backups only of the updated database \(format 4\), so no file was made and nothing was changed/);
+  assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities']);
+  assert.deepStrictEqual(app.writes(), []);
+  noStorage(app);
+});
+
+for (const [label, stage5] of [['no Stage 5 (no capability)', null], ['an unknown phase', 'later_phase']]) {
+  test(`G8 N2: ${label}: no backup file and no format probe; restore is not offered; nothing written`, async () => {
+    const { app } = await boot('contracted');
+    const f4 = await app.ctx.buildBackupObject();
+    app.stage5 = stage5;
+    app.run('stage5Phase = null');
+    const before = app.requests.length;
+    const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
+    assert.notStrictEqual(res, 'made');
+    assert.match(res, /makes backups only of the updated database \(format 4\)/);
+    assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities'], 'no personal_collections / tv_shows probe');
+    app.ctx.__b = f4;
+    await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
+    assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available/);
+    assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
+    assert.strictEqual(app.get('pendingRestoreData'), null);
+    assert.deepStrictEqual(app.writes(), []);
+  });
+}
+
+test('G8 N3: coexistence: a format-3 file is not restored (no direct restore): not offered, no safety backup, nothing sent or pending', async () => {
+  const { app } = await boot('coexistence');
+  let downloads = 0;
+  app.ctx.downloadJSON = () => { downloads++; };
+  const f3 = await legacyBackupFixture(app, 3);
+  const before = app.requests.length;
+  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
+  assert.match(modalText(app), /Restore isn't available This page restores only into the updated database \(format 4\)/);
+  assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
+  assert.strictEqual(app.get('pendingRestoreData'), null);
+  assert.strictEqual(downloads, 0);
+  assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities'], 'no table read, no send');
+  app.ctx.closeRestoreModal();
+  assert.ok(!app.requests.some(r => r.url.includes('/rpc/restore_backup')));
+});
+
+test('G8 N4: contracted: a document that is not format 4 is never sent at the send step', async () => {
+  const co = await boot('coexistence');
+  const f3 = await legacyBackupFixture(co.app, 3);
+  const { app } = await boot('contracted');
+  app.ctx.__b = f3;
+  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 4');
+  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
+  assert.match(app.el('restoreModalBox').innerHTML, /Restore not sent/);
+  assert.ok(!app.requests.some(r => r.url.includes('/rpc/restore_backup')));
+  assert.deepStrictEqual(app.writes(), []);
+});
+
+test('G8 N5: a backup refused at coexistence reads no table; once the database is contracted a new backup is format 4', async () => {
+  const { app } = await boot('coexistence');
+  const before = app.requests.length;
+  const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
+  assert.notStrictEqual(res, 'made');
+  app.stage5 = 'contracted'; // the phase changes right after the refusal
+  assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities'], 'nothing read for the refused backup');
+  const b = await app.ctx.buildBackupObject();
+  assert.strictEqual(b.formatVersion, 4);
+  assert.deepStrictEqual(app.writes(), []);
+});
+
+test('G8 N6: contracted: a format-3 file the converter refuses (a row that is neither a film nor a linked TV season): the refusal is shown; nothing sent, downloaded or pending', async () => {
+  const co = await boot('coexistence');
+  const f3 = await legacyBackupFixture(co.app, 3);
+  const season = f3.tables.watchlist_items.find(r => r.show_id);
+  season.show_id = null; // still a valid format-3 row (format 3 allowed unlinked TV rows), but not representable at 5c
+  const { app } = await boot('contracted');
+  assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(f3)), [], 'the file itself passes format-3 validation');
+  let downloads = 0;
+  app.ctx.downloadJSON = () => { downloads++; };
+  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
+  assert.match(modalText(app), /This format 3 backup can't be converted It breaks a rule your updated list enforces, so nothing was changed: a row that is neither a film nor a linked TV season/);
+  assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
+  assert.strictEqual(app.get('pendingRestoreData'), null);
+  assert.strictEqual(downloads, 0);
+  assert.deepStrictEqual(app.writes(), []);
+});
+
+test('G8 N7: contracted: a converted document that fails format-4 validation is refused; nothing sent, downloaded or pending', async () => {
+  const co = await boot('coexistence');
+  const f3 = await legacyBackupFixture(co.app, 3);
+  const { app } = await boot('contracted');
+  const real = app.ctx.convertFormat3To4(f3, { includeRecovery: true, sourceSha256: 'a'.repeat(64) });
+  const bad = JSON.parse(JSON.stringify(real.doc));
+  bad.tables.watchlist_items.find(r => r.theme_kind != null).theme_kind = 'bogus';
+  app.ctx.__conv = { refusals: [], doc: bad, summary: real.summary };
+  app.run('convertFormat3To4 = () => __conv'); // test-only stand-in; the real converter is unchanged (G8 L6)
+  let downloads = 0;
+  app.ctx.downloadJSON = () => { downloads++; };
+  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
+  assert.match(modalText(app), /This format 3 backup can't be converted The converted backup doesn’t pass validation, so nothing was changed:[\s\S]*theme_kind/);
+  assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
+  assert.strictEqual(app.get('pendingRestoreData'), null);
+  assert.strictEqual(downloads, 0);
+  assert.deepStrictEqual(app.writes(), []);
+});
+
+test('G8 N8: contracted: format 1 and format 2 files are refused at preview, before any safety backup, download or write', async () => {
+  const co = await boot('coexistence');
+  const src2 = await createApp({ rows: library().rows, tvShows: library().tvShows, org: false });
+  const files = [[await legacyBackupFixture(co.app, 1), /predates TV shows \(format 1\)[\s\S]*only format 4 backups can be restored/],
+    [await legacyBackupFixture(src2, 2), /format 2, from before personal collections/]];
+  for (const [f, re] of files) {
+    const { app } = await boot('contracted');
+    let downloads = 0;
+    app.ctx.downloadJSON = () => { downloads++; };
+    app.ctx.__b = f;
+    await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
+    assert.match(app.el('restoreModalBox').innerHTML, re);
+    assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
+    assert.strictEqual(app.get('pendingRestoreData'), null);
+    assert.strictEqual(downloads, 0);
+    assert.deepStrictEqual(app.writes(), []);
+  }
+});
+
+test('G8 N9: a format-3 file refused at coexistence can be chosen again once the database is contracted: converted preview, nothing stale', async () => {
+  const { app } = await boot('coexistence');
+  const f3 = await legacyBackupFixture(app, 3);
+  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
+  assert.match(modalText(app), /Restore isn't available/);
+  app.ctx.closeRestoreModal();
+  app.stage5 = 'contracted';
+  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
+  assert.match(modalText(app), /This is a format 3 backup; it is converted before restoring/);
+  assert.ok(app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
+  assert.strictEqual(app.get('pendingRestoreData.formatVersion'), 4);
+  assert.strictEqual(app.get('pendingRestoreDbFormat'), 4);
+  assert.deepStrictEqual(app.writes(), []);
 });
 
 test('transition while an addition is prepared: the same library function in both phases → it succeeds; nothing older is tried', async () => {
@@ -446,7 +609,7 @@ for (const phase of ['coexistence', 'contracted']) {
 
 test('contracted: a converted format-3 restore keeps every collection’s presentation key (True Crime included); format 4 carries it', async () => {
   const co = await boot('coexistence');
-  const f3 = await co.app.ctx.buildBackupObject();
+  const f3 = await legacyBackupFixture(co.app, 3);
   const { app } = await boot('contracted');
   const conv = app.ctx.convertFormat3To4(f3, { includeRecovery: true, sourceSha256: 'a'.repeat(64) });
   const tc = f3.tables.personal_collections.find(c => c.legacy_source === 'truecrime');

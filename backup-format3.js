@@ -1,20 +1,18 @@
 // ─── Backup formats 1–3 and their conversion to format 4 (Stage 5) ────────────
 // The only part of the page that names the retired storage fields (watchlist_items
 // and tv_shows `collection`, personal_collections `legacy_source`, the
-// othertv_shows table). Two jobs:
-//   * while the database is in coexistence (stage5_capabilities phase
-//     'coexistence', or an older database): backups are made and restored in
-//     format 3 exactly as before (detectLegacyBackupFormat, the column lists and
-//     validators below);
-//   * once it is contracted: a format-3 file is never sent as it is. Restore
-//     converts it explicitly (convertFormat3To4): the preview lists what the
-//     conversion derives and what it can't keep, and refuses a file that breaks the
-//     contracted rules. The file on disk is never changed. While the recovery
-//     archive is active the converted document carries a recovery section (the
-//     original storage values and othertv_shows rows); after it is retired that
-//     section is left out and the preview says so.
-// The format-3 export and direct-restore paths are retired after the contraction is
-// verified; the converter stays (formats 1–2 stay refused as before).
+// othertv_shows table), and only as they appear in a backup file: this module
+// sends no request. Since the 5c clean-up the page makes and restores backups
+// only on a contracted database (format 4); format 1–3 export and direct format-3
+// restore are retired. What stays:
+//   * the format 1–3 column lists and validators below, which check a chosen file
+//     (formats 1–2 are then refused as before);
+//   * the converter (convertFormat3To4): restore converts a format-3 file
+//     explicitly; the preview lists what the conversion derives and what it can't
+//     keep, and refuses a file that breaks the contracted rules. The file on disk
+//     is never changed. While the recovery archive is active the converted document
+//     carries a recovery section (the original storage values and othertv_shows
+//     rows); after it is retired that section is left out and the preview says so.
 
 // Every column of the three format-1 tables. A backup row must carry exactly these
 // keys (key presence), and each value must fit the column type; a trailing "?"
@@ -61,23 +59,6 @@ const FORMAT3_CONVERTER_VERSION = '5.1';
 
 function legacyBackupSpec(formatVersion) {
   return LEGACY_BACKUP_FORMATS[formatVersion] || null;
-}
-
-// The format of a database without Stage 5's contraction: 3 once personal
-// collections exist (personal_collections readable), 2 with the TV-show schema
-// (tv_shows readable), otherwise 1. Read-only probes; any other answer is an error.
-async function detectLegacyBackupFormat() {
-  const probe = async table => {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=id&limit=1`, {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
-    });
-    if (res.ok) return true;
-    const body = await res.text();
-    if (res.status === 404 && body.includes('PGRST205')) return false;
-    throw new Error(`Couldn't tell which backup format this database uses: ${res.status} ${body}`);
-  };
-  if (await probe('personal_collections')) return 3;
-  return (await probe('tv_shows')) ? 2 : 1;
 }
 
 // Row-level checks for formats 1–3 that mirror that schema: storage-scoped

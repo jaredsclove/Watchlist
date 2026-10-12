@@ -282,8 +282,9 @@ function restoreLibrary() {
     ]
   };
 }
+// Restore runs only on a contracted database since the 5c clean-up (G8): the file is its format-4 export.
 async function restoreSetup() {
-  const app = await boot(restoreLibrary());
+  const app = await boot(restoreLibrary(), { stage5: 'contracted' });
   const backup = await app.ctx.buildBackupObject();
   const text = JSON.stringify(backup);
   let release;
@@ -319,7 +320,8 @@ for (const [name, when] of [
       await openCol(app, B['disney']);
       release(); await done; await settle();
     } else if (when === 'preview') {
-      const g = app.hold(r => r.method === 'GET' && r.url.includes('/personal_collections?select=id&limit=1'));
+      // the preview's first current-data read (the format probe it used to hold is retired, G8)
+      const g = app.hold(r => r.method === 'GET' && r.url.includes('/rest/v1/watchlist_items?select=*&'));
       release(); await g.reached;
       assert.ok(modalOpen(app) && app.el('restoreModalBox').innerHTML.includes('Checking current data'), 'reached the preview');
       await openCol(app, B['disney']);

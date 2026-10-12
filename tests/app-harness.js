@@ -1254,4 +1254,21 @@ function runner(title) {
   };
 }
 
-module.exports = { createApp, runner, settle, clone };
+// Test-only (Stage 5 G8): a format 1–3 backup *file*. The page's own format 1–3 export
+// is retired, so tests that need such a file (conversion, validation, refusals) read the
+// harness store through the page's fetchAllRows with that format's column lists
+// (legacyBackupSpec), in the retired exporter's table and row order and object shape.
+// Use it on an app whose store still has the format's tables (coexistence or older).
+async function legacyBackupFixture(app, formatVersion) {
+  const spec = app.ctx.legacyBackupSpec(formatVersion);
+  const tables = {};
+  const rowCounts = {};
+  for (const table of spec.tables) {
+    const rows = await app.ctx.fetchAllRows(table, null, Object.keys(spec.columns[table]).join(','));
+    tables[table] = rows;
+    rowCounts[table] = rows.length;
+  }
+  return { format: app.get('BACKUP_FORMAT'), formatVersion, exportedAt: new Date().toISOString(), rowCounts, tables };
+}
+
+module.exports = { createApp, runner, settle, clone, legacyBackupFixture };

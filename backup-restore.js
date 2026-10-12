@@ -48,9 +48,8 @@ function sameTimestampInstant(a, b) {
   return ka !== null && ka === kb;
 }
 
-// Which backup format the database holds: 4 once Stage 5's contraction has run
-// (stage5_capabilities, read with GET), otherwise what backup-format3.js detects
-// (3 with personal collections, 2 with TV shows, else 1). Read-only.
+// The database's Stage 5 phase (stage5_capabilities, read with GET); null for a
+// database without Stage 5. Read-only.
 async function stage5Capabilities() {
   try { return await sbFetch('GET', 'rpc/stage5_capabilities', null); }
   catch (e) {
@@ -59,10 +58,13 @@ async function stage5Capabilities() {
   }
 }
 
+// Which backup format this page makes and restores: 4, and only on a contracted
+// database. Any other phase (coexistence, none, unknown) is refused, never guessed:
+// format 1–3 export is retired (the 5c clean-up).
 async function detectBackupFormat() {
   const cap = await stage5Capabilities();
   if (cap && cap.phase === 'contracted') return 4;
-  return detectLegacyBackupFormat();
+  throw new Error('This page makes backups only of the updated database (format 4), so no file was made and nothing was changed.');
 }
 
 // At boot (doesn't hold up the first view): which phase this database is in. A database
@@ -79,8 +81,9 @@ async function loadStage5Capabilities() {
 // Fetches every row of every table in the database's backup format, asking for the
 // format's exact columns (never user_id: a backup is list content, not ownership),
 // and assembles the backup JSON object. Does not write anything.
-// The format is read before and again after the reads: a database updated in
-// between (coexistence → contracted) gives no file at all, never a mix.
+// The phase is read before and again after the reads: a database whose phase
+// changed in between (for example a rollback to coexistence) gives no file at all,
+// never a mix.
 async function buildBackupObject() {
   const formatVersion = await detectBackupFormat();
   const spec = backupSpec(formatVersion);
@@ -91,14 +94,15 @@ async function buildBackupObject() {
     let rows;
     try { rows = await fetchAllRows(table, null, Object.keys(spec.columns[table]).join(',')); }
     catch (e) {
-      // A read refused because the update removed what it asks for is the same case.
-      const now = await detectBackupFormat().catch(() => null);
-      throw now != null && now !== formatVersion ? updated : e;
+      // A read refused because the phase changed underneath it is the same case.
+      const now = await stage5Capabilities().catch(() => undefined);
+      throw now !== undefined && !(now && now.phase === 'contracted') ? updated : e;
     }
     tables[table] = rows;
     rowCounts[table] = rows.length;
   }
-  if (await detectBackupFormat() !== formatVersion) throw updated;
+  const after = await stage5Capabilities();
+  if (!after || after.phase !== 'contracted') throw updated;
   return {
     format: BACKUP_FORMAT,
     formatVersion,
@@ -486,12 +490,15 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
   let currentItems = [];
   let dbFormat;
   try {
-    // A restore needs a database whose Stage 5 phase is known (never a fallback to the legacy format).
+    // A restore needs a contracted database (format 4); direct format-3 restore is
+    // retired (the 5c clean-up). Never a fallback to a legacy format.
     const phaseCap = await stage5Capabilities();
     if (!restoreSessionLive(session)) return;
-    if (!phaseCap || !STAGE5_WRITABLE_PHASES.includes(phaseCap.phase)) {
+    if (!phaseCap || phaseCap.phase !== 'contracted') {
       showRestoreModal(`<div class="modal-title">Restore isn't available</div>
-        <div class="modal-error">This page needs a database update that hasn’t been made yet, so it can’t restore here. Nothing was changed.</div>
+        <div class="modal-error">${phaseCap && STAGE5_WRITABLE_PHASES.includes(phaseCap.phase)
+          ? 'This page restores only into the updated database (format 4), and this database isn’t in that state, so it can’t restore here. Nothing was changed.'
+          : 'This page needs a database update that hasn’t been made yet, so it can’t restore here. Nothing was changed.'}</div>
         <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
       pendingRestoreData = null;
       return;
@@ -692,12 +699,12 @@ async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
   // restore_backup (db/phase0_restore_v1.sql) deletes and re-inserts all tables
   // atomically: if anything fails, the database rolls back to exactly what it was.
   const restoredTables = backupSpec(backup.formatVersion).tables;
-  // The phase is read again right before sending: it must still be the one the preview
-  // checked (format 4 ⇔ contracted, format 3 ⇔ coexistence). Nothing is sent otherwise.
+  // The phase is read again right before sending: it must still be contracted, and
+  // only a format-4 document is ever sent (a format-3 file was converted in the
+  // preview; direct format-3 restore is retired). Nothing is sent otherwise.
   let sendCap = null;
   try { sendCap = await stage5Capabilities(); } catch (e) { sendCap = null; }
-  const expectedPhase = backup.formatVersion === 4 ? 'contracted' : 'coexistence';
-  if (!sendCap || sendCap.phase !== expectedPhase || !pendingRestoreData) {
+  if (!sendCap || sendCap.phase !== 'contracted' || backup.formatVersion !== 4 || !pendingRestoreData) {
     showRestoreModal(`<div class="modal-title">Restore not sent</div>
       <div class="modal-error">The database’s update state ${sendCap ? 'changed after this restore was prepared' : 'couldn’t be confirmed'}, so nothing was sent and nothing was changed. Choose the file again to see what restoring it would do now.</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);

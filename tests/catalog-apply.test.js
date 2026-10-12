@@ -473,13 +473,15 @@ test('a database without the Stage 5 functions: Review says catalog updates aren
   assert.ok(!app.requests.some(r => r.url.includes('/rpc/catalog_apply')));
 });
 
-test('a backup taken after an application is format 3 and holds the applied rows (validation and restore: db/test/t_4a_catalog.sql, real ids)', async () => {
-  const { app, missingSeason, missingFilm } = await behind();
+test('a backup taken after an application is format 4 and holds the applied rows and their governance (validation and restore: db/test/t_5c_contract.sql, real ids)', async () => {
+  const { app, missingSeason, missingFilm } = await behind({ stage5: 'contracted' });
   await app.applyCatalog('sheridan');
   const b = await app.ctx.buildBackupObject();
-  assert.strictEqual(b.formatVersion, 3);
-  assert.deepStrictEqual(Object.keys(b.tables).sort(), ['collection_memberships', 'custom_collections', 'othertv_shows', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
+  assert.strictEqual(b.formatVersion, 4);
+  assert.deepStrictEqual(Object.keys(b.tables).sort(), ['catalog_film_links', 'catalog_show_links', 'collection_memberships', 'custom_collections', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
   for (const d of [missingSeason, missingFilm]) assert.ok(b.tables.watchlist_items.some(r => r.item_key === d.k));
+  const film = b.tables.watchlist_items.find(r => r.item_key === missingFilm.k);
+  assert.ok(b.tables.catalog_film_links.some(l => l.item_id === film.id && l.catalog === 'sheridan'), 'the applied film is governed by its catalog');
 });
 
 T.run();

@@ -1,7 +1,8 @@
 // Offline tests for the transactional restore: after the safety-backup
 // confirmation, the app replaces every table with one call to the database
 // function restore_backup (db/phase0_restore_v1.sql), never with table-by-table
-// deletes and inserts, then verifies the result field by field.
+// deletes and inserts, then verifies the result field by field. Since the 5c clean-up
+// (G8) this runs only on a contracted database, with a format-4 document.
 // Run from the repo root: node tests/restore-rpc.test.js
 const assert = require('assert');
 const { createApp, runner } = require('./app-harness');
@@ -18,14 +19,18 @@ const row = (name, o = {}) => ({
   tmdb_collection_name: null, media_type: 'tv', tmdb_id: Number(name.replace(/\D/g, '')) || 1, season_number: 1, ...o
 });
 
-// A backup of different content than the app's current database.
+// Each season is linked to a show of its own (format 4: every row is a film or a linked season).
+const show = name => ({ id: uuid('5' + name), collection: 'othertv', title: `Show ${name}`, show_key: `show ${name}`,
+  tmdb_id: Number(name.replace(/\D/g, '')) || 1, status: 'confirmed', created_at: '2026-01-01T00:00:00+00:00' });
+const linked = (name, o = {}) => row(name, { show_id: uuid('5' + name), skipped: false, ...o });
+
+// A backup of different content than the app's current database. Since the 5c clean-up (G8)
+// restore runs only on a contracted database, so the backup is the format-4 export of another one.
 async function setup() {
-  const app = await createApp({ rows: [row('a1'), row('a2')], format1: true });
-  const backup = {
-    format: 'watchlist-tracker-backup', formatVersion: 1, exportedAt: '2026-10-04T00:00:00.000Z',
-    rowCounts: { watchlist_items: 1, othertv_shows: 0, custom_collections: 0 },
-    tables: { watchlist_items: [row('b7', { title: 'Restored' })], othertv_shows: [], custom_collections: [] }
-  };
+  const src = await createApp({ rows: [linked('b7', { title: 'Restored' })], tvShows: [show('b7')], stage5: 'contracted' });
+  const backup = JSON.parse(JSON.stringify(await src.run('buildBackupObject()'))); // a plain copy, as a file would be
+  assert.strictEqual(backup.formatVersion, 4);
+  const app = await createApp({ rows: [linked('a1'), linked('a2')], tvShows: [show('a1'), show('a2')], stage5: 'contracted' });
   assert.deepStrictEqual(Array.from(app.get('validateBackupObject')(backup)), []);
   app.ctx.__backup = backup;
   app.run(`pendingRestoreData = __backup`);
@@ -62,9 +67,11 @@ test('a failed restore call reports that nothing was changed and stops', async (
 test('verification still compares every field after the restore call', async () => {
   const { app } = await setup();
   // Simulate the database returning a different value than the backup holds.
+  const restore = app.rpcHandlers.restore_backup;
   app.rpcHandlers.restore_backup = body => {
-    app.store.watchlist_items = body.p_backup.tables.watchlist_items.map(r => ({ ...r, title: 'Changed' }));
-    return { ok: true, status: 200, text: async () => '{}', json: async () => ({}), headers: { get: () => null } };
+    const r = restore(body);
+    app.store.watchlist_items = app.store.watchlist_items.map(x => ({ ...x, title: 'Changed' }));
+    return r;
   };
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
   assert.match(app.el('restoreModalBox').innerHTML, /verification failed/);
@@ -114,9 +121,11 @@ test('native restore: created_at returned in the database’s form verifies; a d
   for (const [back, verified] of [['2026-01-01T00:00:00+00:00', true], ['2026-01-01T00:00:01+00:00', false]]) {
     const { app, backup } = await setup();
     backup.tables.watchlist_items[0].created_at = '2026-01-01T00:00:00.000Z';
+    const restore = app.rpcHandlers.restore_backup;
     app.rpcHandlers.restore_backup = body => {
-      app.store.watchlist_items = body.p_backup.tables.watchlist_items.map(r => ({ ...r, created_at: back }));
-      return { ok: true, status: 200, text: async () => '{}', json: async () => ({}), headers: { get: () => null } };
+      const r = restore(body);
+      app.store.watchlist_items = app.store.watchlist_items.map(x => ({ ...x, created_at: back }));
+      return r;
     };
     await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
     assert.match(app.el('restoreModalBox').innerHTML, verified ? /restored and verified/ : /verification failed[\s\S]*created_at/);

@@ -2,14 +2,15 @@
 // your collections at startup without holding up the first view; collections list
 // their members (never storage); archived collections are hidden and a
 // renamed one keeps its device layout; watch-with shows labels and stores tokens;
-// backup format 3 and its validation; format 2 refused before anything happens;
+// format 3 file validation (the converter's input) and the format-4 backup's organization tables;
+// format 2 refused before anything happens (restore and backup run only on a contracted database since G8);
 // Match never applies a collection expansion silently; and the app against a
 // database without personal collections. Run from the repo root:
 //   node tests/organization.test.js
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { createApp, runner, settle } = require('./app-harness');
+const { createApp, runner, settle, legacyBackupFixture } = require('./app-harness');
 
 const T = runner('organization');
 const test = T.test;
@@ -181,14 +182,14 @@ test('watch-with: labels from your choices, tokens in the data; an archived choi
 });
 
 // ── backup format 3 ──
-test('backup is format 3 with the seven tables and exact columns; never user_id, is_film or item_is_film; it validates', async () => {
-  const app = await boot();
+test('backup (contracted) is format 4 with the eight tables and exact organization columns; never user_id, is_film or item_is_film; it validates', async () => {
+  const app = await boot(library(), { stage5: 'contracted' });
   const b = await app.run('buildBackupObject()');
-  assert.strictEqual(b.formatVersion, 3);
-  assert.deepStrictEqual(Object.keys(b.tables).sort(), ['collection_memberships', 'custom_collections', 'othertv_shows', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
+  assert.strictEqual(b.formatVersion, 4);
+  assert.deepStrictEqual(Object.keys(b.tables).sort(), ['catalog_film_links', 'catalog_show_links', 'collection_memberships', 'custom_collections', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
   assert.strictEqual(Object.keys(b.tables.watchlist_items[0]).length, 20);
   assert.deepStrictEqual(Object.keys(b.tables.collection_memberships[0]), ['id', 'collection_id', 'show_id', 'item_id', 'created_at']);
-  assert.deepStrictEqual(Object.keys(b.tables.personal_collections[0]), ['id', 'name', 'legacy_source', 'sort_order', 'archived_at', 'created_at']);
+  assert.deepStrictEqual(Object.keys(b.tables.personal_collections[0]), ['id', 'name', 'catalog_id', 'presentation_key', 'sort_order', 'archived_at', 'created_at']);
   assert.deepStrictEqual(Object.keys(b.tables.watch_with_choices[0]), ['id', 'token', 'label', 'sort_order', 'archived_at', 'created_at']);
   assert.ok(Object.values(b.tables).every(rows => rows.every(r => !('user_id' in r) && !('is_film' in r) && !('item_is_film' in r))));
   assert.deepStrictEqual(Array.from(app.get('validateBackupObject')(b)), []);
@@ -198,7 +199,7 @@ test('backup is format 3 with the seven tables and exact columns; never user_id,
 test('format 3 validation mirrors the database: targets, kinds, duplicates, names and labels ignoring case, sources, watch-with values', async () => {
   const data = library();
   const app = await boot(data);
-  const good = await app.run('buildBackupObject()');
+  const good = await legacyBackupFixture(app, 3); // a format-3 file (the page no longer exports one)
   const validate = o => Array.from(app.get('validateBackupObject')(o)).join(' | ');
   const variant = fn => { const b = JSON.parse(JSON.stringify(good)); fn(b); return validate(b); };
   const season = data.rows.find(r => r.show_id);
@@ -217,9 +218,8 @@ test('format 3 validation mirrors the database: targets, kinds, duplicates, name
 
 test('restore: a format 2 file into this database is refused with guidance before any safety backup, download or write', async () => {
   const src = await boot(library(), { org: false });
-  const v2 = await src.run('buildBackupObject()');
-  assert.strictEqual(v2.formatVersion, 2);
-  const app = await boot();
+  const v2 = await legacyBackupFixture(src, 2);
+  const app = await boot(library(), { stage5: 'contracted' });
   app.ctx.__b = v2;
   const before = app.requests.length;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
@@ -229,20 +229,8 @@ test('restore: a format 2 file into this database is refused with guidance befor
   assert.ok(app.requests.slice(before).every(r => r.method === 'GET'));
 });
 
-test('restore: a format 3 file goes through as one restore_backup call with the whole backup, then verifies all seven tables', async () => {
-  const app = await boot();
-  const b = await app.run('buildBackupObject()');
-  app.store.collection_memberships.pop(); // differs from the backup until restored
-  app.ctx.__b = b;
-  await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
-  assert.ok(app.el('restoreModalBox').innerHTML.includes('these 7 tables'));
-  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
-  const call = app.requests.filter(r => r.method !== 'GET');
-  assert.deepStrictEqual(call.map(r => new URL(r.url).pathname.split('/').pop()), ['restore_backup']);
-  assert.strictEqual(call[0].body.p_backup.formatVersion, 3);
-  assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
-  assert.strictEqual(app.store.collection_memberships.length, b.tables.collection_memberships.length);
-});
+// (A format-3 file is restored only through the conversion since the 5c clean-up (G8): one restore_backup call
+// with the format-4 document, then all eight tables verified — tests/stage5-app.test.js.)
 
 // ── Match ──
 async function matchAsTv(app, rowId, tmdb) {
@@ -291,24 +279,24 @@ test('Match without an expansion keeps the row in its collections; a TV season m
 });
 
 // ── database without personal collections (previous schema) ──
-test('without personal collections: the selector is unavailable (never the storage tabs), backup is format 2, watch-with uses the configured list', async () => {
+test('without personal collections: the selector is unavailable (never the storage tabs), no backup file, watch-with uses the configured list', async () => {
   const data = library();
   const app = await boot(data, { org: false });
   assert.strictEqual(app.get('orgState'), 'absent');
   assert.match(app.el('browseBar').innerHTML, /Collections unavailable/);
   app.ctx.openBrowseCollection(B.disney); await settle();
   assert.strictEqual(app.get('activeViewId'), 'watching', 'nothing to open');
-  const b = await app.run('buildBackupObject()');
-  assert.strictEqual(b.formatVersion, 2);
+  const res = await app.run('buildBackupObject()').then(() => 'made', e => e.message); // not contracted: no file (G8)
+  assert.match(res, /makes backups only of the updated database \(format 4\), so no file was made/);
   assert.deepStrictEqual(JSON.parse(app.get('JSON.stringify(watchWithChoiceList().map(c => c.token))')), Array.from(app.get('WATCH_WITH_OPTIONS')));
   // (Match against a database without the Stage 5 functions is covered in tests/stage5-app.test.js.)
 });
 
 // ── organization refresh (review finding 1) ──
-// A format 3 backup whose collections and watch-with labels differ from what the page has loaded.
+// A format 4 backup (contracted; G8) whose collections and watch-with labels differ from what the page has loaded.
 async function restoredBackup(app) {
   const b = JSON.parse(JSON.stringify(await app.run('buildBackupObject()')));
-  const old = b.tables.personal_collections.find(c => c.legacy_source === 'disney');
+  const old = b.tables.personal_collections.find(c => c.catalog_id === 'disney');
   const fresh = uuid('0c', 77);
   b.tables.personal_collections = b.tables.personal_collections.map(c => c.id === old.id ? { ...c, id: fresh, name: 'Disney+ (restored)' } : c);
   b.tables.collection_memberships = b.tables.collection_memberships.map(m => m.collection_id === old.id ? { ...m, collection_id: fresh } : m);
@@ -324,7 +312,7 @@ async function restoreThrough(app, b) {
 }
 
 test('after a restore the selector and watch-with labels come from the restored data (changed ids, names, labels)', async () => {
-  const app = await boot(); // Restore runs from a TV view (All Movies hides it since Stage 4b)
+  const app = await boot(library(), { stage5: 'contracted' }); // Restore runs from a TV view (All Movies hides it since Stage 4b)
   const { b, oldId, freshId } = await restoredBackup(app);
   await restoreThrough(app, b);
   app.ctx.switchMediaType('movie'); await settle();
@@ -335,7 +323,7 @@ test('after a restore the selector and watch-with labels come from the restored 
 });
 
 test('a restored-away collection that is still open (or chosen from a stale selector) says it isn’t available, with Back', async () => {
-  const app = await boot();
+  const app = await boot(library(), { stage5: 'contracted' });
   const { b, oldId } = await restoredBackup(app);
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b');
@@ -386,7 +374,7 @@ test('an older organization read that finishes last never replaces newer data (R
 });
 
 test('a startup read pending across a restore is discarded; the post-restore read wins', async () => {
-  const app = await boot();
+  const app = await boot(library(), { stage5: 'contracted' });
   const { b, freshId } = await restoredBackup(app);
   const g = app.hold(r => r.url.includes('/personal_collections?'));
   const pending = app.ctx.loadOrganization();
@@ -402,7 +390,7 @@ test('a startup read pending across a restore is discarded; the post-restore rea
 });
 
 test('a pre-restore read that finishes before the post-restore read publishes nothing; the selector waits for the restored data', async () => {
-  const app = await boot();
+  const app = await boot(library(), { stage5: 'contracted' });
   const { b, freshId, oldId } = await restoredBackup(app);
   const g = app.hold(r => r.url.includes('/personal_collections?'));
   const pending = app.ctx.loadOrganization();
@@ -452,7 +440,7 @@ const pickerOf = (app, id) => app.get(`watchWithPickerHtml('${id}', [])`);
 for (const withBrowse of [false, true]) {
   test(`post-restore choices read fails${withBrowse ? ' while a collection view reads successfully' : ''}: no stale or default choices are offered; unavailable + Retry; Retry recovers`, async () => {
     const data = library();
-    const app = await boot(data);
+    const app = await boot(data, { stage5: 'contracted' });
     const dune = data.rows.find(r => r.title === 'Dune');
     await restoreChangedChoices(app); // from a TV view (All Movies hides Restore)
     if (withBrowse) {
@@ -491,7 +479,7 @@ for (const withBrowse of [false, true]) {
 
 test('while the post-restore choices read is pending the controls say loading (no defaults, no stale values)', async () => {
   const data = library();
-  const app = await boot(data);
+  const app = await boot(data, { stage5: 'contracted' });
   const dune = data.rows.find(r => r.title === 'Dune');
   await restoreChangedChoices(app);
   const g = app.hold(r => r.url.includes('/watch_with_choices?'));
