@@ -18,7 +18,8 @@ stays the authoritative project handoff; nothing here authorizes a production st
 | 5b | the Stage 5 page | unchanged | storage-free page; backups stay format 3 |
 | soak | at least 48 hours after 5b is verified (elapsed time alone authorizes nothing) | | |
 | 5c | `db/phase5c_contract.sql` | governance tables, `theme_kind`, `catalog_id`, guards, recovery archive; storage dropped; `stage5_capabilities()` → `contracted` | backups format 4; old pages refused (`client_outdated`) |
-| later | 5c clean-up; archive retirement | each a separate, explicit approval (archive retirement only after backup/restore and recovery verification) | |
+| 5c clean-up (G8) | the page only (`aeb9f73`, released 2026-10-12) | unchanged | format-3 export and direct format-3 restore removed; backup and restore only on a `contracted` database (format 4); the explicit format-3 → 4 converter kept indefinitely |
+| later | archive retirement (G9) | a separate, explicit approval, only after backup/restore and recovery verification | |
 
 Rollbacks: `db/rollback/phase5a.sql` (to Stage 4b exactly; bound to the G3 baseline inventory, plan §3(b): it
 refuses without it and aborts unless the restored `catalog_apply` and function inventory equal it — `db/README.md`),
@@ -69,7 +70,11 @@ differs from its record's key; a `legacy_source` that would repeat. Once the arc
 retired it refuses everything: recovery is fix-forward.
 
 After a rollback, format-4 backups can't be restored (Stage 5a takes format 3): take a
-format-3 backup right after the rollback. A converted format-3 restore made while
+format-3 backup right after the rollback. Since the 5c clean-up (G8, `aeb9f73`) the deployed
+page makes and restores backups only on a contracted database, so it can't take that
+format-3 backup: before any separately approved 5c rollback, restore the 5b app first
+(revert the G8 commit) and verify it on Pages, then take a format-4 backup with it, run the
+rollback, and take the format-3 backup with the 5b page immediately. A converted format-3 restore made while
 contracted records its own archive (`origin: converted_restore`), so a later rollback
 recovers that file's storage.
 
@@ -135,12 +140,16 @@ specification (G2) is under "G2 requirements" below.
 - **Backup**: the format is read before and after the table reads; a change in between,
   or a table read refused because the update removed a column, gives no file and the
   message "The database was updated while the backup was being read, so no file was made."
-  If the phase can't be read at all, no file is made (never a guessed format).
+  If the phase can't be read at all, no file is made (never a guessed format). Since the
+  5c clean-up (G8) a backup is made only on a `contracted` database (format 4); on any other
+  phase, or without the capability, no file is made and no table is read.
 - **Restore**: the preview pins the database's format; the safety backup must still be in
   that format, or the restore is aborted before any download or restore call. A document
   sent after a transition is refused by `restore_backup` itself (format 3 on a contracted
   database, format 4 before contraction): one call, never converted or resent
-  automatically, and the safety file is named.
+  automatically, and the safety file is named. Since the 5c clean-up (G8) a restore is
+  offered only on a `contracted` database; a format-3 file is restored only through the
+  explicit conversion.
 - **Writes**: every `library_*` function has the same signature and answers in both phases,
   so a write prepared in 5a and sent after 5c succeeds or is refused with a stated reason;
   the page never falls back to an older function. An unclear answer is reported as
@@ -166,7 +175,8 @@ to (`coexistence` or `contracted`). Until then every non-GET request is refused 
 catalog application reports the update as missing, and a restore preview is not offered.
 Before `restore_backup` is sent, the capability is read again: the document's format must
 still be the database's (format 4 ⇔ contracted, else format 3), or nothing is sent ("Restore
-not sent …").
+not sent …"). Since the 5c clean-up (G8) the phase must be `contracted` and the document
+format 4; nothing else is ever sent.
 
 ### 6. Governance in the page
 
@@ -269,7 +279,11 @@ Pre-existing risks noticed in review, unchanged by Stage 5:
   `tests/governance.test.js` covers governance publication (overlapping and late reads,
   navigation, restore, uncovered rows). Twelve tests of the removed storage tabs were
   retired (listed in `tests/match-expansion.test.js`); "a newer Match of the same row
-  doesn't retire the refresh's own read" was ported to the view.
+  doesn't retire the refresh's own read" was ported to the view. The 5c clean-up (G8) added
+  `stage5-app` cases for backup and restore outside `contracted` (no file, no format probe,
+  nothing sent), the format-4-only send, a converter refusal and a converted-document
+  validation failure; format 1–3 files in tests come from a test-only fixture builder
+  (`legacyBackupFixture` in `tests/app-harness.js`).
 - Database (PGlite, one session): `db/test/t_5a_expand.sql`, `db/test/t_5c_contract.sql`
   (restore refusals each start from a valid document and change one thing; the recovery
   section, archive hashes, the classification CHECK, presentation keys and catalog
