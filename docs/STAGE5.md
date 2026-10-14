@@ -9,6 +9,14 @@ Personal collections stay many-to-many and independent of governance.
 This file is the implementation contract for the G1 implementation. `docs/HANDOFF.md`
 stays the authoritative project handoff; nothing here authorizes a production step.
 
+**Status (2026-10-14).** Stage 5 ran through 5c and its clean-up (G8); the phase-specific statements below describe
+Stage 5 as implemented and are **historical** unless marked "since B4/B5". Since then **B4/B5 Batch A** (database
+`db/b45_expand.sql`, page `cb0d43d`, 2026-10-14) changed the phase to **`contracted-b45`**, with **backup format 5**
+(format-4 and format-3 files are converted in the restore preview). The **recovery archive remains active**.
+**G9 (archive retirement) is PAUSED** (owner decision, 2026-10-13: keep rollback available): its earlier brief was
+written against the pre-B4/B5 state, so its pins are stale, and any resumption needs a revised brief and separate
+approvals. B4/B5 details: `docs/HANDOFF.md` §4g and §18; scripts: `db/README.md`.
+
 ## Phases
 
 | Phase | What runs | Database | Page |
@@ -19,12 +27,22 @@ stays the authoritative project handoff; nothing here authorizes a production st
 | soak | at least 48 hours after 5b is verified (elapsed time alone authorizes nothing) | | |
 | 5c | `db/phase5c_contract.sql` | governance tables, `theme_kind`, `catalog_id`, guards, recovery archive; storage dropped; `stage5_capabilities()` → `contracted` | backups format 4; old pages refused (`client_outdated`) |
 | 5c clean-up (G8) | the page only (`aeb9f73`, released 2026-10-12) | unchanged | format-3 export and direct format-3 restore removed; backup and restore only on a `contracted` database (format 4); the explicit format-3 → 4 converter kept indefinitely |
-| later | archive retirement (G9) | a separate, explicit approval, only after backup/restore and recovery verification | |
+| B4/B5 Batch A (since 2026-10-14, current) | `db/b45_expand.sql` with the owner-choice preamble; the page `cb0d43d` | status, priority, Show ended, markers, provenance, categorized metadata (existing records initialized empty; no legacy theme mapped) and the earlier-seasons range; `_b45` functions, the changed names `client_outdated` stubs; `restore_backup` format 5; `stage5_capabilities()` → `contracted-b45`; archive active | backups format 5; format 4 and format 3 converted in the preview; old pages keep only the supported id-based edits |
+| later | archive retirement (G9) | **paused**; a separate, explicit approval with a revised brief, only after backup/restore and recovery verification and the owner's decision to relinquish rollback | |
 
 Rollbacks: `db/rollback/phase5a.sql` (to Stage 4b exactly; bound to the G3 baseline inventory, plan §3(b): it
 refuses without it and aborts unless the restored `catalog_apply` and function inventory equal it — `db/README.md`),
 `db/rollback/phase5c.sql`
 (to coexistence while the recovery archive exists; fix-forward only once it is retired).
+
+**Since B4/B5, `db/rollback/phase5c.sql` refuses while B4/B5 is installed** (phase ≠ `contracted`); it can't run
+against the current state. Recovery from the current state, each step separately approved: (1) a fresh format-5
+backup made by the B4/B5 page, validated (P1); (2) the B4/B5 rollback: the dry-run report
+(`db/rollback/b45_report.sql`) with its loss disclosures, the P1 association and the report-bound approval naming
+the report, the P1 file and any accepted loss (`tools/b45-backup-digest.mjs`), then `db/rollback/b45.sql` and its
+verification against the stored pre-B4/B5 baseline; (3) revert the B4/B5 app commits so the page is the G8 app
+again, verify on Pages and reload every page; (4) only then the D2 sequence described below (5b app, format-4
+backup, `db/rollback/phase5c.sql`, format-3 backup). Details: `db/README.md`, `docs/HANDOFF.md` §18.
 
 ## The write boundary (U4)
 
@@ -69,6 +87,7 @@ archived storage that disagrees with governance or theme meaning; a governance k
 differs from its record's key; a `legacy_source` that would repeat. Once the archive is
 retired it refuses everything: recovery is fix-forward.
 
+(As of G8; since B4/B5 the following steps come only after the B4/B5 rollback and the B4/B5 app reversion, above.)
 After a rollback, format-4 backups can't be restored (Stage 5a takes format 3): take a
 format-3 backup right after the rollback. Since the 5c clean-up (G8, `aeb9f73`) the deployed
 page makes and restores backups only on a contracted database, so it can't take that
@@ -142,14 +161,16 @@ specification (G2) is under "G2 requirements" below.
   message "The database was updated while the backup was being read, so no file was made."
   If the phase can't be read at all, no file is made (never a guessed format). Since the
   5c clean-up (G8) a backup is made only on a `contracted` database (format 4); on any other
-  phase, or without the capability, no file is made and no table is read.
+  phase, or without the capability, no file is made and no table is read. Since B4/B5 the
+  page makes backups only at `contracted-b45` (format 5).
 - **Restore**: the preview pins the database's format; the safety backup must still be in
   that format, or the restore is aborted before any download or restore call. A document
   sent after a transition is refused by `restore_backup` itself (format 3 on a contracted
   database, format 4 before contraction): one call, never converted or resent
   automatically, and the safety file is named. Since the 5c clean-up (G8) a restore is
   offered only on a `contracted` database; a format-3 file is restored only through the
-  explicit conversion.
+  explicit conversion. Since B4/B5 restore is offered only at `contracted-b45` and sends only
+  format 5 (format 4 converted 4 → 5, format 3 converted 3 → 4 → 5).
 - **Writes**: every `library_*` function has the same signature and answers in both phases,
   so a write prepared in 5a and sent after 5c succeeds or is refused with a stated reason;
   the page never falls back to an older function. An unclear answer is reported as
@@ -176,7 +197,8 @@ catalog application reports the update as missing, and a restore preview is not 
 Before `restore_backup` is sent, the capability is read again: the document's format must
 still be the database's (format 4 ⇔ contracted, else format 3), or nothing is sent ("Restore
 not sent …"). Since the 5c clean-up (G8) the phase must be `contracted` and the document
-format 4; nothing else is ever sent.
+format 4; nothing else is ever sent. Since B4/B5 the phase must be `contracted-b45` and the
+document format 5, and a missing `_b45` function or B4/B5 column stops the page until reload.
 
 ### 6. Governance in the page
 
