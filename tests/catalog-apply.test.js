@@ -1,5 +1,5 @@
 // Offline tests for Catalog updates (catalog-apply.js; Stage 4a, applied through
-// library_catalog_apply since Stage 5) in the whole-page harness: the views only
+// library_catalog_apply since Stage 5 and library_catalog_apply_b45 since B4/B5) in the whole-page harness: the views only
 // read (entry, reload, Retry, after a restore); the chooser's hint; the freshness check; the preview and the exact apply
 // request; the receipt and the bounded read-back (verified or differences);
 // stale, busy and refused answers; unknown outcomes (no resend, no attribution,
@@ -62,7 +62,7 @@ test('review: freshness check, then a preview; Apply sends the same catalog with
   assert.match(t, /New seasons \(1\)/); assert.match(t, /New films \(1\)/); assert.match(t, /Date updates \(2\)/);
   assert.match(t, /TBA → /);
   assert.ok(app.requests.some(r => r.url === 'config.js'), 'config.js read again');
-  assert.deepStrictEqual(writes(app), ['POST rpc/library_catalog_apply'], 'the preview is the only call so far');
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_catalog_apply_b45'], 'the preview is the only call so far');
   const previewHash = app.get('catalogDialog.preview.hash');
   assert.strictEqual(rpcCalls(app)[0].body.p_approved, undefined);
   await app.ctx.catalogApply(); await settle();
@@ -71,7 +71,7 @@ test('review: freshness check, then a preview; Apply sends the same catalog with
   assert.deepStrictEqual(apply.body.p_defaults, rpcCalls(app)[0].body.p_defaults);
   assert.match(text(app), /Applied 4 changes\./);
   assert.match(text(app), /Verified: every applied change was read back as approved\./);
-  assert.deepStrictEqual(writes(app), ['POST rpc/library_catalog_apply', 'POST rpc/library_catalog_apply'], 'read-back and reload are GETs');
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_catalog_apply_b45', 'POST rpc/library_catalog_apply_b45'], 'read-back and reload are GETs');
   const rc = app.get('catalogDialog.result.receipt');
   assert.ok(app.store.watchlist_items.some(r => r.id === rc[Object.keys(rc).find(k => k.startsWith('insert_film:'))].row_id && r.item_key === missingFilm.k));
   assert.ok(app.store.watchlist_items.some(r => r.item_key === missingSeason.k));
@@ -127,8 +127,8 @@ test('read-back: an incomplete receipt and a membership in another collection ar
   const { app, missingFilm } = await behind();
   await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
-  const real = app.rpcHandlers.library_catalog_apply;
-  app.rpcHandlers.library_catalog_apply = body => {
+  const real = app.rpcHandlers.library_catalog_apply_b45;
+  app.rpcHandlers.library_catalog_apply_b45 = body => {
     const res = real(body);
     if (body.p_approved == null) return res;
     return { ...res, text: async () => { const j = JSON.parse(await res.text()); delete j.receipt[Object.keys(j.receipt).find(k => k.startsWith('fill_date:'))]; return JSON.stringify(j); } };
@@ -175,8 +175,8 @@ test('check state: "present" needs every approved outcome exactly; a committed a
 
 // ── Verification audit: every approved outcome field and receipt value (table-driven) ──
 // A Sheridan library behind its catalog with every kind of effect: show A missing
-// entirely (create_show, its seasons, membership), show B Complete with its latest
-// season missing (attach, insert_season, reopen), a season and a film back to TBA
+// entirely (create_show, its seasons, membership), show B marked ended with its latest
+// season missing (attach, insert_season, ended_kept: B4/B5 never reopens), a season and a film back to TBA
 // (fill_date), a film missing (insert_film, membership).
 async function rich({ archived = false } = {}) {
   const app0 = await createApp();
@@ -190,7 +190,7 @@ async function rich({ archived = false } = {}) {
   const filmFillDef = defs.find(d => d.s === 'Film' && !/TBA/i.test(d.d));
   const missingFilmDef = defs.filter(d => d.s === 'Film' && !/TBA/i.test(d.d) && d.k !== filmFillDef.k).at(-1);
   for (const d of [seasonFillDef, filmFillDef]) Object.assign(rows.find(r => r.item_key === d.k), { display_date: 'TBA', date_sort: '2099-01-01' });
-  B.status = 'complete';
+  Object.assign(B, { status: 'watching', ended: true });
   const kept = rows.filter(r => r.show_id !== A.id && r.id !== bDrop.id && r.item_key !== missingFilmDef.k);
   const app = await createApp({ rows: kept, tvShows: shows.filter(x => x.id !== A.id) });
   if (archived) app.store.personal_collections.find(c => c.legacy_source === 'sheridan').archived_at = '2026-10-08T00:00:00+00:00';
@@ -200,11 +200,11 @@ async function rich({ archived = false } = {}) {
 async function verifyAfter(app, mutate) {
   await openView(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
-  const real = app.rpcHandlers.library_catalog_apply;
-  app.rpcHandlers.library_catalog_apply = body => {
+  const real = app.rpcHandlers.library_catalog_apply_b45;
+  app.rpcHandlers.library_catalog_apply_b45 = body => {
     const res = real(body);
     if (body.p_approved == null) return res;
-    app.rpcHandlers.library_catalog_apply = real;
+    app.rpcHandlers.library_catalog_apply_b45 = real;
     return { ...res, text: async () => { const j = JSON.parse(await res.text()); mutate(app.store, j); return JSON.stringify(j); } };
   };
   await app.ctx.catalogApply(); await settle();
@@ -219,20 +219,24 @@ test('verification audit: with no change after the commit, every kind of effect 
   const r = await verifyAfter(app, () => {});
   assert.strictEqual(r.state, 'verified', JSON.stringify(r.diffs));
   const kinds = new Set(app.get('catalogDialog.result.document.entries').map(e => e.kind));
-  for (const k of ['create_show', 'attach', 'insert_season', 'insert_film', 'fill_date', 'reopen', 'membership', 'noop']) assert.ok(kinds.has(k), `fixture lacks ${k}`);
+  for (const k of ['create_show', 'attach', 'insert_season', 'insert_film', 'fill_date', 'ended_kept', 'membership', 'noop']) assert.ok(kinds.has(k), `fixture lacks ${k}`);
+  assert.ok(!kinds.has('reopen'), 'B4/B5 never reopens a show');
+  const B = app.store.tv_shows.find(x => x.ended);
+  assert.deepStrictEqual([B.status, B.ended, B.priority], ['watching', true, 'normal'], 'the show marked ended keeps its status, priority and Show ended');
 });
 
 const SEASON_FIELDS = ['title', 'season', 'theme', 'display_date', 'date_sort', 'status', 'watched', 'skipped', 'media_type', 'tmdb_id', 'season_number'];
-const FILM_FIELDS = ['title', 'season', 'theme', 'display_date', 'date_sort', 'status', 'watched', 'media_type', 'tmdb_id'];
+const FILM_FIELDS = ['title', 'season', 'theme', 'display_date', 'date_sort', 'status', 'watched', 'media_type', 'tmdb_id', 'priority', 'catalog_new'];
 const AUDIT = [
-  ...['title', 'tmdb_id', 'status'].map(f => [`create_show ${f}`, (st, j, x) => { const s = st.tv_shows.find(y => y.id === j.receipt['create_show:S1'].show_id); s[f] = f === 'status' ? 'skipped' : flip(s[f]); }, 'new show']),
-  ['attach status (reopened show)', (st, j, x) => { st.tv_shows.find(y => y.id === x.B.id).status = 'watching'; }, 'status differs'],
-  ['reopen: show not On List', (st, j, x) => { st.tv_shows.find(y => y.id === x.B.id).status = 'skipped'; }, 'is not On List'],
+  ...['title', 'tmdb_id', 'status', 'priority', 'catalog_new'].map(f => [`create_show ${f}`, (st, j, x) => { const s = st.tv_shows.find(y => y.id === j.receipt['create_show:S1'].show_id);
+    s[f] = f === 'status' ? 'skipped' : f === 'priority' ? 'high' : flip(s[f]); }, 'new show']),
+  ['attach status (show marked ended)', (st, j, x) => { st.tv_shows.find(y => y.id === x.B.id).status = 'skipped'; }, 'status differs'],
+  ['ended_kept: show no longer marked ended', (st, j, x) => { st.tv_shows.find(y => y.id === x.B.id).ended = false; }, 'no longer marked ended'],
   ...SEASON_FIELDS.map(f => [`insert_season ${f}`, (st, j, x) => { const r = rowByKey(st, x.bDrop.item_key); r[f] = flip(r[f]); }, `${f} differ`]),
   // (Stage 5: a row moved to a show the catalog doesn't govern is outside what the read-back reads: "not found".)
   ['insert_season show link', (st, j, x) => { rowByKey(st, x.bDrop.item_key).show_id = x.A.id; }, 'not found'],
   // (A film whose kind changes is no longer a governed film — the database's link refuses that — so "not found".)
-  ...FILM_FIELDS.map(f => [`insert_film ${f}`, (st, j, x) => { const r = rowByKey(st, x.missingFilmDef.k); r[f] = flip(r[f]); }, ['season', 'media_type'].includes(f) ? 'not found' : `${f} differ`]),
+  ...FILM_FIELDS.map(f => [`insert_film ${f}`, (st, j, x) => { const r = rowByKey(st, x.missingFilmDef.k); r[f] = f === 'priority' ? 'low' : flip(r[f]); }, ['season', 'media_type'].includes(f) ? 'not found' : `${f} differ`]),
   ['insert_film show link', (st, j, x) => { rowByKey(st, x.missingFilmDef.k).show_id = x.B.id; }, 'linked to a show'],
   ['fill_date season date', (st, j, x) => { rowByKey(st, x.seasonFillDef.k).display_date = 'Dec 31, 2030'; }, 'the date is Dec 31, 2030'],
   ['fill_date season sort date', (st, j, x) => { rowByKey(st, x.seasonFillDef.k).date_sort = '2030-12-31'; }, 'the date is'],
@@ -251,7 +255,7 @@ const AUDIT = [
   ['receipt insert_season show_id', (st, j) => { j.receipt[receiptKey(j, 'insert_season:')].show_id = 'zz-other'; }, 'the receipt names another show'],
   ['receipt insert_film row_id', (st, j) => { j.receipt['insert_film:F1'].row_id = 'zz-other'; }, 'the receipt names another row'],
   ['receipt fill_date row_id', (st, j) => { j.receipt[receiptKey(j, 'fill_date:')].row_id = 'zz-other'; }, 'the receipt names another row'],
-  ['receipt reopen show_id', (st, j) => { j.receipt[receiptKey(j, 'reopen:')].show_id = 'zz-other'; }, 'the receipt names another reopened show'],
+  ['receipt ended_kept show_id', (st, j) => { j.receipt[receiptKey(j, 'ended_kept:')].show_id = 'zz-other'; }, 'the receipt names another show for “stays marked ended”'],
   ['receipt membership_id', (st, j) => { j.receipt['membership:F1'].membership_id = 'zz-other'; }, 'the receipt names another membership'],
   ['receipt missing an entry', (st, j) => { delete j.receipt[receiptKey(j, 'fill_date:')]; }, 'the receipt doesn’t list exactly the approved changes'],
   ['receipt with an extra entry', (st, j) => { j.receipt['insert_film:F9'] = { row_id: 'zz' }; }, 'the receipt doesn’t list exactly the approved changes']
@@ -336,10 +340,10 @@ test('busy: nothing written, no automatic retry', async () => {
 
 // ── Unknown outcomes ──
 function loseReply(app, { commit }) {
-  const real = app.rpcHandlers.library_catalog_apply;
-  app.rpcHandlers.library_catalog_apply = body => {
+  const real = app.rpcHandlers.library_catalog_apply_b45;
+  app.rpcHandlers.library_catalog_apply_b45 = body => {
     if (body.p_approved == null) return real(body);
-    app.rpcHandlers.library_catalog_apply = real;
+    app.rpcHandlers.library_catalog_apply_b45 = real;
     if (commit) real(body);
     throw new TypeError('Failed to fetch');
   };
@@ -473,11 +477,12 @@ test('a database without the Stage 5 functions: Review says catalog updates aren
   assert.ok(!app.requests.some(r => r.url.includes('/rpc/catalog_apply')));
 });
 
-test('a backup taken after an application is format 4 and holds the applied rows and their governance (validation and restore: db/test/t_5c_contract.sql, real ids)', async () => {
-  const { app, missingSeason, missingFilm } = await behind({ stage5: 'contracted' });
+test('a backup taken after an application is format 5 and holds the applied rows, their governance and New from catalog (validation and restore: db/test/t_b45.sql, real ids)', async () => {
+  const { app, missingSeason, missingFilm } = await behind();
   await app.applyCatalog('sheridan');
   const b = await app.ctx.buildBackupObject();
-  assert.strictEqual(b.formatVersion, 4);
+  assert.strictEqual(b.formatVersion, 5);
+  assert.deepStrictEqual([b.tables.watchlist_items.find(r => r.item_key === missingFilm.k)].map(r => [r.status, r.priority, r.catalog_new]), [['confirmed', 'normal', true]]);
   assert.deepStrictEqual(Object.keys(b.tables).sort(), ['catalog_film_links', 'catalog_show_links', 'collection_memberships', 'custom_collections', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
   for (const d of [missingSeason, missingFilm]) assert.ok(b.tables.watchlist_items.some(r => r.item_key === d.k));
   const film = b.tables.watchlist_items.find(r => r.item_key === missingFilm.k);

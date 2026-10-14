@@ -197,7 +197,7 @@ test('filter choices come from the whole view, not the shown rows, so a choice c
   app.ctx.switchMediaType('movie'); await settle();
   setFilter(app, 'fSearch', 'zzz'); click(app, 'theme', 'Action');
   assert.deepStrictEqual(titles(app), []);
-  assert.deepStrictEqual(options(app, 'fTheme'), ['=All genres / themes', 'Action=Action', 'Drama=Drama', 'Marvel=Marvel', 'Star Wars=Star Wars']);
+  assert.deepStrictEqual(options(app, 'fTheme'), ['=Any original label', 'Action=Action', 'Drama=Drama', 'Marvel=Marvel', 'Star Wars=Star Wars']);
   app.ctx.renderFilters(); app.ctx.renderTable();
   assert.deepStrictEqual(options(app, 'fTheme').length, 5, 'unchanged after a redraw with nothing shown');
   assert.strictEqual(app.el('fTheme').value, 'Action');
@@ -266,7 +266,7 @@ test('All TV: a network/theme pill filters Shows by any stored season, keeping e
   assert.ok(mixed.includes('1/2 watched') && mixed.includes('Season 2'), 'all seasons kept: progress 1/2, up next Season 2');
   assert.ok(/data-filter-value="Star Wars"[^>]*aria-pressed="false"/.test(mixed), 'its own pill (another theme) isn’t shown as selected');
   app.ctx.toggleDerivedShow(app.get("[...tvShowsById.values()].find(s => s.title === 'Mixed Show').id"));
-  assert.strictEqual((html(app).match(/class="[^"]*sub-row/g) || []).length, 3, 'expanded: both seasons and the Add season row (Stage 4b)');
+  assert.strictEqual((html(app).match(/class="[^"]*sub-row/g) || []).length, 4, 'expanded: the show actions (B4/B5), both seasons and the Add season row (Stage 4b)');
   click(app, 'theme', 'Marvel');
   assert.strictEqual(app.el('fTheme').value, '');
 });
@@ -299,10 +299,11 @@ test('All TV progress: unwatched seasons (future ones count, skipped seasons don
   assert.deepStrictEqual(titles(app), ['All Watched', 'Done Skipped Show'], 'All Skipped has no non-skipped season; a Skipped show is listed when Status allows');
   setFilter(app, 'fStatus', '');
   assert.deepStrictEqual(titles(app), ['All Watched'], 'Status still filters the show status separately');
-  setFilter(app, 'fStatus', 'complete'); setFilter(app, 'fProgress', 'unwatched');
-  assert.deepStrictEqual(titles(app), [], 'Complete is a status; progress reads the seasons');
+  // (All Watched was Complete: since B4/B5 it is Watching, marked ended.)
+  setFilter(app, 'fStatus', 'watching'); setFilter(app, 'fProgress', 'unwatched');
+  assert.deepStrictEqual(titles(app), ['Mixed Show', 'Other Watch'], 'Watching is a status; progress reads the seasons');
   setFilter(app, 'fProgress', '');
-  assert.deepStrictEqual(titles(app), ['All Watched']);
+  assert.deepStrictEqual(titles(app), ['All Watched', 'Mixed Show', 'Other Watch']);
   const item = t => app.get(`deriveAllTv(derivedData.rows, tvShowsById, localTodayStr()).items.find(x => x.title === ${JSON.stringify(t)})`);
   assert.strictEqual(app.ctx.allTvProgressMatches(item('All Skipped'), 'unwatched'), false);
   assert.strictEqual(app.ctx.allTvProgressMatches(item('All Skipped'), 'allwatched'), false);
@@ -327,7 +328,7 @@ test('Back from a collection puts All TV’s theme and progress back; a fresh en
 test('Currently Watching and Coming Soon filter by theme too, with choices from their own lists', async () => {
   const app = await boot();
   assert.strictEqual(app.get('activeViewId'), 'watching');
-  assert.deepStrictEqual(options(app, 'fTheme'), ['=All networks / themes', 'HBO=HBO', 'Marvel=Marvel', 'Star Wars=Star Wars']);
+  assert.deepStrictEqual(options(app, 'fTheme'), ['=Any original label', 'HBO=HBO', 'Marvel=Marvel', 'Star Wars=Star Wars']);
   assert.deepStrictEqual(titles(app), ['Mixed Show', 'Other Watch']);
   click(app, 'theme', 'Star Wars');
   assert.deepStrictEqual(titles(app), ['Mixed Show']);
@@ -335,7 +336,7 @@ test('Currently Watching and Coming Soon filter by theme too, with choices from 
   assert.deepStrictEqual(titles(app), ['Mixed Show', 'Other Watch']);
   app.ctx.switchView('comingsoon'); await settle();
   assert.strictEqual(app.el('fTheme').value, '', 'each view starts unfiltered');
-  assert.deepStrictEqual(options(app, 'fTheme'), ['=All networks / themes', 'Marvel=Marvel', 'Netflix=Netflix']);
+  assert.deepStrictEqual(options(app, 'fTheme'), ['=Any original label', 'Marvel=Marvel', 'Netflix=Netflix']);
   click(app, 'theme', 'Netflix');
   assert.deepStrictEqual(titles(app), ['Future Only']);
   assert.deepStrictEqual(pressed(app), ['theme:Netflix']);

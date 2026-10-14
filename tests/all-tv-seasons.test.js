@@ -89,7 +89,7 @@ test('switching to Seasons: header, visibility select at All (except Skipped), n
   assert.deepStrictEqual([...app.el('filtersRow').innerHTML.matchAll(/<option value="(\w+)">([^<]*)</g)].filter(m => m[1] !== '').map(m => m[2]).slice(-5),
     ['All (except Skipped)', 'All seasons', 'To watch', 'Watched', 'Skipped']);
   assert.ok(app.el('filtersRow').innerHTML.includes('onchange="setAllTvSeasonVis(this.value)"'));
-  assert.ok(app.el('tableHead').innerHTML.includes('<th>Show &amp; Season</th><th>Theme</th><th>Premiere</th><th>Show status</th>'));
+  assert.ok(app.el('tableHead').innerHTML.includes('<th>Show &amp; Season</th><th>Categories</th><th>Premiere</th><th>Show status</th>'));
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 1']);
   assert.strictEqual(app.writes().length, 0);
 });
@@ -135,7 +135,7 @@ test('expanded shows stay expanded across toggles', async () => {
   const expanded = tbody(app);
   await seasons(app); await shows(app);
   assert.strictEqual(tbody(app), expanded);
-  assert.strictEqual((tbody(app).match(/sub-row/g) || []).length, 3, 'two seasons and the Add season row (Stage 4b)');
+  assert.strictEqual((tbody(app).match(/sub-row/g) || []).length, 4, 'the show actions (B4/B5), two seasons and the Add season row (Stage 4b)');
 });
 
 // ─── Season visibility memory ────────────────────────────────────────────────
@@ -258,8 +258,8 @@ test('approved exception: with To watch in Seasons, expanding a show in Shows st
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 3']);
   await shows(app);
   app.ctx.toggleDerivedShow(a.show.id); await settle();
-  assert.strictEqual((tbody(app).match(/sub-row/g) || []).length, 4, 'three seasons and the Add season row (Stage 4b)');
-  assert.strictEqual((cards(app).match(/card-subseason-row/g) || []).length, 4);
+  assert.strictEqual((tbody(app).match(/sub-row/g) || []).length, 5, 'the show actions (B4/B5), three seasons and the Add season row (Stage 4b)');
+  assert.strictEqual((cards(app).match(/card-subseason-row/g) || []).length, 5);
 });
 
 // ─── Ordering ────────────────────────────────────────────────────────────────
@@ -344,10 +344,10 @@ test('the show status is a read-only label with a show-scoped tooltip; it follow
   const a = show({ title: 'Alpha', status: 'confirmed' }, [{ num: 1 }, { num: 2 }]);
   const app = await openAllTv(all(a));
   await seasons(app);
-  assert.ok(!/<select class="status-select|setShowStatusById/.test(tbody(app) + cards(app)), 'no status select on season rows');
-  assert.strictEqual((tbody(app).match(/title="Show status — applies to every season of Alpha. Switch to Shows to change it.">✓ On List<\/span>/g) || []).length, 2);
+  assert.ok(!/<select class="status-select|setShowStateById/.test(tbody(app) + cards(app)), 'no status select on season rows');
+  assert.strictEqual((tbody(app).match(/title="Show status — applies to every season of Alpha. Switch to Shows to change it.">To Watch<\/span>/g) || []).length, 2);
   await shows(app);
-  await app.ctx.setShowStatusById(a.show.id, 'watching'); await settle();
+  await app.ctx.setShowStateById(a.show.id, { status: 'watching' }); await settle();
   await seasons(app);
   assert.strictEqual((tbody(app).match(/status-pill s-watching/g) || []).length, 2);
   assert.ok(!tbody(app).includes('s-caughtup'), 'no Up to date tag on season rows');

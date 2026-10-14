@@ -1,5 +1,6 @@
 // Offline tests for the page against the Stage 5 database phases (db/phase5a_expand.sql,
-// db/phase5c_contract.sql), in the whole-page harness:
+// db/phase5c_contract.sql; since B4/B5 the page writes only to the B4/B5 phase,
+// db/b45_expand.sql — the older phases are refused, tests/b45-compat.test.js), in the whole-page harness:
 //   * the phase read at startup (stage5_capabilities, GET) and the notice when it is absent;
 //   * no request ever names a storage value or a retired function, in either phase
 //     (the request scan), and no app script refers to one (the source scan, with its
@@ -68,7 +69,7 @@ const tmdb = p => {
   }
   return TMDB[p];
 };
-async function boot(stage5 = 'contracted', opts = {}) {
+async function boot(stage5 = 'contracted-b45', opts = {}) {
   const lib = library();
   const app = await createApp({ rows: lib.rows, tvShows: lib.tvShows, tmdb, stage5, ...opts });
   return { app, lib };
@@ -87,7 +88,7 @@ const tick = (app, nums) => { app.el('tmdbPreview').querySelectorAll = sel => (s
 
 // ─── The phase ────────────────────────────────────────────────────────────────
 test('startup reads the phase once with GET (stage5_capabilities) and keeps it; nothing is written', async () => {
-  for (const phase of ['coexistence', 'contracted']) {
+  for (const phase of ['contracted-b45']) { // (since B4/B5 the page writes only to the B4/B5 database)
     const { app } = await boot(phase);
     const reads = app.requests.filter(r => r.url.endsWith('/rpc/stage5_capabilities'));
     assert.deepStrictEqual(reads.map(r => r.method), ['GET'], phase);
@@ -107,7 +108,7 @@ test('a database without the Stage 5 update: its own notice, which a view’s me
 });
 
 // ─── Request scan (A13, app side) ─────────────────────────────────────────────
-for (const phase of ['coexistence', 'contracted']) {
+for (const phase of ['contracted-b45']) { // (since B4/B5 the page writes only to the B4/B5 database)
   test(`request scan (${phase}): every view, the panel’s additions, Match, a catalog application, a membership and a backup — no storage value, no retired function, no refusal`, async () => {
     const { app, lib } = await boot(phase);
     for (const v of ['watching', 'alltv', 'comingsoon']) { app.ctx.switchView(v); await settle(); }
@@ -144,23 +145,16 @@ for (const phase of ['coexistence', 'contracted']) {
     await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/rpc/org_add_membership`, { method: 'POST', headers: {}, body: JSON.stringify({ p_collection_id: sheridan.id, p_show_id: lib.sev.id, p_item_id: null }) });
     noStorage(app);
     noRefusal(app);
-    // A backup: format 4 once contracted (no storage). During coexistence there is none since the
-    // 5c clean-up (G8): no file, only the phase read, never a storage column or othertv_shows.
+    // A backup: format 5 on the B4/B5 database (no storage).
     const before = app.requests.length;
-    if (phase === 'contracted') {
-      const b = await app.ctx.buildBackupObject();
-      assert.strictEqual(b.formatVersion, 4);
-    } else {
-      const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
-      assert.match(res, /makes backups only of the updated database \(format 4\), so no file was made/);
-      assert.deepStrictEqual(app.requests.slice(before).map(r => `${r.method} ${r.url.split('/rest/v1/')[1].split('?')[0]}`), ['GET rpc/stage5_capabilities']);
-    }
+    const b = await app.ctx.buildBackupObject();
+    assert.strictEqual(b.formatVersion, 5);
     const backupReads = app.requests.slice(before);
     assert.ok(backupReads.every(r => r.method === 'GET'));
     noStorage(app);
     assert.ok(!app.requests.some(r => /othertv_shows|legacy_source|[?&,=]collection\b/.test(r.url)), 'no retired table or column in any request');
     assert.deepStrictEqual([...new Set(writes(app).map(w => w.split(' ')[1]))].sort(),
-      ['rpc/library_add_films', 'rpc/library_add_seasons', 'rpc/library_catalog_apply', 'rpc/library_create_show', 'rpc/library_match_film', 'rpc/library_match_season', 'rpc/org_add_membership']);
+      ['rpc/library_add_films_b45', 'rpc/library_add_seasons_b45', 'rpc/library_catalog_apply_b45', 'rpc/library_create_show_b45', 'rpc/library_match_film_b45', 'rpc/library_match_season_b45', 'rpc/org_add_membership']);
     assert.ok(app.store.watchlist_items.some(r => r.tmdb_id === 999), 'the film was added');
     assert.ok(app.store.watchlist_items.some(r => r.id === localRow.id && r.tmdb_id === 888), 'the season was matched');
   });
@@ -180,12 +174,19 @@ test('source scan: no app script but backup-format3.js names a storage value, a 
     ['render.js', /filterPillHtml\('collection', c, c, \{ cls: 'collection-tag'/],
     ['collections-pull.js', /tmdbLookupFailureNote\(collectionsMap\.size, failedCollections, 'collection'\)/],
     ['organization-manage.js', /res\.collection \|\| res\.choice|const noun = choice \? 'watch-with choice' : 'collection'|if \(res\.collection\) put\(d\.collections, res\.collection\)|manageCreate\('collection'\)/],
-    ['browse-views.js', /Pull rest of \$\{esc\(franchise \|\| 'collection'\)\}/]
+    ['browse-views.js', /Pull rest of \$\{esc\(franchise \|\| 'collection'\)\}/],
   ];
+  // B4/B5: the preview checks a file's recovery section as restore_backup does (its storage
+  // values against the file's own rows); that block reads the file only and sends nothing.
+  const BLOCKS = { 'backup-restore.js': [/recovery section check: begin/, /recovery section check: end/] };
   const hits = [];
   for (const f of scripts) {
     if (f === 'backup-format3.js') continue;
+    let inBlock = false;
     fs.readFileSync(path.join(ROOT, f), 'utf8').split('\n').forEach((line, i) => {
+      if (BLOCKS[f] && BLOCKS[f][0].test(line)) inBlock = true;
+      if (BLOCKS[f] && BLOCKS[f][1].test(line)) inBlock = false;
+      if (inBlock) { if (/fetch\(|sbFetch\(|sbRpc\(|fetchAllRows/.test(line)) hits.push(`${f}:${i + 1}: request inside the file-only block`); return; }
       if (!RULE.test(line) || /^\s*\/\//.test(line)) return;
       if (ALLOW.some(([af, re]) => af === f && re.test(line.trim()))) return;
       hits.push(`${f}:${i + 1}: ${line.trim()}`);
@@ -201,7 +202,7 @@ test('source scan: no app script but backup-format3.js names a storage value, a 
 
 // ─── Contracted flows ─────────────────────────────────────────────────────────
 test('contracted: Match into a show a catalog governs is refused (match_target_governed); the row and the show are unchanged; nothing is offered instead (U1)', async () => {
-  const { app, lib } = await boot('contracted');
+  const { app, lib } = await boot('contracted-b45');
   // The governed Andor gets a TMDB identity; an unidentified season elsewhere is matched to it.
   lib.andor.tmdb_id = 1234;
   app.store.tv_shows.find(s => s.id === lib.andor.id).tmdb_id = 1234;
@@ -214,56 +215,56 @@ test('contracted: Match into a show a catalog governs is refused (match_target_g
   assert.match(banners(app), /part of a built-in catalog on your list, so this row wasn.t matched to it\. Nothing was changed\./);
   assert.ok(!/Add season/.test(banners(app)), 'Add season is not presented as a substitute');
   assert.strictEqual(JSON.stringify([app.store.watchlist_items, app.store.tv_shows, app.store.collection_memberships]), before);
-  assert.deepStrictEqual(writes(app), ['POST rpc/library_match_season']);
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_match_season_b45']);
 });
 
 test('contracted: Match is not offered for a governed entry (a governed film, a season of a governed show); the database refuses it too', async () => {
-  const { app, lib } = await boot('contracted');
+  const { app, lib } = await boot('contracted-b45');
   const andorRow = lib.rows.find(r => r.show_id === lib.andor.id);
   await allTv(app);
   assert.strictEqual(app.get(`isTmdbMatchEligible(derivedData.rows.find(r => r.id === ${JSON.stringify(andorRow.id)}))`), false);
-  const res = await app.rpcHandlers.library_match_season({ p_row_id: andorRow.id, p_target: { tmdb_id: 1 }, p_patch: {} }).json();
+  const res = await app.rpcHandlers.library_match_season_b45({ p_row_id: andorRow.id, p_target: { tmdb_id: 1 }, p_patch: {} }).json();
   assert.match(res.message, /not_eligible/);
 });
 
-test('contracted: backup is format 4 (no storage, theme_kind, governance tables, no othertv_shows); it validates and restores through restore_backup; verification passes', async () => {
-  const { app } = await boot('contracted');
+test('B4/B5: backup is format 5 (no storage, theme_kind, governance tables, no othertv_shows, the B4/B5 columns); it validates and restores through restore_backup; verification passes', async () => {
+  const { app } = await boot('contracted-b45');
   app.store.watchlist_items.push(filmOf({ collection: 'disney', title: 'Disney Film', media_type: null, tmdb_id: null, item_key: 'disney film|film' })); // a governed film
   const b = await app.ctx.buildBackupObject();
   assert.strictEqual(b.tables.catalog_show_links.length, 1);
   assert.strictEqual(b.tables.catalog_film_links.length, 1);
-  assert.strictEqual(b.formatVersion, 4);
+  assert.strictEqual(b.formatVersion, 5);
   assert.ok(!('othertv_shows' in b.tables));
+  assert.ok(b.tables.tv_shows.every(s => 'priority' in s && 'resume_start_season_id' in s) && b.tables.watchlist_items.every(r => 'genres' in r));
   assert.ok(b.tables.watchlist_items.every(r => !('collection' in r) && 'theme_kind' in r));
   assert.ok(b.tables.tv_shows.every(s => !('collection' in s)));
   assert.ok(['catalog_show_links', 'catalog_film_links'].every(t => Array.isArray(b.tables[t])));
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(b)), []);
   app.ctx.__b = b;
-  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 4');
+  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 5');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
   noStorage(app);
 });
 
 for (const archive of ['active', 'retired']) {
-  test(`contracted: a format-3 file is converted in the page (previewed, loss-aware${archive === 'active' ? ', with its recovery section' : ', without a recovery section once the archive is retired'}); only the converted document is sent`, async () => {
+  test(`B4/B5: a format-3 file is converted in the page (3 → 4 → 5; previewed, loss-aware${archive === 'active' ? ', with its recovery section' : ', without a recovery section once the archive is retired'}); only the converted document is sent`, async () => {
     const co = await boot('coexistence');
     const f3 = await legacyBackupFixture(co.app, 3); // a format-3 file (the page no longer exports one, G8)
     assert.strictEqual(f3.formatVersion, 3);
-    const { app } = await boot('contracted', { recoveryArchive: archive });
-    app.ctx.__b = f3;
-    await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
+    const { app } = await boot('contracted-b45', { recoveryArchive: archive });
+    await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle(); // the file is read (and fingerprinted) as when chosen
     const preview = app.el('restoreModalBox').innerHTML.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
     assert.match(preview, /format 3/i);
     assert.match(preview, /Restore database/);
     const sent = app.get('pendingRestoreData');
-    assert.strictEqual(sent.formatVersion, 4);
+    assert.strictEqual(sent.formatVersion, 5);
     assert.strictEqual(!!sent.recovery, archive === 'active', 'the recovery section only while the archive is active');
     assert.ok(sent.conversion && sent.conversion.source_format === 3);
     await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
     const calls = app.requests.filter(r => r.url.endsWith('/rpc/restore_backup'));
     assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0].body.p_backup.formatVersion, 4, 'never the format-3 file itself');
+    assert.strictEqual(calls[0].body.p_backup.formatVersion, 5, 'never the format-3 file itself');
     assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
   });
 }
@@ -274,7 +275,7 @@ for (const [label, shift, verified] of [['the same instant in the database’s f
   test(`contracted: converted format-3 restore whose link created_at comes back as ${label} ${verified ? 'verifies' : 'fails verification'}`, async () => {
     const co = await boot('coexistence');
     const f3 = await legacyBackupFixture(co.app, 3);
-    const { app } = await boot('contracted', { recoveryArchive: 'active' });
+    const { app } = await boot('contracted-b45', { recoveryArchive: 'active' });
     const asDb = ts => ts.replace(/(\.\d{3})Z$/, (m, f) => `${shift ? (f + '00' + shift) : f.replace(/0+$/, '').replace(/\.$/, '')}+00:00`);
     const restore = app.rpcHandlers.restore_backup;
     app.rpcHandlers.restore_backup = body => {
@@ -282,8 +283,7 @@ for (const [label, shift, verified] of [['the same instant in the database’s f
       for (const l of [...app.store.__links.shows, ...app.store.__links.films]) l.created_at = asDb(l.created_at);
       return r;
     };
-    app.ctx.__b = f3;
-    await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
+    await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle(); // the file is read (and fingerprinted) as when chosen
     const sent = app.get('pendingRestoreData');
     assert.ok(sent.tables.catalog_show_links.length > 0 && sent.tables.catalog_show_links.every(l => /Z$/.test(l.created_at)));
     await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
@@ -294,20 +294,21 @@ for (const [label, shift, verified] of [['the same instant in the database’s f
   });
 }
 
-test('contracted: a format-4 file into a database that is not contracted is refused before anything happens', async () => {
-  const c = await boot('contracted');
+test('B4/B5: a format-5 file into a database that is not B4/B5 is refused before anything happens', async () => {
+  const c = await boot('contracted-b45');
   const f4 = await c.app.ctx.buildBackupObject();
   const { app } = await boot('coexistence');
   app.ctx.__b = f4;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
-  assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*restores only into the updated database \(format 4\)/); // the gate comes first since G8
+  // (Its first view read lacked the B4/B5 columns, so the page has also stopped until it is reloaded.)
+  assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*(restores only into a database in its own state \(format 5\)|This page and the database don’t match)/); // the gate comes first since G8
   assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
   assert.deepStrictEqual(app.writes(), []);
 });
 
 // ─── Phase transitions while something is being prepared (#3) ─────────────────
 test('transition during a backup: the phase changes (contracted → coexistence) between the first and last reads → no file, a clear message, nothing written', async () => {
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
   const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows?') && r.headers.Range);
@@ -322,7 +323,7 @@ test('transition during a backup: the phase changes (contracted → coexistence)
 });
 
 test('transition: the phase can’t be read (HTTP 500) → no backup file and no guess (never the format-3 shape by default)', async () => {
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   app.failNext(r => r.url.endsWith('/rpc/stage5_capabilities'));
   const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
   assert.notStrictEqual(res, 'made');
@@ -330,7 +331,7 @@ test('transition: the phase can’t be read (HTTP 500) → no backup file and no
 });
 
 test('transition after a restore was previewed: the safety backup finds the database changed → aborted before any download or restore call', async () => {
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
   const f4 = await app.ctx.buildBackupObject();
@@ -345,10 +346,10 @@ test('transition after a restore was previewed: the safety backup finds the data
 });
 
 test('transition after the safety backup was confirmed: the phase is read again before sending; a changed phase sends nothing (no conversion, no retry)', async () => {
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   const f4 = await app.ctx.buildBackupObject();
   app.ctx.__b = f4;
-  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 4');
+  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 5');
   app.stage5 = 'coexistence';
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle(); await settle();
   assert.strictEqual(app.requests.filter(r => r.url.endsWith('/rpc/restore_backup')).length, 0, 'nothing sent');
@@ -358,7 +359,7 @@ test('transition after the safety backup was confirmed: the phase is read again 
 });
 
 test('a database without the Stage 5 update (or one rolled back meanwhile): no restore is offered, nothing is sent at any step, and no write of any kind leaves the page', async () => {
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
   const b = await app.ctx.buildBackupObject(); // a format-4 file
@@ -368,14 +369,14 @@ test('a database without the Stage 5 update (or one rolled back meanwhile): no r
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*needs a database update/);
   assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
-  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 4');
+  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 5');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore not sent[\s\S]*couldn’t be confirmed/);
   // Ordinary writes: the cached phase is cleared on a failed check, so every write is refused before sending.
   app.run('stage5Phase = null');
   const sev = app.store.watchlist_items.find(r => r.title === 'Severance');
   await app.ctx.toggleWatch(sev.id); await settle();
-  await app.ctx.setShowStatusById(sev.show_id, 'complete'); await settle();
+  await app.ctx.setShowStateById(sev.show_id, { status: 'skipped' }); await settle();
   assert.deepStrictEqual(app.writes(), [], 'no write of any kind');
   assert.strictEqual(downloads, 0);
 });
@@ -392,7 +393,8 @@ test('G8 N1: coexistence: Backup makes no file; only the phase is read (no table
   const before = app.requests.length;
   await app.ctx.handleBackupClick(); await settle();
   assert.strictEqual(downloads, 0, 'no file');
-  assert.match(app.el('errorBanner').innerHTML, /Backup failed: This page makes backups only of the updated database \(format 4\), so no file was made and nothing was changed/);
+  // (Its first view read lacked the B4/B5 columns: the page has stopped until it is reloaded.)
+  assert.match(app.el('errorBanner').innerHTML, /Backup failed: This page and the database don’t match \(the database may have been updated or rolled back\), so nothing was changed\. Reload the page\. No file was made\./);
   assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities']);
   assert.deepStrictEqual(app.writes(), []);
   noStorage(app);
@@ -400,14 +402,14 @@ test('G8 N1: coexistence: Backup makes no file; only the phase is read (no table
 
 for (const [label, stage5] of [['no Stage 5 (no capability)', null], ['an unknown phase', 'later_phase']]) {
   test(`G8 N2: ${label}: no backup file and no format probe; restore is not offered; nothing written`, async () => {
-    const { app } = await boot('contracted');
+    const { app } = await boot('contracted-b45');
     const f4 = await app.ctx.buildBackupObject();
     app.stage5 = stage5;
     app.run('stage5Phase = null');
     const before = app.requests.length;
     const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
     assert.notStrictEqual(res, 'made');
-    assert.match(res, /makes backups only of the updated database \(format 4\)/);
+    assert.match(res, /makes backups only of a database in its own state \(format 5\), and this database isn’t in it, so no file was made/);
     assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities'], 'no personal_collections / tv_shows probe');
     app.ctx.__b = f4;
     await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
@@ -425,7 +427,7 @@ test('G8 N3: coexistence: a format-3 file is not restored (no direct restore): n
   const f3 = await legacyBackupFixture(app, 3);
   const before = app.requests.length;
   await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
-  assert.match(modalText(app), /Restore isn't available This page restores only into the updated database \(format 4\)/);
+  assert.match(modalText(app), /Restore isn't available This page and the database don’t match/);
   assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
   assert.strictEqual(app.get('pendingRestoreData'), null);
   assert.strictEqual(downloads, 0);
@@ -434,27 +436,31 @@ test('G8 N3: coexistence: a format-3 file is not restored (no direct restore): n
   assert.ok(!app.requests.some(r => r.url.includes('/rpc/restore_backup')));
 });
 
-test('G8 N4: contracted: a document that is not format 4 is never sent at the send step', async () => {
+test('G8 N4 (B4/B5): a document that is not format 5 is never sent at the send step', async () => {
   const co = await boot('coexistence');
   const f3 = await legacyBackupFixture(co.app, 3);
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   app.ctx.__b = f3;
-  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 4');
+  await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 5');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore not sent/);
   assert.ok(!app.requests.some(r => r.url.includes('/rpc/restore_backup')));
   assert.deepStrictEqual(app.writes(), []);
 });
 
-test('G8 N5: a backup refused at coexistence reads no table; once the database is contracted a new backup is format 4', async () => {
+test('G8 N5 (B4/B5, finding 4): a page that found the database out of step stays stopped — the capability later reading B4/B5 doesn’t resume backups; a reloaded page makes format 5', async () => {
   const { app } = await boot('coexistence');
   const before = app.requests.length;
   const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
   assert.notStrictEqual(res, 'made');
-  app.stage5 = 'contracted'; // the phase changes right after the refusal
   assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities'], 'nothing read for the refused backup');
-  const b = await app.ctx.buildBackupObject();
-  assert.strictEqual(b.formatVersion, 4);
+  app.migrateB45(); // the database becomes B4/B5 (or its schema cache catches up) under the open page
+  const again = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
+  assert.match(again, /This page and the database don’t match[\s\S]*Reload the page\. No file was made\./, 'still stopped until reload');
+  assert.match(app.el('phaseBanner').innerHTML, /Reload the page\. Until then this page changes nothing\./);
+  const reloaded = await boot('contracted-b45');
+  const b = await reloaded.app.ctx.buildBackupObject();
+  assert.strictEqual(b.formatVersion, 5);
   assert.deepStrictEqual(app.writes(), []);
 });
 
@@ -463,7 +469,7 @@ test('G8 N6: contracted: a format-3 file the converter refuses (a row that is ne
   const f3 = await legacyBackupFixture(co.app, 3);
   const season = f3.tables.watchlist_items.find(r => r.show_id);
   season.show_id = null; // still a valid format-3 row (format 3 allowed unlinked TV rows), but not representable at 5c
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(f3)), [], 'the file itself passes format-3 validation');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
@@ -478,7 +484,7 @@ test('G8 N6: contracted: a format-3 file the converter refuses (a row that is ne
 test('G8 N7: contracted: a converted document that fails format-4 validation is refused; nothing sent, downloaded or pending', async () => {
   const co = await boot('coexistence');
   const f3 = await legacyBackupFixture(co.app, 3);
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   const real = app.ctx.convertFormat3To4(f3, { includeRecovery: true, sourceSha256: 'a'.repeat(64) });
   const bad = JSON.parse(JSON.stringify(real.doc));
   bad.tables.watchlist_items.find(r => r.theme_kind != null).theme_kind = 'bogus';
@@ -497,10 +503,10 @@ test('G8 N7: contracted: a converted document that fails format-4 validation is 
 test('G8 N8: contracted: format 1 and format 2 files are refused at preview, before any safety backup, download or write', async () => {
   const co = await boot('coexistence');
   const src2 = await createApp({ rows: library().rows, tvShows: library().tvShows, org: false });
-  const files = [[await legacyBackupFixture(co.app, 1), /predates TV shows \(format 1\)[\s\S]*only format 4 backups can be restored/],
+  const files = [[await legacyBackupFixture(co.app, 1), /predates TV shows \(format 1\)[\s\S]*only format 5 backups can be restored/],
     [await legacyBackupFixture(src2, 2), /format 2, from before personal collections/]];
   for (const [f, re] of files) {
-    const { app } = await boot('contracted');
+    const { app } = await boot('contracted-b45');
     let downloads = 0;
     app.ctx.downloadJSON = () => { downloads++; };
     app.ctx.__b = f;
@@ -513,64 +519,73 @@ test('G8 N8: contracted: format 1 and format 2 files are refused at preview, bef
   }
 });
 
-test('G8 N9: a format-3 file refused at coexistence can be chosen again once the database is contracted: converted preview, nothing stale', async () => {
+test('G8 N9 (finding 4): a format-3 file refused at coexistence stays refused in that page after the database becomes B4/B5 (stop until reload); a reloaded page converts it', async () => {
   const { app } = await boot('coexistence');
   const f3 = await legacyBackupFixture(app, 3);
   await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
   assert.match(modalText(app), /Restore isn't available/);
   app.ctx.closeRestoreModal();
-  app.stage5 = 'contracted';
+  app.migrateB45();
   await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
-  assert.match(modalText(app), /This is a format 3 backup; it is converted before restoring/);
-  assert.ok(app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
-  assert.strictEqual(app.get('pendingRestoreData.formatVersion'), 4);
-  assert.strictEqual(app.get('pendingRestoreDbFormat'), 4);
-  assert.deepStrictEqual(app.writes(), []);
+  assert.match(modalText(app), /Restore isn't available This page and the database don’t match/, 'still stopped until reload');
+  assert.strictEqual(app.get('pendingRestoreData'), null);
+  const r = (await boot('contracted-b45')).app;
+  await r.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
+  assert.match(modalText(r), /This is a format 3 backup; it is converted before restoring/);
+  assert.ok(r.el('restoreModalBox').innerHTML.includes('executeRestore()'));
+  assert.strictEqual(r.get('pendingRestoreData.formatVersion'), 5);
+  assert.deepStrictEqual(app.writes().concat(r.writes()), []);
 });
 
-test('transition while an addition is prepared: the same library function in both phases → it succeeds; nothing older is tried', async () => {
-  const { app, lib } = await boot('coexistence');
+test('transition while an addition is prepared: B4/B5 rolled back between the preview and Add → the _b45 function is missing: refused, nothing added, no older function tried, no further writes', async () => {
+  const { app, lib } = await boot('contracted-b45');
   await allTv(app);
   app.ctx.openLibraryPanel('tv'); await settle();
   await choose(app, 95396, 'Severance'); tick(app, [2]);
-  app.stage5 = 'contracted'; // the contraction lands between the preview and Add
+  app.stage5 = 'contracted'; // a (separately approved) B4/B5 rollback lands between the preview and Add
   await app.ctx.addSelectedTMDBSeasons(); await settle();
-  assert.deepStrictEqual(writes(app), ['POST rpc/library_add_seasons']);
-  assert.ok(app.store.watchlist_items.some(r => r.show_id === lib.sev.id && r.season_number === 2));
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_add_seasons_b45'], 'one attempt; never library_add_seasons');
+  assert.match(outcome(app), /This page and the database don’t match[\s\S]*nothing was changed\. Reload the page\./);
+  assert.ok(!app.store.watchlist_items.some(r => r.show_id === lib.sev.id && r.season_number === 2));
+  assert.strictEqual(app.get('stage5Phase'), null);
+  await app.ctx.toggleWatch(lib.rows.find(r => r.show_id === lib.sev.id).id); await settle();
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_add_seasons_b45'], 'later writes are refused before sending');
   noStorage(app);
 });
 
 test('transition while an addition is out: no clear answer → reported unconfirmed, never resent, no fallback', async () => {
-  const { app } = await boot('coexistence');
+  const { app } = await boot('contracted-b45');
   await allTv(app);
   app.ctx.openLibraryPanel('tv'); await settle();
   await choose(app, 95396, 'Severance'); tick(app, [2]);
-  const g = app.hold(r => r.url.endsWith('/rpc/library_add_seasons'));
+  const g = app.hold(r => r.url.endsWith('/rpc/library_add_seasons_b45'));
   const p = app.ctx.addSelectedTMDBSeasons();
   await g.reached;
-  app.stage5 = 'contracted';
+  app.stage5 = 'contracted'; // rolled back meanwhile
   g.fail(); await p; await settle();
   assert.match(outcome(app), /no clear answer came back/);
   await settle();
-  assert.deepStrictEqual(writes(app), ['POST rpc/library_add_seasons'], 'one call');
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_add_seasons_b45'], 'one call');
 });
 
-test('transition while a catalog preview is open: Apply uses library_catalog_apply in either phase; the Stage 4a function is never called', async () => {
-  const { app } = await boot('coexistence');
+test('transition while a catalog preview is open: B4/B5 rolled back → Apply is refused (the _b45 function is missing); neither the 5a nor the Stage 4a function is called; nothing written', async () => {
+  const { app } = await boot('contracted-b45');
   await allTv(app);
   app.ctx.openCatalogUpdates('sheridan'); await settle();
   assert.match(app.el('catalogModalBox').innerHTML, /catalogApply\(\)/);
+  const before = JSON.stringify(app.store.watchlist_items);
   app.stage5 = 'contracted';
   await app.ctx.catalogApply(); await settle();
   const t = app.el('catalogModalBox').innerHTML.replace(/<[^>]+>/g, ' ');
-  assert.ok(/Applied \d+ change/.test(t) || /changed since this preview/.test(t), t);
-  assert.ok(!app.requests.some(r => /\/rpc\/catalog_apply$/.test(r.url)));
-  assert.strictEqual(app.requests.filter(r => r.url.endsWith('/rpc/library_catalog_apply') && r.body.p_approved).length, 1, 'one apply, never retried');
+  assert.ok(!/Applied \d+ change/.test(t), t);
+  assert.ok(!app.requests.some(r => /\/rpc\/(catalog_apply|library_catalog_apply)$/.test(r.url)));
+  assert.strictEqual(app.requests.filter(r => r.url.endsWith('/rpc/library_catalog_apply_b45') && r.body.p_approved).length, 1, 'one apply, never retried');
+  assert.strictEqual(JSON.stringify(app.store.watchlist_items), before);
 });
 
 // ─── Catalog conflicts (U7) ───────────────────────────────────────────────────
 test('catalog conflicts are shown as not included, with their reason and the candidate records; nothing is adopted, merged or created for them (U7)', async () => {
-  const { app } = await boot('coexistence');
+  const { app } = await boot('contracted-b45');
   const def = app.get("COLLECTIONS.find(c => c.id === 'sheridan').defaults.find(d => d.s !== 'Film')");
   // Two unidentified shows outside the catalog already use the catalog show's key: ambiguous.
   const key = app.get(`catalogShowKey('sheridan', ${JSON.stringify(def.k)})`);
@@ -593,7 +608,7 @@ test('catalog conflicts are shown as not included, with their reason and the can
 });
 
 // ─── True Crime / Docs presentation (no storage routing) ──────────────────────
-for (const phase of ['coexistence', 'contracted']) {
+for (const phase of ['contracted-b45']) { // (since B4/B5 the page writes only to the B4/B5 database)
   test(`(${phase}) True Crime / Docs keeps its note and its remembered layout key through its presentation key; nothing reads storage`, async () => {
     const { app } = await boot(phase);
     const tc = app.store.personal_collections.find(c => c.legacy_source === 'truecrime');
@@ -610,7 +625,7 @@ for (const phase of ['coexistence', 'contracted']) {
 test('contracted: a converted format-3 restore keeps every collection’s presentation key (True Crime included); format 4 carries it', async () => {
   const co = await boot('coexistence');
   const f3 = await legacyBackupFixture(co.app, 3);
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   const conv = app.ctx.convertFormat3To4(f3, { includeRecovery: true, sourceSha256: 'a'.repeat(64) });
   const tc = f3.tables.personal_collections.find(c => c.legacy_source === 'truecrime');
   assert.strictEqual(conv.doc.tables.personal_collections.find(c => c.id === tc.id).presentation_key, 'truecrime');
@@ -630,7 +645,7 @@ async function withCatalogShow(phase, title) {
   r.app.store.watchlist_items.push(seasonOf(s));
   return { ...r, catalogShow: s };
 }
-for (const phase of ['coexistence', 'contracted']) {
+for (const phase of ['contracted-b45']) { // (since B4/B5 the page writes only to the B4/B5 database)
   test(`(${phase}) a TMDB show titled like a catalog show (different key): shown first; "Add as a new show" sends that id (distinct_from) and is created`, async () => {
     const { app, catalogShow } = await withCatalogShow(phase, 'Brand New');
     await allTv(app);
@@ -641,14 +656,14 @@ for (const phase of ['coexistence', 'contracted']) {
     app.ctx.libraryChoose(777, 'tv', null, true); await settle();
     tick(app, [1]);
     await app.ctx.addSelectedTMDBSeasons(); await settle();
-    const [call] = app.writes().filter(r => r.url.endsWith('/rpc/library_create_show'));
+    const [call] = app.writes().filter(r => r.url.endsWith('/rpc/library_create_show_b45'));
     assert.deepStrictEqual(Array.from(call.body.p_show.distinct_from), [catalogShow.id]);
     assert.ok(app.store.tv_shows.some(x => x.tmdb_id === 777), 'the confirmed distinct work exists');
   });
 }
 
 test('a catalog show that appears after the preview: nothing is sent (the preview no longer applies); the database refuses an unacknowledged twin anyway', async () => {
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   await allTv(app);
   app.ctx.openLibraryPanel('tv'); await settle();
   await choose(app, 777, 'Brand New');
@@ -658,14 +673,14 @@ test('a catalog show that appears after the preview: nothing is sent (the previe
   await app.ctx.addSelectedTMDBSeasons(); await settle();
   assert.deepStrictEqual(app.writes(), []);
   assert.match(outcome(app), /Your list changed since this preview, so nothing was added/);
-  const res = await app.rpcHandlers.library_create_show({ p_show: { tmdb_id: 778, title: 'Brand New', show_key: 'brand new' },
+  const res = await app.rpcHandlers.library_create_show_b45({ p_show: { tmdb_id: 778, title: 'Brand New', show_key: 'brand new' },
     p_seasons: [{ item_key: 'brand new|season 1', title: 'Brand New', season: 'Season 1', date_sort: '2026-01-01', season_number: 1 }] }).json();
   assert.match(res.message, /^catalog_candidate:/);
   assert.deepStrictEqual(JSON.parse(res.details).candidates, [s.id]);
 });
 
 test('a film by hand titled like a catalog film: shown first; the confirmation acknowledges it (distinct_from) and the film is created', async () => {
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   const cat = filmOf({ title: 'Hell or High Water', collection: 'sheridan', media_type: null, tmdb_id: null, item_key: 'hell or high water|film' });
   app.store.watchlist_items.push(cat);
   app.ctx.switchMediaType('movie'); await settle();
@@ -674,13 +689,13 @@ test('a film by hand titled like a catalog film: shown first; the confirmation a
   await app.ctx.libraryManualFilm(); await settle();
   assert.deepStrictEqual(app.writes(), []);
   await app.ctx.libraryManualFilm(); await settle();
-  const [call] = app.writes().filter(r => r.url.endsWith('/rpc/library_create_film'));
+  const [call] = app.writes().filter(r => r.url.endsWith('/rpc/library_create_film_b45'));
   assert.deepStrictEqual(Array.from(call.body.p_film.distinct_from), [cat.id]);
   assert.strictEqual(app.store.watchlist_items.filter(r => r.title === 'Hell or High Water').length, 2);
 });
 
 test('movie tools: a TMDB film titled like a catalog film is not added (catalog_candidate) and is named in the notice; the others are added', async () => {
-  const { app } = await boot('contracted');
+  const { app } = await boot('contracted-b45');
   app.store.watchlist_items.push(filmOf({ title: 'Twin Film', collection: 'sheridan', media_type: null, tmdb_id: null, item_key: 'twin film|film' }));
   app.ctx.switchMediaType('movie'); await settle();
   app.ctx.openLibraryPanel('movie', 'tools'); await settle();
@@ -711,7 +726,7 @@ async function showTwins(phase) {
   r.app.run(`window.__tmdbMatch = { rowId: ${JSON.stringify(row.id)}, results: [], target: { mediaType: 'tv', seasonNumber: 1, details: { id: 889, name: 'Local Show Renamed', networks: [], seasons: [{ season_number: 1, air_date: '2019-01-01' }] } } };`);
   return { ...r, keyTwin, row };
 }
-for (const phase of ['coexistence', 'contracted']) {
+for (const phase of ['contracted-b45']) { // (since B4/B5 the page writes only to the B4/B5 database)
   test(`(${phase}) Match close to two catalog shows (one only by key, another title): both are read and shown with their catalog beside the target; confirming sends exactly those two`, async () => {
     const { app, catalogShow, keyTwin, row } = await showTwins(phase);
     await app.ctx.confirmTmdbMatch(); await settle();
@@ -723,9 +738,9 @@ for (const phase of ['coexistence', 'contracted']) {
     assert.ok(!/disabled/.test(twinButton(app)));
     const reads = app.requests.filter(r => /tv_shows\?id=in\.|library_catalog_shows\?show_id=in\./.test(r.url));
     assert.ok(reads.length === 2 && reads.every(r => r.method === 'GET'));
-    assert.strictEqual(matchCalls(app, 'library_match_season').length, 1);
+    assert.strictEqual(matchCalls(app, 'library_match_season_b45').length, 1);
     await app.ctx.confirmTmdbMatchDistinct(); await settle();
-    const calls = matchCalls(app, 'library_match_season');
+    const calls = matchCalls(app, 'library_match_season_b45');
     assert.strictEqual(calls.length, 2);
     assert.ok(!('distinct_from' in calls[0].body.p_patch));
     assert.deepStrictEqual(Array.from(calls[1].body.p_patch.distinct_from), [catalogShow.id, keyTwin.id].sort());
@@ -734,24 +749,24 @@ for (const phase of ['coexistence', 'contracted']) {
 }
 
 test('Match candidates: a failed read can’t be confirmed (nothing sent); Retry only reads, then confirming works', async () => {
-  const { app, row } = await showTwins('contracted');
+  const { app, row } = await showTwins('contracted-b45');
   app.failNext(r => r.method === 'GET' && r.url.includes('tv_shows?id=in.'));
   await app.ctx.confirmTmdbMatch(); await settle();
   assert.match(twinsText(app), /Couldn’t read those records .* so this can’t be confirmed yet\. Retry/);
   assert.match(twinButton(app), /disabled/);
   await app.ctx.confirmTmdbMatchDistinct(); await settle();
-  assert.strictEqual(matchCalls(app, 'library_match_season').length, 1, 'nothing sent');
+  assert.strictEqual(matchCalls(app, 'library_match_season_b45').length, 1, 'nothing sent');
   const before = app.requests.length;
   await app.ctx.loadTmdbMatchTwins(app.get('window.__tmdbMatch')); await settle();
   assert.ok(app.requests.slice(before).every(r => r.method === 'GET'), 'Retry only reads');
   assert.ok(!/disabled/.test(twinButton(app)));
   await app.ctx.confirmTmdbMatchDistinct(); await settle();
-  assert.strictEqual(matchCalls(app, 'library_match_season').length, 2);
+  assert.strictEqual(matchCalls(app, 'library_match_season_b45').length, 2);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === row.id).tmdb_id, 889);
 });
 
 test('Match candidates: a read that misses a candidate (or its catalog) is incomplete: not confirmable, nothing acknowledged', async () => {
-  const { app, keyTwin } = await showTwins('contracted');
+  const { app, keyTwin } = await showTwins('contracted-b45');
   const g = app.hold(r => r.method === 'GET' && r.url.includes('library_catalog_shows?show_id=in.'));
   const p = app.ctx.confirmTmdbMatch();
   await g.reached;
@@ -764,16 +779,16 @@ test('Match candidates: a read that misses a candidate (or its catalog) is incom
   assert.match(twinsText(app), /Not every one could be read as a catalog show, so this can’t be confirmed\. Retry/);
   assert.match(twinButton(app), /disabled/);
   await app.ctx.confirmTmdbMatchDistinct(); await settle();
-  assert.strictEqual(matchCalls(app, 'library_match_season').length, 1);
+  assert.strictEqual(matchCalls(app, 'library_match_season_b45').length, 1);
 });
 
 test('Match candidates: a catalog show that appears after the confirmation is refused, then shown with the others for a new confirmation (never acknowledged unseen)', async () => {
-  const { app, catalogShow, keyTwin, row } = await showTwins('contracted');
+  const { app, catalogShow, keyTwin, row } = await showTwins('contracted-b45');
   await app.ctx.confirmTmdbMatch(); await settle();
   const late = showOf({ title: 'local show renamed', show_key: 'something else', collection: '90day' });
   app.store.tv_shows.push(late); app.store.watchlist_items.push(seasonOf(late)); // added by a catalog meanwhile
   await app.ctx.confirmTmdbMatchDistinct(); await settle();
-  let calls = matchCalls(app, 'library_match_season');
+  let calls = matchCalls(app, 'library_match_season_b45');
   assert.strictEqual(calls.length, 2);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === row.id).tmdb_id, null, 'refused: nothing matched');
   const t = twinsText(app);
@@ -781,15 +796,15 @@ test('Match candidates: a catalog show that appears after the confirmation is re
   assert.match(t, /3 built-in catalog shows/);
   assert.match(t, /local show renamed · not matched to TMDB · 90 Day catalog · same name/);
   await settle();
-  assert.strictEqual(matchCalls(app, 'library_match_season').length, 2, 'not resent automatically');
+  assert.strictEqual(matchCalls(app, 'library_match_season_b45').length, 2, 'not resent automatically');
   await app.ctx.confirmTmdbMatchDistinct(); await settle();
-  calls = matchCalls(app, 'library_match_season');
+  calls = matchCalls(app, 'library_match_season_b45');
   assert.deepStrictEqual(Array.from(calls[2].body.p_patch.distinct_from), [catalogShow.id, keyTwin.id, late.id].sort());
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === row.id).tmdb_id, 889);
 });
 
-test('Match candidates for a film: the catalog film is read and shown beside the target; confirming sends its id to library_match_film', async () => {
-  const { app } = await boot('contracted');
+test('Match candidates for a film: the catalog film is read and shown beside the target; confirming sends its id to library_match_film_b45', async () => {
+  const { app } = await boot('contracted-b45');
   const cat = filmOf({ title: 'Hand Film', collection: 'sheridan', media_type: null, tmdb_id: null, item_key: 'hand film (catalog)|film', display_date: 'Mar 3, 2003' });
   app.store.watchlist_items.push(cat);
   app.ctx.switchMediaType('movie'); await settle();
@@ -804,14 +819,14 @@ test('Match candidates for a film: the catalog film is read and shown beside the
   assert.match(app.el('tmdbMatchBody').innerHTML, /It is different — match anyway<\/button>/);
   assert.ok(app.requests.some(r => r.method === 'GET' && r.url.includes('library_catalog_films?item_id=in.')));
   await app.ctx.confirmTmdbMatchDistinct(); await settle();
-  const calls = matchCalls(app, 'library_match_film');
+  const calls = matchCalls(app, 'library_match_film_b45');
   assert.strictEqual(calls.length, 2);
   assert.deepStrictEqual(Array.from(calls[1].body.p_patch.distinct_from), [cat.id]);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === id).tmdb_id, 555);
 });
 
 test('Match candidates: Back while they are being read; the late read never replaces the panel', async () => {
-  const { app } = await showTwins('contracted');
+  const { app } = await showTwins('contracted-b45');
   const g = app.hold(r => r.method === 'GET' && r.url.includes('tv_shows?id=in.'));
   const p = app.ctx.confirmTmdbMatch();
   await g.reached;
@@ -822,7 +837,7 @@ test('Match candidates: Back while they are being read; the late read never repl
 });
 
 // ─── Genre-theme film to TV season: still refused (as before Stage 5) ─────────
-for (const phase of ['coexistence', 'contracted']) {
+for (const phase of ['contracted-b45']) { // (since B4/B5 the page writes only to the B4/B5 database)
   test(`(${phase}) a film whose theme is a genre can’t become a TV season: the page sends nothing; the database refuses it too (genre_film_season)`, async () => {
     const { app } = await boot(phase);
     app.ctx.switchMediaType('movie'); await settle();
@@ -832,7 +847,7 @@ for (const phase of ['coexistence', 'contracted']) {
     await app.ctx.confirmTmdbMatch(); await settle();
     assert.deepStrictEqual(app.writes(), []);
     assert.match(app.el('errorBanner').innerHTML, /genre can’t be matched to a TV season/);
-    const res = await app.rpcHandlers.library_match_season({ p_row_id: id, p_target: { tmdb_id: 888 }, p_patch: {} }).json();
+    const res = await app.rpcHandlers.library_match_season_b45({ p_row_id: id, p_target: { tmdb_id: 888 }, p_patch: {} }).json();
     assert.match(res.message, /^genre_film_season:/);
   });
 }

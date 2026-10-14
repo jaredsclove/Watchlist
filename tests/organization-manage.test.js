@@ -602,7 +602,7 @@ test('add a whole show from search: the button says all stored seasons; Undo rem
   const sev = showByTitle(app, 'Severance');
   await open(app, 'members', d.id);
   typeInto(app, 'manageMemberSearch', 'Severance'); await settle();
-  assert.match(text(app), /Severance TV show · On List/);
+  assert.match(text(app), /Severance TV show · To Watch/);
   assert.ok(!text(app).includes('Other TV'), 'storage isn’t shown (Stage 4b)');
   app.ctx.manageAddMember('s', sev.id); await settle();
   const added = app.store.collection_memberships.find(m => m.collection_id === d.id && m.show_id === sev.id);

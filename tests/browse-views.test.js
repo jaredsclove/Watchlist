@@ -49,7 +49,8 @@ const film = o => ({ id: nid('f'), collection: 'movies', title: 'Film', theme: '
 const legacyFilm = o => film({ media_type: null, tmdb_id: null, ...o });
 const all = (...xs) => ({ rows: xs.flatMap(x => x.rows || [x]), shows: xs.filter(x => x.show).map(x => x.show) });
 
-// The library used by most tests.
+// The library used by most tests. (Show statuses are the old ones; the harness migrates them as
+// db/b45_expand.sql does: Pending → To Watch + New, Complete → Watching + Ended, High priority → To Watch + High.)
 function library() {
   const andor = show({ title: 'Andor', status: 'watching' }, [{ num: 1, w: true, season: 'Season 1' }, { season: 'Season 2', display: 'TBA 2027', date: '2027-06-01' }]);
   const bear = show({ title: 'The Bear', tmdb_id: 136315, status: 'confirmed' }, [{ num: 1, w: true }, { num: 2 }, { num: 0 }]);
@@ -84,7 +85,7 @@ async function openCol(app, id) { app.ctx.openBrowseCollection(id); await settle
 const html = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 const titles = app => [...html(app).matchAll(/<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
-const cardTitles = app => [...cards(app).matchAll(/<span class="card-title">([^<]*)<\/span>/g)].map(m => m[1]);
+const cardTitles = app => [...cards(app).matchAll(/<span class="card-title">(?:<span class="priority-high"[^>]*>★<\/span> )?(?:<span class="show-title">)?([^<]*)</g)].map(m => m[1]);
 const stats = app => [...app.el('statsRow').innerHTML.matchAll(/stat-num">(\d+)<\/div><div class="stat-label">([^<]*)</g)].map(m => `${m[1]} ${m[2]}`);
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
 // (The GET of rpc/stage5_capabilities is the read-only phase check made at startup.)
@@ -214,7 +215,9 @@ test('missing defaults and a stale TBA date cause no write from any view or any 
   for (const id of [B['disney'], B['sheridan'], B['90day'], B['truecrime']]) {
     await openCol(app, id);
     for (const m of ['tv', 'movie', 'all']) { app.ctx.setBrowseMedia(m); await settle(); }
-    for (const st of ['', 'all', 'watching', 'highpriority', 'confirmed', 'complete', 'pending', 'maybe', 'skipped']) setFilter(app, 'fStatus', st);
+    for (const st of ['', 'all', 'to_watch', 'watching', 'watched', 'skipped']) setFilter(app, 'fStatus', st);
+    for (const [id, vals] of [['fPriority', ['high', 'normal', 'low', 'highnormal', '']], ]) for (const v of vals) setFilter(app, id, v);
+    for (const id of ['fNew', 'fReview']) for (const on of [true, false]) { app.el(id).checked = on; app.ctx.renderTable(); }
     setFilter(app, 'fStatus', 'all');
     for (const key of app.get('[...browseData.showsById.keys()]')) { app.ctx.toggleBrowseShow(key); await settle(); }
     assertReadOnlyDom(app);
@@ -243,12 +246,19 @@ test('every row action and Restore is inert while a read-only collection is open
   for (const enter of [() => openCol(app, B['disney'])]) {
     await enter();
     assert.strictEqual(app.el('restoreBtn').style.display, 'none');
-    const showId = app.get("[...browseData.showsById.values()].find(s => s.status === 'pending').id");
+    const showId = app.get("[...browseData.showsById.values()].find(s => s.catalog_new).id");
     assert.ok(app.get(`tvShowsById.has(${JSON.stringify(showId)})`), 'the show is loaded page-wide, so only the guard stops the write');
     await app.ctx.toggleWatch('f-mando');
     await app.ctx.setStatus('f-mando', 'skipped', null);
     await app.ctx.setSeasonSkipped(app.get("browseData.rows.find(r => r.show_id).id"), true);
-    await app.ctx.setShowStatusById(showId, 'watching');
+    await app.ctx.setShowStateById(showId, { status: 'watching' });
+    await app.ctx.setShowStateById(showId, { priority: 'high' });
+    await app.ctx.setFilmPriority('f-mando', 'high');
+    await app.ctx.dismissCatalogNew([{ kind: 'show', id: showId }]);
+    await app.ctx.keepCurrentStatus('show', showId);
+    await app.ctx.startResume(showId, app.get("browseData.rows.find(r => r.show_id).id"));
+    await app.ctx.sendResume(app.get(`tvShowsById.get(${JSON.stringify(showId)})`), null, null, false);
+    app.ctx.openDetails('show', showId); await app.ctx.saveDetails(); app.ctx.closeDetails();
     await app.ctx.delRow('f-wind');
     await app.ctx.toggleWatchWith('f-wind', 'Kids', false);
     app.ctx.handleRestoreClick();
@@ -282,9 +292,9 @@ function restoreLibrary() {
     ]
   };
 }
-// Restore runs only on a contracted database since the 5c clean-up (G8): the file is its format-4 export.
+// Restore runs only on the B4/B5 database since B4/B5: the file is its format-5 export.
 async function restoreSetup() {
-  const app = await boot(restoreLibrary(), { stage5: 'contracted' });
+  const app = await boot(restoreLibrary());
   const backup = await app.ctx.buildBackupObject();
   const text = JSON.stringify(backup);
   let release;
@@ -508,20 +518,30 @@ test('no duplicate marker or storage name is shown (Stage 5: one record per iden
   assert.strictEqual(titles(app).filter(t => t === 'The Bear').length, 2);
 });
 
-test('TV follows the show status, never the season status copies; Skipped shows and films hidden by default; Complete and watched stay', async () => {
+test('TV follows the show status, never the season status copies; Skipped shows and films hidden by default; Ended and watched stay', async () => {
   const app = await boot();
   await openCol(app, B['sheridan']);
-  assert.deepStrictEqual(titles(app), ['Tulsa King', 'Yellowstone', 'F.A.S.T.', 'Sicario'], 'Complete Yellowstone and watched Sicario stay');
+  assert.deepStrictEqual(titles(app), ['Tulsa King', 'Yellowstone', 'F.A.S.T.', 'Sicario'], 'Yellowstone (Watching, Ended) and watched Sicario stay');
   await openCol(app, B['disney']);
   assert.ok(!titles(app).includes('Wonder Man') && !titles(app).includes('Ewoks: The Battle for Endor'));
   assert.ok(titles(app).includes('The Bear'), 'its season copies all say skipped; the show is On List');
   setFilter(app, 'fStatus', 'skipped');
   assert.deepStrictEqual(titles(app), ['Wonder Man', 'Ewoks: The Battle for Endor']);
-  for (const [st, expected] of [['watching', ['Andor']], ['pending', ['Lamp Life', 'Star Wars: Visions']], ['confirmed', ['Explicit TV', 'The Bear', 'The Mandalorian &amp; Grogu']],
-    ['highpriority', []], ['complete', []], ['maybe', []]]) {
+  for (const [st, expected] of [['watching', ['Andor']], ['to_watch', ['Explicit TV', 'Lamp Life', 'Star Wars: Visions', 'The Bear', 'The Mandalorian &amp; Grogu']],
+    ['watched', []]]) {
     setFilter(app, 'fStatus', st);
     assert.deepStrictEqual(titles(app), expected, st);
   }
+  // New from catalog (the former Pending shows) and priority are their own filters (B4/B5).
+  setFilter(app, 'fStatus', '');
+  app.el('fNew').checked = true; app.ctx.renderTable();
+  assert.deepStrictEqual(titles(app), ['Lamp Life', 'Star Wars: Visions']);
+  app.el('fNew').checked = false; app.ctx.renderTable();
+  await openCol(app, B['sheridan']);
+  setFilter(app, 'fPriority', 'high');
+  assert.deepStrictEqual(titles(app), ['Tulsa King'], 'the former High priority show');
+  const statusOptions = [...(app.el('filtersRow').innerHTML.match(/id="fStatus"[\s\S]*?<\/select>/) || [''])[0].matchAll(/<option value="([^"]*)"/g)].map(m => m[1]);
+  assert.deepStrictEqual(statusOptions, ['', 'all', 'to_watch', 'watching', 'watched', 'skipped']);
 });
 
 // ─── Presentation ─────────────────────────────────────────────────────────────
@@ -566,7 +586,7 @@ test('an expanded show lists every stored season in season order: numbered befor
   await openCol(app, B['disney']);
   setFilter(app, 'fStatus', 'all');
   for (const t of ['The Bear', 'Wonder Man', 'Star Wars: Visions']) {
-    app.ctx.toggleBrowseShow(app.get(`[...browseData.showsById.values()].find(s => s.title === ${JSON.stringify(t)} && s.collection === 'disney').id`));
+    app.ctx.toggleBrowseShow(app.get(`[...browseData.showsById.values()].find(s => s.title === ${JSON.stringify(t)} && showCatalogOf(s) === 'disney').id`));
   }
   await settle();
   const labels = [...html(app).matchAll(/padding-left:28px"><span class="season-lbl">([^<]*)<\/span>/g)].map(m => m[1]);

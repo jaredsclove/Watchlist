@@ -100,9 +100,9 @@ test('an exact-count mismatch fails with Retry instead of rendering an incomplet
 
 test("backup's fetchAllRows(table) request is unchanged by the new filter parameter", async () => {
   const app = await createApp();
-  await app.ctx.fetchAllRows('othertv_shows');
+  await app.ctx.fetchAllRows('tv_shows');
   const last = app.requests[app.requests.length - 1];
-  assert.ok(last.url.endsWith('/rest/v1/othertv_shows?select=*&order=id.asc'), last.url);
+  assert.ok(last.url.endsWith('/rest/v1/tv_shows?select=*&order=id.asc'), last.url);
 });
 
 test('no request ever names a view or a storage value (Stage 5)', async () => {
@@ -141,7 +141,11 @@ test('catalog entries reach the views only through Catalog updates: navigation n
   assert.strictEqual(seeded.length, defaults.length, 'every entry lands once');
   assert.ok(seeded.every(r => (r.season === 'Film') === (r.show_id == null)));
   const byKey = new Map(defaults.map(d => [d.k, d]));
-  assert.ok(seeded.every(r => r.status === (byKey.get(r.item_key).p ? 'pending' : 'confirmed')));
+  // B4/B5: every record a catalog creates is To Watch / Normal / New from catalog (the defaults' p no longer decides).
+  assert.ok(byKey.size === defaults.length && seeded.every(r => r.status === 'confirmed'));
+  assert.ok(seeded.filter(r => r.season === 'Film').every(r => r.catalog_new === true && r.priority === 'normal'));
+  assert.ok(seeded.filter(r => r.season !== 'Film').every(r => r.catalog_new === null && r.priority === null), 'seasons carry no film values');
+  assert.ok(app.store.tv_shows.filter(sh => sh.collection === 'disney').every(sh => sh.status === 'confirmed' && sh.catalog_new === true && sh.priority === 'normal'));
   app.ctx.switchView('alltv'); app.run("document.getElementById('fStatus') && (document.getElementById('fStatus').value = 'all')"); await settle();
   const show = app.store.tv_shows.find(sh => sh.collection === 'disney');
   assert.strictEqual(app.get(`showCatalogOf(tvShowsById.get(${JSON.stringify(show.id)}))`), 'disney', 'governed by its catalog, read from library_catalog_shows');
@@ -228,13 +232,13 @@ test('a failed Watched write rolls back the local change and mirrors nothing', a
   assert.ok(app.el('tbody').innerHTML.includes("toggleWatch('w1')"), 'still up next');
 });
 
-test('show status from a view: Watching → Complete removes the show; Skip in Coming Soon is saved by row id', async () => {
+test('show status from a view: Watching → To Watch removes the show; Skip in Coming Soon is saved by row id', async () => {
   const app = await watchingApp();
   const showId = rowIn(app, 'derivedData.rows', 'w1').show_id;
   assert.ok(app.el('tbody').innerHTML.includes("toggleWatch('w1')"));
-  await app.ctx.setShowStatusById(showId, 'complete');
+  await app.ctx.setShowStateById(showId, { status: 'confirmed' });
   assert.ok(!app.el('tbody').innerHTML.includes('derived-show-row'), 'the show is no longer Watching');
-  assert.strictEqual(app.store.tv_shows.find(s => s.id === showId).status, 'complete');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === showId).status, 'confirmed');
   assert.ok(!app.writes().some(r => r.method === 'PATCH'), 'no season status PATCH');
   app.ctx.switchView('comingsoon'); await settle();
   await app.ctx.setSeasonSkipped('c1', true);
@@ -254,19 +258,19 @@ const tmdbTv = p => {
   return m ? { id: +m[1], name: 'New Show', networks: [{ name: 'HBO' }], seasons: [{ season_number: 1, air_date: '2026-01-01', episode_count: 8 }, { season_number: 2, air_date: '2027-01-01', episode_count: 8 }] } : undefined;
 };
 
-test('guard: Refresh shows → another view mid-call: the season goes to that show by id (library_add_seasons), nothing redrawn', async () => {
+test('guard: Refresh shows → another view mid-call: the season goes to that show by id (library_add_seasons_b45), nothing redrawn', async () => {
   const app = await createApp({ rows: [tv({ id: 'ex1', title: 'New Show', item_key: 'new show|season 1', tmdb_id: 55 })], tmdb: tmdbTv });
   app.ctx.switchView('alltv'); await settle();
   app.ctx.openLibraryPanel('tv', 'refresh'); await settle();
   await app.ctx.libraryRefreshShows(); await settle();
   app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = [{ checked: true, dataset: { showIdx: '0', season: '2' } }];
   app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [];
-  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/library_add_seasons'));
+  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/library_add_seasons_b45'));
   const done = app.ctx.libraryApplyRefresh();
   await g.reached;
   app.ctx.switchView('watching'); await settle();
   g.release(); await done; await settle();
-  const post = app.writes().find(r => r.url.endsWith('/rpc/library_add_seasons'));
+  const post = app.writes().find(r => r.url.endsWith('/rpc/library_add_seasons_b45'));
   const showId = app.store.watchlist_items.find(r => r.id === 'ex1').show_id;
   assert.strictEqual(post.body.p_show_id, showId);
   assert.deepStrictEqual(copyOut(post.body.p_expected), { tmdb_id: 55, show_key: 'new show', catalog: null, network: 'HBO' });
@@ -275,7 +279,7 @@ test('guard: Refresh shows → another view mid-call: the season goes to that sh
   assertViewIntact(app);
 });
 
-test('guard: a TMDB search add → another view mid-call: one library_create_show call, the new show and its seasons, nothing redrawn', async () => {
+test('guard: a TMDB search add → another view mid-call: one library_create_show_b45 call, the new show and its seasons, nothing redrawn', async () => {
   const app = await createApp({ tmdb: tmdbTv });
   app.ctx.switchView('alltv'); await settle();
   app.ctx.openLibraryPanel('tv'); await settle();
@@ -283,30 +287,32 @@ test('guard: a TMDB search add → another view mid-call: one library_create_sho
   app.ctx.renderTMDBPreview();
   const prev = app.addEl('tmdbInlinePreview');
   prev.querySelectorAll = sel => (sel === 'input[type="checkbox"][data-season]' ? [{ checked: true, disabled: false, dataset: { season: '1' } }] : []);
-  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/library_create_show'));
+  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/library_create_show_b45'));
   const done = app.ctx.addSelectedTMDBSeasons();
   await g.reached;
   app.ctx.switchView('watching'); await settle();
   g.release(); await done; await settle();
   const posts = app.writes();
-  assert.deepStrictEqual(posts.map(r => r.url.split('/rest/v1/')[1]), ['rpc/library_create_show']);
-  assert.deepStrictEqual(copyOut(posts[0].body.p_show), { tmdb_id: 55, title: 'New Show', show_key: 'new show', network: 'HBO' });
+  assert.deepStrictEqual(posts.map(r => r.url.split('/rest/v1/')[1]), ['rpc/library_create_show_b45']);
+  // (network: the seasons' label, as before; B4: TMDB networks become candidates — Original network is never set automatically.)
+  assert.deepStrictEqual(copyOut(posts[0].body.p_show), { tmdb_id: 55, title: 'New Show', show_key: 'new show', network: 'HBO',
+    genres: [], forms: [], genre_candidates: [], companies: [], network_candidates: ['HBO'] });
   const show = app.store.tv_shows.find(sh => sh.tmdb_id === 55);
   assert.ok(show && app.store.watchlist_items.some(r => r.show_id === show.id && r.season_number === 1));
   noStorage(app);
   assertViewIntact(app);
 });
 
-test('guard: Match from All TV → another view mid-match: one library_match_season call by row id, row matched in place, no redraw', async () => {
+test('guard: Match from All TV → another view mid-match: one library_match_season_b45 call by row id, row matched in place, no redraw', async () => {
   const app = await createApp({ rows: [tv({ id: 'u1', title: 'Manual', media_type: null, tmdb_id: null, season_number: null, item_key: 'manual|season 1' })] });
   app.ctx.switchView('alltv'); await settle();
   app.run(`window.__tmdbMatch = { rowId: 'u1', results: [], target: { mediaType: 'tv', seasonNumber: 1, details: { id: 77, name: 'Matched Show', networks: [{ name: 'HBO' }], seasons: [{ season_number: 1, air_date: '2020-01-01' }] } } };`);
-  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/library_match_season'));
+  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/library_match_season_b45'));
   const done = app.ctx.confirmTmdbMatch();
   await g.reached;
   app.ctx.switchView('watching'); await settle();
   g.release(); await done; await settle();
-  assert.deepStrictEqual(app.writes().map(r => r.url.split('/rest/v1/')[1]), ['rpc/library_match_season'], 'one function call, no direct writes');
+  assert.deepStrictEqual(app.writes().map(r => r.url.split('/rest/v1/')[1]), ['rpc/library_match_season_b45'], 'one function call, no direct writes');
   assert.strictEqual(app.writes()[0].body.p_row_id, 'u1');
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === 'u1').tmdb_id, 77);
   assert.ok(app.store.tv_shows.some(s => s.tmdb_id === 77), 'an identified show, which Refresh shows checks');
@@ -315,17 +321,17 @@ test('guard: Match from All TV → another view mid-match: one library_match_sea
   assertViewIntact(app);
 });
 
-test('guard: a new show by hand → another view mid-call: library_create_show (distinct_from: none shown), nothing redrawn', async () => {
+test('guard: a new show by hand → another view mid-call: library_create_show_b45 (distinct_from: none shown), nothing redrawn', async () => {
   const app = await createApp();
   app.ctx.switchView('alltv'); await settle();
   app.ctx.openLibraryPanel('tv', 'manual'); await settle();
   app.el('nTitle').value = 'ZZ Manual Show'; app.el('nSeason').value = 'Season 1'; app.el('nTheme').value = 'HBO'; app.el('nDate').value = 'Jan 1, 2027';
-  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/library_create_show'));
+  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/library_create_show_b45'));
   const done = app.ctx.libraryManualShow();
   await g.reached;
   app.ctx.switchView('watching'); await settle();
   g.release(); await done; await settle();
-  const post = app.writes().find(r => r.url.endsWith('/rpc/library_create_show'));
+  const post = app.writes().find(r => r.url.endsWith('/rpc/library_create_show_b45'));
   assert.deepStrictEqual(copyOut(post.body.p_show), { tmdb_id: null, title: 'ZZ Manual Show', show_key: 'zz manual show', network: 'HBO', distinct_from: [] });
   assert.ok(app.store.tv_shows.some(sh => sh.show_key === 'zz manual show'));
   noStorage(app);
@@ -356,7 +362,7 @@ for (const [name, setup, selector, box] of [
     await g.reached;
     app.ctx.switchMediaType('tv'); await settle();
     g.release(); await done; await settle();
-    const post = app.writes().find(r => r.url.endsWith('/rpc/library_add_films'));
+    const post = app.writes().find(r => r.url.endsWith('/rpc/library_add_films_b45'));
     assert.ok(post, 'the insert still happens');
     assert.strictEqual(post.body.p_films[0].tmdb_id, 101);
     assert.strictEqual(post.body.p_films[0].theme, 'Drama', 'a genre theme');

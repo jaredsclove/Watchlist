@@ -255,7 +255,7 @@ function membershipByPair(collectionId, showId, itemId) {
     && (showId != null ? m.show_id === showId : m.item_id === itemId)) || null;
 }
 
-const plainStatus = s => (s ? statusOptionLabel(s).replace(/^\S+ /, '') : '');
+const plainStatus = s => (s ? plainStatusLabel(s) : '');
 
 // ── Writes ──
 function runOrgOp(op) {

@@ -181,6 +181,7 @@ async function addPulledUniverseMovies() {
       date_sort: dateSort,
       watched: false,
       status: 'confirmed',
+      ...creationMetadata('movie', details, title),
       tmdb_collection_id: belongsTo ? belongsTo.id : null,
       tmdb_collection_name: belongsTo ? belongsTo.name : null,
       collections,

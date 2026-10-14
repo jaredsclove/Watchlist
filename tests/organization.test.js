@@ -182,12 +182,13 @@ test('watch-with: labels from your choices, tokens in the data; an archived choi
 });
 
 // ── backup format 3 ──
-test('backup (contracted) is format 4 with the eight tables and exact organization columns; never user_id, is_film or item_is_film; it validates', async () => {
-  const app = await boot(library(), { stage5: 'contracted' });
+test('backup (B4/B5) is format 5 with the eight tables and exact organization columns; never user_id, is_film or item_is_film; it validates', async () => {
+  const app = await boot(library());
   const b = await app.run('buildBackupObject()');
-  assert.strictEqual(b.formatVersion, 4);
+  assert.strictEqual(b.formatVersion, 5);
   assert.deepStrictEqual(Object.keys(b.tables).sort(), ['catalog_film_links', 'catalog_show_links', 'collection_memberships', 'custom_collections', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
-  assert.strictEqual(Object.keys(b.tables.watchlist_items[0]).length, 20);
+  assert.strictEqual(Object.keys(b.tables.watchlist_items[0]).length, 30, 'format 4’s 20 columns and the 10 film columns of B4/B5');
+  assert.strictEqual(Object.keys(b.tables.tv_shows[0]).length, 21, 'format 4’s 6 columns and the 15 show columns of B4/B5');
   assert.deepStrictEqual(Object.keys(b.tables.collection_memberships[0]), ['id', 'collection_id', 'show_id', 'item_id', 'created_at']);
   assert.deepStrictEqual(Object.keys(b.tables.personal_collections[0]), ['id', 'name', 'catalog_id', 'presentation_key', 'sort_order', 'archived_at', 'created_at']);
   assert.deepStrictEqual(Object.keys(b.tables.watch_with_choices[0]), ['id', 'token', 'label', 'sort_order', 'archived_at', 'created_at']);
@@ -219,7 +220,7 @@ test('format 3 validation mirrors the database: targets, kinds, duplicates, name
 test('restore: a format 2 file into this database is refused with guidance before any safety backup, download or write', async () => {
   const src = await boot(library(), { org: false });
   const v2 = await legacyBackupFixture(src, 2);
-  const app = await boot(library(), { stage5: 'contracted' });
+  const app = await boot(library());
   app.ctx.__b = v2;
   const before = app.requests.length;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
@@ -252,7 +253,7 @@ test('Match asks the database to refuse a collection expansion; the expansion is
   app.addEl('tmdbMatchBody');
   await matchAsTv(app, legacy.id, 4000);
   const calls = writes(app);
-  assert.deepStrictEqual(calls.map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_season']);
+  assert.deepStrictEqual(calls.map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_season_b45']);
   assert.deepStrictEqual(calls[0].body.p_expansion, {});
   // Stage 3b-2: the expansion is described for confirmation (tests/match-expansion.test.js covers the flow).
   const panel = app.el('tmdbMatchBody').innerHTML;
@@ -262,7 +263,7 @@ test('Match asks the database to refuse a collection expansion; the expansion is
   assert.strictEqual(JSON.stringify([app.store.watchlist_items, app.store.collection_memberships, app.store.tv_shows]), before, 'nothing changed');
 });
 
-test('Match without an expansion keeps the row in its collections; a TV season matched as a film keeps its show’s collections (one library_match_film call)', async () => {
+test('Match without an expansion keeps the row in its collections; a TV season matched as a film keeps its show’s collections (one library_match_film_b45 call)', async () => {
   const doc = show({ title: 'Doc Series', collection: 'truecrime' }, ['Season 1', 'Season 2']);
   const app = await boot(all(doc));
   app.store.collection_memberships.push({ id: uuid('0d', 960), collection_id: coll(app, 'sheridan').id, show_id: doc.show.id, item_id: null, created_at: TS });
@@ -273,7 +274,7 @@ test('Match without an expansion keeps the row in its collections; a TV season m
   const ofFilm = app.store.collection_memberships.filter(m => m.item_id === s1.id).map(m => m.collection_id).sort();
   assert.deepStrictEqual(ofFilm, [coll(app, 'sheridan').id, coll(app, 'truecrime').id].sort());
   assert.ok(app.store.tv_shows.some(s => s.id === doc.show.id), 'the show keeps its other season');
-  assert.deepStrictEqual(writes(app).map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_film'], 'one transaction (Stage 5)');
+  assert.deepStrictEqual(writes(app).map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_film_b45'], 'one transaction (Stage 5)');
   assert.strictEqual(app.store.collection_memberships.filter(m => m.show_id === doc.show.id).length, 2, 'the show keeps its collections');
   assert.ok(!writes(app).some(r => r.body && JSON.stringify(r.body).includes('is_film')), 'the app never sends is_film');
 });
@@ -287,13 +288,13 @@ test('without personal collections: the selector is unavailable (never the stora
   app.ctx.openBrowseCollection(B.disney); await settle();
   assert.strictEqual(app.get('activeViewId'), 'watching', 'nothing to open');
   const res = await app.run('buildBackupObject()').then(() => 'made', e => e.message); // not contracted: no file (G8)
-  assert.match(res, /makes backups only of the updated database \(format 4\), so no file was made/);
+  assert.match(res, /makes backups only of a database in its own state \(format 5\), and this database isn’t in it, so no file was made/);
   assert.deepStrictEqual(JSON.parse(app.get('JSON.stringify(watchWithChoiceList().map(c => c.token))')), Array.from(app.get('WATCH_WITH_OPTIONS')));
   // (Match against a database without the Stage 5 functions is covered in tests/stage5-app.test.js.)
 });
 
 // ── organization refresh (review finding 1) ──
-// A format 4 backup (contracted; G8) whose collections and watch-with labels differ from what the page has loaded.
+// A format 5 backup (B4/B5) whose collections and watch-with labels differ from what the page has loaded.
 async function restoredBackup(app) {
   const b = JSON.parse(JSON.stringify(await app.run('buildBackupObject()')));
   const old = b.tables.personal_collections.find(c => c.catalog_id === 'disney');
@@ -312,7 +313,7 @@ async function restoreThrough(app, b) {
 }
 
 test('after a restore the selector and watch-with labels come from the restored data (changed ids, names, labels)', async () => {
-  const app = await boot(library(), { stage5: 'contracted' }); // Restore runs from a TV view (All Movies hides it since Stage 4b)
+  const app = await boot(library()); // Restore runs from a TV view (All Movies hides it since Stage 4b)
   const { b, oldId, freshId } = await restoredBackup(app);
   await restoreThrough(app, b);
   app.ctx.switchMediaType('movie'); await settle();
@@ -323,7 +324,7 @@ test('after a restore the selector and watch-with labels come from the restored 
 });
 
 test('a restored-away collection that is still open (or chosen from a stale selector) says it isn’t available, with Back', async () => {
-  const app = await boot(library(), { stage5: 'contracted' });
+  const app = await boot(library());
   const { b, oldId } = await restoredBackup(app);
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b');
@@ -374,7 +375,7 @@ test('an older organization read that finishes last never replaces newer data (R
 });
 
 test('a startup read pending across a restore is discarded; the post-restore read wins', async () => {
-  const app = await boot(library(), { stage5: 'contracted' });
+  const app = await boot(library());
   const { b, freshId } = await restoredBackup(app);
   const g = app.hold(r => r.url.includes('/personal_collections?'));
   const pending = app.ctx.loadOrganization();
@@ -390,7 +391,7 @@ test('a startup read pending across a restore is discarded; the post-restore rea
 });
 
 test('a pre-restore read that finishes before the post-restore read publishes nothing; the selector waits for the restored data', async () => {
-  const app = await boot(library(), { stage5: 'contracted' });
+  const app = await boot(library());
   const { b, freshId, oldId } = await restoredBackup(app);
   const g = app.hold(r => r.url.includes('/personal_collections?'));
   const pending = app.ctx.loadOrganization();
@@ -440,7 +441,7 @@ const pickerOf = (app, id) => app.get(`watchWithPickerHtml('${id}', [])`);
 for (const withBrowse of [false, true]) {
   test(`post-restore choices read fails${withBrowse ? ' while a collection view reads successfully' : ''}: no stale or default choices are offered; unavailable + Retry; Retry recovers`, async () => {
     const data = library();
-    const app = await boot(data, { stage5: 'contracted' });
+    const app = await boot(data);
     const dune = data.rows.find(r => r.title === 'Dune');
     await restoreChangedChoices(app); // from a TV view (All Movies hides Restore)
     if (withBrowse) {
@@ -479,7 +480,7 @@ for (const withBrowse of [false, true]) {
 
 test('while the post-restore choices read is pending the controls say loading (no defaults, no stale values)', async () => {
   const data = library();
-  const app = await boot(data, { stage5: 'contracted' });
+  const app = await boot(data);
   const dune = data.rows.find(r => r.title === 'Dune');
   await restoreChangedChoices(app);
   const g = app.hold(r => r.url.includes('/watch_with_choices?'));
@@ -565,12 +566,12 @@ test('Match refused by a concurrent change (40001 re-check, deadlock victim, loc
     const legacy = film({ title: 'Race Doc', collection: 'truecrime', media_type: null, tmdb_id: null, item_key: 'race doc|film' });
     const app = await boot(all(legacy));
     app.ctx.switchMediaType('movie'); await settle();
-    app.rpcHandlers.library_match_season = () => ({ ok: false, status: 409, text: async () => JSON.stringify({ code, message }), json: async () => ({ code, message }), headers: { get: () => null } });
+    app.rpcHandlers.library_match_season_b45 = () => ({ ok: false, status: 409, text: async () => JSON.stringify({ code, message }), json: async () => ({ code, message }), headers: { get: () => null } });
     await matchAsTv(app, legacy.id, 4200);
     assert.match(app.get('document.getElementById("errorBanner").innerHTML'), ['55P03', '57014'].includes(code)
       ? /The database didn’t finish the match in time, so it was cancelled and nothing was matched\. Another change may have been using the same rows; try again\./
       : /Something else was changing the same show or collections at that moment, so nothing was matched\. Try again\./, code);
-    assert.deepStrictEqual(writes(app).map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_season']);
+    assert.deepStrictEqual(writes(app).map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_season_b45']);
   }
 });
 

@@ -229,7 +229,7 @@ function renderTmdbMatchConfirm() {
       ${line(mediaType === 'tv' ? 'Network' : genreTheme ? 'Genre' : 'Company', row.theme, patch.theme)}
       ${line('TMDB', 'not matched', tmdbAfter)}
       ${addedTag ? line('Tag added', '—', addedTag) : ''}
-      <div class="tmdb-refresh-summary">Kept as is: watched, status, watch with${row.collections?.length ? ', existing tags' : ''}.</div>`;
+      <div class="tmdb-refresh-summary">Kept as is: watched, watch with${row.collections?.length ? ', existing tags' : ''}. Status, priority and categories follow the record they end up on; anything that changes is shown before the match is saved.</div>`;
   }
   html += `<div class="tmdb-preview-actions" style="flex-wrap:wrap">
       <button class="btn btn-accent" onclick="confirmTmdbMatch()" ${patch ? '' : 'disabled'}>Confirm match</button>
@@ -239,10 +239,74 @@ function renderTmdbMatchConfirm() {
   body.innerHTML = html;
 }
 
+// ── B4/B5: what a Match drops or overrides, shown before it is saved ──
+// The database answers blocked: 'state_acknowledgment' with the exact list and a token
+// whenever a value the owner can see would be dropped or overridden; only a call carrying
+// that token goes ahead. A season that would become a Skipped + Watched film needs the
+// owner's explicit choice (an explicit status choice). Neither is ever sent automatically.
+const MATCH_FIELD_LABELS = { status: 'Status', priority: 'Priority', ended: 'Show ended', catalog_new: 'New from catalog', status_review: 'Needs status review',
+  legacy_status: 'The old status kept for a rollback', genres: 'Genres', forms: 'Form', franchises: 'Franchise / universe', companies: 'Production company',
+  genre_candidates: 'Unresolved source categories', network: 'Original network', network_candidates: 'Network candidates', metadata_owner_set: 'Categories saved by you' };
+const MATCH_LEGACY_LABELS = { pending: 'Pending', highpriority: 'High priority', maybe: 'Maybe', watching: 'Watching', complete: 'Complete' };
+function matchAckValue(field, v) {
+  if (v == null || (Array.isArray(v) && !v.length)) return 'none';
+  if (field === 'status') return plainStatusLabel(v);
+  if (field === 'legacy_status') return MATCH_LEGACY_LABELS[v] || v;
+  if (field === 'priority') return PRIORITY_LABELS[v] || v;
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  return Array.isArray(v) ? v.join(', ') : String(v);
+}
+// ctx: { row, where } — the row being matched and where it goes ('a new show', '“T”', 'a film').
+function matchAckItemText(x, ctx = {}) {
+  const label = MATCH_FIELD_LABELS[x.field] || x.field;
+  const source = x.show_id && typeof tvShowsById !== 'undefined' ? tvShowsById.get(x.show_id) : null;
+  const sourceTitle = source ? `“${source.title}”` : 'the show this season leaves';
+  if (x.field === 'source_show') return `${sourceTitle} would have no seasons left, so it is removed with its status, priority, Show ended, categories and markers.`;
+  if (x.field === 'resume') return `The earlier-seasons choice for ${sourceTitle} ends because ${ctx.row ? ctx.row.season : 'this season'} moves to ${ctx.where || 'another record'}.`;
+  if (x.effect === 'not_carried') return `${label} (${matchAckValue(x.field, x.source)}) isn’t kept.`;
+  if (x.effect === 'dropped') return `${label} (${matchAckValue(x.field, x.source)}): a film has none, so it isn’t kept.`;
+  return `${label}: this row’s ${matchAckValue(x.field, x.source)} isn’t kept; the show keeps its ${matchAckValue(x.field, x.destination)}.`;
+}
+function renderMatchAck(m) {
+  const body = document.getElementById('tmdbMatchBody');
+  if (!body || !m.ack) return;
+  body.innerHTML = `<div class="tmdb-refresh-summary" style="margin-top:10px" role="status">${m.ack.changed ? 'What this match would change has changed. ' : ''}Before matching, check what changes:</div>
+    <ul class="manage-list">${m.ack.items.map(x => `<li>${esc(matchAckItemText(x, m.ack.ctx))}</li>`).join('')}</ul>
+    <div class="tmdb-preview-actions" style="flex-wrap:wrap">
+      <button class="btn btn-accent" onclick="confirmTmdbMatchAck()">Match with these changes</button>
+      <button class="btn" onclick="renderTmdbMatchConfirm()">Back</button>
+      <button class="btn" onclick="cancelTmdbMatch()">Cancel</button>
+    </div>`;
+}
+function confirmTmdbMatchAck() {
+  const m = window.__tmdbMatch;
+  if (!m || !m.ack) return;
+  confirmTmdbMatch(false, { ack: true, choice: m.ack.choice || null });
+}
+function renderMatchStateChoice(m, row) {
+  const body = document.getElementById('tmdbMatchBody');
+  if (!body) return;
+  m.choiceFor = row.id;
+  body.innerHTML = `<div class="tmdb-refresh-summary" style="margin-top:10px">“${esc(row.title)} · ${esc(row.season)}” is marked watched, but it is skipped${row.skipped ? '' : ' (its show is Skipped)'}. As a film it can’t be both. Choose its status:</div>
+    <div class="tmdb-preview-actions" style="flex-wrap:wrap">
+      <button class="btn btn-accent" onclick="chooseTmdbMatchState('watched')">Watched</button>
+      <button class="btn" onclick="chooseTmdbMatchState('skipped')">Skipped (clears Watched)</button>
+      <button class="btn" onclick="renderTmdbMatchConfirm()">Back</button>
+      <button class="btn" onclick="cancelTmdbMatch()">Cancel</button>
+    </div>`;
+}
+function chooseTmdbMatchState(choice) {
+  const m = window.__tmdbMatch;
+  const row = tmdbMatchRow();
+  if (!m || !row || m.choiceFor !== row.id || !['watched', 'skipped'].includes(choice)) return;
+  confirmTmdbMatch(false, { choice });
+}
+
 // withConfirmation: the user confirmed the collection expansion shown in the panel;
 // it is sent only while the panel still shows that proposal for this row, TMDB id
-// and season.
-async function confirmTmdbMatch(withConfirmation) {
+// and season. opts.ack: the acknowledgment shown for this row, TMDB id and season is
+// sent with it; opts.choice: the owner's Watched / Skipped choice (a season becoming a film).
+async function confirmTmdbMatch(withConfirmation, opts = {}) {
   const m = window.__tmdbMatch;
   const row = tmdbMatchRow();
   if (!m?.target || !row || m.inFlight) return;
@@ -258,6 +322,19 @@ async function confirmTmdbMatch(withConfirmation) {
     const p = m.proposal;
     if (!p || p.rowId !== row.id || p.tmdbId !== patch.tmdb_id || p.seasonNumber !== patch.season_number) return;
     expansion = { confirm: p.token };
+    m.lastExpansion = { rowId: row.id, tmdbId: patch.tmdb_id, seasonNumber: patch.season_number, expansion };
+  } else if (opts.ack && m.lastExpansion && m.lastExpansion.rowId === row.id && m.lastExpansion.tmdbId === patch.tmdb_id
+             && m.lastExpansion.seasonNumber === patch.season_number) {
+    expansion = m.lastExpansion.expansion;
+  }
+  const ackToken = opts.ack && m.ack && m.ack.rowId === row.id && m.ack.tmdbId === patch.tmdb_id && m.ack.seasonNumber === (patch.season_number ?? null)
+    ? m.ack.token : null;
+  if (opts.ack && !ackToken) return;
+  const choice = opts.choice || null;
+  // M6b: a season that would become a Skipped + Watched film: the owner chooses first.
+  if (patch.media_type === 'movie' && isTvSeason(row) && row.watched && (row.skipped || (showOfRow(row) || {}).status === 'skipped') && !choice) {
+    renderMatchStateChoice(m, row);
+    return;
   }
   // Each call's stamp: a delayed answer is checked against what the page shows now.
   const stamp = { seq: ++matchRequestSeq, rowId: row.id, epoch: orgEpoch, rowObj: row, partition: LIBRARY_PARTITION, title: patch.title, viewId: activeViewId };
@@ -295,11 +372,19 @@ async function confirmTmdbMatch(withConfirmation) {
       // Refresh shows from then on), re-checks the conflicts, refuses a show a catalog
       // governs, and refuses (and describes) a match that would show the target
       // show's other seasons in more collections until the user confirms (p_expansion).
-      const res = await sbRpc('library_match_season', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: tmdbMatchAck(m, patch),
-        p_expansion: expansion });
+      const res = await sbRpc('library_match_season_b45', { p_row_id: row.id, p_target: { tmdb_id: patch.tmdb_id, network: patch.theme }, p_patch: tmdbMatchAck(m, patch),
+        p_expansion: expansion, p_ack: ackToken });
       if (m.inFlight === stamp.seq) m.inFlight = 0;
       // A blocked answer wrote nothing: it's shown only if the panel still shows this request.
       const panelCurrent = window.__tmdbMatch === m && matchLatestByRow[row.id] === stamp.seq && stamp.epoch === orgEpoch;
+      if (res && res.blocked && res.reason === 'state_acknowledgment') {
+        if (!panelCurrent || m.target?.details?.id !== patch.tmdb_id || (m.target.seasonNumber ?? null) !== patch.season_number) return;
+        const joins = typeof tvShowsById !== 'undefined' && [...tvShowsById.values()].find(sh => sh.tmdb_id === patch.tmdb_id);
+        m.ack = { rowId: row.id, tmdbId: patch.tmdb_id, seasonNumber: patch.season_number ?? null, token: res.confirmation, items: res.items || [], changed: !!res.changed, choice: null,
+          ctx: { row, where: joins ? `“${joins.title}”` : 'a new show' } };
+        renderMatchAck(m);
+        return;
+      }
       if (res && res.blocked && res.reason === 'membership_expansion') {
         if (!panelCurrent || m.target?.details?.id !== patch.tmdb_id || (m.target.seasonNumber ?? null) !== patch.season_number) return;
         await showMatchProposal(m, res, row, patch);
@@ -309,8 +394,8 @@ async function confirmTmdbMatch(withConfirmation) {
       if (res && res.blocked) {
         // The identified show is already on this list with a different status;
         // nothing was written. Matching never changes a show's status.
-        showError(`Not matched: "${patch.title}" is already on this list as ${statusOptionLabel(res.target_status).replace(/^\S+ /, '')}, `
-          + `but this row's show is ${statusOptionLabel(res.legacy_status).replace(/^\S+ /, '')}. Give both the same status first, then match again.`);
+        showError(`Not matched: "${patch.title}" is already on this list as ${plainStatusLabel(res.target_status)}, `
+          + `but this row's show is ${plainStatusLabel(res.legacy_status)}. Give both the same status first, then match again.`);
         return;
       }
       fresh = res && res.row;
@@ -319,7 +404,18 @@ async function confirmTmdbMatch(withConfirmation) {
       // leaves its show (keeping that show's collections, archived ones included), and
       // a show left with no seasons is removed. Refused (nothing written) if the row
       // changed since this page read it.
-      const res = await sbRpc('library_match_film', { p_row_id: row.id, p_expected: { show_id: row.show_id ?? null }, p_patch: tmdbMatchAck(m, patch) });
+      const res = await sbRpc('library_match_film_b45', { p_row_id: row.id, p_expected: { show_id: row.show_id ?? null }, p_patch: tmdbMatchAck(m, patch),
+        p_ack: ackToken, p_choice: choice });
+      if (res && res.blocked) {
+        if (m.inFlight === stamp.seq) m.inFlight = 0;
+        const panelCurrent = window.__tmdbMatch === m && matchLatestByRow[row.id] === stamp.seq && stamp.epoch === orgEpoch;
+        if (!panelCurrent || m.target?.details?.id !== patch.tmdb_id) return;
+        if (res.reason === 'state_choice') { renderMatchStateChoice(m, row); return; }
+        m.ack = { rowId: row.id, tmdbId: patch.tmdb_id, seasonNumber: null, token: res.confirmation, items: res.items || [], changed: !!res.changed, choice,
+          ctx: { row, where: 'a film' } };
+        renderMatchAck(m);
+        return;
+      }
       fresh = res && res.row;
       if (res && res.former_show_deleted && stamp.epoch === orgEpoch) tvShowsById.delete(res.former_show_id);
     }

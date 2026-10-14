@@ -171,7 +171,7 @@ test('render: both kinds of Watching cards carry the show-level status control; 
   const u = show({ title: 'Current', status: 'watching', tmdb_id: 101 }, [{ num: 1, w: true }, { num: 2, date: day(40) }]);
   const app = await viewApp(all(p, u));
   for (const html of [tbody(app), cards(app)]) {
-    assert.strictEqual((html.match(/setShowStatusById\(/g) || []).length, 2, 'one show control per card');
+    assert.strictEqual((html.match(/setShowStateById\('[^']*', \{ status: this\.value \}\)/g) || []).length, 2, 'one show status control per card');
     assert.ok(!/setStatus\(/.test(html), 'no row-level status control for TV');
     assert.ok(html.includes('Up to date</span>'));
     assert.ok(html.includes(`Next: Season 2 · ${disp(day(40))}`));
@@ -200,13 +200,13 @@ test('render: an expanded Watching show lists every season with Watched and Skip
   assert.ok(!/delRow\(|openTmdbMatch\(/.test(html));
 });
 
-test('render: changing the show status from Currently Watching calls set_show_status and moves the show', async () => {
+test('render: changing the show status from Currently Watching calls library_set_show_state_b45 and moves the show', async () => {
   const p = show({ title: 'Move', status: 'watching' }, [{ num: 1, date: day(-3) }]);
   const app = await viewApp(all(p));
-  await app.ctx.setShowStatusById(p.show.id, 'complete'); await settle();
-  const call = app.writes().find(r => r.url.endsWith('/rpc/set_show_status'));
-  assert.deepStrictEqual([call.body.p_show_id, call.body.p_status], [p.show.id, 'complete']);
-  assert.strictEqual(app.store.tv_shows[0].status, 'complete');
+  await app.ctx.setShowStateById(p.show.id, { status: 'confirmed' }); await settle();
+  const call = app.writes().find(r => r.url.endsWith('/rpc/library_set_show_state_b45'));
+  assert.deepStrictEqual([call.body.p_show_id, call.body.p_changes], [p.show.id, { status: 'confirmed' }]);
+  assert.strictEqual(app.store.tv_shows[0].status, 'confirmed');
   assert.ok(!tbody(app).includes('derived-show-row'), 'no Watching shows left');
   assert.strictEqual(app.writes().length, 1, 'one show write, no season PATCHes');
 });
@@ -218,8 +218,8 @@ test('render: Coming Soon has Skip only — no status menu, no watch control, no
   const html = tbody(app) + cards(app);
   assert.ok(html.includes('Today'));
   assert.ok(html.includes(`setSeasonSkipped('${s.rows[0].id}', true)`));
-  assert.ok(!/<select|toggleWatch\(|delRow\(|setShowStatusById\(/.test(html));
-  assert.ok(html.includes('⏳ Pending'), 'the show status is shown as a label');
+  assert.ok(!/<select|toggleWatch\(|delRow\(|setShowStateById\(/.test(html));
+  assert.ok(html.includes('>To Watch<'), 'the show status is shown as a label (a former Pending show is To Watch, marked New)');
   await app.ctx.setSeasonSkipped(s.rows[0].id, true); await settle();
   assert.ok(app.writes().some(r => r.url.endsWith('/rpc/set_season_skipped')));
   assert.ok(!tbody(app).includes(`setSeasonSkipped('${s.rows[0].id}'`));
@@ -236,7 +236,7 @@ test('All TV and All Movies: × on a catalog season means Skip; a catalog film i
   app.el('fStatus').value = 'all'; app.ctx.renderTable();
   app.ctx.toggleDerivedShow(tvRow.show_id); await settle();
   const html = tbody(app);
-  assert.ok(html.includes(`setShowStatusById('${tvRow.show_id}'`));
+  assert.ok(html.includes(`setShowStateById('${tvRow.show_id}', { status: this.value })`));
   assert.ok(html.includes(`setSeasonSkipped('${tvRow.id}', true)`));
   assert.strictEqual(app.get(`editPolicyOf(derivedData.rows.find(r => r.id === ${JSON.stringify(tvRow.id)})).deleteEffect`), 'skip', 'a catalog entry (governed show, listed key)');
   await app.ctx.delRowInView(tvRow.id); await settle();
@@ -257,7 +257,7 @@ test('All TV groups by show_id with the show control; expanded seasons have Skip
   app.ctx.switchView('alltv'); await settle();
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   const html = tbody(app);
-  assert.ok(html.includes(`setShowStatusById('${s.show.id}'`));
+  assert.ok(html.includes(`setShowStateById('${s.show.id}', { status: this.value })`));
   assert.ok(html.includes(`setSeasonSkipped('${s.rows[1].id}', true)`));
   assert.ok(html.includes(`toggleWatch('${s.rows[1].id}')`));
   assert.ok(!html.includes(`setStatus('${s.rows[0].id}'`), 'no row-level status for a season');

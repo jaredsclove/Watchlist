@@ -1,20 +1,48 @@
-// The Stage 5 page writes only to a database whose phase it has read
-// (stage5_capabilities): coexistence or contracted. A missing or unrecognized phase
-// authorizes nothing; an unknown one is read again (GET) once before a write. The
-// refusal is raised before anything is sent and is formatted as a database refusal
-// (code update_required), so every caller reports that nothing was changed.
-const STAGE5_WRITABLE_PHASES = ['coexistence', 'contracted'];
+// The page writes only to a database whose phase it has read (stage5_capabilities):
+// the B4/B5 phase (contracted-b45). Any other phase authorizes nothing; an unknown one
+// is read again (GET) once before a write. The refusal is raised before anything is
+// sent and is formatted as a database refusal (code update_required), so every caller
+// reports that nothing was changed.
+const STAGE5_WRITABLE_PHASES = ['contracted-b45'];
+const STATE_MISMATCH_TEXT = 'This page and the database don’t match (the database may have been updated or rolled back), so nothing was changed. Reload the page.';
+// Once a B4/B5 function is missing or a read lacks the B4/B5 columns, this page stops writing
+// (and makes no backup or restore) until it is reloaded. A later capability read that still
+// says B4/B5 — the API's schema cache lagging behind the database, or a database rolled back
+// and changed again — never resumes it: only a reload starts from a fresh state.
+let b45Stopped = false;
+function stopB45Writes() {
+  b45Stopped = true;
+  stage5Phase = null;
+  const el = typeof document !== 'undefined' && document.getElementById('phaseBanner');
+  if (el) el.innerHTML = `<div class="error-banner">⚠️ ${esc(STATE_MISMATCH_TEXT)} Until then this page changes nothing.</div>`;
+}
+// Whether this page may write to a database whose capability reads cap.
+function pageMayWrite(cap) {
+  return !b45Stopped && !!cap && STAGE5_WRITABLE_PHASES.includes(cap.phase);
+}
 function stage5Refusal(text) {
   return new Error(`Supabase error 412: ${JSON.stringify({ code: 'P0001', details: null, hint: null, message: `update_required: ${text}` })}`);
 }
 async function requireWritablePhase() {
+  if (b45Stopped) throw stage5Refusal(STATE_MISMATCH_TEXT);
   if (STAGE5_WRITABLE_PHASES.includes(stage5Phase)) return stage5Phase;
   let cap;
   try { cap = await stage5Capabilities(); }
   catch (e) { throw stage5Refusal('The database’s update state couldn’t be read, so nothing was changed. Try again.'); }
-  stage5Phase = cap && STAGE5_WRITABLE_PHASES.includes(cap.phase) ? cap.phase : null;
-  if (!stage5Phase) throw stage5Refusal('This page needs a database update that hasn’t been made yet, so nothing was changed.');
+  stage5Phase = pageMayWrite(cap) ? cap.phase : null;
+  if (!stage5Phase) throw stage5Refusal(cap ? STATE_MISMATCH_TEXT : 'This page needs a database update that hasn’t been made yet, so nothing was changed.');
   return stage5Phase;
+}
+
+// A read the B4/B5 page can't show: shows or films without the B4/B5 columns (the database
+// isn't, or is no longer, in the B4/B5 phase). The view then shows Retry, offers no edit,
+// and the page stops writing until it is reloaded.
+function requireB45Shape(rows, field) {
+  if ((rows || []).some(r => r && !(field in r))) {
+    stopB45Writes();
+    throw new Error(STATE_MISMATCH_TEXT);
+  }
+  return rows;
 }
 
 async function sbFetch(method, path, body) {
@@ -31,6 +59,12 @@ async function sbFetch(method, path, body) {
   });
   if (!res.ok) {
     const err = await res.text();
+    // A B4/B5 function that doesn't exist: the database isn't (or is no longer) in this
+    // page's phase. Nothing ran; the page stops writing until it is reloaded.
+    if (res.status === 404 && /^rpc\/[a-z0-9_]+_b45$/.test(path) && /PGRST202/.test(err)) {
+      stopB45Writes();
+      throw stage5Refusal(STATE_MISMATCH_TEXT);
+    }
     throw new Error(`Supabase error ${res.status}: ${err}`);
   }
   const text = await res.text();

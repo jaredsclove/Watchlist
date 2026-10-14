@@ -19,7 +19,7 @@ const season = { id: RID, collection: 'disney', title: 'Andor', item_key: 'andor
   display_date: 'Jan 1, 2020', status: 'confirmed', watched: false, skipped: false, show_id: SID, tmdb_id: null, media_type: null, season_number: null,
   watch_with: [], collections: [], created_at: TS };
 const LINKS = r => r.method === 'GET' && r.url.includes('/library_catalog_shows?');
-async function boot(phase = 'contracted') {
+async function boot(phase = 'contracted-b45') {
   const app = await createApp({ tvShows: [andor], rows: [season], stage5: phase });
   app.ctx.switchView('alltv'); await settle();
   return app;
@@ -34,7 +34,8 @@ async function cross(app) {
 }
 const isSkip = out => out.sent.length === 1 && out.sent[0] === 'set_season_skipped' && out.stored && out.stored.skipped === true;
 
-for (const phase of ['coexistence', 'contracted']) {
+// (Since B4/B5 the page reads only the B4/B5 database: tests/b45-compat.test.js covers the others.)
+for (const phase of ['contracted-b45']) {
   test(`(${phase}) an older library read that finishes after a newer view read never replaces its governance: × still skips, never deletes`, async () => {
     const app = await boot(phase);
     assert.match(policy(app), /"deleteEffect":"skip"/);

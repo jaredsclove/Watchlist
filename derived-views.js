@@ -75,6 +75,11 @@ function compareTitles(a, b) {
 // next season and whether it is Up to date (none of its remaining seasons has
 // aired). Up to date is a state, not a stored status. Both lists are A–Z by
 // title, then show id. `shows` is a Map or list of tv_shows rows.
+// B4/B5 §4.7: a show whose stored seasons are all skipped isn't listed; a show marked
+// ended with nothing left after its furthest watched season leaves too (it stays Watching
+// and is in All TV as "Caught up · Ended") unless its earlier-seasons range is active,
+// which brings it back with that range's first season as up next. Nothing here changes
+// a status, Ended or a watched mark.
 function deriveCurrentlyWatching(rows, shows, today) {
   const seasonsByShow = new Map();
   rows.forEach(r => {
@@ -86,8 +91,11 @@ function deriveCurrentlyWatching(rows, shows, today) {
   for (const show of (typeof shows.values === 'function' && typeof shows.get === 'function' ? shows.values() : shows)) {
     if (show.status !== 'watching') continue;
     const seasons = (seasonsByShow.get(show.id) || []).sort(compareSeasons);
-    if (seasons.length === 0) continue;
-    const upNext = upNextSeason(seasons);
+    if (seasons.length === 0 || allSeasonsSkipped(seasons)) continue;
+    const range = resumeRange(show, seasons);
+    const resuming = !!range && range.state === 'active';
+    if (!resuming && isEndedExit(show, seasons)) continue;
+    const upNext = resuming ? range.sequence[0] : upNextSeason(seasons);
     const item = {
       key: show.id,
       show,
@@ -95,7 +103,8 @@ function deriveCurrentlyWatching(rows, shows, today) {
       seasons,
       upNext,
       upNextReleased: upNext ? isReleasedRow(upNext, today) : false,
-      upToDate: isShowUpToDate(seasons, today)
+      upToDate: !resuming && isShowUpToDate(seasons, today),
+      resume: range
     };
     (item.upToDate ? upToDate : active).push(item);
   }
@@ -125,7 +134,12 @@ function deriveAllTv(rows, shows, today) {
   for (const show of showMap.values()) {
     const seasons = (seasonsByShow.get(show.id) || []).sort(compareSeasons);
     if (seasons.length === 0) continue;
-    const upNext = upNextSeason(seasons);
+    const range = resumeRange(show, seasons);
+    const resuming = !!range && range.state === 'active';
+    const upNext = resuming ? range.sequence[0] : upNextSeason(seasons);
+    // (Up to date keeps today's rule, §4.3: Ended plays no part; an active earlier-seasons range is in progress.)
+    const endedExit = !resuming && isEndedExit(show, seasons);
+    const allSkipped = allSeasonsSkipped(seasons);
     items.push({
       key: show.id,
       show,
@@ -133,7 +147,10 @@ function deriveAllTv(rows, shows, today) {
       seasons,
       upNext,
       upNextReleased: upNext ? isReleasedRow(upNext, today) : false,
-      upToDate: show.status === 'watching' && isShowUpToDate(seasons, today)
+      upToDate: show.status === 'watching' && !resuming && isShowUpToDate(seasons, today),
+      resume: range,
+      endedExit,
+      allSkipped
     });
   }
   items.sort((a, b) => compareTitles(a.title, b.title)
@@ -264,9 +281,11 @@ function tvRowsFilter() {
 // Paginated, exact-count-checked reads of every TV season, every show and the
 // catalog governance. GET only: no seeding, no TBA refresh. Refetched each time a
 // view is entered.
+// Returns true once the view shows a complete read, false when the read failed (Retry is
+// shown), null when a newer read or another view took over.
 async function loadDerivedView() {
   const viewId = activeViewId;
-  if (!viewId) return;
+  if (!viewId) return null;
   const seq = ++derivedLoadSeq;
   document.getElementById('statsRow').innerHTML = '';
   holdViewFilters(viewId); // a reload or Retry keeps this visit's filters (browse-views.js)
@@ -276,19 +295,23 @@ async function loadDerivedView() {
   const showsRead = typeof matchReadStart === 'function' ? matchReadStart('shows', '*') : null; // tracked (tmdb-match.js)
   try {
     const [rows, shows, gov] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows'), readGovernance()]);
+    requireB45Shape(shows, 'priority');
+    requireB45Shape(rows, 'priority');
     publishAllTvShows(showsRead, shows);
     if (showsRead) matchReadSettle(showsRead, null);
-    if (seq !== derivedLoadSeq || activeViewId !== viewId) return;
+    if (seq !== derivedLoadSeq || activeViewId !== viewId) return null;
     publishGovernance(governanceCovers(gov, rows, shows));
     derivedData = { rows: rows.filter(isTvViewRow), loaded: true };
     renderFilters();
     renderTable();
+    return true;
   } catch(e) {
     console.error(e);
     if (showsRead && showsRead.state === 'pending') matchReadSettle(showsRead, e);
-    if (seq !== derivedLoadSeq || activeViewId !== viewId) return;
+    if (seq !== derivedLoadSeq || activeViewId !== viewId) return null;
     showError(`Couldn't load every TV row, so nothing is shown rather than an incomplete list. ${e.message}`);
     paintDerivedMessage('Failed to load.', true);
+    return false;
   }
 }
 
@@ -299,7 +322,22 @@ function paintDerivedMessage(text, withRetry) {
 }
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
-// What a derived view's theme choices are drawn from: every show (with all its
+// What a derived view's category, priority and marker choices are drawn from: every show
+// the view lists before any filter (Coming Soon: the shows of its seasons).
+function derivedFilterRecords() {
+  if (!derivedData || !derivedData.loaded) return [];
+  const today = localTodayStr();
+  if (activeViewId === 'comingsoon') {
+    const { dated, tba } = deriveComingSoon(derivedData.rows, tvShowsById, today);
+    return dated.concat(tba).map(r => showOfRow(r)).filter(Boolean);
+  }
+  const items = activeViewId === 'watching'
+    ? (({ active, upToDate }) => active.concat(upToDate))(deriveCurrentlyWatching(derivedData.rows, tvShowsById, today))
+    : deriveAllTv(derivedData.rows, tvShowsById, today).items;
+  return items.map(x => x.show);
+}
+
+// What a derived view's original-label choices are drawn from: every show (with all its
 // seasons) or season the view lists before any filter.
 function derivedThemeChoices() {
   if (!derivedData || !derivedData.loaded) return [];
@@ -323,10 +361,10 @@ function renderDerivedFilters() {
   // Show status (All TV only); the default hides Skipped shows.
   const statusSelect = activeViewId === 'alltv'
     ? `
-      <select id="fStatus" onchange="renderTable()">
+      <select id="fStatus" onchange="renderTable()" aria-label="Status">
         <option value="">All (except Skipped)</option>
         <option value="all">All statuses</option>
-        ${TV_STATUS_ORDER.map(s => `<option value="${s}">${esc(statusOptionLabel(s))}${s === 'skipped' ? '' : ' only'}</option>`).join('')}
+        ${TV_STATUS_ORDER.map(s => `<option value="${s}">${esc(plainStatusLabel(s))}</option>`).join('')}
       </select>`
     : '';
   // All TV only: the Shows / Seasons switch (outside the collapsible panel) and,
@@ -351,7 +389,10 @@ function renderDerivedFilters() {
       <select id="fProgress" onchange="renderTable()" aria-label="Progress" title="Which shows to list by their seasons’ watched state (Shows only)">${Object.entries(ALLTV_PROGRESS_LABELS).map(([value, text]) =>
         `<option value="${value}">${text}</option>`).join('')}</select>`
     : '';
-  const themeSelect = themeFilterSelectHtml(derivedThemeChoices(), 'All networks / themes', 'Network or theme');
+  const themeSelect = themeFilterSelectHtml(derivedThemeChoices());
+  // B4: one select per category (shows' own metadata; seasons inherit), priority and markers.
+  const categorySelects = categoryFilterSelectsHtml(derivedFilterRecords());
+  const stateSelects = priorityFilterSelectHtml() + markerFilterChecksHtml();
   // Year (All TV only, Stage 4b): from every season the view lists before filtering.
   const yearSelect = activeViewId === 'alltv' && derivedData && derivedData.loaded
     ? yearFilterSelectHtml(deriveAllTv(derivedData.rows, tvShowsById, localTodayStr()).items.flatMap(x => x.seasons)) : '';
@@ -362,7 +403,7 @@ function renderDerivedFilters() {
     </button>
     <div class="filters-inner">
       <span class="filter-label">Filter:</span>
-      <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" oninput="renderTable()">${statusSelect}${themeSelect}${yearSelect}${progressSelect}${seasonVisSelect}
+      <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" oninput="renderTable()">${statusSelect}${stateSelects}${categorySelects}${themeSelect}${yearSelect}${progressSelect}${seasonVisSelect}
     </div>
   `;
   filtersRowEl.dataset.tab = tag;
@@ -385,7 +426,10 @@ function renderDerivedTable() {
   const val = id => document.getElementById(id)?.value || ''; // a control that isn't shown doesn't filter
   const fSearch = val('fSearch').trim().toLowerCase();
   const fTheme = val('fTheme');
-  const keep = x => !fSearch || (x.title || '').toLowerCase().includes(fSearch);
+  const cats = categoryFilterValues(), fPriority = val('fPriority'), markers = markerFilterValues();
+  // Search, priority, markers and categories, on the show (a season by its show).
+  const showKeep = show => !!show && categoryMatches(metadataOf(show), cats) && priorityMatches(show.priority, fPriority) && markerMatches(show, markers);
+  const keep = x => (!fSearch || (x.title || '').toLowerCase().includes(fSearch)) && showKeep(x.show || showOfRow(x));
   updateDerivedTableHeader();
   if (activeViewId === 'comingsoon') renderComingSoon(today, r => keep(r) && themeMatchesRow(r, fTheme));
   else if (activeViewId === 'alltv') renderAllTv(today, keep, val('fStatus'), fTheme, val('fProgress'), val('fYear'));
@@ -396,10 +440,10 @@ function updateDerivedTableHeader() {
   const thead = document.getElementById('tableHead');
   if (!thead) return;
   const heads = {
-    comingsoon: `<tr><th>Show &amp; Season</th><th>Theme</th><th>Premiere</th><th>Status</th><th></th></tr>`,
-    alltv: `<tr><th>Show</th><th>Theme</th><th>Next</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`,
-    alltvSeasons: `<tr><th>Show &amp; Season</th><th>Theme</th><th>Premiere</th><th>Show status</th><th>Watched</th><th></th></tr>`,
-    watching: `<tr><th>Show</th><th>Theme</th><th>Up next</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`
+    comingsoon: `<tr><th>Show &amp; Season</th><th>Categories</th><th>Premiere</th><th>Status</th><th></th></tr>`,
+    alltv: `<tr><th>Show</th><th>Categories</th><th>Next</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`,
+    alltvSeasons: `<tr><th>Show &amp; Season</th><th>Categories</th><th>Premiere</th><th>Show status</th><th>Watched</th><th></th></tr>`,
+    watching: `<tr><th>Show</th><th>Categories</th><th>Up next</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`
   };
   const key = activeViewId === 'alltv' && allTvPresentation === 'seasons' ? 'alltvSeasons' : activeViewId;
   if (heads[key]) thead.innerHTML = heads[key];
@@ -438,7 +482,9 @@ function renderCurrentlyWatching(today, keep) {
     [shownUpToDate.length, 'Up to date']
   ]);
 
-  let html = '', cardHtml = '';
+  const dismissAll = dismissAllNewHtml(shownActive.concat(derivedSectionOpen.uptodate ? shownUpToDate : [])
+    .filter(x => x.show.catalog_new).map(x => ({ kind: 'show', id: x.show.id })));
+  let html = dismissAll.row, cardHtml = dismissAll.card;
   shownActive.forEach(show => {
     const out = derivedShowHtml(show, today);
     html += out.row;
@@ -490,7 +536,8 @@ function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '', fYear = 
     [shown.filter(x => x.upToDate).length, 'Up to date']
   ]);
 
-  let html = '', cardHtml = '';
+  const dismissAll = dismissAllNewHtml(shown.filter(x => x.show.catalog_new).map(x => ({ kind: 'show', id: x.show.id })));
+  let html = dismissAll.row, cardHtml = dismissAll.card;
   const notListed = unlinked + missingShow;
   if (notListed > 0) {
     const msg = `⚠️ ${notListed} TV season${notListed === 1 ? ' isn’t' : 's aren’t'} linked to a loaded show, so ${notListed === 1 ? 'it isn’t' : 'they aren’t'} listed here.`;
@@ -577,17 +624,18 @@ function renderAllTvSeasons(today, items, shown, notListed, fTheme = '', fYear =
 // shown as stored and labelled "date needs review", never as aired.
 function allTvSeasonRowHtml(r, today, needsReview) {
   const status = displayStatus(r);
-  const rowClass = isOffList(r) ? 'row-skipped' : status === 'maybe' ? 'row-maybe' : '';
+  const show = showOfRow(r) || {};
+  const rowClass = isOffList(r) ? 'row-skipped' : '';
   const dated = !needsReview && !isTbaRow(r);
   const todayTag = dated && r.date_sort === today ? '<span class="today-tag">Today</span>' : '';
   const upcomingTag = dated && r.date_sort > today ? '<span class="upcoming-tag">Upcoming</span>' : '';
   const reviewTag = needsReview ? '<span class="review-tag">date needs review</span>' : '';
   const statusPill = `<span class="status-pill s-${status}" title="Show status — applies to every season of ${esc(r.title)}. Switch to Shows to change it.">${esc(statusOptionLabel(status))}</span>`;
   const releaseOpts = { requireReleased: true, today };
-  const badges = themeBadgeHtml(rowCatalogOf(r), r.theme, r.id);
+  const badges = metadataChipsHtml(metadataOf(r), r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
   const row = `<tr class="${rowClass}">
       <td>
-        <span class="show-title">${esc(r.title)}</span>
+        ${priorityMarkHtml(show.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(show.priority, true)}
         <span class="season-lbl"> · ${esc(r.season)}</span>
         ${todayTag}
       </td>
@@ -600,7 +648,7 @@ function allTvSeasonRowHtml(r, today, needsReview) {
   const card = `<div class="item-card ${rowClass}">
       <div class="card-top">
         <div class="card-title-block">
-          <span class="card-title">${esc(r.title)}</span>
+          <span class="card-title">${priorityMarkHtml(show.priority)}${esc(r.title)}${priorityMarkHtml(show.priority, true)}</span>
           <span class="card-season">${esc(r.season)}</span>
           ${todayTag}
         </div>
@@ -630,11 +678,15 @@ function neutralNextLabel(upNext, released) {
 function derivedShowHtml(item, today) {
   const { key, show, seasons, upNext, upToDate } = item;
   const inProgress = !upToDate && show.status === 'watching' && !!upNext;
-  const dimClass = show.status === 'skipped' ? ' row-skipped' : show.status === 'maybe' ? ' row-maybe' : '';
+  const dimClass = show.status === 'skipped' ? ' row-skipped' : '';
   const isExpanded = expandedShows.has(key);
   const keyArg = esc(key).replace(/'/g, "\\'");
   const theme = (upNext || seasons[0]).theme;
-  const badges = themeBadgeHtml(showCatalogOf(show), theme, key);
+  const badges = metadataChipsHtml(show, key, themeBadgeHtml(showCatalogOf(show), theme, key));
+  const range = item.resume;
+  const resumeTag = range && range.state === 'active' && range.start
+    ? ` <span class="state-tag resume-tag" title="Watching earlier seasons">Earlier seasons from ${esc(range.start.season)}</span>` : '';
+  const titleHtml = `${priorityMarkHtml(show.priority)}<span class="show-title">${esc(item.title)}</span>${priorityMarkHtml(show.priority, true)}${stateTagsHtml(show, 'show')}${resumeTag}`;
 
   const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;
@@ -645,12 +697,26 @@ function derivedShowHtml(item, today) {
     : '';
 
   const upcomingTag = upNext && !item.upNextReleased ? '<span class="upcoming-tag">Upcoming</span>' : '';
-  const upNextLabel = upToDate
-    ? upToDateNextLabel(upNext)
-    : inProgress
-      ? `${esc(upNext.season)} · ${esc(upNext.display_date)}${upcomingTag}`
-      : neutralNextLabel(upNext, item.upNextReleased);
-  const upToDatePill = upToDate ? ' <span class="status-pill s-caughtup">Up to date</span>' : '';
+  const gap = gapSeasons(seasons);
+  const gapNote = gap.length ? ` <span class="gap-note">${gap.length} earlier season${gap.length === 1 ? '' : 's'} unwatched</span>` : '';
+  // Ended is on, yet a stored season hasn't aired: informational (§4.3); it changes nothing.
+  const upcomingNote = show.ended && seasons.some(s => !s.skipped && !isReleasedRow(s, today))
+    ? ' <span class="gap-note">Marked ended, but an upcoming season is listed</span>' : '';
+  // F5 amendment (owner, 2026-10-13; display only): a show labelled "Caught up · Ended" or
+  // "All seasons skipped" doesn't also show the "Up to date" pill. Up to date itself (its
+  // calculation, the stats count, Currently Watching) is unchanged.
+  const stateLabel = item.endedExit ? 'ended' : item.allSkipped && activeViewId === 'alltv' ? 'skipped' : null;
+  const upNextLabel = stateLabel === 'ended'
+    ? `<span class="caught-ended">Caught up · Ended</span>${gapNote}`
+    : stateLabel === 'skipped'
+      ? '<span class="confirmed-lbl">All seasons skipped</span>'
+      : upToDate
+        ? upToDateNextLabel(upNext)
+        : inProgress
+          ? `${esc(upNext.season)} · ${esc(upNext.display_date)}${upcomingTag}`
+          : neutralNextLabel(upNext, item.upNextReleased);
+  const nextCell = upNextLabel + upcomingNote;
+  const upToDatePill = upToDate && !stateLabel ? ' <span class="status-pill s-caughtup">Up to date</span>' : '';
   const releaseOpts = { requireReleased: true, today };
   // All TV (Stage 4b): an expanded show also offers Match (an eligible row), Delete (a row
   // that isn't a built-in catalog entry; those have Skip / Keep) and Add season.
@@ -659,28 +725,30 @@ function derivedShowHtml(item, today) {
     deleteTitle: 'Delete this season', requireReleased: true, today });
   const addSeasonBtn = allTv ? `<button class="btn btn-link" onclick="event.stopPropagation(); openAddSeason('${keyArg}')">+ Add season…</button>` : '';
   const watchCell = inProgress ? seasonWatchControlHtml(upNext, { ...releaseOpts, stopPropagation: true }, false) : '<span class="confirmed-lbl">—</span>';
+  const actions = isExpanded ? showActionsHtml(item, keyArg) : '';
 
   let row = `<tr class="show-group-row derived-show-row${dimClass}" onclick="toggleDerivedShow('${keyArg}')">
       <td>
         <div class="show-title-row">
-          <div class="show-title-left"><span class="show-title">${esc(item.title)}</span></div>
+          <div class="show-title-left">${titleHtml}</div>
           <span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span>
         </div>
       </td>
       <td>${badges}</td>
-      <td class="date-cell">${upNextLabel}</td>
-      <td>${showStatusSelectHtml(show, { stopPropagation: true })}${upToDatePill}</td>
+      <td class="date-cell">${nextCell}</td>
+      <td>${showStatusSelectHtml(show, { stopPropagation: true })} ${prioritySelectHtml(show, 'show', { stopPropagation: true })}${upToDatePill}</td>
       <td>${watchCell}</td>
       <td class="card-date">${progressLabel}${progressBarHtml}</td>
     </tr>`;
-  if (isExpanded) row += seasons.map(r => seasonSubRowHtml(r, subOpts(r))).join('')
+  if (isExpanded) row += `<tr class="sub-row show-actions-row"><td style="padding-left:28px" colspan="6" onclick="event.stopPropagation()">${actions}</td></tr>`
+    + seasons.map(r => seasonSubRowHtml(r, subOpts(r))).join('')
     + (addSeasonBtn ? `<tr class="sub-row"><td style="padding-left:28px" colspan="6">${addSeasonBtn}</td></tr>` : '');
 
   const card = `<div class="item-card show-group-card${dimClass}">
       <div class="card-top" onclick="toggleDerivedShow('${keyArg}')" style="cursor:pointer">
         <div class="card-title-block">
-          <span class="card-title">${esc(item.title)}</span>
-          <span class="card-season">${upNextLabel}</span>
+          <span class="card-title">${titleHtml}</span>
+          <span class="card-season">${nextCell}</span>
         </div>
         <span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span>
       </div>
@@ -690,13 +758,39 @@ function derivedShowHtml(item, today) {
         ${progressBarHtml}
       </div>
       <div class="card-actions" onclick="event.stopPropagation()">
-        ${showStatusSelectHtml(show)}${upToDatePill}
+        ${showStatusSelectHtml(show)} ${prioritySelectHtml(show, 'show')}${upToDatePill}
         ${inProgress ? seasonWatchControlHtml(upNext, releaseOpts, false) : ''}
       </div>
-      ${isExpanded ? `<div class="card-subseasons">${seasons.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}${addSeasonBtn ? `<div class="card-subseason-row">${addSeasonBtn}</div>` : ''}</div>` : ''}
+      ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${actions}</div>${seasons.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}${addSeasonBtn ? `<div class="card-subseason-row">${addSeasonBtn}</div>` : ''}</div>` : ''}
     </div>`;
 
   return { row, card };
+}
+
+// An expanded show's own actions (B4/B5): Details, Show ended, the markers, and the
+// earlier-seasons range (Watch earlier seasons; the chooser; Stop).
+function showActionsHtml(item, keyArg) {
+  const { show, seasons } = item;
+  const range = item.resume;
+  const gap = gapSeasons(seasons);
+  const parts = [`<button class="btn btn-link" onclick="openDetails('show', '${keyArg}', this)">Details…</button>`,
+    `<label class="ended-check"><input type="checkbox"${show.ended ? ' checked' : ''} onchange="setShowStateById('${keyArg}', { ended: this.checked })"> Show ended</label>`];
+  if (show.catalog_new) parts.push(`<button class="btn btn-link" onclick="dismissShowNew('${keyArg}')">Dismiss “New”</button>`);
+  if (show.status_review) parts.push(`<button class="btn btn-link" onclick="keepCurrentStatus('show', '${keyArg}')">Keep current status</button>`);
+  if (range) {
+    const note = range.state === 'active' ? `Watching earlier seasons from ${esc(range.start ? range.start.season : '')}`
+      : range.state === 'complete' ? 'Earlier seasons done' : 'Earlier-seasons range no longer applies; choose again or stop';
+    parts.push(`<span class="gap-note">${note}</span> <button class="btn btn-link" onclick="stopResume('${keyArg}')">Stop watching earlier seasons</button>`);
+  }
+  if (gap.length && !(range && range.state === 'active')) {
+    const label = show.status === 'watching' ? 'Watch earlier seasons…' : 'Start watching earlier seasons…';
+    parts.push(`<button class="btn btn-link" aria-expanded="${resumePickerFor === show.id}" onclick="openResumePicker('${keyArg}')">${label}</button>`);
+    if (resumePickerFor === show.id) {
+      parts.push(`<div class="resume-picker" role="group" aria-label="Start from">${gap.map(r =>
+        `<button class="btn" onclick="startResume('${keyArg}', '${esc(r.id)}')">Start from ${esc(r.season)}</button>`).join(' ')}</div>`);
+    }
+  }
+  return `<div class="show-actions-inner">${parts.join(' ')}</div>`;
 }
 
 // What is next for an Up to date show, from what's stored in the list (no TMDB
@@ -763,17 +857,19 @@ function renderComingSoon(today, keep) {
 // Soon is about availability, so there is no status menu, watch control or delete.
 function comingSoonRowHtml(r, today) {
   const status = displayStatus(r);
-  const rowClass = status === 'maybe' ? 'row-maybe' : '';
+  const show = showOfRow(r) || {};
+  const rowClass = '';
+  const chips = metadataChipsHtml(metadataOf(r), r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
   const todayTag = r.date_sort === today ? '<span class="today-tag">Today</span>' : '';
   const statusPill = `<span class="status-pill s-${status}" title="Show status">${esc(statusOptionLabel(status))}</span>`;
   const skip = seasonSkipButtonHtml(r);
   const row = `<tr class="${rowClass}">
       <td>
-        <span class="show-title">${esc(r.title)}</span>
+        ${priorityMarkHtml(show.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(show.priority, true)}
         <span class="season-lbl"> · ${esc(r.season)}</span>
         ${todayTag}
       </td>
-      <td>${themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)}</td>
+      <td>${chips}</td>
       <td class="date-cell">${esc(r.display_date)}</td>
       <td>${statusPill}</td>
       <td>${skip}</td>
@@ -781,13 +877,13 @@ function comingSoonRowHtml(r, today) {
   const card = `<div class="item-card ${rowClass}">
       <div class="card-top">
         <div class="card-title-block">
-          <span class="card-title">${esc(r.title)}</span>
+          <span class="card-title">${priorityMarkHtml(show.priority)}${esc(r.title)}${priorityMarkHtml(show.priority, true)}</span>
           <span class="card-season">${esc(r.season)}</span>
           ${todayTag}
         </div>
       </div>
       <div class="card-meta">
-        ${themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)}
+        ${chips}
         <span class="card-date">${esc(r.display_date)}</span>
       </div>
       <div class="card-actions">${statusPill} ${skip}</div>

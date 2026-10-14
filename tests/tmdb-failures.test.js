@@ -10,7 +10,7 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'refresh-shows.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'library.js'];
+const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'metadata.js', 'refresh-shows.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'library.js'];
 const { createApp, settle } = require('./app-harness');
 
 // A fresh sandbox per test, as All Movies' "+ Add" panel with its tools prepared
@@ -33,9 +33,9 @@ function makeEnv({ tmdb, rows = [], checkboxes = [] }) {
     tmdbShowSpecials: false,
     tmdbFetch: async p => { log.tmdbCalls++; return tmdb(p); },
     sbFetch: async (method, p) => { throw new Error(`unexpected ${method} ${p}`); },
-    // Films are added through library_add_films (body: the films, recorded as sent).
+    // Films are added through library_add_films_b45 (body: the films, recorded as sent).
     sbRpc: async (name, body) => {
-      if (name !== 'library_add_films') throw new Error(`unexpected rpc ${name}`);
+      if (name !== 'library_add_films_b45') throw new Error(`unexpected rpc ${name}`);
       log.posts.push({ table: `rpc/${name}`, body: JSON.parse(JSON.stringify(body.p_films)) });
       const inserted = body.p_films.map((r, i) => ({ id: `new-${i}`, ...r }));
       return { results: inserted.map((r, i) => ({ index: i, outcome: 'inserted', id: r.id })), inserted };

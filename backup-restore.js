@@ -58,13 +58,14 @@ async function stage5Capabilities() {
   }
 }
 
-// Which backup format this page makes and restores: 4, and only on a contracted
-// database. Any other phase (coexistence, none, unknown) is refused, never guessed:
-// format 1–3 export is retired (the 5c clean-up).
+// Which backup format this page makes and restores: 5, and only on a database in the
+// B4/B5 phase. Any other phase (contracted 5c, coexistence, none, unknown) is refused,
+// never guessed: this page makes no format 4 (it would leave out every B4/B5 value).
 async function detectBackupFormat() {
   const cap = await stage5Capabilities();
-  if (cap && cap.phase === 'contracted') return 4;
-  throw new Error('This page makes backups only of the updated database (format 4), so no file was made and nothing was changed.');
+  if (b45Stopped) throw new Error(STATE_MISMATCH_TEXT + ' No file was made.');
+  if (cap && cap.phase === B45_PHASE) return 5;
+  throw new Error('This page makes backups only of a database in its own state (format 5), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
 }
 
 // At boot (doesn't hold up the first view): which phase this database is in. A database
@@ -72,9 +73,9 @@ async function detectBackupFormat() {
 async function loadStage5Capabilities() {
   try {
     const cap = await stage5Capabilities();
-    stage5Phase = cap && STAGE5_WRITABLE_PHASES.includes(cap.phase) ? cap.phase : null;
+    stage5Phase = pageMayWrite(cap) ? cap.phase : null;
     const el = document.getElementById('phaseBanner');
-    if (el) el.innerHTML = cap ? '' : '<div class="error-banner">⚠️ This page needs a database update that hasn’t been made yet. Your list may not load, and changes are refused until the update is made. Nothing will be changed.</div>';
+    if (el && !b45Stopped) el.innerHTML = cap ? '' : '<div class="error-banner">⚠️ This page needs a database update that hasn’t been made yet. Your list may not load, and changes are refused until the update is made. Nothing will be changed.</div>';
   } catch (e) { /* unknown: the backup and restore checks read it again */ }
 }
 
@@ -96,13 +97,13 @@ async function buildBackupObject() {
     catch (e) {
       // A read refused because the phase changed underneath it is the same case.
       const now = await stage5Capabilities().catch(() => undefined);
-      throw now !== undefined && !(now && now.phase === 'contracted') ? updated : e;
+      throw now !== undefined && !(now && now.phase === B45_PHASE) ? updated : e;
     }
     tables[table] = rows;
     rowCounts[table] = rows.length;
   }
   const after = await stage5Capabilities();
-  if (!after || after.phase !== 'contracted') throw updated;
+  if (!after || after.phase !== B45_PHASE || b45Stopped) throw updated;
   return {
     format: BACKUP_FORMAT,
     formatVersion,
@@ -217,15 +218,35 @@ const RESTORE_COLUMNS_V4 = {
   catalog_film_links: { id: 'uuid', catalog: 'text', entry_key: 'text', item_id: 'uuid', origin: 'text', created_at: 'timestamp' }
 };
 const BACKUP_FORMAT_V4 = { tables: Object.keys(RESTORE_COLUMNS_V4), columns: RESTORE_COLUMNS_V4 };
+// Format 5 (B4/B5): format 4 plus the viewing state (status codes To Watch / Watching /
+// Skipped for shows, To Watch / Skipped plus watched for films; priority; Show ended;
+// New from catalog; Needs status review; the old status kept as provenance), the
+// categorized metadata, and a show's earlier-seasons resume range. Season rows carry
+// none of the film values (NULL); films carry every one of them.
+const RESTORE_COLUMNS_V5 = {
+  ...RESTORE_COLUMNS_V4,
+  watchlist_items: {
+    ...RESTORE_COLUMNS_V4.watchlist_items, priority: 'text?', catalog_new: 'bool?', status_review: 'bool?', legacy_status: 'text?',
+    genres: 'text[]?', forms: 'text[]?', franchises: 'text[]?', companies: 'text[]?', genre_candidates: 'text[]?', metadata_owner_set: 'bool?'
+  },
+  tv_shows: {
+    ...RESTORE_COLUMNS_V4.tv_shows, priority: 'text', ended: 'bool', catalog_new: 'bool', status_review: 'bool', legacy_status: 'text?',
+    genres: 'text[]', forms: 'text[]', franchises: 'text[]', companies: 'text[]', genre_candidates: 'text[]', network: 'text?',
+    network_candidates: 'text[]', metadata_owner_set: 'bool', resume_start_season_id: 'uuid?', resume_end_season_id: 'uuid?'
+  }
+};
+const BACKUP_FORMAT_V5 = { tables: Object.keys(RESTORE_COLUMNS_V5), columns: RESTORE_COLUMNS_V5 };
 const CATALOG_GOVERNANCE_IDS = ['disney', '90day', 'sheridan'];
 const PRESENTATION_KEYS = ['disney', '90day', 'sheridan', 'truecrime'];
+const FORMAT4_CONVERTER_VERSION = 'b45.1';
 
-// The tables and columns of a format (4 here; 1–3 in backup-format3.js).
+// The tables and columns of a format (4 and 5 here; 1–3 in backup-format3.js).
 function backupSpec(formatVersion) {
-  return formatVersion === 4 ? BACKUP_FORMAT_V4 : legacyBackupSpec(formatVersion);
+  return formatVersion === 5 ? BACKUP_FORMAT_V5 : formatVersion === 4 ? BACKUP_FORMAT_V4 : legacyBackupSpec(formatVersion);
 }
 
 const TV_SHOW_STATUSES = ['confirmed', 'highpriority', 'watching', 'complete', 'pending', 'maybe', 'skipped'];
+const TV_SHOW_STATUSES_V5 = ['confirmed', 'watching', 'skipped'];
 
 // Returns why a value doesn't fit a RESTORE_COLUMNS type, or null if it does.
 function restoreValueProblem(type, v) {
@@ -301,17 +322,233 @@ function validateBackupRows(tables, formatVersion = 1) {
   report('watchlist_items identity shape (must be movie, TV season, or legacy with all three empty)', shapeProblems);
   report('custom_collections duplicate name', findDuplicates(tables.custom_collections.filter(r => r && typeof r === 'object'),
     r => typeof r.name === 'string' ? r.name : null, r => `"${r.name}"`));
-  if (formatVersion === 4) validateFormat4Rows(tables, items, report, rowLabel, findDuplicates);
+  if (formatVersion === 5) {
+    validateFormat4Rows(tables, items, report, rowLabel, findDuplicates, TV_SHOW_STATUSES_V5);
+    validateFormat5Rows(tables, items, report, rowLabel);
+  } else if (formatVersion === 4) validateFormat4Rows(tables, items, report, rowLabel, findDuplicates);
   else validateLegacyBackupRows(tables, formatVersion, report, rowLabel, findDuplicates);
   return errors;
+}
+
+// Format 5: what the database's B4/B5 checks enforce, before anything is sent. A film
+// carries every film value (its legacy status may be empty); a season row carries none;
+// statuses, priorities and provenance from their lists; label lists as the database
+// accepts them; a show's resume range is two different seasons of that same show, or none.
+function validateFormat5Rows(tables, items, report, rowLabel) {
+  const isFilm = r => r.media_type === 'movie' || (r.media_type == null && r.season === 'Film');
+  const shows = tables.tv_shows.filter(r => r && typeof r === 'object');
+  const labelsOk = v => Array.isArray(v) && JSON.stringify(labelList(v)) === JSON.stringify(v) && v.length <= METADATA_LIMITS.values;
+  const FILM_FIELDS = ['priority', 'catalog_new', 'status_review', 'genres', 'forms', 'franchises', 'companies', 'genre_candidates', 'metadata_owner_set'];
+  const LISTS = ['genres', 'forms', 'franchises', 'companies', 'genre_candidates'];
+  const filmProblems = [];
+  items.forEach((r, i) => {
+    if (isFilm(r)) {
+      const missing = FILM_FIELDS.filter(f => r[f] === null || r[f] === undefined);
+      if (missing.length) filmProblems.push(`${rowLabel(r, i)} is a film without ${missing.join(', ')}`);
+      if (!['confirmed', 'skipped'].includes(r.status)) filmProblems.push(`${rowLabel(r, i)} has film status ${JSON.stringify(r.status)}`);
+      if (r.priority != null && !PRIORITIES.includes(r.priority)) filmProblems.push(`${rowLabel(r, i)} has priority ${JSON.stringify(r.priority)}`);
+      if (r.legacy_status != null && !['pending', 'highpriority', 'maybe', 'watching', 'complete'].includes(r.legacy_status)) filmProblems.push(`${rowLabel(r, i)} has legacy_status ${JSON.stringify(r.legacy_status)}`);
+      LISTS.forEach(f => { if (r[f] != null && !labelsOk(r[f])) filmProblems.push(`${rowLabel(r, i)} ${f} isn’t a valid label list`); });
+    } else {
+      const set = FILM_FIELDS.concat(['legacy_status']).filter(f => r[f] !== null && r[f] !== undefined);
+      if (set.length) filmProblems.push(`${rowLabel(r, i)} is a TV season but has ${set.join(', ')}`);
+    }
+  });
+  report('watchlist_items B4/B5 values', filmProblems);
+  const seasonsById = new Map(items.filter(r => r.show_id != null).map(r => [r.id, r]));
+  const showProblems = [];
+  shows.forEach((s, i) => {
+    if (!PRIORITIES.includes(s.priority)) showProblems.push(`${rowLabel(s, i)} has priority ${JSON.stringify(s.priority)}`);
+    if (s.legacy_status != null && !['pending', 'highpriority', 'maybe', 'complete'].includes(s.legacy_status)) showProblems.push(`${rowLabel(s, i)} has legacy_status ${JSON.stringify(s.legacy_status)}`);
+    LISTS.concat(['network_candidates']).forEach(f => { if (!labelsOk(s[f])) showProblems.push(`${rowLabel(s, i)} ${f} isn’t a valid label list`); });
+    if (s.network != null && (s.network !== s.network.trim() || !s.network || s.network.length > METADATA_LIMITS.length)) showProblems.push(`${rowLabel(s, i)} has network ${JSON.stringify(s.network)}`);
+    const a = s.resume_start_season_id, b = s.resume_end_season_id;
+    if ((a == null) !== (b == null) || (a != null && a === b)) showProblems.push(`${rowLabel(s, i)} has an incomplete earlier-seasons range`);
+    else if (a != null && [a, b].some(id => !seasonsById.has(id) || seasonsById.get(id).show_id !== s.id)) showProblems.push(`${rowLabel(s, i)} has an earlier-seasons range naming a season that isn’t one of its own`);
+  });
+  report('tv_shows B4/B5 values', showProblems);
+}
+
+// ─── Converting a format-4 document to format 5 ───────────────────────────────
+// Deterministic, with the plan's converter rules (metadata.js b45MapShowStatus /
+// b45MapFilmStatus): Pending → To Watch with New from catalog; High Priority / Maybe
+// Later → To Watch with High / Low priority; Complete (a show) → To Watch, Show ended,
+// Needs status review; a film's watching / complete → To Watch (its watched flag kept)
+// with Needs status review; the old status is kept as provenance. Every film keeps its
+// watched flag (a Skipped + Watched pair stays one). No metadata, no resume range. A
+// format-4 document converted from format 3 keeps its conversion record (source format 3,
+// the original file's hash) and its recovery section verbatim; a native format-4 file gets
+// its own record (source format 4) and never a recovery section. sourceSha256: of the
+// file's text, as read. Refuses (never a document) an unknown status.
+function convertFormat4To5(doc4, { sourceSha256 } = {}) {
+  const t = doc4.tables;
+  const isFilm = r => r.media_type === 'movie' || (r.media_type == null && r.season === 'Film');
+  const refusals = [];
+  const badShows = t.tv_shows.filter(s => !OLD_STATUSES.includes(s.status)).map(s => s.id);
+  const badFilms = t.watchlist_items.filter(r => isFilm(r) && !OLD_STATUSES.includes(r.status)).map(r => r.id);
+  if (badShows.length) refusals.push(`a show with an unknown status: ${badShows.slice(0, 5).join(', ')}`);
+  if (badFilms.length) refusals.push(`a film with an unknown status: ${badFilms.slice(0, 5).join(', ')}`);
+  if (refusals.length) return { refusals };
+  const tally = {};
+  const count = k => { tally[k] = (tally[k] || 0) + 1; };
+  const shows = t.tv_shows.map(s => {
+    if (s.status !== b45MapShowStatus(s.status).status || s.status === 'complete') count(`show:${s.status}`);
+    return { ...s, ...b45MapShowStatus(s.status), genres: [], forms: [], franchises: [], companies: [], genre_candidates: [], network: null,
+      network_candidates: [], metadata_owner_set: false, resume_start_season_id: null, resume_end_season_id: null };
+  });
+  const items = t.watchlist_items.map(r => {
+    if (!isFilm(r)) return { ...r, priority: null, catalog_new: null, status_review: null, legacy_status: null, genres: null, forms: null,
+      franchises: null, companies: null, genre_candidates: null, metadata_owner_set: null };
+    const m = b45MapFilmStatus(r.status);
+    if (m.legacy_status) count(`film:${r.status}`);
+    if (r.status === 'skipped' && r.watched) count('film:pair');
+    return { ...r, ...m, genres: [], forms: [], franchises: [], companies: [], genre_candidates: [], metadata_owner_set: false };
+  });
+  const tables = { ...t, watchlist_items: items, tv_shows: shows };
+  const doc = { format: doc4.format, formatVersion: 5, exportedAt: doc4.exportedAt,
+    rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
+  doc.conversion = doc4.conversion
+    ? { ...doc4.conversion, converter_version: `${doc4.conversion.converter_version}+${FORMAT4_CONVERTER_VERSION}` }
+    : { source_format: 4, source_exported_at: doc4.exportedAt, source_sha256: sourceSha256, converter_version: FORMAT4_CONVERTER_VERSION };
+  if (doc4.recovery) doc.recovery = doc4.recovery;
+  const review = shows.filter(s => s.status_review).map(s => s.title).concat(items.filter(r => r.status_review).map(r => r.title));
+  return { refusals: [], doc, summary: { tally, review, pairs: tally['film:pair'] || 0, fromFormat: doc4.conversion ? 3 : 4 } };
+}
+
+// A format-4 file read from disk may carry a conversion record and a recovery section only
+// as the page's own format-3 conversion writes them (source format 3, the file's hash, a
+// converter version; a recovery section only with them and only while the archive is
+// active). Anything else is refused before anything is sent.
+function format4SectionProblems(doc4, archiveActive) {
+  return sectionProblems(doc4, archiveActive, ['3']);
+}
+// The optional sections of a document about to be restored (format 4 from disk: conversion
+// source 3 only; format 5: source 3 or 4), checked as restore_backup checks them: the
+// conversion record's fields; a recovery section only with a format-3 conversion and an
+// active archive, of exactly the expected shape, and corresponding to the document's own rows.
+function sectionProblems(doc, archiveActive, sources) {
+  const problems = [];
+  const c = doc.conversion, r = doc.recovery;
+  if (c !== undefined && (!c || typeof c !== 'object' || !sources.includes(String(c.source_format)) || !/^[0-9a-f]{64}$/.test(c.source_sha256 || '')
+      || !c.converter_version || !c.source_exported_at)) problems.push('Its conversion record isn’t one this page writes.');
+  if (r !== undefined) {
+    if (c === undefined) problems.push('It has a recovery section without a conversion record.');
+    else if (c && String(c.source_format) !== '3') problems.push('It has a recovery section, which belongs only to a converted format-3 backup.');
+    if (!archiveActive) problems.push('It has a recovery section, and the recovery archive has been retired.');
+    problems.push(...recoverySectionProblems(doc));
+  }
+  return problems;
+}
+// ── recovery section check: begin (reads a file's recovery section only; sends nothing) ──
+// A recovery section against the document's own rows: restore_backup's shape, exact-field and
+// correspondence rules (db/b45_expand.sql), so a section the database would refuse never gets
+// an actionable confirmation. The database still checks everything again, in one transaction.
+const RECOVERY_STORAGE = ['disney', '90day', 'sheridan', 'othertv', 'truecrime', 'movies'];
+const RECOVERY_OTHERTV_FIELDS = ['collection', 'created_at', 'id', 'network', 'title', 'tmdb_id'];
+// The other-TV rows go into private.stage5_recovery_othertv (like othertv_shows: id uuid primary key,
+// tmdb_id integer, title / network text, created_at timestamptz, collection text, all NOT NULL,
+// one row per collection and tmdb_id) after restore_backup's own row checks; these mirror both.
+// The id: restore_backup's pattern (36 lowercase hex digits and hyphens) and PostgreSQL's uuid input
+// (32 hex digits, a hyphen only after a group of four). Returns the uuid's digits, or null.
+function recoveryUuidDigits(v) {
+  return typeof v === 'string' && /^[0-9a-f-]{36}$/.test(v) && /^[0-9a-f]{4}(?:-?[0-9a-f]{4}){7}$/.test(v) ? v.replace(/-/g, '') : null;
+}
+// tmdb_id: its text matches ^[0-9]+$ and fits an integer. Returns the number, or null.
+function recoveryTmdbId(v) {
+  const t = typeof v === 'string' ? v : Number.isInteger(v) ? String(v) : null;
+  if (t === null || !/^[0-9]+$/.test(t)) return null;
+  const n = Number(t);
+  return n <= 2147483647 ? n : null;
+}
+// created_at: an ISO 8601 date and time PostgreSQL reads as timestamptz — a real calendar date
+// (year 1–9999), hour 0–23, minute and second 0–59, optional fraction, optional offset within ±15:59.
+// (Stricter than PostgreSQL, which also reads other spellings; the page and the database write this one.)
+function recoveryTimestampOk(v) {
+  const m = typeof v === 'string'
+    && /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-](\d{2})(?::?(\d{2}))?)?$/.exec(v);
+  if (!m) return false;
+  const [y, mo, d, h, mi, sec, oh, om] = m.slice(1).map(x => (x === undefined ? 0 : Number(x)));
+  const days = [31, (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return y >= 1 && mo >= 1 && mo <= 12 && d >= 1 && d <= days[mo - 1] && h <= 23 && mi <= 59 && sec <= 59 && oh <= 15 && om <= 59;
+}
+// title: restore_backup reads it as text and refuses it blank (PostgreSQL's btrim trims spaces only).
+const recoveryTextOf = v => (v === null || v === undefined ? null : typeof v === 'string' ? v : JSON.stringify(v));
+const recoveryNoNul = v => typeof v !== 'string' || !v.includes('\u0000'); // PostgreSQL text can't hold U+0000
+function recoverySectionProblems(doc) {
+  const r = doc.recovery, t = doc.tables || {};
+  const keys = o => Object.keys(o).sort().join(',');
+  const isObj = o => !!o && typeof o === 'object' && !Array.isArray(o);
+  if (!isObj(r) || keys(r) !== 'othertv_shows,storage_map' || !isObj(r.storage_map) || keys(r.storage_map) !== 'items,personal_collections,shows'
+      || !Array.isArray(r.othertv_shows) || !['items', 'shows', 'personal_collections'].every(k => Array.isArray(r.storage_map[k]))) {
+    return ['Its recovery section isn’t one this page writes (its structure is malformed).'];
+  }
+  const sm = r.storage_map, out = [];
+  const exact = (list, fields, what) => { const bad = list.filter(x => !isObj(x) || keys(x) !== fields).length; if (bad) out.push(`${bad} recovery ${what} entr${bad === 1 ? 'y doesn’t' : 'ies don’t'} have exactly the expected fields.`); };
+  exact(sm.items, 'collection,id', 'item'); exact(sm.shows, 'collection,id', 'show'); exact(sm.personal_collections, 'id,legacy_source', 'collection');
+  exact(r.othertv_shows, RECOVERY_OTHERTV_FIELDS.join(','), 'other-TV');
+  if (out.length) return out;
+  const say = (n, text) => { if (n) out.push(`${n} ${text}`); };
+  const count = (xs, f) => xs.filter(f).length;
+  const items = t.watchlist_items || [], shows = t.tv_shows || [], cols = t.personal_collections || [];
+  const itemMap = new Map(sm.items.map(x => [x.id, x.collection])), showMap = new Map(sm.shows.map(x => [x.id, x.collection]));
+  const repeats = list => list.length - new Set(list.map(x => x.id)).size;
+  say(repeats(sm.items) + repeats(sm.shows), 'recovery entries name the same record twice.');
+  say(count(items, w => !itemMap.has(w.id)), 'saved rows have no recovery entry.');
+  say(count(shows, s => !showMap.has(s.id)), 'shows have no recovery entry.');
+  const itemIds = new Set(items.map(w => w.id)), showIds = new Set(shows.map(s => s.id));
+  say(count(sm.items, x => !itemIds.has(x.id)) + count(sm.shows, x => !showIds.has(x.id)), 'recovery entries name records that aren’t in the backup.');
+  say(count(sm.items.concat(sm.shows), x => !RECOVERY_STORAGE.includes(x.collection)), 'recovery entries name an unknown storage.');
+  const showCat = new Map((t.catalog_show_links || []).map(l => [l.show_id, l.catalog])), filmCat = new Map((t.catalog_film_links || []).map(l => [l.item_id, l.catalog]));
+  const builtin = c => ['disney', '90day', 'sheridan'].includes(c);
+  say(count(sm.shows, x => showIds.has(x.id) && (builtin(x.collection) !== showCat.has(x.id) || (showCat.has(x.id) && showCat.get(x.id) !== x.collection)
+    || (!showCat.has(x.id) && !['othertv', 'truecrime'].includes(x.collection)))), 'show recovery entries disagree with what the backup’s catalogs govern.');
+  say(count(items, w => w.show_id && itemMap.has(w.id) && showMap.has(w.show_id) && itemMap.get(w.id) !== showMap.get(w.show_id)), 'season recovery entries disagree with their show’s.');
+  const isFilm = w => w.media_type === 'movie' || (w.media_type == null && w.season === 'Film');
+  say(count(items, w => isFilm(w) && itemMap.has(w.id) && (builtin(itemMap.get(w.id)) !== filmCat.has(w.id) || (filmCat.has(w.id) && filmCat.get(w.id) !== itemMap.get(w.id))
+    || ((w.theme_kind === 'genre') !== (itemMap.get(w.id) === 'movies')))), 'film recovery entries disagree with the backup’s catalogs or theme meanings.');
+  const colMap = new Map(sm.personal_collections.map(x => [x.id, x.legacy_source]));
+  say(count(cols, c => !colMap.has(c.id)), 'collections have no recovery entry.');
+  say(count(sm.personal_collections, x => { const c = cols.find(y => y.id === x.id);
+    return !c || (x.legacy_source != null && !['disney', '90day', 'sheridan', 'truecrime'].includes(x.legacy_source)) || (c.catalog_id != null && x.legacy_source !== c.catalog_id)
+      || (c.catalog_id == null && builtin(x.legacy_source)) || (c.presentation_key ?? null) !== (x.legacy_source ?? null); }), 'collection recovery entries disagree with the backup’s collections.');
+  say(repeats(sm.personal_collections), 'collection recovery entries repeat a collection.');
+  const otv = r.othertv_shows;
+  say(count(otv, x => recoveryUuidDigits(x.id) === null), 'other-TV recovery rows have an id that isn’t a valid lowercase uuid.');
+  say(count(otv, x => recoveryTmdbId(x.tmdb_id) === null), 'other-TV recovery rows have a TMDB id that isn’t a whole number from 0 to 2147483647.');
+  say(count(otv, x => !recoveryTimestampOk(x.created_at)), 'other-TV recovery rows have a created_at that isn’t a valid date and time.');
+  say(count(otv, x => !['othertv', 'truecrime'].includes(x.collection)), 'other-TV recovery rows have a storage other than othertv or truecrime.');
+  say(count(otv, x => { const t = recoveryTextOf(x.title); return t === null || t.replace(/^ +| +$/g, '') === '' || !recoveryNoNul(t); }), 'other-TV recovery rows have a title that is blank or can’t be stored.');
+  say(count(otv, x => typeof x.network !== 'string' || !recoveryNoNul(x.network)), 'other-TV recovery rows have a network that isn’t text that can be stored.');
+  const ids = otv.map(x => recoveryUuidDigits(x.id)).filter(Boolean);
+  say(ids.length - new Set(ids).size, 'other-TV recovery rows repeat an id.');
+  const otvShows = otv.filter(x => recoveryTmdbId(x.tmdb_id) !== null).map(x => `${x.collection}|${recoveryTmdbId(x.tmdb_id)}`);
+  say(otvShows.length - new Set(otvShows).size, 'other-TV recovery rows repeat a show.');
+  return out.length ? [`Its recovery section doesn’t correspond to the backup: ${out.join(' ')}`] : [];
+}
+// ── recovery section check: end ──
+
+// The preview's list of what the format-4 → 5 conversion derives.
+function format4ConversionHtml(summary) {
+  const li = text => `<li>${esc(text)}</li>`;
+  const n = k => summary.tally[k] || 0;
+  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 5 before restoring</div><ul class="manage-list">
+    ${n('show:pending') + n('film:pending') ? li(`${n('show:pending')} shows and ${n('film:pending')} films that were Pending: To Watch, marked New from catalog.`) : ''}
+    ${n('show:highpriority') + n('film:highpriority') ? li(`${n('show:highpriority')} shows and ${n('film:highpriority')} films that were High Priority: To Watch, High priority.`) : ''}
+    ${n('show:maybe') + n('film:maybe') ? li(`${n('show:maybe')} shows and ${n('film:maybe')} films that were Maybe Later: To Watch, Low priority.`) : ''}
+    ${n('show:complete') ? li(`${n('show:complete')} shows that were Complete: To Watch, Show ended, Needs status review.`) : ''}
+    ${n('film:watching') + n('film:complete') ? li(`${n('film:watching') + n('film:complete')} films that were Watching or Complete: To Watch or Watched (as marked), Needs status review.`) : ''}
+    ${summary.pairs ? li(`${summary.pairs} films that are both Skipped and marked watched are kept that way.`) : ''}
+    ${summary.review.length ? li(`Needs status review: ${summary.review.slice(0, 10).join(', ')}${summary.review.length > 10 ? ` and ${summary.review.length - 10} more` : ''}.`) : ''}
+    ${li('Each old status is kept with the record (for a rollback); no categories or earlier-seasons ranges are added. No field of the backup is lost.')}
+    ${li('The file itself isn’t changed.')}</ul></div>`;
 }
 
 // Format 4: identities unique across the whole library, one season label per show,
 // theme meanings only on films, the catalog governance (one catalog per record,
 // one record per catalog key), shows and links, collections and choices.
-function validateFormat4Rows(tables, items, report, rowLabel, findDuplicates) {
+function validateFormat4Rows(tables, items, report, rowLabel, findDuplicates, statuses = TV_SHOW_STATUSES) {
   const shows = tables.tv_shows.filter(r => r && typeof r === 'object');
-  validateTvShowRows(shows, items, report, rowLabel, findDuplicates);
+  checkTvShowRows(shows, items, report, rowLabel, statuses);
   validateOrganizationRows(tables, items, report, rowLabel, findDuplicates);
   report('watchlist_items duplicate movie identity', findDuplicates(items, r => r.media_type === 'movie' && r.tmdb_id != null ? String(r.tmdb_id) : null, r => `(tmdb_id ${r.tmdb_id})`));
   report('watchlist_items duplicate TV identity', findDuplicates(items, r => r.media_type === 'tv' && r.tmdb_id != null && r.season_number != null ? `${r.tmdb_id}|${r.season_number}` : null,
@@ -397,8 +634,13 @@ function validateOrganizationRows(tables, items, report, rowLabel) { // formats 
 // rules (statuses, every link points at a show in the backup, films never link,
 // skipped only on linked seasons). The identity keys per format are checked by the caller.
 function validateTvShowRows(shows, items, report, rowLabel) {
+  checkTvShowRows(shows, items, report, rowLabel, TV_SHOW_STATUSES);
+}
+// The same rules with a given set of show statuses (format 5: To Watch / Watching / Skipped).
+// (backup-format3.js, unchanged since Stage 5, calls validateTvShowRows with the old set.)
+function checkTvShowRows(shows, items, report, rowLabel, statuses) {
   const byId = new Map(shows.map(s => [s.id, s]));
-  report('tv_shows status', shows.map((s, i) => TV_SHOW_STATUSES.includes(s.status) ? null : `${rowLabel(s, i)} has status ${JSON.stringify(s.status)}`).filter(Boolean));
+  report('tv_shows status', shows.map((s, i) => statuses.includes(s.status) ? null : `${rowLabel(s, i)} has status ${JSON.stringify(s.status)}`).filter(Boolean));
   report('tv_shows empty title or show_key', shows.map((s, i) => (typeof s.title === 'string' && s.title.trim() && typeof s.show_key === 'string' && s.show_key.trim()) ? null : rowLabel(s, i)).filter(Boolean));
   const linkProblems = [];
   items.forEach((r, i) => {
@@ -490,14 +732,14 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
   let currentItems = [];
   let dbFormat;
   try {
-    // A restore needs a contracted database (format 4); direct format-3 restore is
-    // retired (the 5c clean-up). Never a fallback to a legacy format.
+    // A restore needs a database in this page's phase (format 5); formats 3 and 4 are
+    // converted here first. Never a fallback to another format.
     const phaseCap = await stage5Capabilities();
     if (!restoreSessionLive(session)) return;
-    if (!phaseCap || phaseCap.phase !== 'contracted') {
+    if (!phaseCap || phaseCap.phase !== B45_PHASE || b45Stopped) {
       showRestoreModal(`<div class="modal-title">Restore isn't available</div>
-        <div class="modal-error">${phaseCap && STAGE5_WRITABLE_PHASES.includes(phaseCap.phase)
-          ? 'This page restores only into the updated database (format 4), and this database isn’t in that state, so it can’t restore here. Nothing was changed.'
+        <div class="modal-error">${b45Stopped ? esc(STATE_MISMATCH_TEXT) : phaseCap
+          ? 'This page restores only into a database in its own state (format 5), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
           : 'This page needs a database update that hasn’t been made yet, so it can’t restore here. Nothing was changed.'}</div>
         <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
       pendingRestoreData = null;
@@ -519,31 +761,59 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
     return;
   }
 
-  // Format 3 into a contracted database: an explicit, previewed conversion.
-  let conversion = null;
-  if (dbFormat === 4 && backup.formatVersion === 3) {
+  // Formats 3 and 4 into the B4/B5 database: an explicit, previewed conversion (3 → 4 with
+  // the retained converter, then 4 → 5). Only the converted document is ever sent.
+  let conversion = null, conversion5 = null;
+  const refuseConversion = (lines) => {
+    showRestoreModal(`<div class="modal-title">This format ${backup.formatVersion} backup can't be converted</div>
+      <div class="modal-error">${lines.map(esc).join('\n')}</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+    pendingRestoreData = null;
+  };
+  if (dbFormat === 5 && (backup.formatVersion === 3 || backup.formatVersion === 4)) {
     let cap;
     try { cap = await stage5Capabilities(); } catch (e) { cap = null; }
     if (!restoreSessionLive(session)) return;
-    const conv = cap ? convertFormat3To4(backup, { includeRecovery: cap.recovery_archive === 'active', sourceSha256 }) : { refusals: ['Couldn’t read whether the recovery archive is active.'] };
-    if (conv.refusals.length) {
-      showRestoreModal(`<div class="modal-title">This format 3 backup can't be converted</div>
-        <div class="modal-error">${['It breaks a rule your updated list enforces, so nothing was changed:'].concat(conv.refusals).map(esc).join('\n')}</div>
-        <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
-      pendingRestoreData = null;
-      return;
+    if (!cap) { refuseConversion(['Couldn’t read whether the recovery archive is active, so nothing was changed.']); return; }
+    // The conversion record names the file it came from (its SHA-256, computed when the file was read).
+    if (!/^[0-9a-f]{64}$/.test(sourceSha256 || '')) { refuseConversion(['The file’s fingerprint couldn’t be computed, so nothing was changed. Choose the file again.']); return; }
+    let doc4 = backup;
+    if (backup.formatVersion === 3) {
+      const conv = convertFormat3To4(backup, { includeRecovery: cap.recovery_archive === 'active', sourceSha256 });
+      if (conv.refusals.length) { refuseConversion(['It breaks a rule your updated list enforces, so nothing was changed:'].concat(conv.refusals)); return; }
+      conversion = conv.summary;
+      doc4 = conv.doc;
+    } else {
+      const problems = format4SectionProblems(backup, cap.recovery_archive === 'active');
+      if (problems.length) { refuseConversion(['Nothing was changed:'].concat(problems)); return; }
     }
-    const docErrors = validateBackupObject(conv.doc);
-    if (docErrors.length) {
-      showRestoreModal(`<div class="modal-title">This format 3 backup can't be converted</div>
-        <div class="modal-error">${['The converted backup doesn’t pass validation, so nothing was changed:'].concat(docErrors).map(esc).join('\n')}</div>
-        <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
-      pendingRestoreData = null;
-      return;
+    const conv5 = convertFormat4To5(doc4, { sourceSha256 });
+    if (conv5.refusals.length) { refuseConversion(['It breaks a rule your list enforces, so nothing was changed:'].concat(conv5.refusals)); return; }
+    const docErrors = validateBackupObject(conv5.doc);
+    if (docErrors.length) { refuseConversion(['The converted backup doesn’t pass validation, so nothing was changed:'].concat(docErrors)); return; }
+    if (conv5.doc.recovery !== undefined) {
+      const rp = recoverySectionProblems(conv5.doc);
+      if (rp.length) { refuseConversion(['Nothing was changed:'].concat(rp)); return; }
     }
-    conversion = conv.summary;
-    backup = conv.doc;
+    conversion5 = conv5.summary;
+    backup = conv5.doc;
     pendingRestoreData = backup;
+  }
+  // A format-5 file carrying a conversion record or a recovery section (possible only by hand
+  // or from a converted document saved elsewhere): checked as the database checks them first.
+  if (dbFormat === 5 && backup.formatVersion === 5 && (backup.conversion !== undefined || backup.recovery !== undefined)) {
+    let cap;
+    try { cap = await stage5Capabilities(); } catch (e) { cap = null; }
+    if (!restoreSessionLive(session)) return;
+    const problems = cap ? sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4'])
+      : ['Couldn’t read whether the recovery archive is active, so nothing was changed.'];
+    if (problems.length) {
+      showRestoreModal(`<div class="modal-title">This file can't be used for restore</div>
+        <div class="modal-error">${problems.map(esc).join('\n')} Nothing was changed.</div>
+        <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+      pendingRestoreData = null;
+      return;
+    }
   }
 
   // A format-2 backup needs the TV-show schema. Since the switch to show-level
@@ -553,9 +823,7 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
   // has none of your collections or watch-with choices; the database refuses it too.
   // A contracted database takes format 4 (or a converted format 3, above).
   const formatErrors = backup.formatVersion > dbFormat
-    ? [backup.formatVersion === 4
-      ? 'This backup is format 4, from after the database update; this database hasn’t been updated yet, so it can’t take it. Nothing was changed.'
-      : `This backup is format ${backup.formatVersion}, which this database doesn't support yet (it is format ${dbFormat}).`]
+    ? [`This backup is format ${backup.formatVersion}, which this database doesn't support yet (it is format ${dbFormat}).`]
     : backup.formatVersion < dbFormat
       ? [dbFormat >= 3 && backup.formatVersion === 2
         ? 'This backup is format 2, from before personal collections: it has none of your collections or watch-with choices, so it can\'t be restored here. Restore a format 3 backup (made after the personal-collections update) instead. Nothing was changed.'
@@ -585,6 +853,7 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
       <div>${esc(backupDate)}</div>
     </div>
     ${conversion ? format3ConversionHtml(conversion) : ''}
+    ${conversion5 ? format4ConversionHtml(conversion5) : ''}
     <div class="modal-section">
       <div class="modal-label">Rows: current → backup</div>
       ${rows}
@@ -699,12 +968,12 @@ async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
   // restore_backup (db/phase0_restore_v1.sql) deletes and re-inserts all tables
   // atomically: if anything fails, the database rolls back to exactly what it was.
   const restoredTables = backupSpec(backup.formatVersion).tables;
-  // The phase is read again right before sending: it must still be contracted, and
-  // only a format-4 document is ever sent (a format-3 file was converted in the
-  // preview; direct format-3 restore is retired). Nothing is sent otherwise.
+  // The phase is read again right before sending: it must still be this page's, and only
+  // a format-5 document is ever sent (formats 3 and 4 were converted in the preview).
+  // Nothing is sent otherwise.
   let sendCap = null;
   try { sendCap = await stage5Capabilities(); } catch (e) { sendCap = null; }
-  if (!sendCap || sendCap.phase !== 'contracted' || backup.formatVersion !== 4 || !pendingRestoreData) {
+  if (!pageMayWrite(sendCap) || sendCap.phase !== B45_PHASE || backup.formatVersion !== 5 || !pendingRestoreData) {
     showRestoreModal(`<div class="modal-title">Restore not sent</div>
       <div class="modal-error">The database’s update state ${sendCap ? 'changed after this restore was prepared' : 'couldn’t be confirmed'}, so nothing was sent and nothing was changed. Choose the file again to see what restoring it would do now.</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);

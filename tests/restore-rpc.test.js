@@ -2,7 +2,8 @@
 // confirmation, the app replaces every table with one call to the database
 // function restore_backup (db/phase0_restore_v1.sql), never with table-by-table
 // deletes and inserts, then verifies the result field by field. Since the 5c clean-up
-// (G8) this runs only on a contracted database, with a format-4 document.
+// (G8) this runs only on a contracted database; since B4/B5 only on the B4/B5 database,
+// with a format-5 document.
 // Run from the repo root: node tests/restore-rpc.test.js
 const assert = require('assert');
 const { createApp, runner } = require('./app-harness');
@@ -19,18 +20,18 @@ const row = (name, o = {}) => ({
   tmdb_collection_name: null, media_type: 'tv', tmdb_id: Number(name.replace(/\D/g, '')) || 1, season_number: 1, ...o
 });
 
-// Each season is linked to a show of its own (format 4: every row is a film or a linked season).
+// Each season is linked to a show of its own (formats 4 and 5: every row is a film or a linked season).
 const show = name => ({ id: uuid('5' + name), collection: 'othertv', title: `Show ${name}`, show_key: `show ${name}`,
   tmdb_id: Number(name.replace(/\D/g, '')) || 1, status: 'confirmed', created_at: '2026-01-01T00:00:00+00:00' });
 const linked = (name, o = {}) => row(name, { show_id: uuid('5' + name), skipped: false, ...o });
 
-// A backup of different content than the app's current database. Since the 5c clean-up (G8)
-// restore runs only on a contracted database, so the backup is the format-4 export of another one.
+// A backup of different content than the app's current database. Since B4/B5 restore runs
+// only on the B4/B5 database, so the backup is the format-5 export of another one.
 async function setup() {
-  const src = await createApp({ rows: [linked('b7', { title: 'Restored' })], tvShows: [show('b7')], stage5: 'contracted' });
+  const src = await createApp({ rows: [linked('b7', { title: 'Restored' })], tvShows: [show('b7')] });
   const backup = JSON.parse(JSON.stringify(await src.run('buildBackupObject()'))); // a plain copy, as a file would be
-  assert.strictEqual(backup.formatVersion, 4);
-  const app = await createApp({ rows: [linked('a1'), linked('a2')], tvShows: [show('a1'), show('a2')], stage5: 'contracted' });
+  assert.strictEqual(backup.formatVersion, 5);
+  const app = await createApp({ rows: [linked('a1'), linked('a2')], tvShows: [show('a1'), show('a2')] });
   assert.deepStrictEqual(Array.from(app.get('validateBackupObject')(backup)), []);
   app.ctx.__backup = backup;
   app.run(`pendingRestoreData = __backup`);

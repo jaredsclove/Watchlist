@@ -1,7 +1,8 @@
 // Offline tests for the All TV derived view (derived-views.js): one card per show
 // (show_id) of every status, A–Z; Search / Source / show Status filters with
-// Skipped hidden by default; Up to date only for a Watching show; the existing
-// show status, Watched and Skip / Keep actions by real id; and GET-only loading
+// Skipped hidden by default; Up to date only for a Watching show (Caught up · Ended
+// for one marked ended, B4/B5); the guarded show state (library_set_show_state_b45),
+// Watched and Skip / Keep actions by real id; and GET-only loading
 // that refuses incomplete reads. A TV season's own `status` column is a
 // compatibility copy: these tests scramble it to prove nothing reads it.
 // Run from the repo root: node tests/all-tv.test.js
@@ -53,7 +54,8 @@ async function openAllTv(data, opts = {}) {
   return app;
 }
 const titlesShown = app => [...app.el('tbody').innerHTML.matchAll(/<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
-const cardTitles = app => [...app.el('cardList').innerHTML.matchAll(/<span class="card-title">([^<]*)<\/span>/g)].map(m => m[1]);
+const cardTitles = app => [...app.el('cardList').innerHTML.matchAll(/<span class="card-title">(?:<span class="priority-high"[^>]*>★<\/span> )?<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
+const stateCall = (app, i = 0) => { const w = app.writes()[i]; return { fn: w.url.split('/rpc/')[1], body: w.body }; };
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
 const statNums = app => [...app.el('statsRow').innerHTML.matchAll(/stat-num">(\d+)</g)].map(m => Number(m[1]));
 
@@ -115,7 +117,9 @@ test('a late All TV response never draws after leaving the view or over a newer 
 });
 
 // ─── Membership, grouping and order ───────────────────────────────────────────
-test('one card per show of every status except Skipped by default; Complete stays; season status copies are ignored', async () => {
+// (Fixture statuses are the old ones, migrated as db/b45_expand.sql does: Complete → Watching + Ended,
+// High priority / Maybe / Pending → To Watch with High / Low / New from catalog.)
+test('one card per show of every status except Skipped by default; a former Complete show (Watching, Ended) stays; season status copies are ignored', async () => {
   const shows = ['watching', 'highpriority', 'confirmed', 'complete', 'pending', 'maybe', 'skipped']
     .map(st => show({ title: `T-${st}`, status: st }, [{ num: 1, w: true }, { num: 2 }]));
   shows.forEach(x => x.rows.forEach(r => { r.status = 'skipped'; })); // compatibility copies say Skipped: ignored
@@ -126,19 +130,20 @@ test('one card per show of every status except Skipped by default; Complete stay
   assert.strictEqual(statNums(app)[0], 6, 'the count is shows, not seasons');
 });
 
-test('Status filter: All statuses adds Skipped shows; Skipped lists only them; a single status lists only that status', async () => {
+test('Status filter: All statuses adds Skipped shows; Skipped lists only them; a single status lists only that status (To Watch / Watching / Skipped)', async () => {
   const a = show({ title: 'A', status: 'skipped' }, [{ num: 1 }]);
-  const b = show({ title: 'B', status: 'complete' }, [{ num: 1, w: true }]);
-  const c = show({ title: 'C', status: 'watching' }, [{ num: 1 }]);
+  const b = show({ title: 'B', status: 'watching', ended: true }, [{ num: 1, w: true }]);
+  const c = show({ title: 'C', status: 'confirmed' }, [{ num: 1 }]);
   const app = await openAllTv(all(a, b, c));
   assert.deepStrictEqual(titlesShown(app), ['B', 'C']);
-  setFilter(app, 'fStatus', 'all');      assert.deepStrictEqual(titlesShown(app), ['A', 'B', 'C']);
-  setFilter(app, 'fStatus', 'skipped');  assert.deepStrictEqual(titlesShown(app), ['A']);
-  setFilter(app, 'fStatus', 'complete'); assert.deepStrictEqual(titlesShown(app), ['B']);
-  setFilter(app, 'fStatus', 'watching'); assert.deepStrictEqual(titlesShown(app), ['C']);
-  const options = [...app.el('filtersRow').innerHTML.matchAll(/<option value="([^"]*)"/g)].map(m => m[1]);
-  for (const v of ['', 'all', 'watching', 'highpriority', 'confirmed', 'complete', 'pending', 'maybe', 'skipped']) assert.ok(options.includes(v), v);
-  assert.ok(!options.includes('uptodate'), 'Up to date is a state, not a status');
+  setFilter(app, 'fStatus', 'all');       assert.deepStrictEqual(titlesShown(app), ['A', 'B', 'C']);
+  setFilter(app, 'fStatus', 'skipped');   assert.deepStrictEqual(titlesShown(app), ['A']);
+  setFilter(app, 'fStatus', 'watching');  assert.deepStrictEqual(titlesShown(app), ['B']);
+  setFilter(app, 'fStatus', 'confirmed'); assert.deepStrictEqual(titlesShown(app), ['C']);
+  const statusOptions = [...(app.el('filtersRow').innerHTML.match(/id="fStatus"[\s\S]*?<\/select>/) || [''])[0].matchAll(/<option value="([^"]*)"/g)].map(m => m[1]);
+  assert.deepStrictEqual(statusOptions, ['', 'all', 'confirmed', 'watching', 'skipped']);
+  for (const v of ['highpriority', 'complete', 'pending', 'maybe', 'uptodate']) assert.ok(!statusOptions.includes(v), `${v} is not a status (B4/B5)`);
+  assert.match(app.el('filtersRow').innerHTML, />To Watch</);
 });
 
 test('same title in two collections and the same TMDB id in two collections stay separate cards, ordered A–Z, then source, then id', async () => {
@@ -186,28 +191,28 @@ test('a show without linked seasons is not listed; an empty library and an empty
 });
 
 // ─── Up next and Up to date ───────────────────────────────────────────────────
-test('Up to date only for a Watching show: Complete and future-only On List shows never get the pill', async () => {
+test('Up to date only for a Watching show (today’s rule; Ended plays no part): a show marked ended and caught up reads “Caught up · Ended”; future-only and TBA-only To Watch shows never get the pill', async () => {
   const w = show({ title: 'W', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(20) }]);  // Up to date
   const p = show({ title: 'P', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-5) }]); // in progress
-  const c = show({ title: 'C', status: 'complete' }, [{ num: 1, w: true }]);                          // nothing remaining
+  const c = show({ title: 'C', status: 'watching', ended: true }, [{ num: 1, w: true }]);              // caught up, marked ended
   const f = show({ title: 'F', status: 'confirmed' }, [{ num: 1, date: day(30) }]);                   // future only
   const t = show({ title: 'T', status: 'confirmed' }, [{ num: 1, tba: true }]);                       // TBA only
   const app = await openAllTv(all(w, p, c, f, t));
   const items = app.ctx.deriveAllTv(app.get('derivedData').rows, app.get('tvShowsById'), TODAY).items;
   const ut = Object.fromEntries(Array.from(items, x => [x.title, x.upToDate]));
-  assert.deepStrictEqual(ut, { C: false, F: false, P: false, T: false, W: true });
+  assert.deepStrictEqual(ut, { C: true, F: false, P: false, T: false, W: true }, 'C: Watching, nothing remaining (today’s rule, unchanged)');
   const rowOf = title => app.el('tbody').innerHTML.split('<tr').find(x => x.includes(`show-title">${title}<`));
   assert.ok(rowOf('W').includes('s-caughtup">Up to date') && rowOf('W').includes(`Next: Season 2 · ${disp(day(20))}`));
   assert.ok(rowOf('P').includes(`Season 2 · ${disp(day(-5))}`) && rowOf('P').includes('toggleWatch('), 'in progress: Mark watched on up next');
   assert.ok(!rowOf('P').includes('Next: '), 'an in-progress Watching show keeps the Watching up-next label');
-  assert.ok(rowOf('C').includes('No remaining season on your list') && !rowOf('C').includes('Up to date'));
+  assert.ok(rowOf('C').includes('Caught up · Ended'), rowOf('C'));
   assert.ok(rowOf('F').includes(`Next: Season 1 · ${disp(day(30))}<span class="upcoming-tag">Upcoming`) && !rowOf('F').includes('Up to date'));
   assert.ok(rowOf('T').includes('Next: Season 1 · premiere date TBA'));
-  for (const x of ['C', 'F', 'T']) {
+  for (const x of ['F', 'T']) {
     assert.ok(!rowOf(x).includes('toggleWatch('), `${x}: no collapsed watch control`);
     assert.ok(!/In progress/.test(rowOf(x)), `${x}: never labelled in progress`);
   }
-  assert.deepStrictEqual(statNums(app), [5, 2, 1], 'Shows, Watching, Up to date');
+  assert.deepStrictEqual(statNums(app), [5, 3, 2], 'Shows, Watching (C is Watching), Up to date (W and C)');
 });
 
 test('up next uses the whole show, not a filtered subset; Specials never move progress', async () => {
@@ -219,13 +224,15 @@ test('up next uses the whole show, not a filtered subset; Specials never move pr
 });
 
 // ─── Expansion and edits ─────────────────────────────────────────────────────
-test('expanded: every stored season with Watched (Not aired yet until it airs), Skip / Keep and (Stage 4b) Delete and Add season; Match only for an eligible row', async () => {
+test('expanded: the show actions, every stored season with Watched (Not aired yet until it airs), Skip / Keep and (Stage 4b) Delete and Add season; Match only for an eligible row', async () => {
   const s = show({ title: 'S', status: 'confirmed' }, [{ num: 1, w: true }, { num: 2, s: true }, { num: 3, date: day(9) }, { num: 4, tba: true }]);
   const app = await openAllTv(all(s));
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   const html = app.html();
-  assert.strictEqual((app.el('tbody').innerHTML.match(/sub-row/g) || []).length, 5, 'four seasons and the Add season row');
-  assert.strictEqual((app.el('cardList').innerHTML.match(/card-subseason-row/g) || []).length, 5);
+  assert.strictEqual((app.el('tbody').innerHTML.match(/sub-row/g) || []).length, 6, 'the show actions, four seasons and the Add season row');
+  assert.strictEqual((app.el('cardList').innerHTML.match(/card-subseason-row/g) || []).length, 6);
+  assert.ok(html.includes(`openDetails('show', '${s.show.id}'`) || html.includes(`openDetails('show','${s.show.id}'`), 'Details (categories) for the show');
+  assert.ok(html.includes(`setShowStateById('${s.show.id}', { ended: this.checked })`), 'Show ended');
   s.rows.forEach(r => assert.ok(html.includes(`delRow('${r.id}')`), 'Delete on a season that is not a built-in catalog entry'));
   assert.ok(html.includes(`openAddSeason('${s.show.id}')`));
   assert.ok(!html.includes('openTmdbMatch('), 'identified seasons are not Match-eligible');
@@ -249,7 +256,7 @@ test('a season of a Skipped show shows "Show skipped" and the card is dimmed', a
   assert.ok(app.html().includes('Show skipped'));
 });
 
-test('show status: one set_show_status call by real id; the show leaves the default filter when Skipped and the filters are kept', async () => {
+test('show status: one guarded library_set_show_state_b45 call by real id; the show leaves the default filter when Skipped and the filters are kept', async () => {
   const a = show({ title: 'Alpha', status: 'confirmed' }, [{ num: 1 }]);
   const b = show({ title: 'Beta', status: 'confirmed', collection: 'disney', tmdb_id: null }, [{ season: 'Season 1' }]);
   const app = await openAllTv(all(a, b));
@@ -257,11 +264,11 @@ test('show status: one set_show_status call by real id; the show leaves the defa
   app.ctx.renderFilters(); // a same-view re-render keeps every filter
   assert.strictEqual(app.el('fSearch').value, 'a');
   assert.deepStrictEqual(titlesShown(app), ['Alpha', 'Beta']);
-  await app.ctx.setShowStatusById(a.show.id, 'skipped'); await settle();
+  await app.ctx.setShowStateById(a.show.id, { status: 'skipped' }); await settle();
   const w = app.writes();
   assert.strictEqual(w.length, 1);
-  assert.ok(w[0].url.endsWith('/rpc/set_show_status'));
-  assert.deepStrictEqual(w[0].body, { p_show_id: a.show.id, p_status: 'skipped' });
+  assert.deepStrictEqual(stateCall(app), { fn: 'library_set_show_state_b45', body: { p_show_id: a.show.id,
+    p_expected: { status: 'confirmed', priority: 'normal', ended: false, catalog_new: false, status_review: false }, p_changes: { status: 'skipped' } } });
   assert.strictEqual(app.store.tv_shows.find(s => s.id === b.show.id).status, 'confirmed', 'the other show is untouched');
   assert.deepStrictEqual(titlesShown(app), ['Beta']);
   app.el('fStatus').value = 'skipped';
@@ -269,7 +276,7 @@ test('show status: one set_show_status call by real id; the show leaves the defa
   assert.strictEqual(app.el('fStatus').value, 'skipped', 'Status survives a same-view re-render');
   assert.strictEqual(app.el('fSearch').value, 'a');
   assert.deepStrictEqual(titlesShown(app), ['Alpha']);
-  await app.ctx.setShowStatusById(a.show.id, 'watching'); await settle();
+  await app.ctx.setShowStateById(a.show.id, { status: 'watching' }); await settle();
   assert.deepStrictEqual(titlesShown(app), [], 'leaves the Skipped filter when it is no longer Skipped');
 });
 
@@ -289,8 +296,8 @@ test('Watched and Skip from All TV: one function call each by row id, mirrored i
   await app.ctx.setSeasonSkipped(s.rows[1].id, false); await settle();
   assert.strictEqual(app.get('derivedData').rows.find(r => r.id === s.rows[1].id).skipped, true, 'rolled back');
   assert.ok(app.el('errorBanner').innerHTML.length > 0);
-  app.failNext(r => r.url.endsWith('/rpc/set_show_status'));
-  await app.ctx.setShowStatusById(s.show.id, 'complete'); await settle();
+  app.failNext(r => r.url.endsWith('/rpc/library_set_show_state_b45'));
+  await app.ctx.setShowStateById(s.show.id, { status: 'skipped' }); await settle();
   assert.strictEqual(app.get('tvShowsById').get(s.show.id).status, 'watching', 'show status rolled back');
   assert.strictEqual(app.store.watchlist_items.filter(r => r.show_id === s.show.id).length, 2, 'nothing deleted or added');
 });
@@ -333,7 +340,8 @@ test('phone width (375 px): filters start collapsed and cards carry the same con
   const app = await openAllTv(all(s), { width: 375 });
   assert.ok(app.el('filtersRow').classList.contains('collapsed'));
   const card = app.el('cardList').innerHTML;
-  assert.ok(card.includes(`setShowStatusById('${s.show.id}'`) && card.includes(`toggleWatch('${s.rows[0].id}')`));
+  assert.ok(card.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && card.includes(`toggleWatch('${s.rows[0].id}')`));
+  assert.ok(card.includes(`setShowStateById('${s.show.id}', { priority: this.value })`), 'priority on the card too');
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   assert.ok(app.el('cardList').innerHTML.includes(`setSeasonSkipped('${s.rows[0].id}', true)`));
 });
@@ -342,7 +350,7 @@ test('no request from All TV ever uses alltv as a collection; actions never writ
   const s = show({ title: 'Alpha', status: 'confirmed' }, [{ num: 1, date: day(-2) }]);
   const app = await openAllTv(all(s));
   await app.ctx.toggleWatch(s.rows[0].id); await settle();
-  await app.ctx.setShowStatusById(s.show.id, 'watching'); await settle();
+  await app.ctx.setShowStateById(s.show.id, { status: 'watching' }); await settle();
   for (const r of app.requests) {
     assert.ok(!/alltv/.test(r.url), r.url);
     assert.ok(!(r.body && JSON.stringify(r.body).includes('"collection"')), 'no collection written');

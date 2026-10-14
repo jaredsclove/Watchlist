@@ -225,7 +225,7 @@ async function catalogReview() {
   d.phase = 'previewing';
   renderCatalogDialog();
   try {
-    const res = await sbRpc('library_catalog_apply', { p_catalog: d.catalogId, p_defaults: d.defaults });
+    const res = await sbRpc('library_catalog_apply_b45', { p_catalog: d.catalogId, p_defaults: d.defaults });
     if (!catalogLive(session)) return;
     d.preview = res;
     d.phase = 'preview';
@@ -260,7 +260,7 @@ async function catalogApply() {
   renderCatalogDialog();
   let res;
   try {
-    res = await sbRpc('library_catalog_apply', { p_catalog: d.catalogId, p_defaults: d.approved.defaults, p_approved: d.approved.hash });
+    res = await sbRpc('library_catalog_apply_b45', { p_catalog: d.catalogId, p_defaults: d.approved.defaults, p_approved: d.approved.hash });
   } catch (e) {
     if (!catalogLive(session)) return;
     catalogFailed(d, e, true);
@@ -307,7 +307,7 @@ async function catalogLoadRows(session) {
 //           version, owner, payload_hash and the entries themselves are bound by
 //           the approved hash (the apply answers with the same hash).
 //   create_show: show_key, tmdb_id (natural key, unique); title; initial_status = status;
-//           receipt show_id = that show.
+//           priority, catalog_new (b45.1: Normal, New from catalog); receipt show_id = that show.
 //   attach: show_id exists; show_key; status (Complete → On List when this apply reopens it).
 //   insert_season: item_key (unique in the catalog); title, season, theme, display_date,
 //           date_sort, status, watched, skipped, media_type, tmdb_id, season_number;
@@ -321,7 +321,10 @@ async function catalogLoadRows(session) {
 //           show_id (On List when this apply reopens it); receipt row_id = row_id.
 //           old_display / old_sort are bound by the hash (the pre-state).
 //   reopen: show_id status = to; the cause row is stored and linked to that show;
-//           receipt show_id = show_id. from is bound by the hash.
+//           receipt show_id = show_id. from is bound by the hash. (Before B4/B5 only:
+//           since b45.1 an application never changes an existing show's status.)
+//   ended_kept (b45.1): the show still exists, is still marked ended and keeps the
+//           status it had; receipt show_id = show_id.
 //   membership: collection_id = the header's target; result joined = exactly one
 //           membership of the new record, in that collection; not_joined /
 //           no_collection = none at all; receipt membership_id = that membership,
@@ -331,11 +334,11 @@ async function catalogLoadRows(session) {
 //   receipt: exactly one entry per create_show, insert_season, insert_film,
 //           fill_date, reopen and membership entry, no other.
 const catalogInList = ids => `in.(${ids.map(id => encodeURIComponent(`"${id}"`)).join(',')})`;
-const CATALOG_RECEIPT_KINDS = ['create_show', 'insert_season', 'insert_film', 'fill_date', 'reopen', 'membership'];
+const CATALOG_RECEIPT_KINDS = ['create_show', 'insert_season', 'insert_film', 'fill_date', 'reopen', 'ended_kept', 'membership'];
 const CATALOG_COMPARED_FIELDS = {
-  create_show: ['title', 'tmdb_id'],
+  create_show: ['title', 'tmdb_id', 'priority', 'catalog_new'],
   insert_season: ['title', 'season', 'theme', 'display_date', 'date_sort', 'status', 'watched', 'skipped', 'media_type', 'tmdb_id', 'season_number'],
-  insert_film: ['title', 'season', 'theme', 'display_date', 'date_sort', 'status', 'watched', 'media_type', 'tmdb_id']
+  insert_film: ['title', 'season', 'theme', 'display_date', 'date_sort', 'status', 'watched', 'media_type', 'tmdb_id', 'priority', 'catalog_new']
 };
 
 async function catalogReadState(catalogId, doc) {
@@ -423,6 +426,11 @@ async function catalogCompareOutcomes(catalogId, doc, receipt) {
     if (!show || show.status !== e.to) say(`${(show && show.title) || 'a show'} is not On List`);
     if (!st.rows.some(r => r.item_key === e.cause && r.show_id === e.show_id)) say(`${e.cause}: the season that reopened its show is not stored on it`);
   }
+  for (const e of of('ended_kept')) {
+    if (receipt && rc(e.key).show_id !== e.show_id) say('the receipt names another show for “stays marked ended”');
+    const show = showById.get(e.show_id);
+    if (!show || !show.ended) say(`${(show && show.title) || e.show_key}: no longer marked ended`);
+  }
   for (const e of of('excluded_conflict')) {
     if (rowsWithKey(e.item_key).length) say(`${e.item_key} (not included for review) is now stored`);
   }
@@ -495,7 +503,7 @@ async function catalogCheckState() {
   try {
     [cmp, res] = await Promise.all([
       catalogCompareOutcomes(d.catalogId, d.approved.document, null),
-      sbRpc('library_catalog_apply', { p_catalog: d.catalogId, p_defaults: d.approved.defaults })]);
+      sbRpc('library_catalog_apply_b45', { p_catalog: d.catalogId, p_defaults: d.approved.defaults })]);
   } catch (e) {
     if (!catalogLive(session)) return;
     d.phase = 'unknown';
@@ -539,14 +547,15 @@ function catalogDocumentHtml(doc, catalogId) {
   const statusName = s => statusOptionLabel(s);
   const collName = doc.target ? ((personalCollections || []).find(c => c.id === doc.target.collection_id) || {}).name || 'its collection' : null;
   return [
-    section('New shows', E('create_show').map(e => li(e.title, `starts ${statusName(e.initial_status)}`))),
+    section('New shows', E('create_show').map(e => li(e.title, `starts ${statusName(e.initial_status)}${e.catalog_new ? ', marked New' : ''}`))),
     section('New seasons', E('insert_season').map(e => li(`${catalogShowTitle(e.show, doc)} · ${e.season}`, e.display_date))),
-    section('New films', E('insert_film').map(e => li(e.title, e.display_date))),
+    section('New films', E('insert_film').map(e => li(e.title, `${e.display_date}${e.catalog_new ? ' · To Watch, marked New' : ''}`))),
     section('Date updates', E('fill_date').map(e => {
       const skipped = e.item === 'film' ? e.tracking.status === 'skipped' : e.tracking.skipped;
       return li(catalogRowTitle(e.row_id) || e.item_key, `${e.old_display} → ${e.new_display}${skipped ? ' (skipped; stays skipped)' : ''}`);
     })),
     section('Back to On List', E('reopen').map(e => li(catalogShowTitle(e.show_id, doc), `Complete → On List, because of a new season`))),
+    section('Marked ended — stays marked ended', E('ended_kept').map(e => li(catalogShowTitle(e.show_id, doc), 'gets a new season; its status, priority and Show ended don’t change'))),
     section('Collection', E('membership').map(e => {
       const title = e.ref.startsWith('S') ? catalogShowTitle(e.ref, doc) : (E('insert_film').find(f => f.ref === e.ref) || {}).title || e.ref;
       return li(title, e.result === 'joined' ? `joins ${collName}` : e.result === 'not_joined' ? `won’t join ${collName} (archived)` : 'no collection');

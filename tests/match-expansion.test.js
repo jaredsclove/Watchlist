@@ -41,7 +41,7 @@ const select = (app, rowId, season = 1, tmdb = 4000) => {
   app.ctx.__tmdbMatch = { rowId, results: [], target: { mediaType: 'tv', seasonNumber: season,
     details: { id: tmdb, name: 'Target Show', networks: [{ name: 'Net' }], seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 3, air_date: '2022-01-01' }] } } };
 };
-const rpcCalls = app => app.requests.filter(r => r.url.includes('/rpc/library_match_season'));
+const rpcCalls = app => app.requests.filter(r => r.url.includes('/rpc/library_match_season_b45'));
 const panel = app => app.el('tmdbMatchBody').innerHTML;
 const notice = app => app.el('noticeBanner').innerHTML;
 // The page's row: as last published by a tracked read (the refresh's own row read, an applied
@@ -56,7 +56,7 @@ test('preview: the panel names the collections from the reply and the seasons; n
   const before = app.requests.length;
   await app.ctx.confirmTmdbMatch(); await settle();
   const after = app.requests.slice(before);
-  assert.deepStrictEqual(after.filter(r => r.method !== 'GET').map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_season']);
+  assert.deepStrictEqual(after.filter(r => r.method !== 'GET').map(r => new URL(r.url).pathname.split('/').pop()), ['library_match_season_b45']);
   assert.deepStrictEqual(rpcCalls(app)[0].body.p_expansion, {});
   assert.ok(after.some(r => r.method === 'GET' && r.url.includes('/personal_collections')), 'a fresh read of the collections');
   assert.match(panel(app), /Matching also adds a show to collections/);
@@ -77,7 +77,7 @@ test('archive markers come only from the fresh read, never from the page’s old
 
 test('if the fresh read fails, the panel says it couldn’t check archive state and shows no markers (even if the older list had one)', async () => {
   const { app, f } = await boot();
-  app.get('personalCollections').find(c => c.legacy_source === 'disney').archived_at = TS; // stale cached marker
+  app.get('personalCollections').find(c => c.catalog_id === 'disney').archived_at = TS; // stale cached marker
   app.failNext(r => r.method === 'GET' && r.url.includes('/personal_collections'));
   select(app, f.legacy.id);
   await app.ctx.confirmTmdbMatch(); await settle();
@@ -147,7 +147,7 @@ test('while a match call is in flight, Confirm, the seasons and Back wait; Cance
   const { app, f } = await boot();
   select(app, f.legacy.id);
   await app.ctx.confirmTmdbMatch(); await settle();
-  const g = app.hold(r => r.url.includes('/rpc/library_match_season'));
+  const g = app.hold(r => r.url.includes('/rpc/library_match_season_b45'));
   const p = app.ctx.confirmTmdbMatch(true);
   await g.reached;
   assert.match(panel(app), /disabled>Matching…<\/button>/);
@@ -166,7 +166,7 @@ test('while a match call is in flight, Confirm, the seasons and Back wait; Cance
 test('a delayed blocked answer after Cancel is dropped (it wrote nothing)', async () => {
   const { app, f } = await boot();
   select(app, f.legacy.id);
-  const g = app.hold(r => r.url.includes('/rpc/library_match_season'));
+  const g = app.hold(r => r.url.includes('/rpc/library_match_season_b45'));
   const p = app.ctx.confirmTmdbMatch();
   await g.reached;
   app.ctx.cancelTmdbMatch();
@@ -180,7 +180,7 @@ test('a delayed success after a newer read of the row: reported, its payload not
   const { app, f } = await boot();
   select(app, f.legacy.id);
   await app.ctx.confirmTmdbMatch(); await settle();
-  const g = app.hold(r => r.url.includes('/rpc/library_match_season'));
+  const g = app.hold(r => r.url.includes('/rpc/library_match_season_b45'));
   const p = app.ctx.confirmTmdbMatch(true);
   await g.reached;
   // A newer read replaced the page's rows (new objects).
@@ -204,7 +204,7 @@ test('a failed refresh keeps the Match outcome, offers Retry that only reads, an
   const { app, f } = await boot();
   select(app, f.legacy.id);
   await app.ctx.confirmTmdbMatch(); await settle();
-  const g = app.hold(r => r.url.includes('/rpc/library_match_season'));
+  const g = app.hold(r => r.url.includes('/rpc/library_match_season_b45'));
   const p = app.ctx.confirmTmdbMatch(true);
   await g.reached;
   app.get('browseData').rows = app.get('browseData').rows.map(r => ({ ...r }));
@@ -241,9 +241,9 @@ test('Match vs restore (i): the match ran before the restore; the late success i
   select(app, f.legacy.id);
   await app.ctx.confirmTmdbMatch(); await settle();
   const snapshot = JSON.parse(JSON.stringify(app.store.watchlist_items));
-  const g = app.hold(r => r.url.includes('/rpc/library_match_season'));
-  const original = app.rpcHandlers.library_match_season;
-  app.rpcHandlers.library_match_season = body => {
+  const g = app.hold(r => r.url.includes('/rpc/library_match_season_b45'));
+  const original = app.rpcHandlers.library_match_season_b45;
+  app.rpcHandlers.library_match_season_b45 = body => {
     const res = original(body);                               // the match executes …
     app.store.watchlist_items = JSON.parse(JSON.stringify(snapshot)); // … then a restore replaces the data
     app.run('orgEpoch++');                                     // (the page's restore epoch)
@@ -261,7 +261,7 @@ test('Match vs restore (ii): a delayed match executes after the restore; the suc
   const { app, f } = await boot();
   select(app, f.legacy.id);
   await app.ctx.confirmTmdbMatch(); await settle();
-  const g = app.hold(r => r.url.includes('/rpc/library_match_season'));
+  const g = app.hold(r => r.url.includes('/rpc/library_match_season_b45'));
   const p = app.ctx.confirmTmdbMatch(true);
   await g.reached;                       // held in transport
   app.run('orgEpoch++');                 // the restore happens first (same data restored)
@@ -347,11 +347,11 @@ test('a delayed show response from a refresh never overwrites a newer show read 
   const held = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows?select='));
   const p = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
   await held.reached;
-  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'complete';
+  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'skipped';
   await app.run('loadAllTvShows()'); await settle();
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped');
   await releaseWithOlder(app, held, 'tv_shows', older, p);
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete', 'the older show response was not published');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped', 'the older show response was not published');
   assert.match(notice(app), /Refreshed\./, 'the newer show read was accepted');
 });
 
@@ -381,7 +381,7 @@ async function matchNotCurrent(app, rowId, tmdb, name) {
   await settle(); // (an earlier Match's view reload completes: the row is listed again)
   app.ctx.__tmdbMatch = { rowId, results: [], target: { mediaType: 'tv', seasonNumber: 1,
     details: { id: tmdb, name, networks: [{ name: 'Net' }], seasons: [{ season_number: 1, air_date: '2020-01-01' }] } } };
-  const g = app.hold(r => r.url.includes('/rpc/library_match_season'));
+  const g = app.hold(r => r.url.includes('/rpc/library_match_season_b45'));
   const p = app.ctx.confirmTmdbMatch();
   await g.reached;
   app.get('browseData').rows = app.get('browseData').rows.map(r => ({ ...r })); // a newer read replaced the rows
@@ -482,7 +482,7 @@ test('a newer Match of the same row still in progress doesn’t retire the refre
   assert.ok(!/Refreshed\./.test(notice(app)), 'the view’s read doesn’t complete the refresh');
   app.ctx.__tmdbMatch = { rowId: f.legacy.id, results: [], target: { mediaType: 'tv', seasonNumber: 1,
     details: { id: 5000, name: 'Target Show', networks: [], seasons: [{ season_number: 1, air_date: '2020-01-01' }] } } };
-  const g2 = app.hold(r => r.url.includes('/rpc/library_match_season'));
+  const g2 = app.hold(r => r.url.includes('/rpc/library_match_season_b45'));
   const p2 = app.ctx.confirmTmdbMatch();
   await g2.reached;
   assert.ok(!/Refreshed\./.test(notice(app)));
@@ -491,7 +491,7 @@ test('a newer Match of the same row still in progress doesn’t retire the refre
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
   g2.release(); await p2; await settle(); await settle();               // it ends without changing the row (already matched)
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./, 'unchanged by the newer Match that changed nothing');
-  assert.strictEqual(app.requests.filter(r => r.url.includes('/rpc/library_match_season')).length, 2, 'only the user’s two match calls');
+  assert.strictEqual(app.requests.filter(r => r.url.includes('/rpc/library_match_season_b45')).length, 2, 'only the user’s two match calls');
   assert.strictEqual(pageRow(app, f.legacy.id).tmdb_id, 5000, 'the fresh read shows the match');
 });
 
@@ -552,12 +552,12 @@ test('round 3: failure and Retry with two unresolved rows — Retry reads every 
   y.g.release(); await within(y.p); await settle();
   ownX.fail(); await within(x.p); await settle();
   assert.match(notice(app), /Matched “Target Show” and “Other Show”, but the current data couldn’t be refreshed/);
-  const before = app.requests.length, matches = app.requests.filter(r => r.url.includes('/rpc/library_match_season')).length;
+  const before = app.requests.length, matches = app.requests.filter(r => r.url.includes('/rpc/library_match_season_b45')).length;
   app.ctx.retryMatchRefresh(); await settle(); await settle();
   const sent = app.requests.slice(before);
   assert.ok(sent.every(r => r.method === 'GET'), 'Retry only reads');
   assert.ok(sent.some(r => rowGet(f.legacy.id)(r)) && sent.some(r => rowGet(other.id)(r)), 'both unresolved rows are read again');
-  assert.strictEqual(app.requests.filter(r => r.url.includes('/rpc/library_match_season')).length, matches, 'Match not re-sent');
+  assert.strictEqual(app.requests.filter(r => r.url.includes('/rpc/library_match_season_b45')).length, matches, 'Match not re-sent');
   assert.strictEqual(pageRow(app, f.legacy.id).tmdb_id, 5000);
   assert.strictEqual(pageRow(app, other.id).tmdb_id, 6000);
   assert.match(notice(app), /Refreshed\./);
@@ -573,13 +573,13 @@ test('round 3: replacement A pending, then a newer replacement B succeeds — A 
   assert.ok(await within(a.reached));
   const older = JSON.parse(JSON.stringify(app.store.tv_shows));
   ownShows.release(); await within(x.p); await settle();                              // the refresh's own result: A is newer and pending
-  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'complete';
+  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'skipped';
   await app.run('loadAllTvShows()'); await settle();                           // replacement B succeeds
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped');
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./, 'B completes it; A doesn’t block');
   older.find(s => s.id === f.tvShow.id).status = 'watching';
   await releaseWithOlder(app, a, 'tv_shows', older, ap);                              // A finishes last with older data
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete', 'A did not publish over B');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped', 'A did not publish over B');
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./, 'A did not change the notice');
 });
 
@@ -592,12 +592,12 @@ test('round 3: replacement A fails after a newer replacement B succeeded — no 
   const ap = app.run('loadAllTvShows()').catch(() => {});
   assert.ok(await within(a.reached));
   ownShows.release(); await within(x.p); await settle();
-  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'complete';
+  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'skipped';
   await app.run('loadAllTvShows()'); await settle();                           // B succeeds
   a.fail(); await within(ap); await settle();                                          // then A fails
   assert.ok(!/couldn’t be refreshed/.test(notice(app)), 'no obsolete failure');
   assert.match(notice(app), /Refreshed\./);
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped');
 });
 
 test('round 3: an older derived-view show read that finishes after a newer show read doesn’t overwrite it', async () => {
@@ -607,11 +607,11 @@ test('round 3: an older derived-view show read that finishes after a newer show 
   const allShows = app.hold(r => r.method === 'GET' && /\/tv_shows\?select=/.test(r.url));
   app.ctx.switchView('alltv');                                           // the derived views read every show
   assert.ok(await within(allShows.reached));
-  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'complete';
+  app.store.tv_shows.find(s => s.id === f.tvShow.id).status = 'skipped';
   await app.run('loadAllTvShows()'); await settle();              // a newer show read
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped');
   const now = app.store.tv_shows; app.store.tv_shows = older; allShows.release(); await settle(); await settle(); app.store.tv_shows = now;
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete', 'the older full read did not replace it');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped', 'the older full read did not replace it');
 });
 
 // ── Publication of presence/absence, local edits and retired failures (review round 4) ──
@@ -652,17 +652,17 @@ test('round 4 (coverage): during a pending show-status edit, an older show read 
   const allShows = app.hold(r => r.method === 'GET' && /\/tv_shows\?select=/.test(r.url));
   const ap = app.run('loadAllTvShows()');
   assert.ok(await within(allShows.reached));
-  const rpc = app.hold(r => r.url.includes('/rpc/set_show_status'));
-  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  const rpc = app.hold(r => r.url.includes('/rpc/library_set_show_state_b45'));
+  const ep = app.ctx.setShowStateById(f.tvShow.id, { status: 'skipped' });
   assert.ok(await within(rpc.reached));
   ownShows.release(); await within(rp); await settle();                  // older than the edit
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete', 'the edit is not replaced by an older show read');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped', 'the edit is not replaced by an older show read');
   allShows.release(); await within(ap); await settle();
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped');
   assert.ok(!/Refreshed\./.test(notice(app)), 'not completed by a read that kept the edited show list');
   rpc.release(); await within(ep); await settle(); await settle();
-  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'complete');
-  assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'complete');
+  assert.strictEqual(app.get('tvShowsById').get(f.tvShow.id).status, 'skipped');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'skipped');
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
 });
 
@@ -673,12 +673,13 @@ const shownWatched = (app, id) => {
   return !!m[1];
 };
 const shownShowStatus = (app, showId) => {
-  const m = app.el('tbody').innerHTML.match(new RegExp(`show-status-select s-([a-z_]+)"[^>]*setShowStatusById\\('${showId}'`));
+  const m = app.el('tbody').innerHTML.match(new RegExp(`show-status-select s-([a-z_]+)"[^>]*setShowStateById\\('${showId}', \\{ status`));
   assert.ok(m, 'the show status is displayed');
   return m[1];
 };
-const patchOf = id => r => r.method === 'PATCH' && r.url.includes(`id=eq.${id}`);
-const showRpc = r => r.url.includes('/rpc/set_show_status');
+// A film's Watched edit (B4/B5: through library_set_film_state_b45; a PATCH before).
+const patchOf = id => r => (r.method === 'PATCH' && r.url.includes(`id=eq.${id}`)) || (r.url.endsWith('/rpc/library_set_film_state_b45') && r.body.p_item_id === id);
+const showRpc = r => r.url.includes('/rpc/library_set_show_state_b45');
 const idx = (app, pred, from = 0) => app.requests.findIndex((r, i) => i >= from && pred(r));
 const cachedShowStatus = (app, id) => app.get('tvShowsById').get(id).status;
 // The row is shown inside its show group: expand it so its watch button is displayed.
@@ -762,7 +763,7 @@ test('round 5: a show-status edit starts, then the refresh’s show read and an 
   const olderShows = JSON.parse(JSON.stringify(app.store.tv_shows));
   const n0 = app.requests.length;
   const rpc = app.hold(showRpc);
-  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  const ep = app.ctx.setShowStateById(f.tvShow.id, { status: 'watching' });
   assert.ok(await within(rpc.reached));
   const own = app.hold(showsGet);
   const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
@@ -772,16 +773,16 @@ test('round 5: a show-status edit starts, then the refresh’s show read and an 
   assert.ok(await within(all.reached));
   assert.ok(idx(app, showRpc, n0) < idx(app, showsGet, n0), 'the edit started before the reads');
   own.release(); await settle();                                           // returns the old status while the edit is pending
-  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'complete', 'cached: optimistic status kept');
-  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'complete', 'displayed: optimistic status kept');
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'watching', 'cached: optimistic status kept');
+  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'watching', 'displayed: optimistic status kept');
   assert.ok(!/Refreshed\./.test(notice(app)));
   const saved = app.requests.length;
   rpc.release(); await within(ep); await settle();                         // saved
   all.releaseWith({ tv_shows: olderShows }); await within(ap); await within(rp); await settle(); await settle();   // the stale all-shows read returns
-  assert.notStrictEqual(before, 'complete');
-  assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'complete');
-  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'complete', 'cached: saved status kept');
-  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'complete', 'displayed: saved status kept');
+  assert.notStrictEqual(before, 'watching');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'watching');
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'watching', 'cached: saved status kept');
+  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'watching', 'displayed: saved status kept');
   assert.ok(idx(app, showsGet, saved) >= 0, 'a show read started after the save');
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
 });
@@ -791,14 +792,17 @@ test('round 5: a show-status edit starts, the refresh’s show read starts, the 
   app.ctx.switchView('alltv'); await settle(); // the show status is changed and shown in a TV view (All Movies has no show controls)
   const before = cachedShowStatus(app, f.tvShow.id);
   const stale = JSON.parse(JSON.stringify(app.store.tv_shows));
-  stale.find(s => s.id === f.tvShow.id).status = 'complete';               // what the stale read saw differs from the reverted state
+  stale.find(s => s.id === f.tvShow.id).status = 'skipped';               // what the stale read saw differs from the reverted state
   const rpc = app.hold(showRpc);
-  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  const ep = app.ctx.setShowStateById(f.tvShow.id, { status: 'watching' });
   assert.ok(await within(rpc.reached));
   const own = app.hold(showsGet);
   const rp = app.ctx.refreshAfterMatch(refreshStamp(app, f), false);
   assert.ok(await within(own.reached));
+  const failedAt = app.requests.length;
   rpc.fail(); await within(ep); await settle();
+  // (B4/B5: an edit without a clear answer is never resent; the open view is read again at once.)
+  assert.ok(idx(app, showsGet, failedAt) >= 0, 'the view was read again after the failure');
   assert.strictEqual(cachedShowStatus(app, f.tvShow.id), before, 'reverted');
   assert.match(app.el('errorBanner').innerHTML, /simulated failure/);
   const after = app.requests.length;
@@ -806,7 +810,6 @@ test('round 5: a show-status edit starts, the refresh’s show read starts, the 
   assert.strictEqual(cachedShowStatus(app, f.tvShow.id), before, 'cached: reverted status kept');
   assert.strictEqual(shownShowStatus(app, f.tvShow.id), before, 'displayed: reverted status kept');
   assert.match(app.el('errorBanner').innerHTML, /simulated failure/, 'the edit’s error is still shown');
-  assert.ok(idx(app, showsGet, after) >= 0, 'a current show read started after the stale one returned');
   assert.ok(app.requests.slice(after).every(r => r.method === 'GET'));
   assert.match(notice(app), /Matched “Target Show”\. Refreshed\./);
 });
@@ -844,11 +847,11 @@ test('round 5: two overlapping show-status edits — a collection show read star
   const stale = JSON.parse(JSON.stringify(app.store.tv_shows));
   stale.find(s => s.id === f.tvShow.id).status = 'skipped';               // only the stale read has this status
   const r1 = app.hold(showRpc), r2 = app.hold(showRpc);
-  const e1 = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  const e1 = app.ctx.setShowStateById(f.tvShow.id, { status: 'watching' });
   assert.ok(await within(r1.reached));
   app.ctx.switchView('alltv'); await settle(); // show status is changed from a TV view (All Movies has no show controls)
 
-  const e2 = app.ctx.setShowStatusById(f.tvShow.id, 'watching');
+  const e2 = app.ctx.setShowStateById(f.tvShow.id, { status: 'confirmed' });
   assert.ok(await within(r2.reached));
   r1.release(); await within(e1); await settle();                          // the first edit is saved; the second is pending
   const read = app.hold(showsGet);
@@ -858,11 +861,11 @@ test('round 5: two overlapping show-status edits — a collection show read star
   assert.notStrictEqual(cachedShowStatus(app, f.tvShow.id), 'skipped', 'cached: the stale read published nothing while an edit is pending');
   assert.notStrictEqual(shownShowStatus(app, f.tvShow.id), 'skipped', 'displayed: the stale read published nothing');
   r2.release(); await within(e2); await settle();
-  assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'watching');
-  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'watching');
-  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'watching');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === f.tvShow.id).status, 'confirmed');
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'confirmed');
+  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'confirmed');
   await app.run('loadAllTvShows()'); await settle();                // a read after both edits publishes
-  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'watching');
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'confirmed');
 });
 
 // Retired in Stage 5: "a watched edit starts, then a tab read starts …". There is no tab read;
@@ -877,16 +880,16 @@ test('round 5 (coverage): an all-shows read started during a pending show-status
   const stale = JSON.parse(JSON.stringify(app.store.tv_shows));
   stale.find(s => s.id === f.tvShow.id).status = 'skipped';               // only the stale read has this status
   const rpc = app.hold(showRpc);
-  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');
+  const ep = app.ctx.setShowStateById(f.tvShow.id, { status: 'watching' });
   assert.ok(await within(rpc.reached));
   const all = app.hold(r => r.method === 'GET' && /\/tv_shows\?select=/.test(r.url));
   const ap = app.run('loadAllTvShows()');
   assert.ok(await within(all.reached));
   all.releaseWith({ tv_shows: stale }); await within(ap); await settle();
-  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'complete', 'cached: optimistic status kept');
-  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'complete', 'displayed: optimistic status kept');
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'watching', 'cached: optimistic status kept');
+  assert.strictEqual(shownShowStatus(app, f.tvShow.id), 'watching', 'displayed: optimistic status kept');
   rpc.release(); await within(ep); await settle();
-  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'complete');
+  assert.strictEqual(cachedShowStatus(app, f.tvShow.id), 'watching');
 });
 
 test('round 5 (coverage): a pending edit stays protected however many reads happen meanwhile', async () => {
@@ -918,7 +921,7 @@ test('browser validation: a refresh that completes while All TV is shown redraws
   const rpc = app.hold(showRpc);
   app.ctx.switchView('alltv'); await settle(); // show status is changed from a TV view (All Movies has no show controls)
 
-  const ep = app.ctx.setShowStatusById(f.tvShow.id, 'complete');          // a show-status edit is pending
+  const ep = app.ctx.setShowStateById(f.tvShow.id, { status: 'skipped' });          // a show-status edit is pending
   assert.ok(await within(rpc.reached));
   x.g.release(); assert.ok(await within(ownShows.reached));              // the Match creates a new show; the refresh's show read is held
   app.ctx.switchView('alltv'); await settle(); await settle();           // All TV: its show read keeps True Crime's list (edit pending)

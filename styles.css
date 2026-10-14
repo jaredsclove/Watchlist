@@ -592,3 +592,45 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 @media (max-width: 700px) {
   .manage-box .btn, .manage-box .btn-danger, .manage-box input, .browse-manage, .browse-stale .btn, .browse-edit-members, .ww-filter .btn-link, .ww-stale .btn { min-height: 44px; }
 }
+
+/* ── B4 / B5: status, priority, markers, categories, Details, earlier seasons ── */
+.status-select.s-film-to_watch { background-color: var(--green-dim); color: var(--green); border-color: var(--green-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%233ecf8e' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-film-watched { background-color: var(--teal-bg); color: var(--teal); border-color: var(--teal); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%2314b8a6' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-film-skipped, .status-select.s-film-pair { background-color: var(--red-bg); color: var(--red); border-color: var(--red); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-pill.s-film-to_watch { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
+.status-pill.s-film-watched { background: var(--teal-bg); color: var(--teal); border-color: var(--teal); }
+.status-pill.s-film-skipped, .status-pill.s-film-pair { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+.priority-high { color: var(--gold); font-weight: 700; }
+.priority-low { font-size: 11px; color: var(--text3); }
+.priority-select { font-size: 12px; padding: 3px 8px; }
+.state-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 5px; vertical-align: middle; border: 1px solid; white-space: nowrap; }
+.state-tag.ended-tag { background: var(--surface2); color: var(--text2); border-color: var(--border2); }
+.state-tag.new-tag { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
+.state-tag.review-tag-b45 { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
+.state-tag.resume-tag { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
+.meta-chip { font-size: 11px; }
+.meta-more { font-size: 11px; color: var(--text3); }
+.caught-ended { font-size: 12px; color: var(--text2); }
+.gap-note { display: block; font-size: 11px; color: var(--text3); margin-top: 2px; }
+.show-actions-inner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+.show-actions-inner .ended-check { display: inline-flex; gap: 6px; align-items: center; color: var(--text2); }
+.resume-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1 1 100%; padding: 6px 0; }
+.details-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.details-field .search-input, .details-field .search-input:focus { width: 100%; }
+.details-checks { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 12px; }
+.details-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text); }
+@media (max-width: 700px) {
+  .priority-select, .show-actions-inner .btn, .show-actions-inner .btn-link, .show-actions-inner .ended-check, .resume-picker .btn, .resume-picker select,
+  .details-check, .details-field .search-input, #detailsModalBox .btn { min-height: 44px; }
+}
+.filter-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text2); white-space: nowrap; }
+@media (max-width: 700px) { .filter-check { min-height: 44px; } }
+.details-candidate { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 6px; }
+@media (max-width: 700px) { .details-candidate select { min-height: 44px; } }
+/* B4/B5: the cards' action row also holds the priority select; it wraps rather than overflow on a narrow phone. */
+.card-actions, .card-subseason-row .card-actions { flex-wrap: wrap; }
+.card-actions .priority-select { flex: 0 0 auto; }
+.details-value { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.details-value .search-input, .details-value .search-input:focus { flex: 1 1 auto; width: auto; min-width: 0; }
+.details-progress { font-size: 13px; color: var(--text2); margin-bottom: 4px; }
+@media (max-width: 700px) { .details-value .btn-link, #detailsModalBox .btn-link { min-height: 44px; } }

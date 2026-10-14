@@ -6,12 +6,20 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const B45 = require('./b45-harness');
+// The contracted phases: Stage 5c, and B4/B5 on top of it (tests/b45-harness.js).
+const isContracted = app => app.stage5 === 'contracted' || app.stage5 === B45.B45_PHASE;
 
 const ROOT = path.join(__dirname, '..');
-const HTML = fs.readFileSync(path.join(ROOT, 'watchlist.html'), 'utf8');
-const SCRIPT_FILES = [...HTML.matchAll(/<script src="([^"?]+)(?:\?[^"]*)?"><\/script>/g)].map(m => m[1]);
-const INLINE_SCRIPT = HTML.match(/<script>\n([\s\S]*?)<\/script>/)[1];
-const PAGE_IDS = [...HTML.replace(/<script[\s\S]*?<\/script>/g, '').matchAll(/id="([^"]+)"/g)].map(m => m[1]);
+// A page: watchlist.html and its scripts, from the working tree or (createApp({ source }))
+// another directory, e.g. an earlier release exported by tests/b45-compat.test.js.
+function pageOf(root) {
+  const html = fs.readFileSync(path.join(root, 'watchlist.html'), 'utf8');
+  return { root, scripts: [...html.matchAll(/<script src="([^"?]+)(?:\?[^"]*)?"><\/script>/g)].map(m => m[1]),
+    inline: html.match(/<script>\n([\s\S]*?)<\/script>/)[1],
+    ids: [...html.replace(/<script[\s\S]*?<\/script>/g, '').matchAll(/id="([^"]+)"/g)].map(m => m[1]) };
+}
+const PAGE = pageOf(ROOT);
 
 const cmpC = (a, b) => (a < b ? -1 : a > b ? 1 : 0); // code-point order, as collate "C"
 // Canonical JSON (keys by code point, arrays in order, no whitespace) and SHA-256: db/phase4a_catalog.sql's form.
@@ -213,12 +221,16 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
   // would create a record while a record this catalog doesn't govern has the same
   // key or title is excluded for review (existing_record / ambiguous, with the
   // candidates); effects document version 5.1 with `catalog`.
-  function catalogApply({ p_collection: coll, p_defaults: defs, p_approved: approved }, v5 = false) {
+  // b45 (B4/B5's library_catalog_apply_b45): every record created is To Watch / Normal / New
+  // from catalog, entries carry priority and catalog_new, seasons added to a show marked
+  // ended are noted (ended_kept), version b45.1.
+  function catalogApply({ p_collection: coll, p_defaults: defs, p_approved: approved }, v5 = false, b45 = false) {
     if (!BUILTIN.includes(coll)) throw new DbError('22023', `invalid_input: ${coll} has no built-in catalog`);
     if (app.catalogBusyNext) { app.catalogBusyNext--; throw new DbError('P0001', 'catalog_busy: The database was busy, so nothing was changed. Review again in a moment.'); }
     const snap = { w: clone(items()), s: clone(shows()), m: clone(store.collection_memberships || []) };
     const undo = () => { store.watchlist_items = snap.w; store.tv_shows = snap.s; if (store.collection_memberships) store.collection_memberships = snap.m; };
     const pre = Object.fromEntries(shows().filter(x => x.collection === coll).map(x => [x.id, x.status]));
+    const preEnded = Object.fromEntries(shows().map(x => [x.id, !!x.ended]));
     const showIdsBefore = new Set(shows().map(x => x.id));
     const target = (store.personal_collections || []).find(c => c.legacy_source === coll) || null;
     const fills = [];
@@ -259,20 +271,33 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
     for (const f of fills) { const w = items().find(r => r.id === f.row_id); w.display_date = f.new_display; w.date_sort = f.new_sort; }
     const insertedRows = res.inserted.map(r => items().find(x => x.id === r.id));
     const created = shows().filter(x => !showIdsBefore.has(x.id)).sort((a, b) => cmpC(a.show_key, b.show_key) || cmpC(a.id, b.id));
+    if (b45) {
+      created.forEach(x => Object.assign(x, B45.showDefaults(), { status: 'confirmed', catalog_new: true }));
+      insertedRows.forEach(r => Object.assign(r, { status: 'confirmed' }, isFilmRow(r) ? { ...B45.filmDefaults(), catalog_new: true } : B45.seasonNulls()));
+    }
     const refs = {};
     created.forEach((x, i) => { refs[x.id] = `S${i + 1}`; });
     insertedRows.filter(isFilmRow).sort((a, b) => cmpC(a.item_key, b.item_key) || cmpC(a.id, b.id)).forEach((r, i) => { refs[r.id] = `F${i + 1}`; });
     const entries = [], receipt = {};
     for (const x of created) {
-      entries.push({ kind: 'create_show', key: `create_show:${refs[x.id]}`, ref: refs[x.id], show_key: x.show_key, title: x.title, tmdb_id: x.tmdb_id ?? null, initial_status: x.status });
+      entries.push({ kind: 'create_show', key: `create_show:${refs[x.id]}`, ref: refs[x.id], show_key: x.show_key, title: x.title, tmdb_id: x.tmdb_id ?? null, initial_status: x.status,
+        ...(b45 ? { priority: x.priority, catalog_new: x.catalog_new } : {}) });
       receipt[`create_show:${refs[x.id]}`] = { show_id: x.id };
     }
     const attached = new Set(insertedRows.filter(r => !isFilmRow(r) && !refs[r.show_id]).map(r => r.show_id));
-    for (const id of attached) { const x = shows().find(y => y.id === id); entries.push({ kind: 'attach', key: `attach:${id}`, show_id: id, show_key: x.show_key, status: pre[id] }); }
+    for (const id of attached) {
+      const x = shows().find(y => y.id === id);
+      entries.push({ kind: 'attach', key: `attach:${id}`, show_id: id, show_key: x.show_key, status: pre[id] });
+      if (b45 && preEnded[id]) {
+        entries.push({ kind: 'ended_kept', key: `ended_kept:${id}`, show_id: id, show_key: x.show_key });
+        receipt[`ended_kept:${id}`] = { show_id: id };
+      }
+    }
     for (const r of insertedRows) {
       if (isFilmRow(r)) {
         entries.push({ kind: 'insert_film', key: `insert_film:${refs[r.id]}`, ref: refs[r.id], item_key: r.item_key, title: r.title, season: r.season, theme: r.theme,
-          display_date: r.display_date, date_sort: r.date_sort, status: r.status, watched: !!r.watched, media_type: r.media_type ?? null, tmdb_id: r.tmdb_id ?? null });
+          display_date: r.display_date, date_sort: r.date_sort, status: r.status, watched: !!r.watched, media_type: r.media_type ?? null, tmdb_id: r.tmdb_id ?? null,
+          ...(b45 ? { priority: r.priority, catalog_new: r.catalog_new } : {}) });
         receipt[`insert_film:${refs[r.id]}`] = { row_id: r.id };
       } else {
         const sk = shows().find(y => y.id === r.show_id).show_key;
@@ -310,10 +335,10 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
     const identified = new Set([...(res.identified || []).map(x => x.item_key),
       ...items().filter(r => r.collection === coll && r.tmdb_id != null).map(r => r.item_key)]);
     for (const d of defs) if (!touched.has(d.k)) entries.push({ kind: 'noop', key: `noop:${d.k}`, item_key: d.k, category: identified.has(d.k) ? 'identified' : 'present' });
-    const rank = ['create_show', 'attach', 'insert_season', 'insert_film', 'fill_date', 'reopen', 'membership', 'excluded_conflict', 'noop'];
+    const rank = ['create_show', 'attach', 'insert_season', 'insert_film', 'fill_date', 'reopen', 'ended_kept', 'membership', 'excluded_conflict', 'noop'];
     entries.sort((a, b) => rank.indexOf(a.kind) - rank.indexOf(b.kind) || cmpC(a.key, b.key));
     const document = v5
-      ? { version: '5.1', owner: 'owner-1', catalog: coll, payload_hash: sha256(canonical(defs)),
+      ? { version: b45 ? 'b45.1' : '5.1', owner: 'owner-1', catalog: coll, payload_hash: sha256(canonical(defs)),
           target: target ? { collection_id: target.id, archived: !!target.archived_at } : null, entries }
       : { version: '4a.1', owner: 'owner-1', collection: coll, payload_hash: sha256(canonical(defs)),
           target: target ? { collection_id: target.id, archived: !!target.archived_at } : null, entries };
@@ -325,7 +350,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
   }
   // After the contraction every old storage-shaped function refuses (db/phase5c_contract.sql).
   const stage5OldFunction = name => {
-    if (app.stage5 === 'contracted') throw new DbError('P0001', 'client_outdated: This page is out of date. Reload it. Nothing was changed.');
+    if (isContracted(app)) throw new DbError('P0001', 'client_outdated: This page is out of date. Reload it. Nothing was changed.');
   };
   const handlers = {
     add_tv_seasons({ p_collection: coll, p_show: show, p_seasons: seasons, p_target_show: targetShow = null }, internal = false) {
@@ -570,7 +595,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       if (tmdb != null && shows().some(x => x.tmdb_id === tmdb)) throw new DbError('P0001', 'show_exists: This show is already on your list, so nothing was added. Look at it again.');
       if (tmdb == null && shows().some(x => x.tmdb_id == null && x.show_key === key && !distinct.includes(x.id))) throw new DbError('P0001', 'show_exists: A show with this name is already on your list, so nothing was added. Look at it again.');
       // Coexistence: the per-storage key of where new shows go still applies.
-      if (app.stage5 !== 'contracted' && tmdb == null && shows().some(x => x.collection === 'othertv' && x.tmdb_id == null && x.show_key === key)) throw new DbError('P0001', 'show_exists: This show is already on your list, so nothing was added. Look at it again.');
+      if (!isContracted(app) && tmdb == null && shows().some(x => x.collection === 'othertv' && x.tmdb_id == null && x.show_key === key)) throw new DbError('P0001', 'show_exists: This show is already on your list, so nothing was added. Look at it again.');
       handlers.__refuseTwins(handlers.__twins('show', key, title, distinct), 'show', 'added');
       const snap = { w: clone(items()), s: clone(shows()), m: clone(store.collection_memberships || []), o: clone(store.othertv_shows) };
       const undo = () => { store.watchlist_items = snap.w; store.tv_shows = snap.s; if (store.collection_memberships) store.collection_memberships = snap.m; store.othertv_shows = snap.o; };
@@ -605,7 +630,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       if (!f || f.tmdb_id != null || !String(f.title || '').trim() || !/\|film$/.test(f.item_key || '') || !validDate(f.date_sort)) throw new DbError('22023', 'invalid_input: film');
       const distinct = Array.isArray(f.distinct_from) ? f.distinct_from : [];
       if (items().some(r => isFilmRow(r) && r.tmdb_id == null && r.item_key === f.item_key && !distinct.includes(r.id))) throw new DbError('P0001', 'film_exists: A film with this name is already on your list, so nothing was added. Look at it again.');
-      if (app.stage5 !== 'contracted' && items().some(r => r.collection === 'movies' && r.tmdb_id == null && r.item_key === f.item_key)) throw new DbError('P0001', 'film_exists: A film with this name is already on your list, so nothing was added. Look at it again.');
+      if (!isContracted(app) && items().some(r => r.collection === 'movies' && r.tmdb_id == null && r.item_key === f.item_key)) throw new DbError('P0001', 'film_exists: A film with this name is already on your list, so nothing was added. Look at it again.');
       handlers.__refuseTwins(handlers.__twins('film', f.item_key, f.title, distinct), 'film', 'added');
       const r = insertRow({ collection: 'movies', item_key: f.item_key, title: f.title.trim(), season: 'Film', theme: f.theme || '', display_date: f.display_date || '',
         date_sort: f.date_sort, status: f.status || 'confirmed', watched: !!f.watched });
@@ -621,7 +646,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       if (t && BUILTIN.includes(t.collection)) throw new DbError('P0001', 'match_target_governed: This TMDB show is part of a built-in catalog on your list, so this row wasn\'t matched to it. Nothing was changed.');
       if (!t) handlers.__refuseTwins(handlers.__twins('show', String(patch.title || '').trim().toLowerCase(), patch.title, patch.distinct_from), 'show', 'matched');
       if (patch && 'distinct_from' in patch) { patch = { ...patch }; delete patch.distinct_from; }
-      if (app.stage5 !== 'contracted' && t && t.collection !== r.collection) throw new DbError('P0001', 'match_conflict: This TMDB show is already on your list in a part this update can\'t join yet, so nothing was matched.');
+      if (!isContracted(app) && t && t.collection !== r.collection) throw new DbError('P0001', 'match_conflict: This TMDB show is already on your list in a part this update can\'t join yet, so nothing was matched.');
       return handlers.match_tv_row({ p_row_id: id, p_target: target, p_patch: patch, p_expansion: expansion }, true);
     },
     library_match_film({ p_row_id: id, p_expected: exp, p_patch: patch }) {
@@ -673,8 +698,16 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       return clone(r);
     }
   };
+  handlers.__catalogApplyB45 = args => catalogApply(args, true, true);
+  Object.assign(handlers, B45.b45Handlers({ app, store, handlers, newId, org, DbError, isFilmRow, BUILTIN }));
   return Object.fromEntries(Object.entries(handlers).map(([name, fn]) => [name, body => {
-    try { return response(200, fn(body)); }
+    try {
+      // B4/B5 installed: the old names refuse (an old page still open), before anything is read.
+      if (app.stage5 === B45.B45_PHASE && B45.B45_STUBS.includes(name)) {
+        throw new DbError('P0001', 'client_outdated: This page is out of date. Reload it. Nothing was changed.');
+      }
+      return response(200, fn(body));
+    }
     catch (e) {
       if (!(e instanceof DbError)) throw e;
       return response(HTTP_FOR[e.code] || 400, { code: e.code, details: e.detail ? JSON.stringify(e.detail) : null, hint: null, message: e.message });
@@ -818,7 +851,11 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, stage = 'final', org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true, catalog4a = true, configText = null, addToShow = true, stage5 = 'coexistence', recoveryArchive = 'active' } = {}) {
+  orgWrite = true, catalog4a = true, configText = null, addToShow = true, stage5, recoveryArchive = 'active', source = null } = {}) {
+  const page = source ? pageOf(source) : PAGE;
+  // The default phase is B4/B5 (production's schema once B4/B5 is installed); a database
+  // older than personal collections (org: false, format1) has no Stage 5.
+  if (stage5 === undefined) stage5 = format1 || org === false ? null : B45.B45_PHASE;
   const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
   if (!format1) store.tv_shows = clone(tvShows || []);
   const requests = [];
@@ -829,6 +866,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   let nextId = 1;
   const app = { store, requests, selectors, consoleErrors, countOverride, stage, catalog4a, configText, addToShow, stage5, recoveryArchive };
   if (store.tv_shows) linkFixtureRows(store, () => `new-${nextId++}`);
+  // B4/B5 (the default phase): the fixtures as db/b45_expand.sql would leave them.
+  if (stage5 === B45.B45_PHASE && store.tv_shows) B45.migrateFixtures(store, isFilmRow);
 
   // ── personal organization (db/phase3b_org.sql) ──
   const orgOn = !format1 && org !== false;
@@ -906,7 +945,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     };
     return el;
   }
-  PAGE_IDS.forEach(id => registry.set(id, makeEl(id)));
+  page.ids.forEach(id => registry.set(id, makeEl(id)));
   const document = {
     getElementById: id => registry.get(id) || null,
     querySelectorAll: sel => selectors[sel] || [],
@@ -936,6 +975,32 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   app.rpcHandlers = {
     restore_backup: body => {
       const b = body.p_backup;
+      if (app.stage5 === B45.B45_PHASE) {
+        if (b.formatVersion !== 5) return pgError(400, '22023', `restore_invalid: format ${b.formatVersion} backups ${[3, 4].includes(b.formatVersion) ? 'are converted in the page first (Restore shows what the conversion keeps and what it can\'t); nothing was changed' : 'can\'t be restored here'}`);
+        if (b.conversion && (![3, 4].includes(Number(b.conversion.source_format)) || !/^[0-9a-f]{64}$/.test(b.conversion.source_sha256 || ''))) return pgError(400, '22023', 'restore_invalid: the conversion record is malformed');
+        if (b.recovery && (!b.conversion || Number(b.conversion.source_format) !== 3)) return pgError(400, 'P0001', 'recovery_not_accepted: a recovery section belongs only to a converted format-3 backup; nothing was changed');
+        if (b.recovery && app.recoveryArchive !== 'active') return pgError(400, 'P0001', 'recovery_not_accepted: the recovery archive has been retired, so a recovery section can\'t be kept; convert the file again without it. Nothing was changed.');
+        const t = b.tables;
+        const showCat = new Map(t.catalog_show_links.map(l => [l.show_id, l.catalog])), filmCat = new Map(t.catalog_film_links.map(l => [l.item_id, l.catalog]));
+        const mapS = new Map(((b.recovery || {}).storage_map || {}).shows?.map(x => [x.id, x.collection]) || []);
+        const mapC = new Map(((b.recovery || {}).storage_map || {}).personal_collections?.map(x => [x.id, x.legacy_source]) || []);
+        const shows = t.tv_shows.map(sh => ({ ...sh, collection: showCat.get(sh.id) || mapS.get(sh.id) || 'othertv' }));
+        const byShow = new Map(shows.map(sh => [sh.id, sh.collection]));
+        // The resume range names two seasons of the same show (the deferred foreign keys).
+        const seasonOf = new Map(t.watchlist_items.map(r => [r.id, r.show_id]));
+        const badRange = shows.find(sh => (sh.resume_start_season_id != null || sh.resume_end_season_id != null)
+          && (seasonOf.get(sh.resume_start_season_id) !== sh.id || seasonOf.get(sh.resume_end_season_id) !== sh.id || sh.resume_start_season_id === sh.resume_end_season_id));
+        if (badRange) return pgError(409, '23503', 'insert or update on table "tv_shows" violates foreign key constraint "tv_shows_resume_start_fkey"');
+        store.tv_shows = clone(shows);
+        store.watchlist_items = clone(t.watchlist_items.map(({ theme_kind, ...r }) => ({ ...r,
+          collection: r.show_id ? byShow.get(r.show_id) : filmCat.get(r.id) || (theme_kind === 'genre' ? 'movies' : 'othertv') })));
+        store.personal_collections = clone(t.personal_collections.map(({ catalog_id, presentation_key, ...c }) => ({ ...c, legacy_source: mapC.has(c.id) ? mapC.get(c.id) : (presentation_key ?? catalog_id) })));
+        for (const k of ['custom_collections', 'collection_memberships', 'watch_with_choices']) store[k] = clone(t[k]);
+        store.othertv_shows = clone((b.recovery || {}).othertv_shows || []);
+        store.__links = { shows: clone(t.catalog_show_links), films: clone(t.catalog_film_links) };
+        app.restored = (app.restored || 0) + 1;
+        return response(200, { formatVersion: 5, restored: Object.fromEntries(Object.keys(t).map(k => [k, t[k].length])), recovery: b.recovery ? 'archived' : 'none' });
+      }
       if (app.stage5 === 'contracted') {
         if (b.formatVersion !== 4) return pgError(400, '22023', `restore_invalid: format ${b.formatVersion} backups ${b.formatVersion === 3 ? 'are converted in the page first' : 'can\'t be restored here'}; nothing was changed`);
         if (b.recovery && !b.conversion) return pgError(400, 'P0001', 'recovery_not_accepted: a recovery section belongs only to a converted format-3 backup; nothing was changed');
@@ -972,9 +1037,10 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   // fake database (not through the page): preview, then apply with its hash.
   app.applyCatalog = async (coll, defs) => {
     const d = clone(defs || app.get(`COLLECTIONS.find(c => c.id === ${JSON.stringify(coll)}).defaults`));
-    if (app.stage5) { // Stage 5: library_catalog_apply (the old catalog_apply refuses applies)
-      const p = await app.rpcHandlers.library_catalog_apply({ p_catalog: coll, p_defaults: d }).json();
-      return app.rpcHandlers.library_catalog_apply({ p_catalog: coll, p_defaults: d, p_approved: p.hash }).json();
+    if (app.stage5) { // Stage 5: library_catalog_apply (B4/B5: library_catalog_apply_b45; the old names refuse)
+      const fn = app.stage5 === B45.B45_PHASE ? 'library_catalog_apply_b45' : 'library_catalog_apply';
+      const p = await app.rpcHandlers[fn]({ p_catalog: coll, p_defaults: d }).json();
+      return app.rpcHandlers[fn]({ p_catalog: coll, p_defaults: d, p_approved: p.hash }).json();
     }
     const p = await app.rpcHandlers.catalog_apply({ p_collection: coll, p_defaults: d }).json();
     return app.rpcHandlers.catalog_apply({ p_collection: coll, p_defaults: d, p_approved: p.hash }).json();
@@ -994,7 +1060,9 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       for (const t of Object.keys(older)) { now[t] = store[t]; store[t] = older[t]; }
       try { return serveRequest(req, url, method, body); } finally { for (const t of Object.keys(now)) store[t] = now[t]; }
     }
-    return serveRequest(req, url, method, body);
+    if (app.stage5 === B45.B45_PHASE) B45.normalize(store, isFilmRow);
+    try { return serveRequest(req, url, method, body); }
+    finally { if (app.stage5 === B45.B45_PHASE && method !== 'GET') B45.normalize(store, isFilmRow); }
   }
 
   function serveRequest(req, url, method, body) {
@@ -1018,7 +1086,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const table = u.pathname.split('/').pop();
     const params = [...u.searchParams.entries()];
     // ── Stage 5 (db/phase5a_expand.sql, db/phase5c_contract.sql) ──
-    const contracted = app.stage5 === 'contracted';
+    const contracted = isContracted(app);
+    const b45 = app.stage5 === B45.B45_PHASE;
     if (contracted) {
       const retired = k => k === 'collection' || k === 'legacy_source';
       const select = (u.searchParams.get('select') || '').split(',');
@@ -1034,10 +1103,19 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
         if (targets.some(r => prot.some(k => k in body && JSON.stringify(body[k]) !== JSON.stringify(k === 'theme_kind' ? (isFilmRow(r) ? (r.collection === 'movies' ? 'genre' : 'other') : null) : r[k] ?? null)))) return guard();
       }
       if (method === 'PATCH' && table === 'tv_shows' && body && ['id', 'tmdb_id', 'show_key'].some(k => k in body)) return guard();
+      // B4/B5: status, priority, Ended, markers, provenance, metadata, the resume range and a
+      // film's status / watched change only through the _b45 functions.
+      if (b45 && method === 'PATCH' && ['tv_shows', 'watchlist_items'].includes(table)
+          && B45.patchGuard(table, body, store[table].filter(r => matches(r, params)), isFilmRow)) return guard();
     }
     if (u.pathname.includes('/rpc/') && table === 'stage5_capabilities') {
       if (!app.stage5) return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.stage5_capabilities in the schema cache' });
-      return response(200, { stage5: 1, phase: app.stage5, backup_format: contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none' });
+      return response(200, { stage5: 1, phase: app.stage5, backup_format: b45 ? 5 : contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none',
+        ...(b45 ? { b45: 1 } : {}) });
+    }
+    // A B4/B5 function on a database without B4/B5 doesn't exist.
+    if (u.pathname.includes('/rpc/') && /_b45$/.test(table) && !b45) {
+      return response(404, { code: 'PGRST202', details: null, hint: null, message: `Could not find the function public.${table} in the schema cache` });
     }
     if (u.pathname.includes('/rpc/') && /^library_/.test(table) && !app.stage5) {
       return response(404, { code: 'PGRST202', details: null, hint: null, message: `Could not find the function public.${table} in the schema cache` });
@@ -1202,14 +1280,22 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   };
   ctx.window = ctx;
   vm.createContext(ctx);
-  for (const f of SCRIPT_FILES) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
+  for (const f of page.scripts) vm.runInContext(fs.readFileSync(path.join(page.root, f), 'utf8'), ctx, { filename: f });
   app.ctx = ctx;
   app.get = expr => vm.runInContext(expr, ctx);
   app.run = code => vm.runInContext(code, ctx);
-  vm.runInContext(INLINE_SCRIPT, ctx, { filename: 'watchlist.html' }); // state + boot
+  vm.runInContext(page.inline, ctx, { filename: 'watchlist.html' }); // state + boot
   await settle();
 
   app.writes = () => requests.filter(r => r.method !== 'GET');
+  // The database changes phase under an open page (tests/b45-compat.test.js): B4/B5 installed
+  // (the store migrated as db/b45_expand.sql does), or rolled back (its columns gone).
+  app.migrateB45 = () => { app.stage5 = B45.B45_PHASE; B45.migrateFixtures(store, isFilmRow); B45.normalize(store, isFilmRow); };
+  app.rollbackB45 = () => {
+    app.stage5 = 'contracted';
+    for (const s of store.tv_shows || []) for (const k of B45.SHOW_COLUMNS) delete s[k];
+    for (const r of store.watchlist_items || []) for (const k of B45.FILM_COLUMNS) delete r[k];
+  };
   // Requests that name a retired storage field or an old storage-shaped function
   // (Stage 5 A13): a filter or select on collection / legacy_source, a body carrying
   // either, or add_tv_seasons / add_tv_seasons_to_show / create_tv_show / match_tv_row / catalog_apply.
@@ -1258,16 +1344,23 @@ function runner(title) {
 // is retired, so tests that need such a file (conversion, validation, refusals) read the
 // harness store through the page's fetchAllRows with that format's column lists
 // (legacyBackupSpec), in the retired exporter's table and row order and object shape.
-// Use it on an app whose store still has the format's tables (coexistence or older).
+// Use it on an app whose store still has the format's tables (coexistence or older); the
+// reads are served as that phase serves them. (Old statuses — Complete, Pending, … — exist
+// only in an app created with stage5: 'coexistence' or null: the default B4/B5 app's store
+// has been migrated.)
 async function legacyBackupFixture(app, formatVersion) {
   const spec = app.ctx.legacyBackupSpec(formatVersion);
   const tables = {};
   const rowCounts = {};
-  for (const table of spec.tables) {
-    const rows = await app.ctx.fetchAllRows(table, null, Object.keys(spec.columns[table]).join(','));
-    tables[table] = rows;
-    rowCounts[table] = rows.length;
-  }
+  const phase = app.stage5;
+  if (isContracted(app)) app.stage5 = 'coexistence';
+  try {
+    for (const table of spec.tables) {
+      const rows = await app.ctx.fetchAllRows(table, null, Object.keys(spec.columns[table]).join(','));
+      tables[table] = rows;
+      rowCounts[table] = rows.length;
+    }
+  } finally { app.stage5 = phase; }
   return { format: app.get('BACKUP_FORMAT'), formatVersion, exportedAt: new Date().toISOString(), rowCounts, tables };
 }
 

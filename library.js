@@ -211,8 +211,8 @@ function yearFilterSelectHtml(rows) {
 
 // ─── The open view, read again ────────────────────────────────────────────────
 function reloadOpenView() {
-  if (isBrowseView(activeViewId)) loadBrowseView();
-  else if (activeViewId) loadDerivedView();
+  if (isBrowseView(activeViewId)) return loadBrowseView();
+  else if (activeViewId) return loadDerivedView();
 }
 
 // What a write started from: answers are used only while the same view (and panel)
@@ -273,7 +273,9 @@ function libraryAddText(res, title) {
   const existing = (res.existing || []).length;
   if (existing) parts.push(`${existing} ${existing === 1 ? 'season was' : 'seasons were'} already on your list.`);
   for (const x of res.rejected || []) parts.push(`“${x.season || x.item_key}” wasn’t added: ${LIBRARY_REVIEW_TEXT[x.reason] || x.reason}.`);
-  if (res.reopened) parts.push(`“${title}” was Complete and is back On List.`);
+  // B5: an addition never changes the show's status, priority or Show ended.
+  if (res.ended_kept) parts.push(`“${title}” is marked ended; it stays marked ended.`);
+  if (res.unmapped && res.unmapped.length) parts.push(`TMDB categories not used: ${res.unmapped.join(', ')}.`);
   return parts.join(' ');
 }
 
@@ -538,7 +540,8 @@ async function librarySubmitSelection() {
       renderTMDBPreview();
       return;
     }
-    if (sel.mediaType === 'movie') return await libraryAddFilm(ctx, { ...libraryFilmFromTmdb(sel.id, name, details), ...(ack.length ? { distinct_from: ack } : {}) });
+    if (sel.mediaType === 'movie') return await libraryAddFilm(ctx, { ...libraryFilmFromTmdb(sel.id, name, details), ...(ack.length ? { distinct_from: ack } : {}) },
+      undefined, (md => md.unmapped.concat(md.omitted))(tmdbMetadata('movie', details)));
     if (bound.kind === 'existing') {
       const show = lib.showsById.get(bound.showId);
       const byNum = new Map((details.seasons || []).map(s => [s.season_number, s]));
@@ -546,7 +549,8 @@ async function librarySubmitSelection() {
       return await librarySendToShow(ctx, show, seasons, bound.expected.network);
     }
     return await libraryNewShow(ctx, { tmdb_id: sel.id, title: name, show_key: name.toLowerCase().trim(),
-      network: (details.networks && details.networks[0]?.name) || 'Unknown', ...(ack.length ? { distinct_from: ack } : {}) }, libraryNewShowSeasons(sel.id, name, details, nums));
+      network: (details.networks && details.networks[0]?.name) || 'Unknown', ...creationMetadata('tv', details),
+      ...(ack.length ? { distinct_from: ack } : {}) }, libraryNewShowSeasons(sel.id, name, details, nums), (md => md.unmapped.concat(md.omitted))(tmdbMetadata('tv', details)));
   } finally {
     if (libraryPanel === p) p.busy = false;
   }
@@ -557,7 +561,8 @@ function libraryFilmFromTmdb(tmdbId, name, details) {
   return { item_key: `${name.toLowerCase().trim()}|film`, title: name, season: 'Film',
     theme: (details.genres && details.genres[0]?.name) || 'Film',
     display_date: details.release_date ? formatDisplayDate(details.release_date) : 'TBA', date_sort: details.release_date || '2099-01-01',
-    watched: false, status: 'confirmed', tmdb_collection_id: belongsTo ? belongsTo.id : null, tmdb_collection_name: belongsTo ? belongsTo.name : null,
+    watched: false, status: 'confirmed', ...creationMetadata('movie', details),
+    tmdb_collection_id: belongsTo ? belongsTo.id : null, tmdb_collection_name: belongsTo ? belongsTo.name : null,
     collections: belongsTo ? [belongsTo.name] : [], media_type: 'movie', tmdb_id: tmdbId, season_number: null };
 }
 
@@ -567,7 +572,7 @@ function libraryFilmFromTmdb(tmdbId, name, details) {
 async function librarySendToShow(ctx, show, seasons, network) {
   let res;
   try {
-    res = await sbRpc('library_add_seasons', { p_show_id: show.id, p_expected: libraryExpected(show, network), p_seasons: seasons });
+    res = await sbRpc('library_add_seasons_b45', { p_show_id: show.id, p_expected: libraryExpected(show, network), p_seasons: seasons });
   } catch (e) {
     if (!libraryAnswerCurrent(ctx, show.title)) return { failed: true };
     const f = libraryFailure(e, `Adding to “${show.title}”`);
@@ -591,11 +596,11 @@ async function librarySendToShow(ctx, show, seasons, network) {
 // (show_exists / create_conflict, nothing written) when a show with this identity,
 // or an unmatched one with this key the page didn't show (distinct_from), is there
 // by then. It never joins a show.
-async function libraryNewShow(ctx, showInfo, seasons) {
+async function libraryNewShow(ctx, showInfo, seasons, unmapped = []) {
   if (!seasons.length) return;
   let res;
   try {
-    res = await sbRpc('library_create_show', { p_show: showInfo, p_seasons: seasons });
+    res = await sbRpc('library_create_show_b45', { p_show: showInfo, p_seasons: seasons });
   } catch (e) {
     if (!libraryAnswerCurrent(ctx, showInfo.title)) return;
     const f = libraryFailure(e, `Adding “${showInfo.title}”`, 'Adding a new show');
@@ -605,22 +610,23 @@ async function libraryNewShow(ctx, showInfo, seasons) {
   }
   if (!libraryAnswerCurrent(ctx, showInfo.title)) return;
   libraryAfterWrite(ctx);
-  if (!res || !res.show_created) { // not expected from library_create_show; never reported as a new show
+  if (!res || !res.show_created) { // not expected from library_create_show_b45; never reported as a new show
     libraryReport(ctx, `The answer didn’t confirm a new show “${showInfo.title}”. Check your list before adding again.`, true);
     return;
   }
   if ((res.inserted || []).length) showSaved();
-  libraryReport(ctx, libraryAddText(res, showInfo.title), false, libraryMembershipHtml(ctx, { show_id: res.show_id }, showInfo.title));
+  libraryReport(ctx, libraryAddText({ ...res, unmapped }, showInfo.title), false, libraryMembershipHtml(ctx, { show_id: res.show_id }, showInfo.title));
 }
 
 // A film: from TMDB through library_add_films (already on the list: reported, not
 // added again), or typed by hand through library_create_film (distinct_from: the
 // same-named unmatched films the page showed).
-async function libraryAddFilm(ctx, film, distinctFrom) {
+// unmapped: TMDB categories the approved lists don't take (named in the outcome, never guessed).
+async function libraryAddFilm(ctx, film, distinctFrom, unmapped = []) {
   let saved;
   try {
     if (film.tmdb_id != null) {
-      const res = await sbRpc('library_add_films', { p_films: [film] });
+      const res = await sbRpc('library_add_films_b45', { p_films: [film] });
       const out = res && res.results && res.results[0];
       if (!libraryAnswerCurrent(ctx, film.title)) return;
       if (out && out.outcome === 'catalog_candidate') {
@@ -635,7 +641,7 @@ async function libraryAddFilm(ctx, film, distinctFrom) {
       }
       saved = { id: out.id };
     } else {
-      const res = await sbRpc('library_create_film', { p_film: { ...film, distinct_from: distinctFrom || [] } });
+      const res = await sbRpc('library_create_film_b45', { p_film: { ...film, distinct_from: distinctFrom || [] } });
       if (!libraryAnswerCurrent(ctx, film.title)) return;
       saved = res && res.id ? { id: res.id } : null;
     }
@@ -648,7 +654,8 @@ async function libraryAddFilm(ctx, film, distinctFrom) {
   }
   showSaved();
   libraryAfterWrite(ctx);
-  libraryReport(ctx, `Added “${film.title}”.`, false, saved ? libraryMembershipHtml(ctx, { item_id: saved.id }, film.title) : '');
+  libraryReport(ctx, `Added “${film.title}”.${unmapped.length ? ` TMDB categories not used: ${unmapped.join(', ')}.` : ''}`, false,
+    saved ? libraryMembershipHtml(ctx, { item_id: saved.id }, film.title) : '');
 }
 
 // After any answer in the same epoch: the open view and the panel's library are read again.
@@ -1002,7 +1009,7 @@ async function libraryApplyRefresh() {
       const byNum = new Map(f.fresh.map(s => [s.season_number, s]));
       let res;
       try {
-        res = await sbRpc('library_add_seasons', { p_show_id: show.id, p_expected: libraryExpected(show, network),
+        res = await sbRpc('library_add_seasons_b45', { p_show_id: show.id, p_expected: libraryExpected(show, network),
           p_seasons: nums.filter(n => byNum.has(n)).map(n => libraryTmdbSeason(show, byNum.get(n), network)) });
       } catch (e) {
         const fl = libraryFailure(e, `“${show.title}”`);
@@ -1105,12 +1112,15 @@ function toolKnownRows(collectionId) {
 // Films added by a tool, through library_add_films: each one inserted, or reported
 // as already on the list (added elsewhere meanwhile); never changed, never twice.
 async function libraryInsertFilms(rows) {
-  const res = await sbRpc('library_add_films', { p_films: rows });
+  const res = await sbRpc('library_add_films_b45', { p_films: rows });
   const existing = (res.results || []).filter(x => x.outcome === 'existing').length;
   const twins = (res.results || []).filter(x => x.outcome === 'catalog_candidate').map(x => rows[x.index] && rows[x.index].title).filter(Boolean);
   const notes = [];
   if (existing) notes.push(`${existing} of these ${existing === 1 ? 'film was' : 'films were'} already on your list (added somewhere else meanwhile), so ${existing === 1 ? 'it wasn’t' : 'they weren’t'} added again.`);
   if (twins.length) notes.push(`Not added: ${twins.join(', ')} — a built-in catalog film with the same name is on your list (it may be the same film). If it’s a different film, add it from Search.`);
+  // §5.2: what TMDB sourcing left out is named, never guessed.
+  const sourcing = takeSourcingNote((res.inserted || []).map(r => r.title));
+  if (sourcing) notes.push(sourcing);
   if (notes.length) showNotice(notes.join(' '));
   return res.inserted || [];
 }
@@ -1179,12 +1189,16 @@ async function delRowInView(id) {
   }
   if (policy.deleteEffect === 'skip') { await setSeasonSkipped(id, true); return; }
   if (policy.deleteEffect === 'skip-film') {
-    if (!confirm(`Skip “${row.title}”? It’s part of a built-in catalog, so it is marked Skipped rather than deleted.`)) return;
-    await setStatus(id, 'skipped');
+    // The film contract (B5): Skip is an explicit status choice; on a watched film it also clears Watched.
+    if (!confirm(`Skip “${row.title}”? It’s part of a built-in catalog, so it is marked Skipped rather than deleted.${row.watched ? ' This also clears Watched.' : ''}`)) return;
+    await sendFilmState(row, { state: 'skipped' });
     return;
   }
   const what = isTvSeason(row) ? `“${row.title}” · ${row.season}` : `“${row.title}”`;
-  if (!confirm(`Delete ${what}? This removes it from your list.`)) return;
+  // A season that starts or bounds its show's earlier-seasons range: deleting it ends that choice (§4.7.5).
+  const rangeShow = isTvSeason(row) ? showOfRow(row) : null;
+  const endsRange = !!rangeShow && (rangeShow.resume_start_season_id === row.id || rangeShow.resume_end_season_id === row.id);
+  if (!confirm(`Delete ${what}? This removes it from your list.${endsRange ? ` The earlier-seasons choice for “${rangeShow.title}” ends too.` : ''}`)) return;
   const viewId = activeViewId, epoch = orgEpoch;
   const idx = rows.indexOf(row);
   rows.splice(idx, 1);

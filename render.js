@@ -15,7 +15,12 @@ function renderFilters() {
 const FILTER_PILLS = {
   theme: { select: 'fTheme', clickable: 'badge-clickable' },
   collection: { select: 'fCollection', clickable: 'collection-tag-clickable' },
-  watchwith: { select: 'fWatchWith', clickable: 'ww-tag-clickable' }
+  watchwith: { select: 'fWatchWith', clickable: 'ww-tag-clickable' },
+  genres: { select: 'fGenre', clickable: 'badge-clickable' },
+  forms: { select: 'fForm', clickable: 'badge-clickable' },
+  franchises: { select: 'fFranchise', clickable: 'badge-clickable' },
+  network: { select: 'fNetwork', clickable: 'badge-clickable' },
+  companies: { select: 'fCompany', clickable: 'badge-clickable' }
 };
 
 // cls / attrs: the label's existing look; owner: the row or show it sits on (for focus).
@@ -64,13 +69,316 @@ function toggleFilterPill(btn) {
   if (target && typeof target.focus === 'function') target.focus();
 }
 
-// A theme / genre / network filter control: every value in the view's loaded rows
-// (never only the shown ones), so a choice can always be changed or cleared.
-function themeFilterSelectHtml(themes, allLabel, ariaLabel) {
+// The Original label filter (each row's stored theme, B4: kept as it was): every value in
+// the view's loaded rows (never only the shown ones), so a choice can always be changed or cleared.
+function themeFilterSelectHtml(themes, allLabel = 'Any original label', ariaLabel = 'Original label') {
   const list = [...new Set(themes.filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  return `<select id="fTheme" onchange="renderTable()" aria-label="${esc(ariaLabel)}">
+  return `<select id="fTheme" onchange="renderTable()" aria-label="${esc(ariaLabel)}" title="Original label: the label each entry was saved with">
         <option value="">${esc(allLabel)}</option>${list.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
       </select>`;
+}
+
+// ─── Categorized metadata (B4) ────────────────────────────────────────────────
+// A TV season shows and filters by its show's metadata (no per-season values); a show
+// and a film by their own. Combined TMDB categories stay unresolved candidates: shown in
+// Details, filterable as such, never as genres.
+function metadataOf(rec) {
+  if (rec && typeof isTvSeason === 'function' && isTvSeason(rec) && !('genres' in rec && Array.isArray(rec.genres))) return showOfRow(rec) || {};
+  return rec || {};
+}
+function metadataEmpty(m) {
+  return !['genres', 'forms', 'franchises', 'companies'].some(k => (m[k] || []).length) && !m.network;
+}
+// Chips (filter pills where the view has the filter): up to two genres, then forms,
+// franchises and the network. While every category is empty and the owner hasn't saved
+// Details, the original label is shown instead (fallback: its badge HTML).
+function metadataChipsHtml(m, owner, fallback = '') {
+  if (!m || (metadataEmpty(m) && !m.metadata_owner_set)) return fallback;
+  const chip = (kind, v) => filterPillHtml(kind, v, v, { cls: `badge meta-chip meta-${kind}`, title: `Filter by “${v}”`, owner });
+  const genres = m.genres || [];
+  return genres.slice(0, 2).map(v => chip('genres', v)).join('')
+    + (genres.length > 2 ? `<span class="meta-more" title="${esc(genres.slice(2).join(', '))}">+${genres.length - 2}</span>` : '')
+    + (m.forms || []).map(v => chip('forms', v)).join('')
+    + (m.franchises || []).map(v => chip('franchises', v)).join('')
+    + (m.network ? chip('network', m.network) : '');
+}
+// The category filters' values (a control that isn't shown doesn't filter).
+function categoryFilterValues() {
+  const val = id => document.getElementById(id)?.value || '';
+  return { genres: val('fGenre'), forms: val('fForm'), franchises: val('fFranchise'), network: val('fNetwork'), companies: val('fCompany') };
+}
+// AND across categories; one value per category. An unresolved candidate is chosen as "cand:<name>".
+function categoryMatches(m, f) {
+  if (!f) return true;
+  for (const c of METADATA_CATEGORIES) {
+    const v = f[c.key];
+    if (!v) continue;
+    if (c.key === 'genres' && v.startsWith('cand:')) { if (!(m.genre_candidates || []).includes(v.slice(5))) return false; continue; }
+    if (c.single ? m[c.key] !== v : !(m[c.key] || []).includes(v)) return false;
+  }
+  return true;
+}
+// The category selects. Genre and Form offer their whole controlled lists (Genre also an
+// "Unresolved source categories" group of the combined names present); Franchise, Network
+// (confirmed values only) and Company offer the values of the records the view lists before
+// filtering, and aren't offered while no record has one.
+function categoryFilterSelectsHtml(records) {
+  const ms = records.map(metadataOf);
+  return METADATA_CATEGORIES.map(c => {
+    const values = c.list ? c.list.slice()
+      : [...new Set(ms.flatMap(m => (c.single ? [m[c.key]] : m[c.key] || [])).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const cands = c.key === 'genres' ? [...new Set(ms.flatMap(m => m.genre_candidates || []))].sort((a, b) => a.localeCompare(b)) : [];
+    if (!values.length && !cands.length) return '';
+    return `<select id="${c.filter}" onchange="renderTable()" aria-label="${esc(c.label)}">
+        <option value="">${esc(`Any ${c.label.toLowerCase()}`)}</option>${values.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}${cands.length
+          ? `<optgroup label="Unresolved source categories">${cands.map(v => `<option value="cand:${esc(v)}">${esc(v)} (unresolved)</option>`).join('')}</optgroup>` : ''}
+      </select>`;
+  }).join('');
+}
+// Priority and the markers (shows and films alike).
+function priorityFilterSelectHtml() {
+  return `<select id="fPriority" onchange="renderTable()" aria-label="Priority">
+        <option value="">Any priority</option><option value="high">★ High</option><option value="normal">Normal</option>
+        <option value="low">Low</option><option value="highnormal">High + Normal</option></select>`;
+}
+// The markers: two checkboxes; a ticked one keeps only the records that have that marker.
+const MARKER_FILTER_IDS = ['fNew', 'fReview'];
+function markerFilterChecksHtml() {
+  return `<label class="filter-check"><input type="checkbox" id="fNew" onchange="renderTable()"> New from catalog</label>
+      <label class="filter-check"><input type="checkbox" id="fReview" onchange="renderTable()"> Needs status review</label>`;
+}
+function markerFilterValues() {
+  return { fNew: !!document.getElementById('fNew')?.checked, fReview: !!document.getElementById('fReview')?.checked };
+}
+function priorityMatches(p, fPriority) {
+  if (!fPriority) return true;
+  if (fPriority === 'highnormal') return p !== 'low';
+  return p === fPriority;
+}
+function markerMatches(rec, m) {
+  return (!m || !m.fNew || !!rec.catalog_new) && (!m || !m.fReview || !!rec.status_review);
+}
+
+// ─── Details: categorized metadata of one show or film (O7) ───────────────────
+// Opened from an expanded show (All TV, Currently Watching) or a film's ⋯ (All Movies).
+// Saving records the owner's choice (also with every field left empty) through one guarded
+// call; nothing automatic changes it afterwards. The original labels are shown read-only.
+// Each opening is a session bound to the metadata it displayed (its snapshot), the restore
+// epoch and its own id: Save sends that snapshot as the expected values, so a draft never
+// overwrites values that changed meanwhile (a refresh or another page), never runs after a
+// restore, and an answer for an earlier opening never closes or changes a newer one. Values
+// are kept exactly as typed (commas included; surrounding spaces trimmed); anything the
+// database wouldn't accept is refused here with the reason, and the draft stays.
+function detailsRecord() {
+  if (!detailsDialog) return null;
+  return detailsDialog.kind === 'show' ? tvShowsById.get(detailsDialog.id) || null : (actionRows().find(r => r.id === detailsDialog.id) || null);
+}
+function metadataExpected(rec, kind) {
+  const m = { genres: (rec.genres || []).slice(), forms: (rec.forms || []).slice(), franchises: (rec.franchises || []).slice(),
+    companies: (rec.companies || []).slice(), genre_candidates: (rec.genre_candidates || []).slice() };
+  if (kind === 'show') Object.assign(m, { network: rec.network ?? null, network_candidates: (rec.network_candidates || []).slice() });
+  m.metadata_owner_set = !!rec.metadata_owner_set;
+  return m;
+}
+function openDetails(kind, id, opener) {
+  const rec = kind === 'show' ? tvShowsById.get(id) : actionRows().find(r => r.id === id);
+  if (!rec) return;
+  const snapshot = metadataExpected(rec, kind);
+  const labels = kind === 'show'
+    ? [...new Set(((derivedData && derivedData.rows) || []).filter(r => r.show_id === rec.id).map(r => r.theme).filter(Boolean))]
+    : [rec.theme].filter(Boolean);
+  detailsDialog = { session: ++detailsSessionSeq, kind, id, title: rec.title, epoch: orgEpoch, snapshot, labels, opener: opener || null,
+    draft: { genres: snapshot.genres.slice(), forms: snapshot.forms.slice(), franchises: snapshot.franchises.slice(),
+      companies: snapshot.companies.slice(), resolve: {}, network: kind === 'show' ? (snapshot.network || '') : '' },
+    error: '', notice: '', saving: false, stale: null, picker: false };
+  renderDetails();
+  document.getElementById('detailsModalOverlay').style.display = 'flex';
+  const box = document.getElementById('detailsModalBox');
+  if (box && typeof box.focus === 'function') box.focus();
+}
+function closeDetails() {
+  const opener = detailsDialog && detailsDialog.opener;
+  detailsDialog = null;
+  document.getElementById('detailsModalOverlay').style.display = 'none';
+  document.getElementById('detailsModalBox').innerHTML = '';
+  if (opener && typeof opener.focus === 'function') opener.focus();
+}
+// Discards this draft and starts again from what the page holds now (after a refusal or an
+// unknown outcome, once the list was read again). Never automatic.
+function detailsRestart() {
+  if (!detailsDialog) return;
+  const { kind, id, opener } = detailsDialog;
+  openDetails(kind, id, opener);
+}
+function detailsKeydown(e) {
+  if (e && e.key === 'Escape') closeDetails();
+}
+// Draft edits (no redraw while typing, so focus stays).
+function detailsToggle(field, index, checked) {
+  if (!detailsDialog) return;
+  const v = (field === 'genres' ? GENRES : FORMS)[index];
+  const list = detailsDialog.draft[field].filter(x => x !== v);
+  if (checked) list.push(v);
+  detailsDialog.draft[field] = list;
+}
+function detailsSetValue(field, index, value) { if (detailsDialog) detailsDialog.draft[field][index] = String(value); }
+function detailsAddValue(field) { if (!detailsDialog) return; detailsDialog.draft[field].push(''); renderDetails(); }
+function detailsRemoveValue(field, index) { if (!detailsDialog) return; detailsDialog.draft[field].splice(index, 1); renderDetails(); }
+function detailsResolve(index, choice) { if (detailsDialog) detailsDialog.draft.resolve[index] = choice; }
+function detailsSetNetwork(value) { if (detailsDialog) detailsDialog.draft.network = String(value); }
+function detailsPickNetwork(index) {
+  if (!detailsDialog) return;
+  detailsDialog.draft.network = (detailsDialog.snapshot.network_candidates || [])[index] || '';
+  renderDetails();
+}
+function detailsTogglePicker() { if (detailsDialog) { detailsDialog.picker = !detailsDialog.picker; renderDetails(); } }
+
+// The draft as the database would store it, or the reasons it can't be (nothing is dropped).
+function detailsValidate(dialog) {
+  const d = dialog.draft, problems = [];
+  const list = (field, label, values) => {
+    const out = values.map(v => String(v).trim()).filter(v => v !== '');
+    out.filter(v => v.length > METADATA_LIMITS.length).forEach(v => problems.push(`${label}: “${v.slice(0, 30)}…” is longer than ${METADATA_LIMITS.length} characters.`));
+    if (out.length > METADATA_LIMITS.values) problems.push(`${label}: at most ${METADATA_LIMITS.values} values (there are ${out.length}).`);
+    const seen = new Map();
+    out.forEach(v => { const k = v.toLowerCase(); if (seen.has(k)) problems.push(`${label}: “${v}” is listed twice.`); seen.set(k, v); });
+    return out;
+  };
+  const genres = d.genres.slice(), candidates = [];
+  (dialog.snapshot.genre_candidates || []).forEach((c, i) => {
+    const choice = d.resolve[i] || '';
+    const pair = COMBINED_CATEGORIES[c] || [];
+    if (!choice) { candidates.push(c); return; }
+    const add = choice === 'a' ? [pair[0]] : choice === 'b' ? [pair[1]] : choice === 'both' ? pair : [];
+    add.filter(Boolean).forEach(g => { if (!genres.includes(g)) genres.push(g); });
+  });
+  const metadata = { genres: list('genres', 'Genres', GENRES.filter(g => genres.includes(g))), forms: list('forms', 'Form', FORMS.filter(f => d.forms.includes(f))),
+    franchises: list('franchises', 'Franchise / universe', d.franchises), companies: list('companies', 'Production company', d.companies),
+    genre_candidates: candidates };
+  if (dialog.kind === 'show') {
+    const net = String(d.network || '').trim();
+    if (net.length > METADATA_LIMITS.length) problems.push(`Original network: “${net.slice(0, 30)}…” is longer than ${METADATA_LIMITS.length} characters.`);
+    metadata.network = net || null;
+    metadata.network_candidates = (dialog.snapshot.network_candidates || []).slice();
+  }
+  return { metadata, problems };
+}
+
+// Viewing progress of a show (§4.7, details placement): Caught up · Ended, earlier unwatched
+// seasons with "Watch earlier seasons", the range's state and its recovery actions. Live (what
+// the page holds now); the actions are the same guarded calls as in the expanded show.
+function detailsProgressHtml(show) {
+  const seasons = ((derivedData && derivedData.rows) || []).filter(r => r.show_id === show.id);
+  if (!seasons.length) return '';
+  const range = resumeRange(show, seasons);
+  const active = !!range && range.state === 'active';
+  const gap = gapSeasons(seasons);
+  const idArg = esc(show.id).replace(/'/g, "\\'");
+  const lines = [];
+  if (!active && isEndedExit(show, seasons)) lines.push('<span class="caught-ended">Caught up · Ended</span>');
+  if (gap.length) lines.push(`<span>${gap.length} earlier season${gap.length === 1 ? '' : 's'} unwatched</span>`);
+  if (range) {
+    const text = range.state === 'active' ? `Watching earlier seasons from ${esc(range.start ? range.start.season : '')}`
+      : range.state === 'complete' ? 'Earlier seasons done' : 'Earlier-seasons range no longer applies; choose again or stop';
+    lines.push(`<span>${text}</span>`);
+  }
+  const actions = [];
+  if (gap.length && !active) {
+    const label = range && range.state === 'invalid' ? 'Choose again' : show.status === 'watching' ? 'Watch earlier seasons…' : 'Start watching earlier seasons…';
+    actions.push(`<button class="btn btn-link" aria-expanded="${!!detailsDialog.picker}" onclick="detailsTogglePicker()">${label}</button>`);
+  }
+  if (range) actions.push(`<button class="btn btn-link" onclick="stopResume('${idArg}')">Stop watching earlier seasons</button>`);
+  if (range && range.state === 'invalid' && !gap.length) lines.push('<span class="manage-hint">No earlier unwatched season to choose now.</span>');
+  const picker = detailsDialog.picker && gap.length && !active
+    ? `<div class="resume-picker" role="group" aria-label="Start from">${gap.map(r => `<button class="btn" onclick="startResume('${idArg}', '${esc(r.id)}')">Start from ${esc(r.season)}</button>`).join(' ')}</div>` : '';
+  if (!lines.length && !actions.length) return '';
+  return `<div class="details-field"><span class="modal-label">Viewing progress</span><div class="details-progress">${lines.join(' · ')}</div>
+    ${actions.length ? `<div class="show-actions-inner">${actions.join(' ')}</div>` : ''}${picker}</div>`;
+}
+
+function renderDetails() {
+  const box = document.getElementById('detailsModalBox');
+  if (!box || !detailsDialog) return;
+  const dlg = detailsDialog, rec = detailsRecord();
+  if (!rec && !dlg.saving) { box.innerHTML = `<div class="modal-title" id="detailsTitle">Details</div><div class="modal-error">This entry isn’t on the page any more. Nothing was changed.</div><div class="modal-actions"><button class="btn" onclick="closeDetails()">Close</button></div>`; return; }
+  const kind = dlg.kind, m = dlg.snapshot, d = dlg.draft;
+  const restored = dlg.epoch !== orgEpoch;
+  const locked = !!dlg.stale || restored;
+  const checks = (field, listName, list) => `<div class="details-checks">${list.map((v, i) =>
+    `<label class="details-check"><input type="checkbox" name="${listName}" value="${esc(v)}"${d[field].includes(v) ? ' checked' : ''} onchange="detailsToggle('${field}', ${i}, this.checked)"> ${esc(v)}</label>`).join('')}</div>`;
+  const values = (field, label, addLabel) => `<div class="details-field"><span class="modal-label">${esc(label)}</span>
+      ${d[field].map((v, i) => `<div class="details-value"><input type="text" class="search-input" id="details-${field}-${i}" value="${esc(v)}" aria-label="${esc(label)} ${i + 1}" oninput="detailsSetValue('${field}', ${i}, this.value)">
+        <button type="button" class="btn btn-link" onclick="detailsRemoveValue('${field}', ${i})" aria-label="Remove ${esc(label)} ${i + 1}">Remove</button></div>`).join('')}
+      <button type="button" class="btn btn-link" onclick="detailsAddValue('${field}')">${esc(addLabel)}</button></div>`;
+  const cands = m.genre_candidates.length ? `<div class="details-field"><span class="modal-label">Unresolved source categories</span>
+      ${m.genre_candidates.map((c, i) => {
+        const pair = COMBINED_CATEGORIES[c];
+        const opts = (pair ? [['a', pair[0]], ['b', pair[1]], ['both', 'Both']] : []).concat([['neither', 'Neither']]);
+        return `<div class="details-candidate"><span class="state-tag review-tag-b45">Unresolved category</span> Unresolved source category: ${esc(c)}
+          <select id="detailsResolve${i}" aria-label="Resolve ${esc(c)}" onchange="detailsResolve(${i}, this.value)"><option value="">Resolve…</option>${opts.map(([v, l]) =>
+            `<option value="${v}"${d.resolve[i] === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`;
+      }).join('')}</div>` : '';
+  const network = kind === 'show' ? `<div class="details-field"><span class="modal-label">Original network / service</span>
+      <input type="text" id="detailsNetwork" class="search-input" value="${esc(d.network)}" placeholder="Not set" oninput="detailsSetNetwork(this.value)">
+      ${(m.network_candidates || []).length ? `<p class="browse-note">Network candidates (TMDB): ${m.network_candidates.map((n, i) =>
+        `<button type="button" class="btn btn-link" onclick="detailsPickNetwork(${i})">${esc(n)}</button>`).join(', ')}</p>` : ''}</div>` : '';
+  const progress = kind === 'show' && rec ? detailsProgressHtml(rec) : '';
+  const lockText = restored ? 'A restore happened since this dialog opened, so it can’t save. Your entries are shown for reference; start again from the current values.'
+    : dlg.stale === 'changed' ? 'This entry changed since this dialog opened, so nothing was saved. Your entries are shown for reference; start again from the current values to edit what is stored now.'
+    : dlg.stale === 'unknown' ? 'The save wasn’t confirmed and won’t be sent again. Your entries are shown for reference; start again from the current values once you have checked what is stored.' : '';
+  box.innerHTML = `<div class="modal-title" id="detailsTitle">Details · ${esc(dlg.title)}</div>
+    ${progress}
+    ${dlg.labels.length ? `<div class="details-field"><span class="modal-label">Original label${dlg.labels.length > 1 ? 's' : ''}</span><div>${dlg.labels.map(esc).join(', ')}</div></div>` : ''}
+    <div class="details-field"><span class="modal-label">Genres</span>${checks('genres', 'detailsGenre', GENRES)}</div>
+    ${cands}
+    <div class="details-field"><span class="modal-label">Form</span>${checks('forms', 'detailsForm', FORMS)}</div>
+    ${values('franchises', 'Franchise / universe', 'Add a franchise / universe')}
+    ${network}
+    ${values('companies', 'Production company', 'Add a production company')}
+    ${dlg.error ? `<div class="modal-error" role="alert">${esc(dlg.error)}</div>` : ''}
+    ${dlg.notice ? `<div class="manage-hint" role="status">${esc(dlg.notice)}</div>` : ''}
+    ${lockText ? `<div class="modal-error" role="alert">${esc(lockText)}</div>` : ''}
+    <div class="modal-actions"><button class="btn" onclick="closeDetails()">${locked ? 'Close' : 'Cancel'}</button>
+      ${locked ? '<button class="btn btn-accent" onclick="detailsRestart()">Start again from the current values</button>'
+        : `<button class="btn btn-accent" onclick="saveDetails()"${dlg.saving ? ' disabled' : ''}>${dlg.saving ? 'Saving…' : 'Save'}</button>`}</div>`;
+}
+
+async function saveDetails() {
+  if (isBrowseView(activeViewId) && activeViewId !== ALL_MOVIES_VIEW.id) return; // read-only views never write
+  const dlg = detailsDialog;
+  if (!dlg || dlg.saving || dlg.stale) return;
+  if (dlg.epoch !== orgEpoch) { renderDetails(); return; } // a restore happened: nothing is sent (the dialog says so)
+  const { metadata, problems } = detailsValidate(dlg);
+  if (problems.length) { dlg.error = `Not saved: ${problems.join(' ')} Correct these and save again.`; renderDetails(); return; }
+  const { session, kind, id, title, epoch } = dlg;
+  dlg.saving = true;
+  dlg.error = '';
+  renderDetails();
+  const current = () => detailsDialog && detailsDialog.session === session ? detailsDialog : null; // this opening, still open
+  try {
+    const res = await sbRpc('library_set_metadata_b45', { p_kind: kind, p_id: id, p_expected: dlg.snapshot, p_metadata: metadata });
+    if (epoch !== orgEpoch) { if (current()) closeDetails(); staleAfterRestore(`“${title}” · details`); return; }
+    if (kind === 'show' && res && res.show) { const rec = tvShowsById.get(id); if (rec) Object.assign(rec, res.show); }
+    else if (res && res.row) mirrorRowUpdate(id, res.row, epoch);
+    showSaved();
+    if (current()) closeDetails();
+    renderFilters();
+    renderTable();
+  } catch (e) {
+    if (epoch !== orgEpoch) { if (current()) closeDetails(); staleAfterRestore(`“${title}” · details`); return; }
+    const mine = current();
+    if (mine) {
+      mine.saving = false;
+      mine.error = stateErrorText(e);
+      if (stateNeedsReread(e)) mine.stale = stateUnconfirmed(e) ? 'unknown' : 'changed';
+      renderDetails();
+    }
+    // Stale or unknown: the open view is read again (same epoch); the dialog keeps this draft
+    // and says whether that read succeeded. An earlier opening's answer touches no dialog.
+    const ok = await reportStateFailure(e, epoch);
+    const still = current();
+    if (still && still.stale) { still.notice = rereadText(ok).trim(); renderDetails(); }
+  }
 }
 
 // A film's legacy collection tags (cleaned names) and watch-with choices as filter pills.
@@ -125,11 +433,6 @@ document.addEventListener('click', function(e) {
 
 
 // ─── Season rows (derived views) ─────────────────────────────────────────────
-// Row-level status options: films (TV shows use showStatusSelectHtml).
-function statusOptionsHtml(status) {
-  return TV_STATUS_ORDER.map(s => `<option value="${s}"${status === s ? ' selected' : ''}>${statusOptionLabel(s)}</option>`).join('');
-}
-
 // The watch control for one season row. Derived views pass requireReleased, which
 // replaces "Mark watched" with a note until the season has aired (a row already
 // marked watched keeps its toggle so it can be undone). compact is the mobile label.
@@ -146,7 +449,7 @@ function seasonWatchControlHtml(r, opts, compact) {
 // is the show's), the row-level status for a film. A season of a Skipped show
 // follows its show and has none.
 function seasonRowControlHtml(r, opts = {}) {
-  if (!isTvSeason(r)) return `<select class="status-select s-${r.status}" onchange="setStatus('${r.id}', this.value, this)">${statusOptionsHtml(r.status)}</select>`;
+  if (!isTvSeason(r)) return filmStatusSelectHtml(r);
   if (displayStatus(r) === 'skipped') return `<span class="confirmed-lbl">Show skipped</span>`;
   return seasonSkipButtonHtml(r, opts);
 }
@@ -155,8 +458,7 @@ function seasonRowControlHtml(r, opts = {}) {
 // opts: { isNew, showMatch, showDelete, deleteTitle, requireReleased, today }
 function seasonSubRowHtml(r, opts) {
   const isSkipped = isOffList(r);
-  const isMaybe   = displayStatus(r) === 'maybe';
-  const rowClass = isSkipped?'row-skipped':isMaybe?'row-maybe':'';
+  const rowClass = isSkipped ? 'row-skipped' : '';
   return `<tr class="${rowClass} sub-row">
         <td style="padding-left:28px">
           <span class="season-lbl">${esc(r.season)}</span>
