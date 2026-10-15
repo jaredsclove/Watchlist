@@ -111,7 +111,7 @@ const shortcuts = html => [...html.matchAll(/<button class="watch-btn show-short
   .map(m => ({ show: m[1], aria: m[2], onclick: m[3], text: m[4] }));
 
 test('B2: Currently Watching and All TV name the up-next season on the show-level shortcut, in table and cards', async () => {
-  const a = show({ title: 'Worst Neighbor Ever', status: 'watching' }, [{ num: 1, date: day(-3) }]);
+  const a = show({ title: 'Synthetic Neighbor Show', status: 'watching' }, [{ num: 1, date: day(-3) }]);
   for (const view of ['watching', 'alltv']) {
     const app = await boot(all(a));
     app.ctx.switchView(view); await settle();
@@ -120,7 +120,7 @@ test('B2: Currently Watching and All TV name the up-next season on the show-leve
     assert.strictEqual(cards.length, 1, `${view}: one shortcut in the cards`);
     for (const s of [rows[0], cards[0]]) {
       assert.strictEqual(s.text, 'Mark Season 1 watched');
-      assert.strictEqual(s.aria, 'Mark Season 1 of Worst Neighbor Ever watched');
+      assert.strictEqual(s.aria, 'Mark Season 1 of Synthetic Neighbor Show watched');
       assert.strictEqual(s.show, a.show.id);
       assert.ok(s.onclick.endsWith(`toggleWatch('${a.rows[0].id}')`));
     }
@@ -188,7 +188,7 @@ const tbody = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 const rowsOf = html => html.split('<tr').slice(1).map(x => '<tr' + x);
 const showRowOf = (app, key) => rowsOf(tbody(app)).find(r => r.includes(`data-show-row="${key}"`));
-const cardOf = (app, key) => { const c = cards(app); const i = c.indexOf(`<div class="item-card show-group-card" data-show-row="${key}"`); return i < 0 ? null : c.slice(i, c.indexOf('<div class="item-card', i + 10) > 0 ? c.indexOf('<div class="item-card', i + 10) : undefined); };
+const cardOf = (app, key) => { const c = cards(app); const i = c.indexOf(`<div class="item-card show-group-card" data-item="${key}" data-show-row="${key}"`); return i < 0 ? null : c.slice(i, c.indexOf('<div class="item-card', i + 10) > 0 ? c.indexOf('<div class="item-card', i + 10) : undefined); };
 const cellCount = row => (row.match(/<td[\s>]/g) || []).length;
 
 function cwLibrary() {
@@ -219,7 +219,7 @@ test('B6: headings: In progress (focusable, not collapsible) and Caught up (a re
   const { data } = cwLibrary();
   const app = await boot(data);
   const html = tbody(app);
-  assert.ok(html.includes('<th colspan="6" scope="colgroup" tabindex="-1" data-section="inprogress">In progress'));
+  assert.ok(html.includes('<th colspan="5" scope="colgroup" tabindex="-1" data-section="inprogress">In progress'), 'spans the five columns');
   assert.ok(/<button type="button" class="section-toggle" data-section="uptodate" aria-expanded="true" onclick="toggleDerivedSection\('uptodate'\)">[^]*Caught up/.test(html));
   assert.ok(!/Up to date/.test(html), 'the section is Caught up');
   assert.ok(cards(app).includes('<h3 class="derived-section-card derived-heading-card" tabindex="-1" data-section="inprogress">In progress'));
@@ -340,7 +340,7 @@ test('B6: expand buttons: one per show row and card, labelled, aria-expanded, st
   for (const view of ['watching', 'alltv']) {
     const app = await boot(data);
     app.ctx.switchView(view); await settle();
-    const btn = `<button type="button" class="expand-btn" data-show-key="${p.show.id}" aria-expanded="false" aria-label="Show seasons and actions of Progress" onclick="event.stopPropagation(); toggleDerivedShow('${p.show.id}')">`;
+    const btn = `<button type="button" class="expand-btn" data-show-key="${p.show.id}" data-primary="1" aria-expanded="false" aria-label="Show seasons and actions of Progress" onclick="event.stopPropagation(); toggleDerivedShow('${p.show.id}')">`;
     assert.ok(showRowOf(app, p.show.id).includes(btn), `${view}: row`);
     assert.ok(cardOf(app, p.show.id).includes(btn), `${view}: card`);
     // A click that started on a control inside the row belongs to that control.
@@ -406,11 +406,11 @@ test('B6: the focus chain F-1 … F-7 (pure): every transition picks one visible
   assert.deepStrictEqual(F(rec('a', 'inprogress', sc), L(['a'], []), t => t.kind === 'shortcut' && t.value === 'a' && false || (t.kind === 'shortcut')), sc);
   assert.deepStrictEqual(F(rec('a', 'inprogress', { kind: 'action', value: 'details', show: 'a' }), L(['a'], []), t => t.kind === 'shortcut'), sc);
   // T3: it moved into an open Caught up (its expand button), or a collapsed one (the toggle)
-  assert.deepStrictEqual(F(rec('a', 'inprogress', sc, ['b']), L(['b'], ['a'])), { kind: 'expand', value: 'a' });
+  assert.deepStrictEqual(F(rec('a', 'inprogress', sc, ['b']), L(['b'], ['a'])), { kind: 'item', value: 'a' });
   assert.deepStrictEqual(F(rec('a', 'inprogress', sc, ['b']), L(['b'], ['a'], false)), { kind: 'section', value: 'uptodate' });
   // T4, F-5: it left; the next neighbour, else the previous one
-  assert.deepStrictEqual(F(rec('b', 'inprogress', sel, ['c'], ['a']), L(['a', 'c'], [])), { kind: 'expand', value: 'c' });
-  assert.deepStrictEqual(F(rec('c', 'inprogress', sel, [], ['b', 'a']), L(['a', 'b'], [])), { kind: 'expand', value: 'b' });
+  assert.deepStrictEqual(F(rec('b', 'inprogress', sel, ['c'], ['a']), L(['a', 'c'], [])), { kind: 'item', value: 'c' });
+  assert.deepStrictEqual(F(rec('c', 'inprogress', sel, [], ['b', 'a']), L(['a', 'b'], [])), { kind: 'item', value: 'b' });
   // a neighbour only in another section isn't used
   assert.deepStrictEqual(F(rec('c', 'uptodate', sel, ['x'], []), L(['x', 'p'], ['y'])), { kind: 'section', value: 'uptodate' });
   // T5, F-7: the only Caught up show left (the section is gone at 0): the first heading, In progress
@@ -421,13 +421,13 @@ test('B6: the focus chain F-1 … F-7 (pure): every transition picks one visible
   assert.deepStrictEqual(F(rec('p', 'inprogress', sel), L([], [])), { kind: 'empty' });
   assert.deepStrictEqual(F(rec('p', 'inprogress', sel, ['q']), L([], [])), { kind: 'empty' });
   // T8: after a reload (the loading message was focused; it is gone): the same rules
-  const reload = { ...rec(null, null, { kind: 'loading', value: '1' }), loading: false };
+  const reload = rec(null, null, { kind: 'loading', value: '1' });
   assert.deepStrictEqual(F(reload, L([], [])), { kind: 'empty' });
   assert.deepStrictEqual(F(reload, L(['p'], [])), { kind: 'section', value: 'inprogress' });
   // All TV: one list without a heading; F-6 / F-7 fall back to its first listed show
   const allTv = keys => ({ sections: [{ name: 'all', shown: true, open: true, heading: false, keys }] });
-  assert.deepStrictEqual(F(rec('a', 'all', sel, ['b']), allTv(['b', 'c'])), { kind: 'expand', value: 'b' });
-  assert.deepStrictEqual(F(rec('a', 'all', sel), allTv(['c'])), { kind: 'expand', value: 'c' });
+  assert.deepStrictEqual(F(rec('a', 'all', sel, ['b']), allTv(['b', 'c'])), { kind: 'item', value: 'b' });
+  assert.deepStrictEqual(F(rec('a', 'all', sel), allTv(['c'])), { kind: 'item', value: 'c' });
   assert.deepStrictEqual(F(rec('a', 'all', sel), allTv([])), { kind: 'empty' });
   // no listing (Coming Soon, Seasons): only F-1
   assert.strictEqual(app.ctx.focusChainTarget(rec('a', 'all', sel), null, () => false), null);
@@ -603,6 +603,290 @@ test('B8: while loading and after a failed read no count is shown', async () => 
   assert.strictEqual(app.el('statsRow').innerHTML, '', 'All Movies loading: no count');
   g2.fail(); await settle();
   assert.strictEqual(app.el('statsRow').innerHTML, '', 'All Movies failed: no count');
+});
+
+// ─── B6 correction batch: focus across real redraws (test-only DOM) ───────────
+// The harness's DOM has no element tree or focus. This small test-only DOM parses the
+// list containers' rendered markup (re-parsed only when it changes, so elements keep their
+// identity between redraws) and gives elements closest / matches / querySelector(All) /
+// getAttribute / focus / events / getClientRects, enough to run the page's own capture →
+// redraw → focus code. It is not a browser: no layout, no real keyboard or pointer.
+const VOID = new Set(['input', 'br', 'img', 'hr', 'meta', 'link']);
+function parseSel(sel) {
+  return sel.split(',').map(alt => alt.trim().split(/\s+(?![^\[]*\])/).map(part => {
+    const s = { tag: null, id: null, cls: [], attrs: [] };
+    const re = /^([a-zA-Z][a-zA-Z0-9]*)|#([\w-]+)|\.([\w-]+)|\[([\w-]+)(?:=("(?:[^"\\]|\\.)*"))?\]/g;
+    let m;
+    while ((m = re.exec(part))) {
+      if (m[1]) s.tag = m[1].toLowerCase(); else if (m[2]) s.id = m[2]; else if (m[3]) s.cls.push(m[3]);
+      else s.attrs.push([m[4], m[5] === undefined ? undefined : JSON.parse(m[5])]);
+    }
+    return s;
+  }));
+}
+function makeMiniDom(app) {
+  const doc = app.ctx.document;
+  const unesc = v => v.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  function node(tag, attrs, parent, root) {
+    const n = { tagName: tag.toUpperCase(), tag, attrs, parent, root, children: [], listeners: {} };
+    n.getAttribute = a => (a in n.attrs ? n.attrs[a] : null);
+    n.matchesSimple = s => (!s.tag || s.tag === n.tag) && (!s.id || n.attrs.id === s.id)
+      && s.cls.every(c => (n.attrs.class || '').split(/\s+/).includes(c))
+      && s.attrs.every(([a, v]) => a in n.attrs && (v === undefined || n.attrs[a] === v));
+    n.matchesChain = chain => {
+      if (!n.matchesSimple(chain[chain.length - 1])) return false;
+      let i = chain.length - 2, p = n.parent;
+      while (i >= 0 && p) { if (p.matchesSimple(chain[i])) i--; p = p.parent; }
+      return i < 0;
+    };
+    n.matches = sel => parseSel(sel).some(ch => n.matchesChain(ch));
+    n.closest = sel => { const alts = parseSel(sel); for (let p = n; p; p = p.parent) if (alts.some(ch => p.matchesChain(ch))) return p; return null; };
+    const all = () => { const out = []; const walk = x => x.children.forEach(c => { out.push(c); walk(c); }); walk(n); return out; };
+    n.querySelectorAll = sel => { const alts = parseSel(sel); return all().filter(x => alts.some(ch => x.matchesChain(ch))); };
+    n.querySelector = sel => n.querySelectorAll(sel)[0] || null;
+    n.focus = () => { doc.activeElement = n; };
+    n.getClientRects = () => (n.root.hidden ? [] : [{}]);
+    n.addEventListener = (t, f) => { (n.listeners[t] = n.listeners[t] || []).push(f); };
+    n.removeEventListener = (t, f) => { n.listeners[t] = (n.listeners[t] || []).filter(x => x !== f); };
+    n.dispatch = t => (n.listeners[t] || []).slice().forEach(f => f({ type: t }));
+    return n;
+  }
+  const cache = {};
+  function tree(id) {
+    const el = app.el(id), html = el.innerHTML;
+    if (cache[id] && cache[id].html === html) return cache[id].root;
+    const root = node('div', { id }, null, null); root.root = root; root.hidden = !!(cache[id] && cache[id].root.hidden);
+    let cur = root;
+    for (const m of html.matchAll(/<(\/?)([a-zA-Z0-9]+)((?:[^>"]|"[^"]*")*)>/g)) {
+      const [, close, tagRaw, rest] = m; const tag = tagRaw.toLowerCase();
+      if (close) { let p = cur; while (p && p.tag !== tag) p = p.parent; if (p && p.parent) cur = p.parent; continue; }
+      const attrs = {};
+      for (const a of rest.matchAll(/([\w-]+)(?:="([^"]*)")?/g)) attrs[a[1]] = a[2] === undefined ? '' : unesc(a[2]);
+      const n = node(tag, attrs, cur, root); cur.children.push(n);
+      if (!VOID.has(tag) && !/\/\s*$/.test(rest)) cur = n;
+    }
+    cache[id] = { html, root };
+    return root;
+  }
+  for (const id of ['tbody', 'cardList']) {
+    const el = app.el(id);
+    el.querySelector = sel => tree(id).querySelector(sel);
+    el.querySelectorAll = sel => tree(id).querySelectorAll(sel);
+    el.getClientRects = () => (tree(id).hidden ? [] : [{}]);
+  }
+  return {
+    in: (id, sel) => tree(id).querySelector(sel),
+    hide: (id, hidden = true) => { tree(id).hidden = hidden; },
+    focus: (id, sel) => { const n = tree(id).querySelector(sel); assert.ok(n, `no ${sel} in ${id}`); n.focus(); return n; },
+    active: () => doc.activeElement,
+    outside: () => { const n = node('input', { id: 'fSearch' }, null, null); n.root = n; doc.activeElement = n; return n; }
+  };
+}
+const desc = n => (n ? `${n.tag}${Object.entries(n.attrs).filter(([k]) => k.startsWith('data-') || k === 'class').map(([k, v]) => `[${k}=${v}]`).join('')}` : 'null');
+
+test('correction 1: a shortcut whose optimistic redraw moves the show keeps the original target through the failed answer and rollback', async () => {
+  const a = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }, { num: 3, date: day(40) }]);
+  const b = show({ title: 'Bravo', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-4) }]);
+  for (const collapsed of [false, true]) {
+    const app = await boot(all(a, b));
+    const dom = makeMiniDom(app);
+    if (collapsed) { app.ctx.toggleDerivedSection('uptodate'); await settle(); }
+    const shortcut = dom.focus('tbody', `[data-shortcut-show="${a.show.id}"]`);
+    assert.strictEqual(shortcut.attrs['aria-label'], 'Mark Season 2 of Alpha watched');
+    const g = app.hold(r => r.url.endsWith('/rpc/set_season_watched'));
+    app.ctx.toggleWatch(a.rows[1].id); await g.reached;
+    // Optimistic redraw: Alpha is caught up now (its next season hasn't aired).
+    const mid = dom.active();
+    if (collapsed) assert.strictEqual(desc(mid), desc(dom.in('tbody', '[data-section="uptodate"]')), 'F-3: the collapsed Caught up toggle');
+    else assert.strictEqual(mid, dom.in('tbody', `[data-item="${a.show.id}"] [data-primary]`), 'F-2: Alpha’s expand button in the open Caught up');
+    g.fail(); await settle();
+    // Rollback: the original target is back, so focus returns to it (F-1), not to where it stood.
+    assert.strictEqual(dom.active(), dom.in('tbody', `[data-shortcut-show="${a.show.id}"]`), `rollback (${collapsed ? 'collapsed' : 'open'}): the original shortcut`);
+    assert.strictEqual(dom.active().attrs['aria-label'], 'Mark Season 2 of Alpha watched');
+    assert.strictEqual(app.writes().length, 1, 'one request, not resent');
+  }
+});
+
+test('correction 1: a later focus change by the owner wins: a key or pointer on the placed element, or focus moved outside the list', async () => {
+  const a = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }, { num: 3, date: day(40) }]);
+  const b = show({ title: 'Bravo', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-4) }]);
+  for (const move of ['keydown', 'pointerdown', 'outside']) {
+    const app = await boot(all(a, b));
+    const dom = makeMiniDom(app);
+    dom.focus('tbody', `[data-shortcut-show="${a.show.id}"]`);
+    const g = app.hold(r => r.url.endsWith('/rpc/set_season_watched'));
+    app.ctx.toggleWatch(a.rows[1].id); await g.reached;
+    const placed = dom.active();
+    let outside = null;
+    if (move === 'outside') outside = dom.outside(); else placed.dispatch(move);
+    g.fail(); await settle();
+    if (move === 'outside') assert.strictEqual(dom.active(), outside, 'focus outside the list is never taken back');
+    else assert.strictEqual(desc(dom.active()), desc(placed), `${move}: the owner's element (its redrawn equivalent) keeps focus, not the old shortcut`);
+  }
+});
+
+test('correction 1: the status select’s target survives the optimistic redraw and the answer (All TV and the expanded Currently Watching show)', async () => {
+  const a = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }]);
+  const b = show({ title: 'Bravo', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-4) }]);
+  // Currently Watching: status → To Watch takes Alpha out; focus goes to the next show and stays
+  // there through the answer (it is the original action's place, F-5).
+  const app = await boot(all(a, b));
+  const dom = makeMiniDom(app);
+  app.ctx.toggleDerivedShow(a.show.id); await settle();
+  dom.focus('tbody', `[data-show-of="${a.show.id}"] [data-action="status"] select`);
+  await app.ctx.setShowStateById(a.show.id, { status: 'confirmed' }); await settle();
+  assert.strictEqual(dom.active(), dom.in('tbody', `[data-item="${b.show.id}"] [data-primary]`), 'F-5: Bravo’s expand button');
+  // All TV: a priority change keeps the same row's priority select (identity, not position).
+  const app2 = await boot(all(a, b));
+  const dom2 = makeMiniDom(app2);
+  app2.ctx.switchView('alltv'); await settle();
+  dom2.focus('tbody', `[data-item="${a.show.id}"] [data-action="priority"] select`);
+  await app2.ctx.setShowStateById(a.show.id, { priority: 'high' }); await settle();
+  assert.strictEqual(dom2.active(), dom2.in('tbody', `[data-item="${a.show.id}"] [data-action="priority"] select`));
+  assert.ok(dom2.active().attrs.class.includes('p-high'), 'the redrawn select');
+});
+
+test('correction 2: season actions are found by identity (season + action), never by their position among controls', async () => {
+  const s = show({ title: 'Ident', status: 'confirmed', tmdb_id: null, collection: 'othertv' }, [{ season: 'Season 1', date: day(-50) }, { season: 'Season 2', date: day(-40) }]);
+  const app = await boot(all(s));
+  const dom = makeMiniDom(app);
+  app.ctx.switchView('alltv'); await settle();
+  app.ctx.toggleDerivedShow(s.show.id); await settle();
+  const row = dom.in('tbody', `[data-season-row="${s.rows[0].id}"]`);
+  const actions = row.querySelectorAll('[data-action]').map(x => x.attrs['data-action']);
+  assert.deepStrictEqual(actions, ['season-match', 'season-control', 'season-watch', 'season-delete'], 'every control has a stable identity');
+  // Skip the season: its Watched control turns into "—" (a control disappears) and Skip becomes Keep.
+  dom.focus('tbody', `[data-season-row="${s.rows[0].id}"] [data-action="season-control"] button`);
+  await app.ctx.setSeasonSkipped(s.rows[0].id, true); await settle();
+  assert.strictEqual(dom.active(), dom.in('tbody', `[data-season-row="${s.rows[0].id}"] [data-action="season-control"] button`), 'the same season’s Skip / Keep');
+  assert.ok(/Keep/.test(app.el('tbody').innerHTML.split(`data-season-row="${s.rows[0].id}"`)[1].split('</tr>')[0]));
+  // The same identities on the phone cards and in Currently Watching's five-cell rows.
+  assert.ok(app.el('cardList').innerHTML.includes(`data-season-row="${s.rows[1].id}" data-show-of="${s.show.id}"`));
+  assert.ok(app.el('cardList').innerHTML.includes('data-action="season-control"') && app.el('cardList').innerHTML.includes('data-action="season-watch"'));
+  // All TV's row selects have identities too.
+  assert.ok(app.el('tbody').innerHTML.includes('<span class="state-action" data-action="status"><select') && app.el('tbody').innerHTML.includes('<span class="state-action" data-action="priority"><select'));
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
+  assert.ok(/\.season-action, \.state-action \{ display: contents; \}/.test(css), 'the wrappers add no box');
+});
+
+test('correction 3: Coming Soon: skipping moves focus to the next season, then (dated only) the empty-state message; or the TBA toggle', async () => {
+  const a = show({ title: 'Alpha', status: 'confirmed' }, [{ num: 1, date: day(5) }, { num: 2, date: day(9) }]);
+  const app = await boot(all(a));
+  const dom = makeMiniDom(app);
+  app.ctx.switchView('comingsoon'); await settle();
+  assert.ok(app.el('tbody').innerHTML.includes(`data-item="${a.rows[0].id}" data-season-row="${a.rows[0].id}" data-row-section="dated"`));
+  dom.focus('tbody', `[data-season-row="${a.rows[0].id}"] [data-action="season-control"] button`);
+  await app.ctx.setSeasonSkipped(a.rows[0].id, true); await settle();
+  assert.strictEqual(dom.active(), dom.in('tbody', `[data-item="${a.rows[1].id}"] [data-primary]`), 'F-5: the next season’s title');
+  dom.focus('tbody', `[data-season-row="${a.rows[1].id}"] [data-action="season-control"] button`);
+  await app.ctx.setSeasonSkipped(a.rows[1].id, true); await settle();
+  assert.strictEqual(dom.active(), dom.in('tbody', '[data-empty]'), 'F-4: dated-only results, now empty: the message');
+  assert.ok(dom.active().children.length === 0 && app.el('tbody').innerHTML.includes('data-empty="1">Nothing with a confirmed date is coming up.'));
+  assert.strictEqual(dom.active().attrs.colspan, '5', 'Coming Soon has five columns');
+  // With a TBA section left: its toggle (F-7)
+  const b = show({ title: 'Bravo', status: 'confirmed' }, [{ num: 1, date: day(5) }, { num: 2, tba: true }]);
+  const app2 = await boot(all(b));
+  const dom2 = makeMiniDom(app2);
+  app2.ctx.switchView('comingsoon'); await settle();
+  dom2.focus('tbody', `[data-season-row="${b.rows[0].id}"] [data-action="season-control"] button`);
+  await app2.ctx.setSeasonSkipped(b.rows[0].id, true); await settle();
+  assert.strictEqual(dom2.active(), dom2.in('tbody', '[data-section="tba"]'), 'F-7: the TBA toggle');
+});
+
+test('correction 3: All TV Seasons: a skipped season leaves; focus goes to the next season, then to the empty-state message', async () => {
+  const a = show({ title: 'Alpha', status: 'confirmed' }, [{ num: 1, date: day(-50) }, { num: 2, date: day(-40) }]);
+  const app = await boot(all(a));
+  const dom = makeMiniDom(app);
+  app.ctx.switchView('alltv'); await settle(); app.ctx.setAllTvPresentation('seasons'); await settle();
+  dom.focus('tbody', `[data-season-row="${a.rows[0].id}"] [data-action="season-control"] button`);
+  await app.ctx.setSeasonSkipped(a.rows[0].id, true); await settle();
+  assert.strictEqual(dom.active(), dom.in('tbody', `[data-item="${a.rows[1].id}"] [data-primary]`), 'F-5: the next season');
+  dom.focus('tbody', `[data-season-row="${a.rows[1].id}"] [data-action="season-control"] button`);
+  await app.ctx.setSeasonSkipped(a.rows[1].id, true); await settle();
+  assert.strictEqual(dom.active(), dom.in('tbody', '[data-empty]'), 'F-4: the empty-state message');
+  assert.ok(app.el('tbody').innerHTML.includes('data-empty="1">No seasons match your filters.'));
+});
+
+test('correction 4: after a reload, focus moves only if it is still on the loading message, and only into the visible layout', async () => {
+  const a = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }]);
+  // (a) untouched: the loading message, then the same control after the read
+  let app = await boot(all(a)), dom = makeMiniDom(app);
+  dom.focus('tbody', `[data-item="${a.show.id}"] [data-primary]`);
+  let g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadDerivedView(); await g.reached;
+  assert.strictEqual(dom.active(), dom.in('tbody', '[data-loading]'), 'the loading message while reading');
+  g.release(); await settle();
+  assert.strictEqual(dom.active(), dom.in('tbody', `[data-item="${a.show.id}"] [data-primary]`), 'back on the same expand button');
+  // (b) the owner moved to a header control or a dialog during the read: nothing is taken back
+  app = await boot(all(a)); dom = makeMiniDom(app);
+  dom.focus('tbody', `[data-item="${a.show.id}"] [data-primary]`);
+  g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadDerivedView(); await g.reached;
+  const header = dom.outside();
+  g.release(); await settle();
+  assert.strictEqual(dom.active(), header, 'success: focus stays with the owner');
+  dom.focus('tbody', `[data-item="${a.show.id}"] [data-primary]`);
+  g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadDerivedView(); await g.reached;
+  const dialog = dom.outside();
+  g.fail(); await settle();
+  assert.strictEqual(dom.active(), dialog, 'failure: Retry doesn’t take focus from the owner');
+  // (c) untouched, but the read failed: Retry
+  dom.focus('tbody', '[data-retry]');
+  g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadDerivedView(); await g.reached;
+  g.fail(); await settle();
+  assert.strictEqual(dom.active(), dom.in('tbody', '[data-retry]'), 'Retry');
+  // (d) the table layout was hidden meanwhile (the window crossed the phone width): the card layout
+  app = await boot(all(a)); dom = makeMiniDom(app);
+  dom.focus('tbody', `[data-item="${a.show.id}"] [data-primary]`);
+  g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadDerivedView(); await g.reached;
+  dom.hide('tbody');
+  g.release(); await settle();
+  assert.strictEqual(dom.active(), dom.in('cardList', `[data-item="${a.show.id}"] [data-primary]`), 'the visible (card) layout’s button');
+});
+
+test('correction 5: stored unknown-date text is kept (also with the 2099 sentinel and no "TBA" in it); only empty or bare TBA reads "Date TBA"', async () => {
+  const app = await boot(all());
+  const t = (display, date_sort) => app.ctx.nextDateText({ display_date: display, date_sort });
+  assert.strictEqual(t('2027 (announced)', '2099-01-01'), '2027 (announced)');
+  assert.strictEqual(t('Announced', '2099-01-01'), 'Announced');
+  assert.strictEqual(t('2026 (TBA)', '2026-06-01'), '2026 (TBA)');
+  assert.strictEqual(t('TBA', '2099-01-01'), 'Date TBA');
+  assert.strictEqual(t('tba', '2099-01-01'), 'Date TBA');
+  assert.strictEqual(t('', '2099-01-01'), 'Date TBA');
+  assert.strictEqual(t('Nov 12, 2026', '2026-11-12'), 'Nov 12, 2026');
+  assert.strictEqual(t('<b>&', '2099-01-01'), '&lt;b&gt;&amp;', 'escaped');
+  const s = show({ title: 'Announced', status: 'watching', tmdb_id: null }, [{ season: 'Season 1', w: true, date: day(-90) }, { season: 'Season 2', date: '2099-01-01', display: '2027 (announced)' }]);
+  const app2 = await boot(all(s));
+  assert.ok(app2.el('tbody').innerHTML.includes('Season 2 · 2027 (announced)'), 'desktop');
+  assert.ok(app2.el('cardList').innerHTML.includes('<span class="visually-hidden">Next season: </span>Season 2 · 2027 (announced)'), 'phone, an actual value: the hidden prefix');
+});
+
+test('correction 6: every full-width row of Currently Watching spans its five columns', async () => {
+  const mk = (title, extra) => show({ title, status: 'watching', catalog_new: true, ...extra }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }]);
+  const a = mk('Alpha'), b = mk('Bravo'), c = show({ title: 'Charlie', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }]);
+  const app = await boot(all(a, b, c));
+  // Each row's cells add up to the five columns (a caught-up row: Show, Categories, Up next spanning 3).
+  const spans = () => app.el('tbody').innerHTML.split('<tr').slice(1).map(r => [...r.split('</tr>')[0].matchAll(/<t[dh](?=[\s>])([^>]*)>/g)]
+    .reduce((n, m) => n + Number((m[1].match(/colspan="(\d+)"/) || [0, 1])[1]), 0)).map(String);
+  app.ctx.toggleDerivedShow(a.show.id); await settle();
+  let html = app.el('tbody').innerHTML;
+  assert.ok(html.includes('Dismiss “New” on these 2'), 'the dismiss-all row is present');
+  assert.ok(html.includes('data-section="inprogress"') && html.includes('data-section="uptodate"') && html.includes('show-actions-row'));
+  assert.ok(spans().length >= 8 && spans().every(x => x === '5'), `every row spans 5: ${spans()}`);
+  app.el('fSearch').value = 'zzz'; app.ctx.renderTable();
+  assert.ok(app.el('tbody').innerHTML.includes('No in-progress shows match your filters.') && app.el('tbody').innerHTML.includes('No caught-up shows match your filters.'));
+  assert.ok(spans().every(x => x === '5'), `messages span 5: ${spans()}`);
+  const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadDerivedView(); await g.reached;
+  assert.ok(app.el('tbody').innerHTML.includes('colspan="5" class="loading"'), 'the loading message too');
+  g.fail(); await settle();
+  assert.ok(app.el('tbody').innerHTML.includes('colspan="5" class="loading"'), 'and the failure message');
+  // All TV keeps six
+  app.ctx.switchView('alltv'); await settle();
+  assert.ok(spans().every(x => x === '6'), `All TV rows span 6: ${spans()}`);
 });
 
 test('B2: the shortcut style wraps the full label and never truncates it', () => {

@@ -464,9 +464,14 @@ function seasonRowControlHtml(r, opts = {}) {
 
 // One season of a grouped show: a desktop sub-row and a mobile card row.
 // opts: { isNew, showMatch, showDelete, deleteTitle, requireReleased, today, showOf, cwOrder }
-// showOf: the show's key, and data-season-row, mark the row for focus after a redraw (B6).
+// Focus hooks (B6): data-season-row names the season and data-action each of its controls,
+// so focus can return to the same control after a redraw (an identity, never a position);
+// showOf names the show the row belongs to.
 // cwOrder (Currently Watching, B6, which has no Status column): Watched under Watched, then
 // Skip / Keep, in five cells.
+function seasonActionHtml(action, html) {
+  return html ? `<span class="season-action" data-action="${action}">${html}</span>` : '';
+}
 function seasonSubRowHtml(r, opts) {
   const isSkipped = isOffList(r);
   const rowClass = isSkipped ? 'row-skipped' : '';
@@ -475,32 +480,34 @@ function seasonSubRowHtml(r, opts) {
           <span class="season-lbl">${esc(r.season)}</span>
           ${opts.isNew?'<span class="new-tag">New</span>':''}
         </td>`;
+  const watch = seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, false));
+  const control = seasonActionHtml('season-control', seasonRowControlHtml(r));
   if (opts.cwOrder) {
     return `<tr class="${rowClass} sub-row"${hooks}>
         ${label}
         <td></td>
         <td class="date-cell">${esc(r.display_date)}</td>
-        <td>${seasonWatchControlHtml(r, opts, false)}</td>
-        <td>${seasonRowControlHtml(r)}</td>
+        <td>${watch}</td>
+        <td>${control}</td>
       </tr>`;
   }
   return `<tr class="${rowClass} sub-row"${hooks}>
         ${label}
-        <td>${opts.showMatch ? `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</td>
+        <td>${opts.showMatch ? seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`) : ''}</td>
         <td class="date-cell">${esc(r.display_date)}</td>
-        <td>${seasonRowControlHtml(r)}</td>
-        <td>${seasonWatchControlHtml(r, opts, false)}</td>
-        <td>${opts.showDelete ? `<button class="del-btn" onclick="delRow('${r.id}')" title="${esc(opts.deleteTitle || 'Remove')}">×</button>` : ''}</td>
+        <td>${control}</td>
+        <td>${watch}</td>
+        <td>${opts.showDelete ? seasonActionHtml('season-delete', `<button class="del-btn" onclick="delRow('${r.id}')" title="${esc(opts.deleteTitle || 'Remove')}">×</button>`) : ''}</td>
       </tr>`;
 }
 
 function seasonSubCardHtml(r, opts) {
-  return `<div class="card-subseason-row" data-season-row="${esc(r.id)}">
-          <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}${opts.showMatch ? ` <button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</span>
+  return `<div class="card-subseason-row" data-season-row="${esc(r.id)}"${opts.showOf ? ` data-show-of="${esc(opts.showOf)}"` : ''}>
+          <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}${opts.showMatch ? ` ${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}` : ''}</span>
           <div class="card-actions">
-            ${seasonRowControlHtml(r)}
-            ${seasonWatchControlHtml(r, opts, true)}
-            ${opts.showDelete ? `<button class="card-del-btn" onclick="delRow('${r.id}')" title="${esc(opts.deleteTitle || 'Remove')}">×</button>` : ''}
+            ${seasonActionHtml('season-control', seasonRowControlHtml(r))}
+            ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, true))}
+            ${opts.showDelete ? seasonActionHtml('season-delete', `<button class="card-del-btn" onclick="delRow('${r.id}')" title="${esc(opts.deleteTitle || 'Remove')}">×</button>`) : ''}
           </div>
         </div>`;
 }

@@ -290,13 +290,15 @@ async function loadDerivedView() {
   // B6: focus in the list is recorded now and moved to the loading message; after the read
   // the focus rules run against the new data (a failed read focuses Retry; a superseded
   // read moves nothing). A loading message already focused carries the earlier record's place.
+  // After the read, focus moves only if it is still on that loading message: the owner may
+  // have gone to a header control, a filter or a dialog meanwhile, and that focus is theirs.
   const focusRec = captureListFocus();
   document.getElementById('statsRow').innerHTML = '';
   holdViewFilters(viewId); // a reload or Retry keeps this visit's filters (browse-views.js)
   document.getElementById('filtersRow').innerHTML = '';
   showError('');
   paintDerivedMessage('Loading…', false);
-  if (focusRec) focusListElement(focusRec.container, '[data-loading]');
+  if (focusRec) placeListFocus('[data-loading]', focusRec);
   const showsRead = typeof matchReadStart === 'function' ? matchReadStart('shows', '*') : null; // tracked (tmdb-match.js)
   try {
     const [rows, shows, gov] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows'), readGovernance()]);
@@ -308,15 +310,16 @@ async function loadDerivedView() {
     publishGovernance(governanceCovers(gov, rows, shows));
     derivedData = { rows: rows.filter(isTvViewRow), loaded: true };
     renderFilters();
-    renderDerivedTable(focusRec && { ...focusRec, loading: false });
+    renderDerivedTable(focusRec && focusIsPlaced(focusRec) ? focusRec : null);
     return true;
   } catch(e) {
     console.error(e);
     if (showsRead && showsRead.state === 'pending') matchReadSettle(showsRead, e);
     if (seq !== derivedLoadSeq || activeViewId !== viewId) return null;
+    const owned = !!focusRec && focusIsPlaced(focusRec);
     showError(`Couldn't load every TV row, so nothing is shown rather than an incomplete list. ${e.message}`);
     paintDerivedMessage('Failed to load.', true);
-    if (focusRec) focusListElement(focusRec.container, '[data-retry]');
+    if (owned) placeListFocus('[data-retry]', focusRec);
     return false;
   }
 }
@@ -326,15 +329,10 @@ async function loadDerivedView() {
 function paintDerivedMessage(text, withRetry) {
   const retry = withRetry ? ` <button class="btn" data-retry="1" onclick="loadDerivedView()">Retry</button>` : '';
   const hook = withRetry ? '' : ' tabindex="-1" data-loading="1"';
-  document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading"${hook}>${esc(text)}${retry}</td></tr>`;
+  document.getElementById('tbody').innerHTML = `<tr><td colspan="${derivedColspan()}" class="loading"${hook}>${esc(text)}${retry}</td></tr>`;
   document.getElementById('cardList').innerHTML = `<div class="loading"${hook}>${esc(text)}${retry}</div>`;
 }
 
-function focusListElement(container, selector) {
-  const box = document.getElementById(container);
-  const el = box && typeof box.querySelector === 'function' ? box.querySelector(selector) : null;
-  if (el && typeof el.focus === 'function') el.focus();
-}
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 // What a derived view's category, priority and marker choices are drawn from: every show
@@ -450,11 +448,10 @@ function renderDerivedTable(carried) {
   const keep = x => (!fSearch || (x.title || '').toLowerCase().includes(fSearch)) && showKeep(x.show || showOfRow(x));
   updateDerivedTableHeader();
   let listing = null;
-  if (activeViewId === 'comingsoon') renderComingSoon(today, r => keep(r) && themeMatchesRow(r, fTheme));
-  else if (activeViewId === 'alltv') listing = renderAllTv(today, keep, val('fStatus'), fTheme, val('fProgress'), val('fYear')) || null;
+  if (activeViewId === 'comingsoon') listing = renderComingSoon(today, r => keep(r) && themeMatchesRow(r, fTheme));
+  else if (activeViewId === 'alltv') listing = renderAllTv(today, keep, val('fStatus'), fTheme, val('fProgress'), val('fYear'));
   else if (activeViewId === 'watching') listing = renderCurrentlyWatching(today, x => keep(x) && themeMatchesShow(x.seasons, fTheme));
-  // Focus on the loading message belongs to the reload that drew it (loadDerivedView).
-  if (rec && (carried || !rec.loading)) applyListFocus(rec, listing);
+  if (rec) applyListFocus(rec, listing || null);
 }
 
 function updateDerivedTableHeader() {
@@ -501,13 +498,24 @@ function countLineHtml(text) {
   return `<p class="count-line">${esc(text)}</p>`;
 }
 
+// The open view's column count: Currently Watching (B6) and Coming Soon have five columns,
+// All TV six. Full-width rows (headings, sections, messages, expanded actions) span exactly that.
+function derivedColspan() {
+  return activeViewId === 'watching' || activeViewId === 'comingsoon' ? 5 : 6;
+}
+// A full-width row from a shared helper written for six columns (tv-shows.js dismissAllNewHtml),
+// fitted to the open view.
+function fitColspan(out) {
+  return { ...out, row: (out.row || '').replace(/colspan="6"/g, `colspan="${derivedColspan()}"`) };
+}
+
 // A collapsible section's header: a real button (keyboard, aria-expanded), as in the
 // Browse views (B6).
 function derivedSectionHtml(name, label, count) {
   const open = !!derivedSectionOpen[name];
   const btn = `<button type="button" class="section-toggle" data-section="${name}" aria-expanded="${open}" onclick="toggleDerivedSection('${name}')"><span class="expand-chevron">${open ? '▾' : '▸'}</span> ${esc(label)} <span class="section-count">${count}</span></button>`;
   return {
-    row: `<tr class="derived-section-row"><td colspan="6">${btn}</td></tr>`,
+    row: `<tr class="derived-section-row"><td colspan="${derivedColspan()}">${btn}</td></tr>`,
     card: `<div class="derived-section-card">${btn}</div>`
   };
 }
@@ -516,7 +524,7 @@ function derivedSectionHtml(name, label, count) {
 // the page only (tabindex -1), so focus can land on it after a redraw (B6).
 function derivedHeadingHtml(name, label, count) {
   return {
-    row: `<tr class="derived-section-row derived-heading-row"><th colspan="6" scope="colgroup" tabindex="-1" data-section="${name}">${esc(label)} <span class="section-count">${count}</span></th></tr>`,
+    row: `<tr class="derived-section-row derived-heading-row"><th colspan="${derivedColspan()}" scope="colgroup" tabindex="-1" data-section="${name}">${esc(label)} <span class="section-count">${count}</span></th></tr>`,
     card: `<h3 class="derived-section-card derived-heading-card" tabindex="-1" data-section="${name}">${esc(label)} <span class="section-count">${count}</span></h3>`
   };
 }
@@ -524,7 +532,7 @@ function derivedHeadingHtml(name, label, count) {
 // A view's empty-state message: focusable by the page only, the focus fallback of an empty view.
 function derivedEmptyHtml(msg, pad = '2rem') {
   return {
-    row: `<tr class="empty-row"><td colspan="6" tabindex="-1" data-empty="1">${esc(msg)}</td></tr>`,
+    row: `<tr class="empty-row"><td colspan="${derivedColspan()}" tabindex="-1" data-empty="1">${esc(msg)}</td></tr>`,
     card: `<div class="empty-row" style="padding:${pad} 0" tabindex="-1" data-empty="1">${esc(msg)}</div>`
   };
 }
@@ -537,8 +545,8 @@ function renderCurrentlyWatching(today, keep) {
   // B8: the counts are in the section headings (shows), not tiles.
   document.getElementById('statsRow').innerHTML = '';
 
-  const dismissAll = dismissAllNewHtml(shownActive.concat(derivedSectionOpen.uptodate ? shownUpToDate : [])
-    .filter(x => x.show.catalog_new).map(x => ({ kind: 'show', id: x.show.id })));
+  const dismissAll = fitColspan(dismissAllNewHtml(shownActive.concat(derivedSectionOpen.uptodate ? shownUpToDate : [])
+    .filter(x => x.show.catalog_new).map(x => ({ kind: 'show', id: x.show.id }))));
   let html = dismissAll.row, cardHtml = dismissAll.card;
   // B6: the upper section has its own heading (it doesn't collapse).
   const heading = derivedHeadingHtml('inprogress', 'In progress', headingCount(shownActive.length, active.length, 'show', 'shows'));
@@ -575,7 +583,7 @@ function renderCurrentlyWatching(today, keep) {
       });
       if (shownUpToDate.length === 0) {
         const msg = 'No caught-up shows match your filters.';
-        html += `<tr class="empty-row"><td colspan="6">${esc(msg)}</td></tr>`;
+        html += `<tr class="empty-row"><td colspan="${derivedColspan()}">${esc(msg)}</td></tr>`;
         cardHtml += `<div class="empty-row" style="padding:1rem 0">${esc(msg)}</div>`;
       }
     }
@@ -648,7 +656,9 @@ function renderAllTvSeasons(today, items, shown, notListed, fTheme = '', fYear =
   if (notListed > 0) note(`⚠️ ${notListed} TV season${notListed === 1 ? ' isn’t' : 's aren’t'} linked to a loaded show, so ${notListed === 1 ? 'it isn’t' : 'they aren’t'} listed here.`);
 
   if (total === 0) {
-    note(items.length === 0 ? 'No TV shows on your list yet.' : shown.length === 0 ? 'No shows match your filters.' : 'No seasons match your filters.');
+    const out = derivedEmptyHtml(items.length === 0 ? 'No TV shows on your list yet.' : shown.length === 0 ? 'No shows match your filters.' : 'No seasons match your filters.', '1rem');
+    html += out.row;
+    cardHtml += out.card;
   } else if (dated.length === 0) {
     note('No dated seasons; see TBA / no date below.');
   }
@@ -661,7 +671,7 @@ function renderAllTvSeasons(today, items, shown, notListed, fTheme = '', fYear =
       cardHtml += `<div class="card-year-group">${esc(year)}</div>`;
       lastYear = year;
     }
-    const out = allTvSeasonRowHtml(r, today, false);
+    const out = allTvSeasonRowHtml(r, today, false, 'dated');
     html += out.row;
     cardHtml += out.card;
   });
@@ -677,7 +687,7 @@ function renderAllTvSeasons(today, items, shown, notListed, fTheme = '', fYear =
         html += `<tr class="year-group"><td colspan="6">${esc(label)}</td></tr>`;
         cardHtml += `<div class="card-year-group">${esc(label)}</div>`;
         list.forEach(r => {
-          const out = allTvSeasonRowHtml(r, today, needsReview);
+          const out = allTvSeasonRowHtml(r, today, needsReview, 'alltvTba');
           html += out.row;
           cardHtml += out.card;
         });
@@ -687,13 +697,21 @@ function renderAllTvSeasons(today, items, shown, notListed, fTheme = '', fYear =
 
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
+  // The focus chain's listing (B6): season items, dated (no heading) and TBA / no date (a toggle).
+  return { sections: [
+    { name: 'dated', shown: dated.length > 0, open: true, heading: false, keys: dated.map(r => r.id) },
+    { name: 'alltvTba', shown: tba.length + review.length > 0, open: !!derivedSectionOpen.alltvTba, heading: true, keys: tba.concat(review).map(r => r.id) }
+  ] };
 }
 
 // One season in All TV's Seasons list: the show's status as a read-only label
 // (it applies to every season; it's changed in Shows), the existing Watched
 // control (release rule unchanged) and Skip / Keep. A date that isn't valid is
 // shown as stored and labelled "date needs review", never as aired.
-function allTvSeasonRowHtml(r, today, needsReview) {
+// B6: the row is a focus item (data-item; its title takes focus from the page) and each
+// control has a stable identity (data-action).
+function allTvSeasonRowHtml(r, today, needsReview, section = 'dated') {
+  const item = seasonItemAttrs(r, section);
   const status = displayStatus(r);
   const show = showOfRow(r) || {};
   const rowClass = isOffList(r) ? 'row-skipped' : '';
@@ -704,8 +722,8 @@ function allTvSeasonRowHtml(r, today, needsReview) {
   const statusPill = `<span class="status-pill s-${status}" title="Show status — applies to every season of ${esc(r.title)}. Switch to Shows to change it.">${esc(statusOptionLabel(status))}</span>`;
   const releaseOpts = { requireReleased: true, today };
   const badges = metadataChipsHtml(metadataOf(r), r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
-  const row = `<tr class="${rowClass}">
-      <td>
+  const row = `<tr class="${rowClass}"${item}>
+      <td tabindex="-1" data-primary="1">
         ${priorityMarkHtml(show.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(show.priority, true)}
         <span class="season-lbl"> · ${esc(r.season)}</span>
         ${todayTag}
@@ -713,12 +731,12 @@ function allTvSeasonRowHtml(r, today, needsReview) {
       <td>${badges}</td>
       <td class="date-cell">${esc(r.display_date)}${upcomingTag}${reviewTag}</td>
       <td>${statusPill}</td>
-      <td>${seasonWatchControlHtml(r, releaseOpts, false)}</td>
-      <td>${seasonRowControlHtml(r)}</td>
+      <td>${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, false))}</td>
+      <td>${seasonActionHtml('season-control', seasonRowControlHtml(r))}</td>
     </tr>`;
-  const card = `<div class="item-card ${rowClass}">
+  const card = `<div class="item-card ${rowClass}"${item}>
       <div class="card-top">
-        <div class="card-title-block">
+        <div class="card-title-block" tabindex="-1" data-primary="1">
           <span class="card-title">${priorityMarkHtml(show.priority)}${esc(r.title)}${priorityMarkHtml(show.priority, true)}</span>
           <span class="card-season">${esc(r.season)}</span>
           ${todayTag}
@@ -728,21 +746,23 @@ function allTvSeasonRowHtml(r, today, needsReview) {
         ${badges}
         <span class="card-date">${esc(r.display_date)}</span>${upcomingTag}${reviewTag}
       </div>
-      <div class="card-actions">${statusPill} ${seasonWatchControlHtml(r, releaseOpts, true)} ${seasonRowControlHtml(r)}</div>
+      <div class="card-actions">${statusPill} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))}</div>
     </div>`;
   return { row, card };
 }
 
 // A next-season line (B6): "Season 3 · Nov 12, 2026" with no "Next:" prefix (the column
-// heading says it). A stored date that is just "TBA" reads "Date TBA"; other TBA text (a
-// catalog row's "2026 (TBA)") is kept as stored, so its year isn't lost. On a phone card
+// heading says it). A stored date that is empty or just "TBA" reads "Date TBA"; any other
+// stored text ("2026 (TBA)", "2027 (announced)") is kept, so what it says isn't lost. On a phone card
 // (no column heading) a screen reader hears "Next season:" first; only before an actual
 // next-season value, never before a status such as "No upcoming season listed".
 const SR_NEXT_SEASON = '<span class="visually-hidden">Next season: </span>';
 function nextDateText(r) {
   const text = (r.display_date || '').trim();
-  if (isTbaRow(r)) return !text || /^TBA$/i.test(text) || !/TBA/i.test(text) ? 'Date TBA' : esc(text);
-  return esc(r.display_date);
+  // Only an empty or bare "TBA" becomes "Date TBA"; any other stored text says something (a
+  // year, "announced", "2026 (TBA)"), also on a row dated by the 2099 sentinel, and is kept.
+  if (isTbaRow(r) && (!text || /^TBA$/i.test(text))) return 'Date TBA';
+  return esc(text);
 }
 function nextSeasonLabel(upNext, released, card = false, upcomingOnTba = false) {
   const upcoming = !released && (upcomingOnTba || !isTbaRow(upNext)) ? '<span class="upcoming-tag">Upcoming</span>' : '';
@@ -760,7 +780,7 @@ function neutralNextLabel(upNext, released, card = false) {
 // Currently Watching and All TV, so a keyboard reaches a show's seasons and actions. It
 // stops the event, so one activation toggles once (the row's own click handler never runs).
 function derivedExpandBtnHtml(key, keyArg, title, isExpanded) {
-  return `<button type="button" class="expand-btn" data-show-key="${esc(key)}" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Hide' : 'Show'} seasons and actions of ${esc(title)}" onclick="event.stopPropagation(); toggleDerivedShow('${keyArg}')"><span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span></button>`;
+  return `<button type="button" class="expand-btn" data-show-key="${esc(key)}" data-primary="1" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Hide' : 'Show'} seasons and actions of ${esc(title)}" onclick="event.stopPropagation(); toggleDerivedShow('${keyArg}')"><span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span></button>`;
 }
 
 // A show's season progress as text: watched of non-skipped seasons, and skipped ones.
@@ -827,7 +847,7 @@ function derivedShowHtml(item, today) {
   const cw = activeViewId === 'watching';
   const subOpts = r => ({ isNew: false, showMatch: allTv && isTmdbMatchEligible(r), showDelete: allTv && editPolicyOf(r).deleteEffect === 'delete',
     deleteTitle: 'Delete this season', requireReleased: true, today, showOf: key, cwOrder: cw });
-  const addSeasonBtn = allTv ? `<button class="btn btn-link" onclick="event.stopPropagation(); openAddSeason('${keyArg}')">+ Add season…</button>` : '';
+  const addSeasonBtn = allTv ? `<button class="btn btn-link" data-action="add-season" onclick="event.stopPropagation(); openAddSeason('${keyArg}')">+ Add season…</button>` : '';
   // B2: the show-level shortcut names the season it marks (the up-next season, or the
   // earlier-seasons range's next one).
   const shortcutOpts = { ...releaseOpts, shortcutOf: show };
@@ -835,7 +855,7 @@ function derivedShowHtml(item, today) {
   const expandBtn = derivedExpandBtnHtml(key, keyArg, item.title, isExpanded);
   // The focus hooks (B6): the show's row or card, and the section it is listed in.
   const section = cw ? (upToDate ? 'uptodate' : 'inprogress') : 'all';
-  const showAttrs = `data-show-row="${esc(key)}" data-row-section="${section}"`;
+  const showAttrs = `data-item="${esc(key)}" data-show-row="${esc(key)}" data-row-section="${section}"`;
   const ofAttr = `data-show-of="${esc(key)}"`;
 
   if (cw) {
@@ -853,7 +873,7 @@ function derivedShowHtml(item, today) {
       <td>${badges}</td>
       ${cells}
     </tr>`;
-    if (isExpanded) row += `<tr class="sub-row show-actions-row" ${ofAttr}><td style="padding-left:28px" colspan="6" onclick="event.stopPropagation()">${showActionsHtml(item, keyArg, { state: true, progress: true })}</td></tr>`
+    if (isExpanded) row += `<tr class="sub-row show-actions-row" ${ofAttr}><td style="padding-left:28px" colspan="${derivedColspan()}" onclick="event.stopPropagation()">${showActionsHtml(item, keyArg, { state: true, progress: true })}</td></tr>`
       + seasons.map(r => seasonSubRowHtml(r, subOpts(r))).join('');
 
     // Phone card, top to bottom: title (expand button), season line, categories, progress,
@@ -887,7 +907,7 @@ function derivedShowHtml(item, today) {
       </td>
       <td>${badges}</td>
       <td class="date-cell">${nextCell}</td>
-      <td>${showStatusSelectHtml(show, { stopPropagation: true })} ${prioritySelectHtml(show, 'show', { stopPropagation: true })}${upToDatePill}</td>
+      <td><span class="state-action" data-action="status">${showStatusSelectHtml(show, { stopPropagation: true })}</span> <span class="state-action" data-action="priority">${prioritySelectHtml(show, 'show', { stopPropagation: true })}</span>${upToDatePill}</td>
       <td>${watchCell}</td>
       <td class="card-date">${progressLabel}${progressBarHtml}</td>
     </tr>`;
@@ -909,10 +929,10 @@ function derivedShowHtml(item, today) {
         ${progressBarHtml}
       </div>
       <div class="card-actions" onclick="event.stopPropagation()">
-        ${showStatusSelectHtml(show)} ${prioritySelectHtml(show, 'show')}${upToDatePill}
+        <span class="state-action" data-action="status">${showStatusSelectHtml(show)}</span> <span class="state-action" data-action="priority">${prioritySelectHtml(show, 'show')}</span>${upToDatePill}
         ${inProgress ? seasonWatchControlHtml(upNext, shortcutOpts, false) : ''}
       </div>
-      ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${actions}</div>${seasons.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}${addSeasonBtn ? `<div class="card-subseason-row">${addSeasonBtn}</div>` : ''}</div>` : ''}
+      ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${actions}</div>${seasons.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}${addSeasonBtn ? `<div class="card-subseason-row" ${ofAttr}>${addSeasonBtn}</div>` : ''}</div>` : ''}
     </div>`;
 
   return { row, card };
@@ -979,19 +999,19 @@ function renderComingSoon(today, keep) {
     const month = r.date_sort.substring(0, 7);
     if (month !== lastMonth) {
       const label = `${months[parseInt(month.substring(5, 7), 10) - 1] || ''} ${month.substring(0, 4)}`;
-      html += `<tr class="year-group"><td colspan="6">${esc(label)}</td></tr>`;
+      html += `<tr class="year-group"><td colspan="${derivedColspan()}">${esc(label)}</td></tr>`;
       cardHtml += `<div class="card-year-group">${esc(label)}</div>`;
       lastMonth = month;
     }
-    const out = comingSoonRowHtml(r, today);
+    const out = comingSoonRowHtml(r, today, 'dated');
     html += out.row;
     cardHtml += out.card;
   });
 
   if (shownDated.length === 0) {
-    const msg = dated.length === 0 ? 'Nothing with a confirmed date is coming up.' : 'No dated entries match your filters.';
-    html += `<tr class="empty-row"><td colspan="6">${esc(msg)}</td></tr>`;
-    cardHtml += `<div class="empty-row" style="padding:2rem 0">${esc(msg)}</div>`;
+    const out = derivedEmptyHtml(dated.length === 0 ? 'Nothing with a confirmed date is coming up.' : 'No dated entries match your filters.');
+    html += out.row;
+    cardHtml += out.card;
   }
 
   if (shownTba.length > 0) {
@@ -1000,7 +1020,7 @@ function renderComingSoon(today, keep) {
     cardHtml += section.card;
     if (derivedSectionOpen.tba) {
       shownTba.forEach(r => {
-        const out = comingSoonRowHtml(r, today);
+        const out = comingSoonRowHtml(r, today, 'tba');
         html += out.row;
         cardHtml += out.card;
       });
@@ -1009,20 +1029,26 @@ function renderComingSoon(today, keep) {
 
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
+  // The focus chain's listing (B6): season items, dated (no heading) and TBA (a toggle).
+  return { sections: [
+    { name: 'dated', shown: shownDated.length > 0, open: true, heading: false, keys: shownDated.map(r => r.id) },
+    { name: 'tba', shown: shownTba.length > 0, open: !!derivedSectionOpen.tba, heading: true, keys: shownTba.map(r => r.id) }
+  ] };
 }
 
 // Date details, the show's status as a label, and Skip only: Coming
 // Soon is about availability, so there is no status menu, watch control or delete.
-function comingSoonRowHtml(r, today) {
+function comingSoonRowHtml(r, today, section = 'dated') {
+  const item = seasonItemAttrs(r, section);
   const status = displayStatus(r);
   const show = showOfRow(r) || {};
   const rowClass = '';
   const chips = metadataChipsHtml(metadataOf(r), r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
   const todayTag = r.date_sort === today ? '<span class="today-tag">Today</span>' : '';
   const statusPill = `<span class="status-pill s-${status}" title="Show status">${esc(statusOptionLabel(status))}</span>`;
-  const skip = seasonSkipButtonHtml(r);
-  const row = `<tr class="${rowClass}">
-      <td>
+  const skip = seasonActionHtml('season-control', seasonSkipButtonHtml(r));
+  const row = `<tr class="${rowClass}"${item}>
+      <td tabindex="-1" data-primary="1">
         ${priorityMarkHtml(show.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(show.priority, true)}
         <span class="season-lbl"> · ${esc(r.season)}</span>
         ${todayTag}
@@ -1032,9 +1058,9 @@ function comingSoonRowHtml(r, today) {
       <td>${statusPill}</td>
       <td>${skip}</td>
     </tr>`;
-  const card = `<div class="item-card ${rowClass}">
+  const card = `<div class="item-card ${rowClass}"${item}>
       <div class="card-top">
-        <div class="card-title-block">
+        <div class="card-title-block" tabindex="-1" data-primary="1">
           <span class="card-title">${priorityMarkHtml(show.priority)}${esc(r.title)}${priorityMarkHtml(show.priority, true)}</span>
           <span class="card-season">${esc(r.season)}</span>
           ${todayTag}
@@ -1064,107 +1090,161 @@ function toggleDerivedShow(key, ev) {
 // A redraw replaces the list's markup, so the focused control is gone. After an action
 // redraw (expanding, a section toggle, a write, a reload) focus goes to the first of
 // these that applies (the proposal's F-1 … F-7):
-//   F-1 the same control; F-2 the show's new shortcut, else its expand button; F-3 the
+//   F-1 the same control; F-2 the show's new shortcut, else its item's main control; F-3 the
 //   toggle of the collapsed section it moved into; F-4 the empty-state message when the
-//   view lists no show; F-5 the next (else previous) show still listed in its section;
-//   F-6 its section's toggle or heading; F-7 the first section heading, else the first show.
+//   view lists nothing; F-5 the next (else previous) item still listed in its section;
+//   F-6 its section's toggle or heading; F-7 the first section heading, else the first item.
 // Only when focus was in the list (#tbody / #cardList) before the redraw. Filter redraws
 // (Search, the filter controls, Back) keep focus where it is, and a filter pill keeps its
 // own rule (render.js toggleFilterPill), even when the list becomes empty.
-const FOCUS_HOOKS = [['action', 'data-action'], ['shortcut', 'data-shortcut-show'], ['expand', 'data-show-key'],
+//
+// Items (data-item): a show (Currently Watching, All TV Shows), whose main control is its
+// expand button, or a season (Coming Soon, All TV Seasons), whose title takes focus from the
+// page. Controls are found by identity (the item or season and data-action), never by position.
+//
+// The original action keeps its target across the redraws it causes (an optimistic redraw,
+// then the answer or the rollback): the element focus is moved to remembers the record it
+// came from, until the owner moves focus or presses a key or pointer on it.
+const FOCUS_ORIGIN = '__watchlistFocusOrigin';
+const FOCUS_HOOKS = [['shortcut', 'data-shortcut-show'], ['action', 'data-action'], ['item', 'data-primary'],
   ['section', 'data-section'], ['empty', 'data-empty'], ['loading', 'data-loading']];
+
+// A season row in Coming Soon and All TV Seasons as a focus item (B6).
+function seasonItemAttrs(r, section) {
+  return ` data-item="${esc(r.id)}" data-season-row="${esc(r.id)}" data-row-section="${section}"`;
+}
 
 function captureListFocus() {
   const active = document.activeElement;
   if (!active || typeof active.closest !== 'function') return null;
+  if (active[FOCUS_ORIGIN]) return active[FOCUS_ORIGIN]; // still where the page put it: the original action's record
   const container = ['tbody', 'cardList'].find(id => active.closest(`#${id}`));
   if (!container || active.closest('.filter-pill')) return null;
   const box = document.getElementById(container);
-  const showEl = active.closest('[data-show-row], [data-show-of]');
-  const key = showEl ? (showEl.getAttribute('data-show-row') || showEl.getAttribute('data-show-of')) : null;
-  let hook = null;
+  const attrOf = (el, a) => (el ? el.getAttribute(a) : null);
+  const itemEl = active.closest('[data-item], [data-show-of]');
+  const key = attrOf(itemEl, 'data-item') || attrOf(itemEl, 'data-show-of');
   const seasonEl = active.closest('[data-season-row]');
-  if (seasonEl) {
-    hook = { kind: 'season', value: seasonEl.getAttribute('data-season-row'), index: [...seasonEl.querySelectorAll('button, select, input')].indexOf(active) };
-  } else {
-    for (const [kind, attr] of FOCUS_HOOKS) {
-      const el = active.closest(`[${attr}]`);
-      if (el) { hook = { kind, value: el.getAttribute(attr) }; break; }
-    }
+  let hook = null;
+  for (const [kind, attr] of FOCUS_HOOKS) {
+    const el = active.closest(`[${attr}]`);
+    if (el) { hook = { kind, value: el.getAttribute(attr) }; break; }
   }
-  if (hook && hook.kind === 'action') hook.show = key;
-  // The show's section and its neighbours in that section, in listed order.
-  const rows = [...box.querySelectorAll('[data-show-row]')];
-  const own = key ? rows.find(r => r.getAttribute('data-show-row') === key) : null;
+  if (hook && hook.kind === 'action') { hook.item = key; hook.season = attrOf(seasonEl, 'data-season-row'); }
+  if (hook && hook.kind === 'item') hook.value = key;
+  // The item's section and its neighbours in that section, in listed order.
+  const items = [...box.querySelectorAll('[data-item]')];
+  const own = key ? items.find(r => r.getAttribute('data-item') === key) : null;
   const section = own ? own.getAttribute('data-row-section') : null;
-  const peers = rows.filter(r => r.getAttribute('data-row-section') === section).map(r => r.getAttribute('data-show-row'));
+  const peers = items.filter(r => r.getAttribute('data-row-section') === section).map(r => r.getAttribute('data-item'));
   const at = peers.indexOf(key);
   return { container, key, section, hook,
-    next: at >= 0 ? peers.slice(at + 1) : [], prev: at >= 0 ? peers.slice(0, at).reverse() : [],
-    loading: !!(hook && hook.kind === 'loading') };
+    next: at >= 0 ? peers.slice(at + 1) : [], prev: at >= 0 ? peers.slice(0, at).reverse() : [] };
 }
 
 // The target after a redraw, from what was recorded (rec) and what the view now lists
 // (listing: { sections: [{ name, shown, open, heading, keys }] }). present(t) says whether
-// target t is in the redrawn list. Pure: no DOM.
+// target t is in the redrawn, visible list. Pure: no DOM.
 function focusChainTarget(rec, listing, present) {
   if (!rec) return null;
-  if (rec.hook && !rec.loading && present(rec.hook)) return rec.hook; // F-1
+  if (rec.hook && rec.hook.kind !== 'loading' && present(rec.hook)) return rec.hook; // F-1
   if (!listing) return null;
   const shown = listing.sections.filter(s => s.shown);
   const sectionOf = k => shown.find(s => s.keys.includes(k)) || null;
   const anyListed = shown.some(s => s.keys.length > 0);
-  const firstFallback = () => { // F-7: the first heading or toggle, else the first listed show
+  const item = k => ({ kind: 'item', value: k });
+  const firstFallback = () => { // F-7: the first heading or toggle, else the first listed item
     const h = shown.find(s => s.heading);
     if (h) return { kind: 'section', value: h.name };
     const s = shown.find(x => x.open && x.keys.length);
-    return s ? { kind: 'expand', value: s.keys[0] } : { kind: 'empty' };
+    return s ? item(s.keys[0]) : { kind: 'empty' };
   };
   const sec = rec.key ? sectionOf(rec.key) : null;
   if (sec && sec.open) { // F-2
     const sc = { kind: 'shortcut', value: rec.key };
-    return present(sc) ? sc : { kind: 'expand', value: rec.key };
+    return present(sc) ? sc : item(rec.key);
   }
   if (sec) return { kind: 'section', value: sec.name }; // F-3
   if (!anyListed) return { kind: 'empty' }; // F-4
   if (!rec.key) return firstFallback();
   for (const k of rec.next.concat(rec.prev)) { // F-5
     const s = sectionOf(k);
-    if (s && s.name === rec.section) return s.open ? { kind: 'expand', value: k } : { kind: 'section', value: s.name };
+    if (s && s.name === rec.section) return s.open ? item(k) : { kind: 'section', value: s.name };
   }
   const own = shown.find(s => s.name === rec.section);
   if (own) return own.heading ? { kind: 'section', value: own.name } : firstFallback(); // F-6
   return firstFallback(); // F-7
 }
 
-// The element for a target inside one list container (the visible layout focus was in).
+// Shown on the page (not in a hidden layout or collapsed away); without layout (the offline
+// harness) everything counts as shown.
+function isRendered(el) {
+  return !!el && (typeof el.getClientRects !== 'function' || el.getClientRects().length > 0);
+}
+// The list container to use: the one focus was in if it is still shown, else the other
+// (the window may have crossed the phone width meanwhile); never a hidden layout.
+function visibleListBox(preferred) {
+  for (const id of [preferred, preferred === 'tbody' ? 'cardList' : 'tbody']) {
+    const box = document.getElementById(id);
+    if (box && typeof box.querySelector === 'function' && isRendered(box)) return box;
+  }
+  return null;
+}
+
+// The element for a target inside one list container.
 function focusTargetElement(box, t) {
   if (!box || !t) return null;
   const q = sel => box.querySelector(sel);
   const v = x => JSON.stringify(String(x));
-  const focusable = el => (!el ? null : el.matches('button, select, input, [tabindex]') ? el : el.querySelector('button, select, input'));
-  if (t.kind === 'season') {
-    const row = q(`[data-season-row=${v(t.value)}]`);
-    return row ? ([...row.querySelectorAll('button, select, input')][t.index] || null) : null;
-  }
+  const focusable = el => (!el ? null : el.matches('button, select, input, [tabindex]') ? el : el.querySelector('button, select, input, [tabindex]'));
+  let el = null;
   if (t.kind === 'action') {
-    return focusable(q(`[data-show-of=${v(t.show)}] [data-action=${v(t.value)}], [data-show-row=${v(t.show)}] [data-action=${v(t.value)}]`));
+    el = t.season
+      ? q(`[data-season-row=${v(t.season)}] [data-action=${v(t.value)}]`)
+      : q(`[data-item=${v(t.item)}] [data-action=${v(t.value)}], [data-show-of=${v(t.item)}] [data-action=${v(t.value)}]`);
+  } else if (t.kind === 'item') el = q(`[data-item=${v(t.value)}] [data-primary]`);
+  else if (t.kind === 'empty') el = q('[data-empty]');
+  else if (t.kind === 'loading') el = q('[data-loading]');
+  else {
+    const attr = { shortcut: 'data-shortcut-show', section: 'data-section' }[t.kind];
+    if (attr) el = q(`[${attr}=${v(t.value)}]`);
   }
-  if (t.kind === 'empty') return q('[data-empty]');
-  if (t.kind === 'loading') return q('[data-loading]');
-  const attr = { shortcut: 'data-shortcut-show', expand: 'data-show-key', section: 'data-section' }[t.kind];
-  return attr ? focusable(q(`[${attr}=${v(t.value)}]`)) : null;
+  el = focusable(el);
+  return isRendered(el) ? el : null;
+}
+
+// Moves focus to el and remembers which action it serves, until the owner moves focus or
+// acts on el (a key or pointer press there starts a new action of its own).
+function placeFocus(el, origin) {
+  if (!el || typeof el.focus !== 'function') return;
+  el.focus();
+  if (document.activeElement !== el) return;
+  el[FOCUS_ORIGIN] = origin;
+  const forget = () => { delete el[FOCUS_ORIGIN]; ['blur', 'keydown', 'pointerdown', 'mousedown', 'touchstart'].forEach(t => el.removeEventListener(t, forget)); };
+  ['blur', 'keydown', 'pointerdown', 'mousedown', 'touchstart'].forEach(t => el.addEventListener(t, forget));
+}
+// Focus is still on the element the page moved it to for this record.
+function focusIsPlaced(origin) {
+  const active = document.activeElement;
+  return !!active && active[FOCUS_ORIGIN] === origin;
+}
+// One element of the visible list container (the loading message, Retry).
+function placeListFocus(selector, origin) {
+  const box = visibleListBox(origin.container);
+  const el = box ? box.querySelector(selector) : null;
+  if (isRendered(el)) placeFocus(el, origin);
 }
 
 function applyListFocus(rec, listing) {
   if (!rec) return;
-  const box = document.getElementById(rec.container);
-  if (!box || typeof box.querySelector !== 'function') return;
+  const box = visibleListBox(rec.container);
+  if (!box) return;
   const t = focusChainTarget(rec, listing, x => !!focusTargetElement(box, x));
-  // A view without a listing (Coming Soon, All TV Seasons) whose control is gone: its first
-  // section toggle, show or message, so focus never falls back to the page.
-  const el = focusTargetElement(box, t) || box.querySelector('[data-section], [data-show-key], [data-empty]');
-  if (el && typeof el.focus === 'function') el.focus();
+  // Never back to the page: the first visible section control, item or message.
+  // (Section toggles are buttons; headings, item titles and messages take focus from the page.)
+  const el = focusTargetElement(box, t)
+    || [...box.querySelectorAll('[data-section], [data-primary], [data-empty]')].find(isRendered);
+  if (el) placeFocus(el, rec);
 }
 
 function toggleDerivedSection(name) {
