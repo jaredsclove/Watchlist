@@ -85,7 +85,7 @@ test('first use opens All TV in Shows: the switch shows Shows active, no season-
   assert.ok(f.includes(`aria-pressed="false" onclick="setAllTvPresentation('seasons')"`));
   assert.ok(!f.includes('fSeasonVis'));
   assert.ok(tbody(app).includes('derived-show-row') && app.el('tableHead').innerHTML.includes('<th>Next</th>'));
-  assert.ok(f.indexOf('view-toggle') < f.indexOf('filterToggleBtn'), 'the switch sits outside the collapsible panel');
+  assert.ok(f.indexOf('view-toggle') < f.indexOf('class="filter-line"'), 'the switch sits outside the filters (B10: before the filter line)');
 });
 
 test('switching to Seasons: header, visibility select at All (except Skipped), no request and no write', async () => {
@@ -95,8 +95,10 @@ test('switching to Seasons: header, visibility select at All (except Skipped), n
   await seasons(app);
   assert.strictEqual(app.requests.length, before, 'toggling makes no request');
   assert.strictEqual(app.el('fSeasonVis').value, 'notskipped');
-  assert.deepStrictEqual([...app.el('filtersRow').innerHTML.matchAll(/<option value="(\w+)">([^<]*)</g)].filter(m => m[1] !== '').map(m => m[2]).slice(-5),
-    ['All (except Skipped)', 'All seasons', 'To watch', 'Watched', 'Skipped']);
+  // B10: the select sits on the visible line before the More filters panel, so its own options are read.
+  const visSelect = app.el('filtersRow').innerHTML.match(/<select id="fSeasonVis"[\s\S]*?<\/select>/)[0];
+  assert.deepStrictEqual([...visSelect.matchAll(/<option value="(\w+)">([^<]*)</g)].filter(m => m[1] !== '').map(m => m[2]),
+    ['Seasons: All (except Skipped)', 'Seasons: All seasons', 'Seasons: To watch', 'Seasons: Watched', 'Seasons: Skipped']); // B10: named on the visible line
   assert.ok(app.el('filtersRow').innerHTML.includes('onchange="setAllTvSeasonVis(this.value)"'));
   assert.ok(app.el('tableHead').innerHTML.includes('<th>Show &amp; Season</th><th>Categories</th><th>Premiere</th><th>Show status</th>'));
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 1']);
@@ -472,13 +474,13 @@ test('opening All TV in Seasons (remembered) loads with GETs only and refuses an
   assert.ok(app.requests.every(r => r.method === 'GET'));
 });
 
-test('phone width: the switch stays outside the collapsed panel; cards carry the label, Watched and Skip / Keep', async () => {
+test('phone width: the switch stays outside the filters; the Seasons choice is on the always-visible line (B10); cards carry the label, Watched and Skip / Keep', async () => {
   const a = show({ title: 'Alpha' }, [{ num: 1, date: day(-2) }]);
   const app = await openAllTv(all(a), { width: 375 });
   await seasons(app);
-  assert.ok(app.el('filtersRow').classList.contains('collapsed'));
+  assert.ok(!app.el('filtersRow').classList.contains('collapsed'), 'B10 (D10): no collapsed filter panel on phones');
   const f = app.el('filtersRow').innerHTML;
-  assert.ok(f.indexOf('view-toggle') < f.indexOf('filters-inner') && f.indexOf('fSeasonVis') > f.indexOf('filters-inner'));
+  assert.ok(f.indexOf('view-toggle') < f.indexOf('class="filter-line"') && f.indexOf('fSeasonVis') > f.indexOf('class="filter-line"') && f.indexOf('fSeasonVis') < f.indexOf('id="filterMore"'));
   const c = cards(app);
   assert.ok(c.includes('status-pill s-confirmed') && c.includes(`toggleWatch('${a.rows[0].id}')`) && c.includes(`setSeasonSkipped('${a.rows[0].id}', true)`));
 });

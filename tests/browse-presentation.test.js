@@ -110,8 +110,9 @@ function listed(app) {
 const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"]*)"/g)]
   .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1])).filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
 const READ_ONLY = new Set(['toggleFilterPill', 'toggleBrowseShow', 'setBrowseMedia', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
-  'renderTable', 'toggleFilters', 'browseBack', 'openBrowseCollection', 'loadBrowseView',
-  'openManage']); // Stage 3b-2: opens the Manage collections dialog (organization only, never tracking)
+  'renderTable', 'browseBack', 'openBrowseCollection', 'loadBrowseView',
+  'openManage', // Stage 3b-2: opens the Manage collections dialog (organization only, never tracking)
+  'toggleFilterPanel', 'filterPanelKeydown', 'removeFilterChip', 'clearViewFilters']); // B10: filters only (tests/filter-bar.test.js)
 // (The GET of rpc/stage5_capabilities is the read-only phase check made at startup.)
 const mutating = app => app.requests.filter(r => r.method !== 'GET' || (/\/rpc\//.test(r.url) && !r.url.endsWith('/rpc/stage5_capabilities')) || !r.url.includes('/rest/v1/'));
 const J = (app, expr) => JSON.parse(JSON.stringify(app.get(expr)));
@@ -121,9 +122,9 @@ test('first use is All media + Shows + Separate; Shows/Seasons hides with Movies
   const app = await boot();
   await open(app);
   assert.deepStrictEqual(J(app, '[browseMedia, browsePresentation, browseGrouping, browseSeasonVis]'), ['all', 'shows', 'separate', 'notskipped']);
-  const inner = () => filters(app).indexOf('class="filters-inner"');
+  const inner = () => filters(app).indexOf('class="filter-line"'); // B10: the filter line follows the layout controls
   const at = s => filters(app).indexOf(s);
-  assert.ok(at('data-presentation="shows"') > -1 && at('data-presentation="shows"') < inner() && at('data-grouping="combined"') < inner(), 'outside the collapsible panel');
+  assert.ok(at('data-presentation="shows"') > -1 && at('data-presentation="shows"') < inner() && at('data-grouping="combined"') < inner(), 'outside the filters');
   assert.ok(/aria-label="TV presentation"/.test(filters(app)) && /aria-label="Grouping"/.test(filters(app)));
   assert.ok(!filters(app).includes('fSeasonVis'), 'TV seasons only in Seasons');
   app.ctx.setBrowseMedia('tv');
@@ -132,7 +133,7 @@ test('first use is All media + Shows + Separate; Shows/Seasons hides with Movies
   assert.ok(at('data-presentation') === -1 && at('data-grouping') === -1 && !filters(app).includes('fSeasonVis'));
   app.ctx.setBrowseMedia('all');
   app.ctx.setBrowsePresentation('seasons');
-  assert.ok(at('id="fSeasonVis"') > inner(), 'TV seasons sits inside the panel');
+  assert.ok(at('id="fSeasonVis"') > inner() && at('id="fSeasonVis"') < at('id="filterMore"'), 'B10: TV seasons sits on the visible filter line, not in More filters');
   assert.deepStrictEqual([...filters(app).matchAll(/<option value="(\w+)"[^>]*>(TV seasons: [^<]*)</g)].map(m => m[2]),
     ['TV seasons: All (except Skipped)', 'TV seasons: All', 'TV seasons: To watch', 'TV seasons: Watched', 'TV seasons: Skipped']);
   assert.ok(filters(app).includes('<option value="notskipped" selected>TV seasons: All (except Skipped)'), 'the default is selected');

@@ -104,14 +104,16 @@ const mutating = app => app.requests.filter(r => r.method !== 'GET' || (/\/rpc\/
 const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"]*)"/g)]
   .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1]))
   .filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
-const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'renderTable', 'toggleFilters', 'browseBack', 'openBrowseCollection',
+const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'renderTable', 'browseBack', 'openBrowseCollection',
   'loadBrowseView', 'switchView', 'switchTab', 'switchMediaType', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
   // Stage 3b-2: opens the Manage collections dialog (organization only; it never changes tracking — tests/organization-manage.test.js)
   'openManage',
   // a filter pill: sets or clears a filter control and redraws (tests/filter-pills.test.js)
   'toggleFilterPill',
   // Stage 4b: opens the Catalog updates chooser (it reads; applying needs Review → Apply in its dialog — tests/catalog-apply.test.js)
-  'openCatalogChooser']);
+  'openCatalogChooser',
+  // B10: More filters, its Escape, a chip's removal and Clear filters only change filters and redraw (tests/filter-bar.test.js)
+  'toggleFilterPanel', 'filterPanelKeydown', 'removeFilterChip', 'clearViewFilters']);
 function assertReadOnlyDom(app) {
   for (const id of ['tbody', 'cardList', 'filtersRow', 'statsRow', 'browseBar', 'viewHead']) {
     const bad = handlersIn(app.el(id).innerHTML).filter(h => !READ_ONLY_HANDLERS.has(h));
@@ -237,7 +239,7 @@ test('missing defaults and a stale TBA date cause no write from any view or any 
     assertReadOnlyDom(app);
     setFilter(app, 'fSearch', 'zzz'); setFilter(app, 'fSearch', '');
     app.ctx.loadBrowseView(); await settle();
-    app.ctx.toggleFilters();
+    app.ctx.toggleFilterPanel();
     app.ctx.browseBack(); await settle();
   }
   // All Movies has film actions since Stage 4b; showing and filtering it still writes nothing.
@@ -700,15 +702,15 @@ test('titles with apostrophes, ampersands and markup are escaped; handlers carry
   assertReadOnlyDom(app);
 });
 
-test('at phone width the title, Back and media choice stay outside the collapsed filter panel; cards match the table', async () => {
+test('at phone width the title, Back and media choice stay outside the filters; Search is always visible (B10); cards match the table', async () => {
   const app = await boot(library(), { width: 375 });
   await openCol(app, B['sheridan']);
   const f = app.el('filtersRow');
-  assert.ok(f.classList.contains('collapsed'));
-  const inner = f.innerHTML.indexOf('class="filters-inner"');
+  assert.ok(!f.classList.contains('collapsed'), 'B10 (D10): no collapsed filter panel on phones');
+  const inner = f.innerHTML.indexOf('class="filter-line"');
   assert.ok(app.el('viewHead').innerHTML.includes('browse-title') && app.el('viewHead').innerHTML.includes('Back to TV'));
   assert.ok(f.innerHTML.indexOf("setBrowseMedia('tv')") < inner);
-  assert.ok(f.innerHTML.indexOf('id="fSearch"') > inner);
+  assert.ok(f.innerHTML.indexOf('id="fSearch"') > inner && f.innerHTML.indexOf('id="fSearch"') < f.innerHTML.indexOf('id="filterMore"'));
   assert.deepStrictEqual(cardTitles(app), titles(app));
   assert.ok(cards(app).includes('aria-label="Show seasons of Tulsa King"'));
 });

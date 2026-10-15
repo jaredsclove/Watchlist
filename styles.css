@@ -124,7 +124,6 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .mini-progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
 
 .filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
-.filter-label { font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 2px; }
 
 .search-input {
   background: var(--surface);
@@ -532,9 +531,52 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .section-toggle { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 4px 0; min-height: 32px; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; }
 .section-toggle:hover .expand-chevron, .section-toggle:focus-visible .expand-chevron { border-color: var(--accent); color: var(--accent); }
 
-/* ── Filter toggle (mobile) ── */
-.filter-toggle-btn { display: none; }
-.filters-inner { display: contents; }
+/* ── Filter bar (B10): Search, scope controls and More filters on one line; the More filters
+   panel (hidden, never removed); the chip row (applied, "Not applied", Clear filters). ── */
+.filter-line { display: contents; }
+.filter-more-btn { display: inline-flex; align-items: center; gap: 6px; }
+.filter-more-btn[aria-expanded="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); } /* B10 corr1 (F3): text stays --text */
+.more-label-narrow { display: none; }
+.filter-count { background: var(--accent); color: var(--bg); border-radius: 10px; font-size: 11px; font-weight: 700; padding: 0 6px; line-height: 17px; }
+.filter-count[hidden] { display: none; }
+.filter-more { flex: 1 0 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; padding: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.filter-more[hidden] { display: none; }
+.filter-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.filter-group-title { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
+.filter-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.filter-field-label { font-size: 11px; color: var(--text2); }
+.filter-field select { width: 100%; max-width: 100%; text-overflow: ellipsis; }
+.filter-field-row { display: flex; align-items: center; gap: 6px; min-width: 0; } /* B10 corr2 (D11): Refresh beside the Collection tag select */
+.filter-field-row select { flex: 1 1 auto; min-width: 0; }
+.filter-field-row #collectionRefreshLink { flex: none; }
+.filter-field-row #collectionRefreshLink:empty { display: none; }
+select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.filter-chips { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; max-width: 100%; }
+.filter-chips:empty { display: none; }
+.chip-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; max-width: 100%; }
+.chips-label { font-size: 12px; color: var(--text2); }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 280px; min-width: 0; border: 1px solid var(--accent); background: var(--accent-dim);
+  color: var(--text); border-radius: 16px; padding: 3px 4px 3px 10px; font-size: 12px; font-family: inherit; cursor: pointer; }
+.filter-chip .chip-k { color: var(--text); font-weight: 400; flex: none; }
+.filter-chip .chip-v { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.filter-chip .chip-x { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface2); color: var(--text2); font-size: 11px; flex: none; }
+.filter-chip:hover .chip-x, .filter-chip:focus-visible .chip-x { color: var(--text); }
+.filter-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (min-width: 701px) { .filters > .browse-controls { display: flex; flex: 1 0 100%; flex-wrap: wrap; gap: 8px; } } /* B10 corr1 (F5) */
+/* "Not applied": dashed and muted, never the applied chips' accent */
+.filter-chip.filter-chip-kept { border-style: dashed; border-color: var(--border2); background: transparent; color: var(--text2); }
+.filter-chip.filter-chip-kept .chip-v { font-weight: 500; }
+.filter-chip.filter-chip-kept { display: inline-grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "k v x" "na na x";
+  column-gap: 6px; row-gap: 3px; border-radius: 12px; padding: 3px 4px 4px 10px; text-align: left; }
+.filter-chip-kept .chip-k { grid-area: k; }
+.filter-chip-kept .chip-v { grid-area: v; }
+.filter-chip-kept .chip-x { grid-area: x; }
+.filter-chip.filter-chip-kept .chip-na { grid-area: na; justify-self: start; white-space: normal; max-width: 100%; }
+.filter-chip .chip-na { font-size: 11px; font-weight: 600; color: var(--text2); border: 1px dashed var(--border2); border-radius: 4px; padding: 0 5px; white-space: nowrap; flex: none; }
+.filter-clear { font-size: 13px; }
+.empty-clear { margin-left: 8px; }
 
 @media (max-width: 700px) {
   .main { padding: 12px; }
@@ -558,18 +600,22 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   .browse-toggles .view-toggle { flex: 1 1 150px; width: auto; margin-bottom: 0; }
   .browse-title { font-size: 16px; }
   .view-toggle-btn { flex: 1; padding: 8px 12px; }
-  .filter-toggle-btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 8px 12px; color: var(--text); font-size: 13px; cursor: pointer; width: 100%;
-    justify-content: space-between;
-  }
   .filters { flex-direction: column; align-items: stretch; }
-  .filters.collapsed .filters-inner { display: none; }
-  .filters-inner {
-    display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
-  }
-  .filters-inner > * { width: 100%; }
+  /* B10 (D10): Search always visible; the scope controls and Filters share rows of 44 px targets. */
+  .filter-line { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+  .filter-line .search-input { grid-column: 1 / -1; }
+  .filter-line select, .filter-line .search-input, .filter-more-btn { min-height: 44px; width: 100%; max-width: 100%; }
+  .filter-more-btn { justify-content: center; }
+  .more-label-wide { display: none; }
+  .more-label-narrow { display: inline; }
+  .filter-more { grid-template-columns: 1fr; flex: none; }
+  .filter-chips { flex: none; }
+  .filter-field select { min-height: 44px; }
+  .filters > * { min-width: 0; }
+  .filter-chip { min-height: 32px; max-width: min(100%, calc(100vw - 24px)); } /* B10 corr1 (F2) */
+  .filter-chip .chip-x { width: 28px; height: 28px; }
+  .filter-clear { min-height: 44px; }
+  .empty-clear { min-height: 44px; }
   .search-input { width: 100%; }
   .search-input:focus { width: 100%; }
 

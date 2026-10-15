@@ -194,6 +194,7 @@ function allTvProgressMatches(item, fProgress) {
 // All TV simply opens in Shows.
 const ALLTV_PRESENTATION_KEY = 'watchlist_alltv_presentation';
 const ALLTV_SEASON_VIS = ['notskipped', 'all', 'towatch', 'watched', 'skipped'];
+const ALLTV_SEASON_VIS_LABELS = { notskipped: 'All (except Skipped)', all: 'All seasons', towatch: 'To watch', watched: 'Watched', skipped: 'Skipped' };
 
 function readAllTvPresentation() {
   try {
@@ -365,12 +366,14 @@ function derivedThemeChoices() {
   return items.flatMap(x => x.seasons.map(r => r.theme));
 }
 
+// B10: one filter bar (render.js filterBarHtml). Visible: Search, Status (All TV) and, in Seasons,
+// which seasons to list; everything else in the More filters panel.
 function renderDerivedFilters() {
   const filtersRowEl = document.getElementById('filtersRow');
   const tag = `view:${activeViewId}`;
   // Back from a collection (browse-views.js) puts this view's filters back once.
-  const { restored, keepState, values } = viewFilterStart(tag, filtersRowEl);
-  const wasCollapsed = filtersRowEl.classList.contains('collapsed');
+  const { restored, values } = viewFilterStart(tag, filtersRowEl);
+  filterPanelStart(tag, restored);
   // Show status (All TV only); the default hides Skipped shows.
   const statusSelect = activeViewId === 'alltv'
     ? `
@@ -389,12 +392,8 @@ function renderDerivedFilters() {
     : '';
   const seasonVisSelect = activeViewId === 'alltv' && allTvPresentation === 'seasons'
     ? `
-      <select id="fSeasonVis" onchange="setAllTvSeasonVis(this.value)" title="Which seasons to list (Seasons only)">
-        <option value="notskipped">All (except Skipped)</option>
-        <option value="all">All seasons</option>
-        <option value="towatch">To watch</option>
-        <option value="watched">Watched</option>
-        <option value="skipped">Skipped</option>
+      <select id="fSeasonVis" onchange="setAllTvSeasonVis(this.value)" aria-label="Seasons" title="Which seasons to list (Seasons only)">${ALLTV_SEASON_VIS.map(v =>
+        `<option value="${v}">Seasons: ${ALLTV_SEASON_VIS_LABELS[v]}</option>`).join('')}
       </select>`
     : '';
   const progressSelect = activeViewId === 'alltv' && allTvPresentation === 'shows'
@@ -404,23 +403,19 @@ function renderDerivedFilters() {
     : '';
   const themeSelect = themeFilterSelectHtml(derivedThemeChoices());
   // B4: one select per category (shows' own metadata; seasons inherit), priority and markers.
-  const categorySelects = categoryFilterSelectsHtml(derivedFilterRecords());
-  const stateSelects = priorityFilterSelectHtml() + markerFilterChecksHtml();
+  const categoryFields = categoryFilterSelectsHtml(derivedFilterRecords());
   // Year (All TV only, Stage 4b): from every season the view lists before filtering.
   const yearSelect = activeViewId === 'alltv' && derivedData && derivedData.loaded
     ? yearFilterSelectHtml(deriveAllTv(derivedData.rows, tvShowsById, localTodayStr()).items.flatMap(x => x.seasons)) : '';
 
-  filtersRowEl.innerHTML = `${presentationToggle}${libraryAddButtonHtml('tv')}
-    <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
-      <span>🔍 Search &amp; Filter</span><span id="filterToggleChevron">▾</span>
-    </button>
-    <div class="filters-inner">
-      <span class="filter-label">Filter:</span>
-      <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" oninput="renderTable()">${statusSelect}${stateSelects}${categorySelects}${themeSelect}${yearSelect}${progressSelect}${seasonVisSelect}
-    </div>
-  `;
+  filtersRowEl.innerHTML = filterBarHtml({
+    lead: `${presentationToggle}${libraryAddButtonHtml('tv')}`,
+    line: `${statusSelect}${seasonVisSelect}`,
+    cats: [categoryFields],
+    marks: [filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml()), markerFilterChecksHtml()],
+    more: [filterFieldHtml('Year', 'fYear', yearSelect), filterFieldHtml('Progress', 'fProgress', progressSelect), filterFieldHtml('Original label', 'fTheme', themeSelect)]
+  });
   filtersRowEl.dataset.tab = tag;
-  if (window.innerWidth <= 700) filtersRowEl.classList.add('collapsed');
   const seasonVisEl = document.getElementById('fSeasonVis');
   if (seasonVisEl) seasonVisEl.value = allTvSeasonVis;
 
@@ -429,7 +424,6 @@ function renderDerivedFilters() {
   tmdbPanel.innerHTML = '';
 
   applyViewFilters(tag, values);
-  if (keepState && !restored && filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
@@ -451,6 +445,7 @@ function renderDerivedTable(carried) {
   if (activeViewId === 'comingsoon') listing = renderComingSoon(today, r => keep(r) && themeMatchesRow(r, fTheme));
   else if (activeViewId === 'alltv') listing = renderAllTv(today, keep, val('fStatus'), fTheme, val('fProgress'), val('fYear'));
   else if (activeViewId === 'watching') listing = renderCurrentlyWatching(today, x => keep(x) && themeMatchesShow(x.seasons, fTheme));
+  renderFilterBarState(); // B10: chips, More filters count (render.js)
   if (rec) applyListFocus(rec, listing || null);
 }
 
@@ -530,10 +525,11 @@ function derivedHeadingHtml(name, label, count) {
 }
 
 // A view's empty-state message: focusable by the page only, the focus fallback of an empty view.
-function derivedEmptyHtml(msg, pad = '2rem') {
+// extra: markup after the text (B10: Clear filters in a "no matches" message).
+function derivedEmptyHtml(msg, pad = '2rem', extra = '') {
   return {
-    row: `<tr class="empty-row"><td colspan="${derivedColspan()}" tabindex="-1" data-empty="1">${esc(msg)}</td></tr>`,
-    card: `<div class="empty-row" style="padding:${pad} 0" tabindex="-1" data-empty="1">${esc(msg)}</div>`
+    row: `<tr class="empty-row"><td colspan="${derivedColspan()}" tabindex="-1" data-empty="1">${esc(msg)}${extra}</td></tr>`,
+    card: `<div class="empty-row" style="padding:${pad} 0" tabindex="-1" data-empty="1">${esc(msg)}${extra}</div>`
   };
 }
 
@@ -564,7 +560,7 @@ function renderCurrentlyWatching(today, keep) {
       : active.length === 0
         ? 'Nothing in progress. Every Watching show is caught up.'
         : 'No in-progress shows match your filters.';
-    const out = derivedEmptyHtml(msg);
+    const out = derivedEmptyHtml(msg, '2rem', active.length ? filterEmptyClearHtml() : '');
     html += out.row;
     cardHtml += out.card;
   }
@@ -582,9 +578,9 @@ function renderCurrentlyWatching(today, keep) {
         cardHtml += out.card;
       });
       if (shownUpToDate.length === 0) {
-        const msg = 'No caught-up shows match your filters.';
-        html += `<tr class="empty-row"><td colspan="${derivedColspan()}">${esc(msg)}</td></tr>`;
-        cardHtml += `<div class="empty-row" style="padding:1rem 0">${esc(msg)}</div>`;
+        const msg = 'No caught-up shows match your filters.', clear = filterEmptyClearHtml();
+        html += `<tr class="empty-row"><td colspan="${derivedColspan()}">${esc(msg)}${clear}</td></tr>`;
+        cardHtml += `<div class="empty-row" style="padding:1rem 0">${esc(msg)}${clear}</div>`;
       }
     }
   }
@@ -628,7 +624,7 @@ function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '', fYear = 
     cardHtml += out.card;
   });
   if (shown.length === 0) {
-    const out = derivedEmptyHtml(items.length === 0 ? 'No TV shows on your list yet.' : 'No shows match your filters.');
+    const out = derivedEmptyHtml(items.length === 0 ? 'No TV shows on your list yet.' : 'No shows match your filters.', '2rem', items.length ? filterEmptyClearHtml() : '');
     html += out.row;
     cardHtml += out.card;
   }
@@ -656,7 +652,7 @@ function renderAllTvSeasons(today, items, shown, notListed, fTheme = '', fYear =
   if (notListed > 0) note(`⚠️ ${notListed} TV season${notListed === 1 ? ' isn’t' : 's aren’t'} linked to a loaded show, so ${notListed === 1 ? 'it isn’t' : 'they aren’t'} listed here.`);
 
   if (total === 0) {
-    const out = derivedEmptyHtml(items.length === 0 ? 'No TV shows on your list yet.' : shown.length === 0 ? 'No shows match your filters.' : 'No seasons match your filters.', '1rem');
+    const out = derivedEmptyHtml(items.length === 0 ? 'No TV shows on your list yet.' : shown.length === 0 ? 'No shows match your filters.' : 'No seasons match your filters.', '1rem', items.length ? filterEmptyClearHtml() : '');
     html += out.row;
     cardHtml += out.card;
   } else if (dated.length === 0) {
@@ -1009,7 +1005,7 @@ function renderComingSoon(today, keep) {
   });
 
   if (shownDated.length === 0) {
-    const out = derivedEmptyHtml(dated.length === 0 ? 'Nothing with a confirmed date is coming up.' : 'No dated entries match your filters.');
+    const out = derivedEmptyHtml(dated.length === 0 ? 'Nothing with a confirmed date is coming up.' : 'No dated entries match your filters.', '2rem', dated.length ? filterEmptyClearHtml() : '');
     html += out.row;
     cardHtml += out.card;
   }

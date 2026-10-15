@@ -543,6 +543,7 @@ function browseFilterBase() {
 
 // Collection tag and watch-with filters for the films' existing labels (offered
 // only when some film has one). Watch-with is by token, labelled as the choice is now.
+// B10: two labelled fields of the More filters panel ({ tag, watchWith }).
 function filmTagFiltersHtml(films) {
   const tags = [...new Set(films.flatMap(r => (r.collections || []).map(cleanCollectionName)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const tokens = [...new Set(films.flatMap(r => r.watch_with || []).filter(Boolean))]
@@ -558,23 +559,25 @@ function filmTagFiltersHtml(films) {
     ? `<select id="fWatchWith" onchange="renderTable()" aria-label="Watch with">
         <option value="">Watch with: anyone</option>${tokens.map(w => `<option value="${esc(w.t)}">${esc(w.label)}</option>`).join('')}
       </select>` : '';
-  return tagSelect + wwSelect;
+  return { tag: filterFieldHtml('Collection tag', 'fCollection', allMovies && tagSelect ? `<div class="filter-field-row">${tagSelect}</div>` : tagSelect),
+    watchWith: filterFieldHtml('Watch with', 'fWatchWith', wwSelect) };
 }
 
+// B10: one filter bar (render.js filterBarHtml). Visible: Search, Status, All Movies' Watched and,
+// in a collection's Seasons, the TV seasons choice; everything else in the More filters panel.
 function renderBrowseFilters() {
   const filtersRowEl = document.getElementById('filtersRow');
   const tag = `view:${activeViewId}`;
   const dest = isBrowseCollectionView(activeViewId);
   // All Movies opens on Unwatched only; a changed choice is kept for the visit and by Back.
-  const { restored, keepState, values } = viewFilterStart(tag, filtersRowEl, dest ? {} : { fWatch: 'unwatched' });
-  const wasCollapsed = filtersRowEl.classList.contains('collapsed');
+  const { restored, values } = viewFilterStart(tag, filtersRowEl, dest ? {} : { fWatch: 'unwatched' });
+  filterPanelStart(tag, restored);
   const base = browseFilterBase();
   const mediaToggle = dest
     ? `<div class="view-toggle" role="group" aria-label="Media">${Object.entries(BROWSE_MEDIA_LABELS).map(([media, label]) =>
         `<button class="view-toggle-btn${browseMedia === media ? ' active' : ''}" data-media="${media}" aria-pressed="${browseMedia === media}" onclick="setBrowseMedia('${media}')">${label}</button>`).join('')}</div>`
     : '';
-  // Shows/Seasons (not for Movies only) and Separate/Combined (All media only),
-  // outside the collapsible panel; TV seasons (Seasons only) inside it.
+  // Shows/Seasons (not for Movies only) and Separate/Combined (All media only), outside the filters.
   const toggleGroup = (label, attr, setter, options, current) =>
     `<div class="view-toggle" role="group" aria-label="${label}">${Object.entries(options).map(([value, text]) =>
       `<button class="view-toggle-btn${current === value ? ' active' : ''}" data-${attr}="${value}" aria-pressed="${current === value}" onclick="${setter}('${value}')">${text}</button>`).join('')}</div>`;
@@ -591,30 +594,26 @@ function renderBrowseFilters() {
         `<option value="${value}"${value === 'unwatched' ? ' selected' : ''}>${text}</option>`).join('')}</select>`;
   const themes = base.shows.flatMap(x => x.seasons.map(r => r.theme)).concat(base.films.map(r => r.theme));
   const themeSelect = themeFilterSelectHtml(themes);
-  const categorySelects = categoryFilterSelectsHtml(base.shows.map(x => x.show).concat(base.films));
-  const stateSelects = priorityFilterSelectHtml() + markerFilterChecksHtml();
+  const categoryFields = categoryFilterSelectsHtml(base.shows.map(x => x.show).concat(base.films));
   const statusValues = dest ? ['to_watch', 'watching', 'watched', 'skipped'] : ['to_watch', 'watched', 'skipped'];
   const yearSelect = dest ? '' : yearFilterSelectHtml(base.films); // All Movies (Stage 4b)
   // The films' labels: only while films are shown (a collection's TV only hides them, and they don't filter then).
-  const tagFilters = !dest || browseMedia !== 'tv' ? filmTagFiltersHtml(base.films) : '';
+  const tagFilters = !dest || browseMedia !== 'tv' ? filmTagFiltersHtml(base.films) : { tag: '', watchWith: '' };
   document.getElementById('viewHead').innerHTML = browseHeadHtml();
   // .browse-controls scopes the larger phone touch targets to these views (All TV's toggle is unchanged).
-  filtersRowEl.innerHTML = `${dest ? `<div class="browse-controls">${mediaToggle}${layoutToggles}</div>` : libraryAddButtonHtml('movie')}
-    <button class="filter-toggle-btn" onclick="toggleFilters()" id="filterToggleBtn">
-      <span>🔍 Search &amp; Filter</span><span id="filterToggleChevron">▾</span>
-    </button>
-    <div class="filters-inner">
-      <span class="filter-label">Filter:</span>
-      <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" aria-label="Search titles" oninput="renderTable()">
+  filtersRowEl.innerHTML = filterBarHtml({
+    lead: dest ? `<div class="browse-controls">${mediaToggle}${layoutToggles}</div>` : libraryAddButtonHtml('movie'),
+    line: `
       <select id="fStatus" onchange="renderTable()" aria-label="Status">
         <option value="">All (except Skipped)</option>
         <option value="all">All statuses</option>
         ${statusValues.map(v => `<option value="${v}">${esc(BROWSE_STATUS_LABELS[v])}</option>`).join('')}
-      </select>${watchSelect}${stateSelects}${categorySelects}${themeSelect}${yearSelect}${tagFilters}${seasonVisSelect}
-    </div>
-  `;
+      </select>${watchSelect}${seasonVisSelect}`,
+    cats: [categoryFields],
+    marks: [filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml()), markerFilterChecksHtml(), tagFilters.watchWith],
+    more: [filterFieldHtml('Year', 'fYear', yearSelect), tagFilters.tag, filterFieldHtml('Original label', 'fTheme', themeSelect)]
+  });
   filtersRowEl.dataset.tab = tag;
-  if (window.innerWidth <= 700) filtersRowEl.classList.add('collapsed');
 
   const tmdbPanel = document.getElementById('tmdbPanel');
   tmdbPanel.style.display = 'none';
@@ -622,7 +621,6 @@ function renderBrowseFilters() {
 
   applyViewFilters(tag, values);
   if (!dest) updateCollectionRefreshLink();
-  if (keepState && !restored && filtersRowEl.classList.contains('collapsed') !== wasCollapsed) toggleFilters();
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
@@ -641,6 +639,7 @@ function renderBrowseTable() {
   const dest = currentBrowseDest();
   if (isBrowseCollectionView(activeViewId)) { if (dest) renderBrowseCollection(dest, today, f); }
   else renderAllMovies(today, { ...f, fYear: val('fYear'), fWatch: val('fWatch') });
+  renderFilterBarState(); // B10: chips, More filters count (render.js)
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -726,7 +725,7 @@ function renderBrowseCollection(dest, today, f) {
         : section.key === 'film'
           ? (v.baseFilms === 0 ? 'No films in this collection.' : 'No films match these filters.')
           : (v.baseShows + v.baseFilms === 0 ? `Nothing in ${dest.label}.` : 'Nothing matches these filters.');
-      add(browseNoteHtml(msg));
+      add(browseNoteHtml(msg, /match(es)? these filters/.test(msg) ? filterEmptyClearHtml() : ''));
     }
   });
   document.getElementById('tbody').innerHTML = html;
@@ -763,7 +762,7 @@ function renderAllMovies(today, f) {
     add(browseNoteHtml(`⚠️ ${plural(unclassified, 'saved entry is', 'saved entries are')} neither a TV season nor a film, so ${unclassified === 1 ? 'it isn’t' : 'they aren’t'} listed.`));
   }
   shown.forEach(r => add(allMoviesFilmHtml(r, today, films)));
-  if (shown.length === 0) add(browseNoteHtml(films.length === 0 ? 'No films saved yet.' : 'No films match these filters.'));
+  if (shown.length === 0) add(browseNoteHtml(films.length === 0 ? 'No films saved yet.' : 'No films match these filters.', films.length ? filterEmptyClearHtml() : ''));
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
 }

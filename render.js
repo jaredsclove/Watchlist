@@ -33,20 +33,14 @@ function filterPillHtml(kind, value, text, { cls = '', attrs = '', title = '', o
   return `<button type="button" class="${cls} ${pill.clickable} filter-pill"${extra} data-filter-kind="${kind}" data-filter-value="${esc(value)}"${owner ? ` data-pill-owner="${esc(owner)}"` : ''} aria-pressed="${pressed}" title="${esc(pressed ? `Remove this filter (${text})` : title)}" onclick="event.stopPropagation(); toggleFilterPill(this)">${esc(text)}</button>`;
 }
 
-// Sets the filter control to the value (or clears it when it is already set),
-// opens the collapsed filter panel so the choice is visible, and redraws. A value
-// the control doesn't offer changes nothing.
+// Sets the filter control to the value (or clears it when it is already set) and
+// redraws. A value the control doesn't offer changes nothing. B10 (D5): a pill never
+// opens the More filters panel; the chip row shows the value instead.
 function toggleFilterSelect(selectId, value) {
   const select = document.getElementById(selectId);
   if (!select) return false;
   if (select.tagName === 'SELECT' && select.value !== value && ![...select.options].some(o => o.value === value)) return false;
   select.value = select.value === value ? '' : value;
-  const filtersEl = document.getElementById('filtersRow');
-  if (filtersEl && filtersEl.classList.contains('collapsed')) {
-    filtersEl.classList.remove('collapsed');
-    const chevron = document.getElementById('filterToggleChevron');
-    if (chevron) chevron.textContent = '▴';
-  }
   // All Movies' ↻ Refresh link for a person collection (a read only), as its select does.
   if (selectId === 'fCollection' && activeViewId === ALL_MOVIES_VIEW.id) updateCollectionRefreshLink();
   renderTable();
@@ -118,10 +112,11 @@ function categoryMatches(m, f) {
   }
   return true;
 }
-// The category selects. Genre and Form offer their whole controlled lists (Genre also an
-// "Unresolved source categories" group of the combined names present); Franchise, Network
-// (confirmed values only) and Company offer the values of the records the view lists before
-// filtering, and aren't offered while no record has one.
+// The category selects, each as a labelled field of the More filters panel (B10). Genre and
+// Form offer their whole controlled lists (Genre also an "Unresolved source categories" group
+// of the combined names present); Franchise, Network (confirmed values only) and Company offer
+// the values of the records the view lists before filtering, and aren't offered while no
+// record has one.
 function categoryFilterSelectsHtml(records) {
   const ms = records.map(metadataOf);
   return METADATA_CATEGORIES.map(c => {
@@ -129,10 +124,10 @@ function categoryFilterSelectsHtml(records) {
       : [...new Set(ms.flatMap(m => (c.single ? [m[c.key]] : m[c.key] || [])).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const cands = c.key === 'genres' ? [...new Set(ms.flatMap(m => m.genre_candidates || []))].sort((a, b) => a.localeCompare(b)) : [];
     if (!values.length && !cands.length) return '';
-    return `<select id="${c.filter}" onchange="renderTable()" aria-label="${esc(c.label)}">
+    return filterFieldHtml(c.label, c.filter, `<select id="${c.filter}" onchange="renderTable()" aria-label="${esc(c.label)}">
         <option value="">${esc(`Any ${c.label.toLowerCase()}`)}</option>${values.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}${cands.length
           ? `<optgroup label="Unresolved source categories">${cands.map(v => `<option value="cand:${esc(v)}">${esc(v)} (unresolved)</option>`).join('')}</optgroup>` : ''}
-      </select>`;
+      </select>`);
   }).join('');
 }
 // Priority and the markers (shows and films alike).
@@ -157,6 +152,240 @@ function priorityMatches(p, fPriority) {
 }
 function markerMatches(rec, m) {
   return (!m || !m.fNew || !!rec.catalog_new) && (!m || !m.fReview || !!rec.status_review);
+}
+
+// ─── Filter bar (B10) ─────────────────────────────────────────────────────────
+// Every derived and browse view draws one filter bar (filterBarHtml). On one line: Search, the
+// view's scope controls (those that hide something by default) and More filters. Then the More
+// filters panel: every other control, grouped; closed means hidden, never removed, so its
+// controls keep filtering and its pills keep working. Then the chip row: the applied values, the
+// values the visit keeps that don't filter in this mode ("Not applied"), and Clear filters. DOM
+// order is the keyboard order. The renderers filter exactly as before (they read the controls);
+// nothing here sends a request or writes.
+
+// A labelled control of the panel (a control that isn't offered gives no field).
+function filterFieldHtml(label, id, control) {
+  return control ? `<div class="filter-field"><label class="filter-field-label" for="${id}">${esc(label)}</label>${control}</div>` : '';
+}
+
+// lead: what stays outside the filters (layout toggles, + Add); line: the scope controls;
+// cats / marks / more: the panel's fields, in that group order.
+function filterBarHtml({ lead = '', line = '', cats = [], marks = [], more = [] }) {
+  const groups = [['Categories', cats], ['Your marks', marks], ['More', more]].map(([title, fields]) => {
+    const body = fields.filter(Boolean).join('');
+    return body ? `<div class="filter-group" role="group" aria-label="${title}"><span class="filter-group-title" aria-hidden="true">${title}</span>${body}</div>` : '';
+  }).join('');
+  return `${lead}
+    <div class="filter-line">
+      <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" aria-label="Search titles" oninput="renderTable()">${line}
+      <button type="button" class="btn filter-more-btn" id="filterMoreBtn" aria-expanded="${filterPanelOpen}" aria-controls="filterMore" onclick="toggleFilterPanel()"><span class="more-label-wide">More filters</span><span class="more-label-narrow">Filters</span><span class="filter-count" id="filterMoreCount" aria-hidden="true" hidden></span><span class="visually-hidden" id="filterMoreA11y"></span> <span id="filterMoreChevron" aria-hidden="true">${filterPanelOpen ? '▴' : '▾'}</span></button>
+    </div>
+    <div class="filter-more" id="filterMore" role="group" aria-label="More filters" onkeydown="filterPanelKeydown(event)"${filterPanelOpen ? '' : ' hidden'}>${groups}</div>
+    <div class="filter-chips" id="filterChips"></div>`;
+}
+
+// The panel's open state (proposal §4.2.1): kept for a redraw of the same visit (a filter,
+// presentation or media change, reload, Retry, an action); a fresh entry (switchView resets
+// the visit's memory: another view, TV ↔ Movies, a collection) and Back close it.
+function filterPanelStart(tag, restored) {
+  if (restored || viewFilterMemory.tag !== tag) filterPanelOpen = false;
+}
+
+function toggleFilterPanel(open = !filterPanelOpen) {
+  filterPanelOpen = !!open;
+  const panel = document.getElementById('filterMore');
+  if (panel) panel.hidden = !filterPanelOpen;
+  const btn = document.getElementById('filterMoreBtn');
+  if (btn && typeof btn.setAttribute === 'function') btn.setAttribute('aria-expanded', String(filterPanelOpen));
+  const chevron = document.getElementById('filterMoreChevron');
+  if (chevron) chevron.textContent = filterPanelOpen ? '▴' : '▾';
+}
+
+// Escape inside the open panel closes it and returns focus to its button.
+function filterPanelKeydown(e) {
+  if (!e || e.key !== 'Escape' || !filterPanelOpen) return;
+  if (typeof e.preventDefault === 'function') e.preventDefault();
+  toggleFilterPanel(false);
+  focusFilterTarget('filterMoreBtn');
+}
+
+// Chip order: the scope controls, then the panel's groups (Categories, Your marks, More).
+// 'seasons' is the Seasons / TV seasons choice (page state, not the visit's memory).
+const FILTER_DEFS = [
+  { id: 'fStatus', label: 'Status', scope: true }, { id: 'fWatch', label: 'Watched', scope: true }, { id: 'seasons', scope: true },
+  { id: 'fGenre', label: 'Genre' }, { id: 'fForm', label: 'Form' }, { id: 'fFranchise', label: 'Franchise' },
+  { id: 'fNetwork', label: 'Network' }, { id: 'fCompany', label: 'Company' },
+  { id: 'fPriority', label: 'Priority' }, { id: 'fNew', label: 'New from catalog', check: true },
+  { id: 'fReview', label: 'Needs status review', check: true }, { id: 'fWatchWith', label: 'Watch with' },
+  { id: 'fYear', label: 'Year' }, { id: 'fProgress', label: 'Progress' }, { id: 'fCollection', label: 'Collection tag' },
+  { id: 'fTheme', label: 'Original label' }
+];
+const FILTER_PRIORITY_LABELS = { high: '★ High', normal: 'Normal', low: 'Low', highnormal: 'High + Normal' };
+const FILTER_CONTEXT_SENTENCES = { 'Shows only': 'Applies in Shows only.', 'Seasons only': 'Applies in Seasons only.',
+  'while films are shown': 'Applies while films are shown.', 'not offered in this list': 'Not offered in this list.' };
+
+// A filter's starting value (what a fresh entry gives): All Movies opens on Unwatched only;
+// every other control on its first choice ('' / unticked).
+function filterDefault(id) {
+  return id === 'fWatch' && activeViewId === ALL_MOVIES_VIEW.id ? 'unwatched' : '';
+}
+
+// The Seasons choice of All TV or a collection: its value, and whether the current mode lists seasons.
+function filterSeasonsState() {
+  if (activeViewId === 'alltv') return { label: 'Seasons', value: allTvSeasonVis, labels: ALLTV_SEASON_VIS_LABELS, applies: allTvPresentation === 'seasons' };
+  if (isBrowseCollectionView(activeViewId)) return { label: 'TV seasons', value: browseSeasonVis, labels: BROWSE_SEASON_VIS_LABELS,
+    applies: browsePresentation === 'seasons' && browseMedia !== 'movie' };
+  return null;
+}
+function setFilterSeasonsDefault() {
+  if (activeViewId === 'alltv') allTvSeasonVis = 'notskipped';
+  else if (isBrowseCollectionView(activeViewId)) browseSeasonVis = 'notskipped';
+  else return;
+  const select = document.getElementById('fSeasonVis');
+  if (select) select.value = 'notskipped';
+}
+
+// A value as its control shows it.
+function filterValueText(id, v) {
+  if (id === 'fStatus') return v === 'all' ? 'All statuses' : (isBrowseView(activeViewId) ? BROWSE_STATUS_LABELS[v] : plainStatusLabel(v)) || v;
+  if (id === 'fWatch') return BROWSE_WATCH_LABELS[v] || v;
+  if (id === 'fPriority') return FILTER_PRIORITY_LABELS[v] || v;
+  if (id === 'fProgress') return ALLTV_PROGRESS_LABELS[v] || v;
+  if (id === 'fWatchWith') return watchWithArchived(v) ? `${watchWithLabel(v)} (archived)` : watchWithLabel(v);
+  if (id === 'fGenre' && v.startsWith('cand:')) return `${v.slice(5)} (unresolved)`;
+  return v;
+}
+
+// Why a kept value doesn't filter: its control isn't in the current mode.
+function filterKeptContext(id) {
+  if (id === 'fProgress') return 'Shows only';
+  if ((id === 'fCollection' || id === 'fWatchWith') && isBrowseCollectionView(activeViewId) && browseMedia === 'tv') return 'while films are shown';
+  return 'not offered in this list';
+}
+
+// What the chip row shows (proposal §4.3, §4.3.1). A control in the page (open or closed panel)
+// filters by its value: applied when that isn't the starting value. A value counts as "Not
+// applied" only when the visit's memory keeps it and no control in the page filters by it (the
+// renderers read a missing control as no filter); for the Seasons choice, when the mode lists
+// no seasons. Options and result counts never decide it. badge: the panel's applied controls.
+function filterChipModel() {
+  const tag = `view:${activeViewId}`;
+  const kept = viewFilterMemory.tag === tag ? viewFilterMemory.values : {};
+  const applied = [], inactive = [];
+  for (const d of FILTER_DEFS) {
+    if (d.id === 'seasons') {
+      const s = filterSeasonsState();
+      if (s && s.value !== 'notskipped') (s.applies ? applied : inactive).push({ key: 'seasons', label: s.label, text: s.labels[s.value] || s.value, scope: true, context: 'Seasons only' });
+      continue;
+    }
+    const el = document.getElementById(d.id), def = filterDefault(d.id);
+    const chip = v => ({ key: d.id, label: d.label, text: d.check ? '' : filterValueText(d.id, v), check: !!d.check, scope: !!d.scope });
+    if (el) {
+      const v = d.check ? (el.checked ? 'on' : '') : (el.value || '');
+      if (v !== def) applied.push(chip(v));
+    } else if (kept[d.id] !== undefined && kept[d.id] !== def) {
+      inactive.push({ ...chip(kept[d.id]), context: filterKeptContext(d.id) });
+    }
+  }
+  const search = document.getElementById('fSearch');
+  return { applied, inactive, search: !!(search && search.value), badge: applied.filter(c => !c.scope).length };
+}
+
+// Whether anything differs from the view's starting filters (Search text included).
+function viewFiltersNonDefault() {
+  const m = filterChipModel();
+  return m.search || m.applied.length > 0 || m.inactive.length > 0;
+}
+
+function filterChipHtml(c, applied) {
+  const what = c.check ? c.label : `${c.label}, ${c.text}`;
+  const name = applied ? `Remove filter: ${what}` : `Not applied: ${what}. ${FILTER_CONTEXT_SENTENCES[c.context]} Remove.`;
+  const body = c.check ? `<span class="chip-v">${esc(c.label)}</span>` : `<span class="chip-k">${esc(c.label)}:</span> <span class="chip-v">${esc(c.text)}</span>`;
+  const kept = applied ? '' : ` <span class="chip-na">Not applied (${esc(c.context)})</span>`;
+  return `<button type="button" id="chip-${c.key}" class="filter-chip${applied ? '' : ' filter-chip-kept'}" aria-label="${esc(name)}" title="${esc(name)}" onclick="removeFilterChip('${c.key}')">${body}${kept}<span class="chip-x" aria-hidden="true">✕</span></button>`;
+}
+
+// After every list redraw: the chip row, the More filters count and the marked controls.
+// Only these are redrawn; the controls are not, so focus stays where it is.
+function renderFilterBarState() {
+  const box = document.getElementById('filterChips');
+  if (!box) return;
+  const m = filterChipModel();
+  const group = (list, label, visible, applied) => (list.length
+    ? `<div class="chip-group" role="group" aria-label="${label}"><span class="chips-label" aria-hidden="true">${visible}</span>${list.map(c => filterChipHtml(c, applied)).join('')}</div>` : '');
+  const clear = m.search || m.applied.length || m.inactive.length
+    ? '<button type="button" class="btn-link filter-clear" id="filterClear" onclick="clearViewFilters()">Clear filters</button>' : '';
+  box.innerHTML = group(m.applied, 'Active filters', 'Active:', true) + group(m.inactive, 'Kept, not applied', 'Kept, not applied:', false) + clear;
+  const count = document.getElementById('filterMoreCount');
+  if (count) { count.textContent = m.badge ? String(m.badge) : ''; count.hidden = !m.badge; }
+  const a11y = document.getElementById('filterMoreA11y');
+  if (a11y) a11y.textContent = m.badge ? `, ${m.badge} active` : '';
+  const marked = new Set(m.applied.map(c => (c.key === 'seasons' ? 'fSeasonVis' : c.key)));
+  FILTER_DEFS.map(d => (d.id === 'seasons' ? 'fSeasonVis' : d.id)).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList[marked.has(id) ? 'add' : 'remove']('filter-set');
+  });
+}
+
+function filterChipOrder() {
+  const m = filterChipModel();
+  return m.applied.concat(m.inactive).map(c => c.key);
+}
+
+function focusFilterTarget(id) {
+  const el = document.getElementById(id);
+  if (!el || typeof el.focus !== 'function') return;
+  el.focus();
+  if (id === 'fSearch' && typeof el.setSelectionRange === 'function') el.setSelectionRange(el.value.length, el.value.length);
+}
+
+// A chip's ✕: that one value back to its starting value (the control, or the kept value of a
+// control the mode doesn't show), as changing the control would. Focus: the next chip, else the
+// previous one, else Search.
+function removeFilterChip(key) {
+  const before = filterChipOrder();
+  const at = before.indexOf(key);
+  if (at < 0) return;
+  const tag = `view:${activeViewId}`;
+  if (key === 'seasons') setFilterSeasonsDefault();
+  else {
+    const def = filterDefault(key), el = document.getElementById(key);
+    if (el) { if (MARKER_FILTER_IDS.includes(key)) el.checked = false; else el.value = def; }
+    if (viewFilterMemory.tag === tag) viewFilterMemory.values[key] = def;
+    if (key === 'fCollection' && activeViewId === ALL_MOVIES_VIEW.id) updateCollectionRefreshLink();
+  }
+  renderTable();
+  const after = filterChipOrder();
+  const next = after[at] || after[at - 1];
+  focusFilterTarget(next ? `chip-${next}` : 'fSearch');
+}
+
+// Clear filters (proposal §4.4): every filter of the open view back to its starting value,
+// kept values included; layout, expansion, sections and the panel's state are unchanged.
+// Focus: Search (moved there first, so a Clear inside the list leaves nothing to carry).
+function clearViewFilters() {
+  const tag = `view:${activeViewId}`;
+  focusFilterTarget('fSearch');
+  const search = document.getElementById('fSearch');
+  if (search) search.value = '';
+  FILTER_DEFS.forEach(d => {
+    if (d.id === 'seasons') { setFilterSeasonsDefault(); return; }
+    const el = document.getElementById(d.id);
+    if (el) { if (d.check) el.checked = false; else el.value = filterDefault(d.id); }
+  });
+  if (viewFilterMemory.tag === tag) {
+    const values = {};
+    VIEW_FILTER_IDS.forEach(id => { values[id] = filterDefault(id); });
+    viewFilterMemory = { tag, values };
+  }
+  if (activeViewId === ALL_MOVIES_VIEW.id) updateCollectionRefreshLink();
+  renderTable();
+  focusFilterTarget('fSearch');
+}
+
+// Clear filters inside a "no matches" message (D7), while anything differs from the starting filters.
+function filterEmptyClearHtml() {
+  return viewFiltersNonDefault() ? ' <button type="button" class="btn empty-clear" onclick="clearViewFilters()">Clear filters</button>' : '';
 }
 
 // ─── Details: categorized metadata of one show or film (O7) ───────────────────

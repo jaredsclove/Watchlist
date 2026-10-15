@@ -343,10 +343,12 @@ test('header and stats follow the open view (All TV has its own branch)', async 
   assert.ok(app.el('statsRow').innerHTML.includes('in the next 30 days') || app.el('statsRow').innerHTML.includes('0 dated seasons'));
 });
 
-test('phone width (375 px): filters start collapsed and cards carry the same controls', async () => {
+test('phone width (375 px): Search and Status stay visible, the More filters panel starts closed (B10), and cards carry the same controls', async () => {
   const s = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, date: day(-2) }]);
   const app = await openAllTv(all(s), { width: 375 });
-  assert.ok(app.el('filtersRow').classList.contains('collapsed'));
+  const f = app.el('filtersRow').innerHTML;
+  assert.ok(!app.el('filtersRow').classList.contains('collapsed') && f.indexOf('id="fSearch"') < f.indexOf('id="filterMore"') && f.indexOf('id="fStatus"') < f.indexOf('id="filterMore"'));
+  assert.ok(/id="filterMore"[^>]* hidden>/.test(f) && f.indexOf('id="fGenre"') > f.indexOf('id="filterMore"'), 'the other controls are in the closed panel');
   const card = app.el('cardList').innerHTML;
   assert.ok(card.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && card.includes(`toggleWatch('${s.rows[0].id}')`));
   assert.ok(card.includes(`setShowStateById('${s.show.id}', { priority: this.value })`), 'priority on the card too');

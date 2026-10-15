@@ -157,13 +157,6 @@ function delRow(id) {
   if (activeViewId) return delRowInView(id);
 }
 
-function toggleFilters() {
-  const el = document.getElementById('filtersRow');
-  el.classList.toggle('collapsed');
-  const chevron = document.getElementById('filterToggleChevron');
-  if (chevron) chevron.textContent = el.classList.contains('collapsed') ? '▾' : '▴';
-}
-
 async function toggleWatchWith(rowId, tag, checked) {
   const row = actionRows().find(r => r.id === rowId);
   if (!row) return;
