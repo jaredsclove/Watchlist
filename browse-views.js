@@ -670,10 +670,8 @@ function renderBrowseCollection(dest, today, f) {
     seasonVis: browseSeasonVis, ...f });
   const { counts } = v;
 
-  const stats = [];
-  if (v.withTv) stats.push([counts.shows, counts.shows === 1 ? 'Show' : 'Shows'], [counts.entries, counts.entries === 1 ? 'Season entry' : 'Season entries']);
-  if (v.withFilms) stats.push([counts.films, counts.films === 1 ? 'Film' : 'Films']);
-  document.getElementById('statsRow').innerHTML = derivedStatsHtml(stats);
+  // B8: the counts are in the section headings (no tiles).
+  document.getElementById('statsRow').innerHTML = '';
 
   let html = '', cardHtml = '';
   const add = out => { html += out.row; cardHtml += out.card; };
@@ -693,11 +691,12 @@ function renderBrowseCollection(dest, today, f) {
   if (v.seasons && v.withFilms && ['towatch', 'watched', 'skipped'].includes(browseSeasonVis)) {
     add(browseNoteHtml(`TV seasons: ${BROWSE_SEASON_VIS_LABELS[browseSeasonVis]}. Films aren’t filtered by this.`));
   }
-  const countLabel = {
-    tv: `${plural(counts.shows, 'show', 'shows')} · ${plural(counts.entries, 'season entry', 'season entries')}`,
-    film: plural(counts.films, 'film', 'films'),
-    all: `${plural(counts.shows, 'show', 'shows')} · ${plural(counts.entries, 'season entry', 'season entries')} · ${plural(counts.films, 'film', 'films')}`
-  };
+  // B8: shows and films as "N of T" when filters narrow them (T: the members read); season
+  // entries without a total (the TV seasons choice would make one misleading).
+  const ofTotal = (n, t, one, many) => (n === t ? plural(t, one, many) : `${n} of ${plural(t, one, many)}`);
+  const showsPart = `${ofTotal(counts.shows, v.baseShows, 'show', 'shows')} · ${plural(counts.entries, 'season entry', 'season entries')}`;
+  const filmsPart = ofTotal(counts.films, v.baseFilms, 'film', 'films');
+  const countLabel = { tv: `· ${showsPart}`, film: `· ${filmsPart}`, all: `· ${showsPart} · ${filmsPart}` };
   v.sections.forEach(section => {
     add(browseSectionHtml(section.label, countLabel[section.key]));
     const entryHtml = (e, needsReview) => browseEntryHtml(e, today, v.combined, needsReview);
@@ -748,19 +747,15 @@ function browseSubsectionHtml(name, label, count) {
   return { row: `<tr class="browse-subsection-row"><td colspan="6">${btn}</td></tr>`, card: `<div class="browse-subsection-card">${btn}</div>` };
 }
 
-// The totals count the films that pass every filter but Watched (so Unwatched only
-// doesn't zero Watched); Shown counts what the list holds.
+// B8: the count is the films the list holds of every saved film (all statuses, watched or
+// not), and the library's watched / unwatched by the stored flag.
 function renderAllMovies(today, f) {
   const { films, unclassified } = deriveAllMovies(browseData.rows);
   const matching = films.filter(r => (!f.fYear || rowYear(r) === f.fYear) && browseFilmMatches(r, f));
   const shown = matching.filter(r => browseWatchMatches(r, f.fWatch));
-  const watched = matching.filter(r => r.watched).length;
-  document.getElementById('statsRow').innerHTML = derivedStatsHtml([
-    [shown.length, 'Shown'],
-    [matching.length, matching.length === 1 ? 'Film' : 'Films'],
-    [watched, 'Watched'],
-    [matching.length - watched, 'To watch']
-  ]);
+  const libWatched = films.filter(r => r.watched).length;
+  const library = films.length ? ` · library: ${libWatched} watched, ${films.length - libWatched} unwatched` : '';
+  document.getElementById('statsRow').innerHTML = countLineHtml(countScoped(shown.length, films.length, 'film', 'films') + library);
   let html = '', cardHtml = '';
   const add = out => { html += out.row; cardHtml += out.card; };
   add(dismissAllNewHtml(shown.filter(r => r.catalog_new).map(r => ({ kind: 'film', id: r.id }))));

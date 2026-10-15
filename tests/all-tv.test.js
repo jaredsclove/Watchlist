@@ -57,7 +57,13 @@ const titlesShown = app => [...app.el('tbody').innerHTML.matchAll(/<span class="
 const cardTitles = app => [...app.el('cardList').innerHTML.matchAll(/<span class="card-title">(?:<span class="priority-high"[^>]*>★<\/span> )?<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
 const stateCall = (app, i = 0) => { const w = app.writes()[i]; return { fn: w.url.split('/rpc/')[1], body: w.body }; };
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
-const statNums = app => [...app.el('statsRow').innerHTML.matchAll(/stat-num">(\d+)</g)].map(m => Number(m[1]));
+// B8: All TV's count line ("Showing N of T shows · of these, W Watching, U up to date"), read
+// back as the old tiles' numbers [shows shown, Watching, up to date].
+const statNums = app => {
+  const line = (app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || '';
+  const m = line.match(/^(?:Showing (\d+) of )?(\d+) shows?(?: · of these, (\d+) Watching, (\d+) up to date)?$/);
+  return m ? [Number(m[1] ?? m[2]), Number(m[3] ?? 0), Number(m[4] ?? 0)] : [];
+};
 
 // ─── Navigation and loading ───────────────────────────────────────────────────
 test('All TV sits between Currently Watching and Coming Soon; no storage tabs (Stage 4b); startup is unchanged', async () => {
@@ -327,13 +333,14 @@ test('header and stats follow the open view (All TV has its own branch)', async 
   const s = show({ title: 'Alpha', status: 'watching' }, [{ num: 1 }]);
   const app = await openAllTv(all(s));
   assert.ok(app.el('tableHead').innerHTML.includes('<th>Next</th>'));
-  assert.ok(app.el('statsRow').innerHTML.includes('>Show<') || app.el('statsRow').innerHTML.includes('>Shows<'));
+  assert.ok(app.el('statsRow').innerHTML.includes('<p class="count-line">1 show · of these, 1 Watching, 0 up to date</p>'), 'B8: one count line');
   app.ctx.switchView('watching'); await settle();
   assert.ok(app.el('tableHead').innerHTML.includes('<th>Up next</th>'));
-  assert.ok(app.el('statsRow').innerHTML.includes('In progress'));
+  assert.strictEqual(app.el('statsRow').innerHTML, '', 'B8: Currently Watching counts in its headings');
+  assert.ok(app.el('tbody').innerHTML.includes('In progress <span class="section-count">· 1 show</span>'));
   app.ctx.switchView('comingsoon'); await settle();
   assert.ok(app.el('tableHead').innerHTML.includes('Show &amp; Season'));
-  assert.ok(app.el('statsRow').innerHTML.includes('Next 30 days'));
+  assert.ok(app.el('statsRow').innerHTML.includes('in the next 30 days') || app.el('statsRow').innerHTML.includes('0 dated seasons'));
 });
 
 test('phone width (375 px): filters start collapsed and cards carry the same controls', async () => {

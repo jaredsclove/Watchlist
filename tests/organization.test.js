@@ -151,7 +151,7 @@ test('the membership-based view equals the storage-based one while memberships m
   assert.deepStrictEqual(titles(app), ['Andor']);
   await open(app, B.sheridan);
   assert.deepStrictEqual(titles(app), ['Tulsa King', 'Sicario']);
-  assert.match(app.el('statsRow').innerHTML, /stat-num">1<\/div><div class="stat-label">Show</);
+  assert.ok(app.el('tbody').innerHTML.includes('TV <span class="section-count">· 1 show · '), 'B8: the count is in the TV heading');
 });
 
 // ── watch-with ──

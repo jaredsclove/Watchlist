@@ -455,6 +455,156 @@ test('B6: loading and failure messages carry their focus hooks (loading message 
   assert.ok(tbody(app).includes('<button class="btn" data-retry="1" onclick="loadDerivedView()">Retry</button>'));
 });
 
+// ─── B8: compact counts ───────────────────────────────────────────────────────
+const line = app => (app.el('statsRow').innerHTML.match(/^<p class="count-line">([^<]*)<\/p>$/) || [])[1];
+const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
+
+test('B8: no statistics tile in any view; one count line or the section headings instead', async () => {
+  const { data } = cwLibrary();
+  data.rows.push(film({ title: 'A Film', collection: 'disney' }));
+  data.shows[0].collection = 'disney'; data.rows.filter(r => r.show_id === data.shows[0].id).forEach(r => { r.collection = 'disney'; });
+  const app = await boot(data);
+  const views = [['watching', ''], ['alltv', 'line'], ['comingsoon', 'line'], ['allmovies', 'line']];
+  for (const [v, kind] of views) {
+    app.ctx.switchView(v); await settle();
+    assert.ok(!/class="stat"|stat-num|stat-label/.test(app.el('statsRow').innerHTML + app.html()), `${v}: no tile`);
+    if (kind) assert.ok(line(app), `${v}: one count line`); else assert.strictEqual(app.el('statsRow').innerHTML, '');
+  }
+  app.ctx.switchView('alltv'); await settle(); app.ctx.setAllTvPresentation('seasons'); await settle();
+  assert.ok(/^Showing \d+ seasons? from \d+ shows?$/.test(line(app)));
+  app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
+  assert.strictEqual(app.el('statsRow').innerHTML, '', 'a collection: counts in its section headings');
+  assert.ok(!/stat-num/.test(app.html()));
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
+  assert.ok(!/\.stat\b|\.stat-num|\.stat-label/.test(css), 'the tile styles are gone');
+});
+
+test('B8: Currently Watching headings: shows with their unit, "N of T" only when filters narrow; Caught up kept at 0 of T; zero states', async () => {
+  const a = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }]);
+  const b = show({ title: 'Bravo', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-4) }]);
+  const c = show({ title: 'Charlie', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }]);
+  const app = await boot(all(a, b, c));
+  const h = () => tbody(app);
+  assert.ok(h().includes('In progress <span class="section-count">· 2 shows</span>'));
+  assert.ok(h().includes('Caught up <span class="section-count">· 1 show</span>'));
+  setFilter(app, 'fSearch', 'alpha');
+  assert.ok(h().includes('In progress <span class="section-count">· 1 of 2 shows</span>'));
+  assert.ok(h().includes('Caught up <span class="section-count">· 0 of 1 show</span>'), 'Caught up stays, at 0 of 1');
+  assert.ok(h().includes('No caught-up shows match your filters.'));
+  setFilter(app, 'fSearch', 'zzz');
+  assert.ok(h().includes('In progress <span class="section-count">· 0 of 2 shows</span>') && h().includes('No in-progress shows match your filters.'));
+  setFilter(app, 'fSearch', '');
+  assert.strictEqual(app.el('statsRow').innerHTML, '', 'no count line in Currently Watching');
+  const empty = await boot(all());
+  assert.ok(tbody(empty).includes('In progress <span class="section-count">· 0 shows</span>') && tbody(empty).includes('Nothing is marked Watching yet.'));
+  assert.ok(!tbody(empty).includes('Caught up'), 'Caught up hidden when it has no shows at all');
+  const onlyCu = await boot(all(c));
+  assert.ok(tbody(onlyCu).includes('In progress <span class="section-count">· 0 shows</span>') && tbody(onlyCu).includes('Every Watching show is caught up.'));
+});
+
+test('B8: All TV Shows: "Showing N of T shows" (T: every show with a linked season, all statuses) · of these, Watching and up to date; zero states', async () => {
+  const w = show({ title: 'Watch', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(30) }]);
+  const t = show({ title: 'ToWatch', status: 'confirmed' }, [{ num: 1, date: day(-9) }]);
+  const s = show({ title: 'Skip', status: 'skipped' }, [{ num: 1, date: day(-9) }]);
+  const app = await boot(all(w, t, s));
+  app.ctx.switchView('alltv'); await settle();
+  assert.strictEqual(line(app), 'Showing 2 of 3 shows · of these, 1 Watching, 1 up to date', 'the Skipped default narrows it');
+  setFilter(app, 'fStatus', 'all');
+  assert.strictEqual(line(app), '3 shows · of these, 1 Watching, 1 up to date');
+  setFilter(app, 'fSearch', 'zzz');
+  assert.strictEqual(line(app), 'Showing 0 of 3 shows', 'no "of these" at 0');
+  assert.ok(tbody(app).includes('No shows match your filters.'));
+  const before = app.requests.length;
+  setFilter(app, 'fSearch', '');
+  assert.strictEqual(app.requests.length, before, 'a filter change makes no request');
+  const none = await boot(all());
+  none.ctx.switchView('alltv'); await settle();
+  assert.strictEqual(line(none), '0 shows');
+  assert.ok(tbody(none).includes('No TV shows on your list yet.'));
+});
+
+test('B8: All TV Seasons: "Showing N seasons from K shows"; the TBA / no date heading carries units; zero', async () => {
+  const a = show({ title: 'A', status: 'confirmed' }, [{ num: 1, date: day(-90) }, { num: 2, tba: true }, { num: 3, date: '2024-13-40', display: 'Someday' }]);
+  const b = show({ title: 'B', status: 'confirmed' }, [{ num: 1, date: day(-80) }]);
+  const app = await boot(all(a, b));
+  app.ctx.switchView('alltv'); await settle(); app.ctx.setAllTvPresentation('seasons'); await settle();
+  assert.strictEqual(line(app), 'Showing 4 seasons from 2 shows');
+  assert.ok(tbody(app).includes('TBA / no date <span class="section-count">· 1 TBA season · 1 season needs a date review</span>'));
+  setFilter(app, 'fSearch', 'zzz');
+  assert.strictEqual(line(app), 'Showing 0 seasons');
+});
+
+test('B8: Coming Soon: dated seasons (of every eligible dated season) · of these, the next 30 days; the TBA heading has units', async () => {
+  const a = show({ title: 'Alpha', status: 'confirmed' }, [{ num: 1, date: day(5) }, { num: 2, date: day(90) }, { num: 3, tba: true }]);
+  const b = show({ title: 'Bravo', status: 'confirmed' }, [{ num: 1, date: day(10) }, { num: 2, tba: true }]);
+  const app = await boot(all(a, b));
+  app.ctx.switchView('comingsoon'); await settle();
+  assert.strictEqual(line(app), '3 dated seasons · of these, 2 in the next 30 days');
+  assert.ok(tbody(app).includes('TBA <span class="section-count">· 2 seasons</span>'));
+  setFilter(app, 'fSearch', 'alpha');
+  assert.strictEqual(line(app), 'Showing 2 of 3 dated seasons · of these, 1 in the next 30 days');
+  assert.ok(tbody(app).includes('TBA <span class="section-count">· 1 of 2 seasons</span>'));
+  setFilter(app, 'fSearch', 'zzz');
+  assert.strictEqual(line(app), 'Showing 0 of 3 dated seasons');
+  assert.ok(tbody(app).includes('No dated entries match your filters.') && !tbody(app).includes('section-toggle" data-section="tba"'));
+  const none = await boot(all());
+  none.ctx.switchView('comingsoon'); await settle();
+  assert.strictEqual(line(none), '0 dated seasons');
+});
+
+test('B8 (decision 13): All Movies: "Showing N of T films" (T: every saved film) · library: watched, unwatched; zero', async () => {
+  const data = all(film({ title: 'A' }), film({ title: 'B', watched: true }), film({ title: 'C', status: 'skipped' }), film({ title: 'D', status: 'skipped', watched: true }));
+  const app = await boot(data);
+  app.ctx.switchMediaType('movie'); await settle();
+  assert.strictEqual(line(app), 'Showing 1 of 4 films · library: 2 watched, 2 unwatched', 'defaults: Unwatched only, Skipped hidden');
+  setFilter(app, 'fWatch', ''); setFilter(app, 'fStatus', 'all');
+  assert.strictEqual(line(app), '4 films · library: 2 watched, 2 unwatched');
+  setFilter(app, 'fSearch', 'zzz');
+  assert.strictEqual(line(app), 'Showing 0 of 4 films · library: 2 watched, 2 unwatched');
+  assert.ok(app.html().includes('No films match these filters.'));
+  const none = await boot(all());
+  none.ctx.switchMediaType('movie'); await settle();
+  assert.strictEqual(line(none), '0 films');
+  assert.ok(none.html().includes('No films saved yet.'));
+});
+
+test('B8: collection headings: shows and films "N of T" when narrowed, season entries without a total; Combined; zero', async () => {
+  const a = show({ title: 'Andor', status: 'confirmed', collection: 'disney' }, [{ num: 1, date: day(-90) }, { num: 2, date: day(-50) }]);
+  const b = show({ title: 'Bluey', status: 'confirmed', collection: 'disney' }, [{ num: 1, date: day(-80) }]);
+  const data = all(a, b, film({ title: 'Fly', collection: 'disney', media_type: null, tmdb_id: null }));
+  const app = await boot(data);
+  app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
+  const h = () => tbody(app);
+  assert.ok(h().includes('TV <span class="section-count">· 2 shows · 3 season entries</span>'));
+  assert.ok(h().includes('Movies <span class="section-count">· 1 film</span>'));
+  setFilter(app, 'fSearch', 'andor');
+  assert.ok(h().includes('TV <span class="section-count">· 1 of 2 shows · 2 season entries</span>'));
+  assert.ok(h().includes('Movies <span class="section-count">· 0 of 1 film</span>') && h().includes('No films match these filters.'));
+  app.ctx.setBrowseGrouping('combined'); await settle();
+  assert.ok(h().includes('All media <span class="section-count">· 1 of 2 shows · 2 season entries · 0 of 1 film</span>'));
+  const empty = await boot(all(film({ title: 'Only', collection: 'sheridan' })));
+  empty.ctx.openBrowseCollection(empty.browseId('sheridan')); await settle();
+  assert.ok(tbody(empty).includes('TV <span class="section-count">· 0 shows · 0 season entries</span>') && tbody(empty).includes('No TV shows in Sheridan.'));
+});
+
+test('B8: while loading and after a failed read no count is shown', async () => {
+  const { data } = cwLibrary();
+  const app = await boot(data);
+  app.ctx.switchView('alltv'); await settle();
+  assert.ok(line(app));
+  const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadDerivedView(); await g.reached;
+  assert.strictEqual(app.el('statsRow').innerHTML, '', 'loading: no count');
+  g.fail(); await settle();
+  assert.strictEqual(app.el('statsRow').innerHTML, '', 'failed: no count');
+  app.ctx.switchMediaType('movie'); await settle();
+  const g2 = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadBrowseView(); await g2.reached;
+  assert.strictEqual(app.el('statsRow').innerHTML, '', 'All Movies loading: no count');
+  g2.fail(); await settle();
+  assert.strictEqual(app.el('statsRow').innerHTML, '', 'All Movies failed: no count');
+});
+
 test('B2: the shortcut style wraps the full label and never truncates it', () => {
   const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
   const rule = (css.match(/\.watch-btn\.show-shortcut\s*\{([^}]*)\}/) || [])[1] || '';

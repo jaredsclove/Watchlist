@@ -86,7 +86,18 @@ const html = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 const titles = app => [...html(app).matchAll(/<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
 const cardTitles = app => [...cards(app).matchAll(/<span class="card-title">(?:<span class="priority-high"[^>]*>★<\/span> )?(?:<span class="show-title">)?([^<]*)</g)].map(m => m[1]);
-const stats = app => [...app.el('statsRow').innerHTML.matchAll(/stat-num">(\d+)<\/div><div class="stat-label">([^<]*)</g)].map(m => `${m[1]} ${m[2]}`);
+// B8: a collection's counts are in its section headings ("· N shows · N season entries",
+// "· N films"; "N of T" when filters narrow them); read back as the old tiles' tokens.
+const collectionStats = app => {
+  const heads = [...app.el('tbody').innerHTML.matchAll(/<span class="section-count">· ([^<]*)<\/span><\/th>/g)].map(m => m[1]).join(' · ');
+  const out = [];
+  const num = (re, one, many) => { const m = heads.match(re); if (m) { const n = Number(m[1]); out.push(`${n} ${n === 1 ? one : many}`); } };
+  num(/(\d+)(?: of \d+)? shows?\b/, 'Show', 'Shows'); num(/(\d+) season entr/, 'Season entry', 'Season entries'); num(/(\d+)(?: of \d+)? films?\b/, 'Film', 'Films');
+  return out;
+};
+// B8: All Movies' count line ("Showing N of T films · library: W watched, U unwatched").
+const countLine = app => (app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || '';
+const stats = app => (app.get('activeViewId') === 'allmovies' ? [countLine(app)] : collectionStats(app));
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
 // (The GET of rpc/stage5_capabilities is the read-only phase check made at startup.)
 const mutating = app => app.requests.filter(r => r.method !== 'GET' || (/\/rpc\//.test(r.url) && !r.url.endsWith('/rpc/stage5_capabilities')) || !r.url.includes('/rest/v1/'));
@@ -504,7 +515,8 @@ test('All Movies has no Source filter (Stage 4b); Status is the film row’s own
   assert.deepStrictEqual(titles(app), ['Ewoks: The Battle for Endor']);
   setFilter(app, 'fSearch', 'tell me'); setFilter(app, 'fStatus', '');
   assert.deepStrictEqual(titles(app), ['Tell Me Who I Am']);
-  assert.deepStrictEqual(stats(app), ['1 Shown', '1 Film', '1 Watched', '0 To watch']);
+  // B8 (decision 13): shown of every saved film (all statuses); the library's watched / unwatched.
+  assert.deepStrictEqual(stats(app), ['Showing 1 of 9 films · library: 2 watched, 7 unwatched']);
 });
 
 test('no duplicate marker or storage name is shown (Stage 5: one record per identity); Disney+ shows only its own The Bear', async () => {
@@ -569,8 +581,8 @@ test('the media choice hides a section without changing membership; Search and S
 test('section labels carry their counts; season entries include Specials and parts; expanding changes no count and reads nothing', async () => {
   const app = await boot();
   await openCol(app, B['sheridan']);
-  assert.ok(html(app).includes('TV <span class="section-count">2 shows · 3 season entries</span>'));
-  assert.ok(html(app).includes('Movies <span class="section-count">2 films</span>'));
+  assert.ok(html(app).includes('TV <span class="section-count">· 2 shows · 3 season entries</span>'));
+  assert.ok(html(app).includes('Movies <span class="section-count">· 2 films</span>'));
   const reqs = app.requests.length;
   const before = app.el('statsRow').innerHTML;
   const yid = app.get("[...browseData.showsById.values()].find(s => s.title === 'Yellowstone').id");

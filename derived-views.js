@@ -481,8 +481,24 @@ function themeBadgeHtml(catalog, theme, owner = '') {
   return filterPillHtml('theme', theme, theme, { ...look, title: `Filter by “${theme}”`, owner });
 }
 
-function derivedStatsHtml(stats) {
-  return stats.map(([num, label]) => `<div class="stat"><div class="stat-num">${num}</div><div class="stat-label">${label}</div></div>`).join('');
+// ─── Compact counts (B8) ──────────────────────────────────────────────────────
+// Two scopes only: shown (after every filter, defaults included) and total (the view's
+// whole set of that unit with every filter cleared). Units are always written. "Showing N
+// of T" (a count line) or "N of T" (a heading) only when N ≠ T; a secondary count names its
+// scope ("of these": the shown items; "library": the total). Counts come from the rows the
+// view already read; nothing is counted from a read that failed or is still loading (the
+// line is cleared then).
+function countUnit(n, one, many) {
+  return `${n} ${n === 1 ? one : many}`;
+}
+function countScoped(n, total, one, many) {
+  return n === total ? countUnit(total, one, many) : `Showing ${n} of ${countUnit(total, one, many)}`;
+}
+function headingCount(n, total, one, many) {
+  return `· ${n === total ? countUnit(total, one, many) : `${n} of ${countUnit(total, one, many)}`}`;
+}
+function countLineHtml(text) {
+  return `<p class="count-line">${esc(text)}</p>`;
 }
 
 // A collapsible section's header: a real button (keyboard, aria-expanded), as in the
@@ -518,16 +534,14 @@ function renderCurrentlyWatching(today, keep) {
   const shownActive = active.filter(keep);
   const shownUpToDate = upToDate.filter(keep);
 
-  document.getElementById('statsRow').innerHTML = derivedStatsHtml([
-    [shownActive.length, 'In progress'],
-    [shownUpToDate.length, 'Caught up']
-  ]);
+  // B8: the counts are in the section headings (shows), not tiles.
+  document.getElementById('statsRow').innerHTML = '';
 
   const dismissAll = dismissAllNewHtml(shownActive.concat(derivedSectionOpen.uptodate ? shownUpToDate : [])
     .filter(x => x.show.catalog_new).map(x => ({ kind: 'show', id: x.show.id })));
   let html = dismissAll.row, cardHtml = dismissAll.card;
   // B6: the upper section has its own heading (it doesn't collapse).
-  const heading = derivedHeadingHtml('inprogress', 'In progress', shownActive.length);
+  const heading = derivedHeadingHtml('inprogress', 'In progress', headingCount(shownActive.length, active.length, 'show', 'shows'));
   html += heading.row;
   cardHtml += heading.card;
   shownActive.forEach(show => {
@@ -548,8 +562,9 @@ function renderCurrentlyWatching(today, keep) {
   }
 
   // B6: the lower section is "Caught up" (the Up to date rule itself is unchanged).
-  if (shownUpToDate.length > 0) {
-    const section = derivedSectionHtml('uptodate', 'Caught up', shownUpToDate.length);
+  // B8: shown whenever it has shows (also when filters leave none), with its count.
+  if (upToDate.length > 0) {
+    const section = derivedSectionHtml('uptodate', 'Caught up', headingCount(shownUpToDate.length, upToDate.length, 'show', 'shows'));
     html += section.row;
     cardHtml += section.card;
     if (derivedSectionOpen.uptodate) {
@@ -558,6 +573,11 @@ function renderCurrentlyWatching(today, keep) {
         html += out.row;
         cardHtml += out.card;
       });
+      if (shownUpToDate.length === 0) {
+        const msg = 'No caught-up shows match your filters.';
+        html += `<tr class="empty-row"><td colspan="6">${esc(msg)}</td></tr>`;
+        cardHtml += `<div class="empty-row" style="padding:1rem 0">${esc(msg)}</div>`;
+      }
     }
   }
 
@@ -566,7 +586,7 @@ function renderCurrentlyWatching(today, keep) {
   // What the focus chain needs (B6): each section's listed shows, whether it is drawn and open.
   return { sections: [
     { name: 'inprogress', shown: true, open: true, heading: true, keys: shownActive.map(x => x.key) },
-    { name: 'uptodate', shown: shownUpToDate.length > 0, open: !!derivedSectionOpen.uptodate, heading: true, keys: shownUpToDate.map(x => x.key) }
+    { name: 'uptodate', shown: upToDate.length > 0, open: !!derivedSectionOpen.uptodate, heading: true, keys: shownUpToDate.map(x => x.key) }
   ] };
 }
 
@@ -582,11 +602,9 @@ function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '', fYear = 
   const shown = listed.filter(x => themeMatchesShow(x.seasons, fTheme) && allTvProgressMatches(x, fProgress)
     && (!fYear || x.seasons.some(r => rowYear(r) === fYear)));
 
-  document.getElementById('statsRow').innerHTML = derivedStatsHtml([
-    [shown.length, shown.length === 1 ? 'Show' : 'Shows'],
-    [shown.filter(x => x.show.status === 'watching').length, 'Watching'],
-    [shown.filter(x => x.upToDate).length, 'Up to date']
-  ]);
+  // B8: shows listed of every show with a linked season (all statuses); of these, Watching and up to date.
+  const ofThese = shown.length ? ` · of these, ${shown.filter(x => x.show.status === 'watching').length} Watching, ${shown.filter(x => x.upToDate).length} up to date` : '';
+  document.getElementById('statsRow').innerHTML = countLineHtml(countScoped(shown.length, items.length, 'show', 'shows') + ofThese);
 
   const dismissAll = dismissAllNewHtml(shown.filter(x => x.show.catalog_new).map(x => ({ kind: 'show', id: x.show.id })));
   let html = dismissAll.row, cardHtml = dismissAll.card;
@@ -619,9 +637,8 @@ function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '', fYear = 
 // collapsed section, labelled and counted separately.
 function renderAllTvSeasons(today, items, shown, notListed, fTheme = '', fYear = '') {
   const { dated, tba, review, total, showCount } = deriveAllTvSeasons(shown, allTvSeasonVis, r => themeMatchesRow(r, fTheme) && (!fYear || rowYear(r) === fYear));
-  const stats = [[total, total === 1 ? 'Season' : 'Seasons'], [showCount, showCount === 1 ? 'Show' : 'Shows'], [tba.length, 'TBA']];
-  if (review.length) stats.push([review.length, 'Date needs review']);
-  document.getElementById('statsRow').innerHTML = derivedStatsHtml(stats);
+  // B8: the seasons listed and the shows they come from (no total: the Seasons choice is a list mode).
+  document.getElementById('statsRow').innerHTML = countLineHtml(`Showing ${countUnit(total, 'season', 'seasons')}${total ? ` from ${countUnit(showCount, 'show', 'shows')}` : ''}`);
 
   let html = '', cardHtml = '';
   const note = msg => {
@@ -650,7 +667,7 @@ function renderAllTvSeasons(today, items, shown, notListed, fTheme = '', fYear =
   });
 
   if (tba.length + review.length > 0) {
-    const count = `${tba.length} TBA${review.length ? ` · ${review.length} date needs review` : ''}`;
+    const count = `· ${countUnit(tba.length, 'TBA season', 'TBA seasons')}${review.length ? ` · ${review.length} ${review.length === 1 ? 'season needs' : 'seasons need'} a date review` : ''}`;
     const section = derivedSectionHtml('alltvTba', 'TBA / no date', count);
     html += section.row;
     cardHtml += section.card;
@@ -952,11 +969,9 @@ function renderComingSoon(today, keep) {
   in30.setDate(in30.getDate() + 30);
   const cutoff30 = localTodayStr(in30);
 
-  document.getElementById('statsRow').innerHTML = derivedStatsHtml([
-    [shownDated.length, 'Dated'],
-    [shownDated.filter(r => r.date_sort <= cutoff30).length, 'Next 30 days'],
-    [shownTba.length, 'TBA']
-  ]);
+  // B8: dated seasons shown of every eligible dated season; of these, the next 30 days.
+  const soon = shownDated.length ? ` · of these, ${shownDated.filter(r => r.date_sort <= cutoff30).length} in the next 30 days` : '';
+  document.getElementById('statsRow').innerHTML = countLineHtml(countScoped(shownDated.length, dated.length, 'dated season', 'dated seasons') + soon);
 
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   let html = '', cardHtml = '', lastMonth = '';
@@ -980,7 +995,7 @@ function renderComingSoon(today, keep) {
   }
 
   if (shownTba.length > 0) {
-    const section = derivedSectionHtml('tba', 'TBA', shownTba.length);
+    const section = derivedSectionHtml('tba', 'TBA', headingCount(shownTba.length, tba.length, 'season', 'seasons'));
     html += section.row;
     cardHtml += section.card;
     if (derivedSectionOpen.tba) {

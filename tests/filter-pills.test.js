@@ -69,7 +69,8 @@ async function boot(data = library(), opts = {}) {
 const html = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 const titles = app => [...html(app).matchAll(/<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
-const stats = app => [...app.el('statsRow').innerHTML.matchAll(/stat-num">(\d+)<\/div><div class="stat-label">([^<]*)</g)].map(m => `${m[1]} ${m[2]}`);
+// B8: All Movies' count line ("Showing N of T films · library: W watched, U unwatched").
+const stats = app => [(app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || ''];
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
 // A pill as the page passes it to its handler (this): its kind and value, and optionally its row.
 const pill = (kind, value, owner = '') => ({ dataset: { filterKind: kind, filterValue: value, pillOwner: owner } });
@@ -82,7 +83,7 @@ const options = (app, id) => {
 const readsOnly = app => app.requests.every(r => r.method === 'GET');
 
 // ─── All Movies: Watched ─────────────────────────────────────────────────────
-test('All Movies opens on Unwatched only (the stored watched flag); Status still hides Skipped; totals before Watched, Shown after', async () => {
+test('All Movies opens on Unwatched only (the stored watched flag); Status still hides Skipped; the count is shown of every saved film (B8)', async () => {
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle();
   assert.strictEqual(app.get('activeViewId'), 'allmovies');
@@ -90,10 +91,11 @@ test('All Movies opens on Unwatched only (the stored watched flag); Status still
   assert.deepStrictEqual(options(app, 'fWatch'), ['=Any watched state', 'unwatched=Unwatched only', 'watched=Watched only']);
   assert.ok(/<option value="unwatched" selected>/.test(app.el('filtersRow').innerHTML), 'selected in the markup too (a real select shows it)');
   assert.deepStrictEqual(titles(app), ['Alpha', 'Gamma', 'Zeta'], 'unwatched; Skipped Epsilon hidden by Status');
-  assert.deepStrictEqual(stats(app), ['3 Shown', '5 Films', '2 Watched', '3 To watch']);
+  // B8 (decision 13): shown of every saved film (Skipped Epsilon included); the library's watched / unwatched.
+  assert.deepStrictEqual(stats(app), ['Showing 3 of 6 films · library: 2 watched, 4 unwatched']);
   setFilter(app, 'fWatch', 'watched');
   assert.deepStrictEqual(titles(app), ['Beta', 'Delta']);
-  assert.deepStrictEqual(stats(app), ['2 Shown', '5 Films', '2 Watched', '3 To watch']);
+  assert.deepStrictEqual(stats(app), ['Showing 2 of 6 films · library: 2 watched, 4 unwatched']);
   setFilter(app, 'fWatch', '');
   assert.deepStrictEqual(titles(app), ['Alpha', 'Beta', 'Delta', 'Gamma', 'Zeta']);
   setFilter(app, 'fStatus', 'all'); setFilter(app, 'fWatch', 'unwatched');

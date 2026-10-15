@@ -81,7 +81,15 @@ async function open(app, id = B['disney']) { app.ctx.openBrowseCollection(id); a
 const html = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 const filters = app => app.el('filtersRow').innerHTML;
-const stats = app => [...app.el('statsRow').innerHTML.matchAll(/stat-num">(\d+)<\/div><div class="stat-label">([^<]*)</g)].map(m => `${m[1]} ${m[2]}`);
+// B8: a collection's counts are in its section headings ("· N shows · N season entries",
+// "· N films"; "N of T" when filters narrow them); read back as the old tiles' tokens.
+const stats = app => {
+  const heads = [...app.el('tbody').innerHTML.matchAll(/<span class="section-count">· ([^<]*)<\/span><\/th>/g)].map(m => m[1]).join(' · ');
+  const out = [];
+  const num = (re, one, many) => { const m = heads.match(re); if (m) { const n = Number(m[1]); out.push(`${n} ${n === 1 ? one : many}`); } };
+  num(/(\d+)(?: of \d+)? shows?\b/, 'Show', 'Shows'); num(/(\d+) season entr/, 'Season entry', 'Season entries'); num(/(\d+)(?: of \d+)? films?\b/, 'Film', 'Films');
+  return out;
+};
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
 // The listed entries in order: "title · season" for seasons, "title [film]", "title [show]", plus headers.
 function listed(app) {

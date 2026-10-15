@@ -59,7 +59,16 @@ const cards = app => app.el('cardList').innerHTML;
 const seasonRows = app => [...tbody(app).matchAll(/<span class="show-title">([^<]*)<\/span>\s*<span class="season-lbl"> · ([^<]*)<\/span>/g)].map(m => `${m[1]} · ${m[2]}`);
 const seasonCards = app => [...cards(app).matchAll(/<span class="card-title">([^<]*)<\/span>\s*<span class="card-season">([^<]*)<\/span>/g)].map(m => `${m[1]} · ${m[2]}`);
 const showCards = app => [...tbody(app).matchAll(/toggleDerivedShow\('([^']+)'\)/g)].map(m => m[1]).filter((x, i, a) => a.indexOf(x) === i);
-const statNums = app => [...app.el('statsRow').innerHTML.matchAll(/stat-num">(\d+)<\/div><div class="stat-label">([^<]*)</g)].map(m => `${m[1]} ${m[2]}`);
+// B8: All TV Seasons' count line ("Showing N seasons from K shows") and the TBA / no date
+// heading ("· T TBA seasons · R seasons need a date review"), read back as the old tiles' tokens.
+const statNums = app => {
+  const line = (app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || '';
+  const m = line.match(/^Showing (\d+) seasons?(?: from (\d+) shows?)?$/) || [];
+  const head = (app.el('tbody').innerHTML.match(/TBA \/ no date <span class="section-count">· ([^<]*)<\/span>/) || [])[1] || '';
+  const tba = Number((head.match(/(\d+) TBA seasons?/) || [0, 0])[1]), review = Number((head.match(/(\d+) seasons? needs? a date review/) || [0, 0])[1]);
+  const n = Number(m[1] ?? 0), k = Number(m[2] ?? 0);
+  return [`${n} ${n === 1 ? 'Season' : 'Seasons'}`, `${k} ${k === 1 ? 'Show' : 'Shows'}`, `${tba} TBA`, ...(review ? [`${review} Date needs review`] : [])];
+};
 const setF = (app, id, v) => { app.el(id).value = v; app.ctx.renderTable(); };
 function memoryStorage(initial = {}) {
   const m = new Map(Object.entries(initial));
@@ -301,7 +310,7 @@ test('genuine TBA (text with a guessed date, or the 2099 sentinel) is never date
   const app = await openAllTv(all(a, b));
   await seasons(app);
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 1'], 'only the confirmed date is in the dated list (section collapsed)');
-  assert.ok(tbody(app).includes(`toggleDerivedSection('alltvTba')`) && tbody(app).includes('TBA / no date <span class="section-count">3 TBA</span>'));
+  assert.ok(tbody(app).includes(`toggleDerivedSection('alltvTba')`) && tbody(app).includes('TBA / no date <span class="section-count">· 3 TBA seasons</span>'));
   assert.deepStrictEqual(statNums(app), ['4 Seasons', '2 Shows', '3 TBA']);
   app.ctx.toggleDerivedSection('alltvTba'); await settle();
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 1', 'Alpha · Season 2', 'Alpha · Season 3', 'Beta · Season 4']);
@@ -327,7 +336,7 @@ test('dates needing review (empty, malformed, impossible) are labelled separatel
   const app = await openAllTv(all(a));
   await seasons(app);
   assert.deepStrictEqual(statNums(app), ['5 Seasons', '1 Show', '1 TBA', '3 Date needs review']);
-  assert.ok(tbody(app).includes('TBA / no date <span class="section-count">1 TBA · 3 date needs review</span>'));
+  assert.ok(tbody(app).includes('TBA / no date <span class="section-count">· 1 TBA season · 3 seasons need a date review</span>'));
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 5']);
   app.ctx.toggleDerivedSection('alltvTba'); await settle();
   const sec = tbody(app).split('TBA / no date')[1];

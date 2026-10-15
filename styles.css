@@ -114,10 +114,10 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 
 /* ── Main ── */
 .main { max-width: 1100px; margin: 0 auto; padding: 24px; }
-.stats-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px 16px; min-width: 90px; }
-.stat-num { font-size: 22px; font-weight: 600; color: var(--text); line-height: 1.2; }
-.stat-label { font-size: 11px; color: var(--text2); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+/* B8: compact counts (one line of text) in place of the statistics tiles */
+.stats-row { margin-bottom: 12px; }
+.stats-row:empty { display: none; }
+.count-line { margin: 0; font-size: 13px; color: var(--text2); overflow-wrap: anywhere; }
 .progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 6px; width: 80px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
 .mini-progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 4px; width: 70px; overflow: hidden; }
@@ -567,9 +567,6 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   .search-input { width: 100%; }
   .search-input:focus { width: 100%; }
 
-  .stats-row { gap: 6px; }
-  .stat { flex: 1; min-width: 78px; padding: 8px 10px; }
-  .stat-num { font-size: 18px; }
 
   .tmdb-search-row { flex-direction: column; }
   .tmdb-search-row input, .tmdb-search-row button { width: 100%; }
