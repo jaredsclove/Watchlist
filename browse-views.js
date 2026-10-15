@@ -814,14 +814,16 @@ function browseShowHtml(item, today, combined) {
   const watchedLabel = `${watchedCount}/${trackable.length} watched${skippedCount ? ` · ${skippedCount} skipped` : ''}`;
   const entriesLabel = plural(seasons.length, 'season entry', 'season entries');
   const bar = trackable.length > 0 ? `<div class="mini-progress-track"><div class="mini-progress-fill" style="width:${pct}%"></div></div>` : '';
-  const upcomingTag = upNext && !item.upNextReleased ? '<span class="upcoming-tag">Upcoming</span>' : '';
-  const nextLabel = item.endedExit
+  // B6: no "Next:" / "Up next:" prefix (the column heading says it); a phone card's screen
+  // reader text adds "Next season:" before an actual next season only (derived-views.js).
+  const nextFor = card => item.endedExit
     ? '<span class="caught-ended">Caught up · Ended</span>'
     : upToDate
-    ? upToDateNextLabel(upNext)
+    ? upToDateNextLabel(upNext, card)
     : inProgress
-      ? `Up next: ${esc(upNext.season)} · ${esc(upNext.display_date)}${upcomingTag}`
-      : neutralNextLabel(upNext, item.upNextReleased);
+      ? nextSeasonLabel(upNext, item.upNextReleased, card, true)
+      : neutralNextLabel(upNext, item.upNextReleased, card);
+  const nextLabel = nextFor(false), nextCard = nextFor(true);
   const statusHtml = browseStatusPillHtml(show.status, `Show status — applies to every season of ${show.title}`)
     + (upToDate && !item.endedExit ? ' <span class="status-pill s-caughtup">Up to date</span>' : ''); // (F5: not beside “Caught up · Ended”)
   const expandBtn = `<button class="expand-btn" data-show-key="${esc(key)}" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Hide' : 'Show'} seasons of ${esc(item.title)}" onclick="toggleBrowseShow('${keyArg}')"><span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span></button>`;
@@ -847,7 +849,7 @@ function browseShowHtml(item, today, combined) {
       <div class="card-top">
         <div class="card-title-block">
           <span class="card-title">${titleHtml}</span>${combined ? '<span class="ro-tag">TV show</span>' : ''}
-          <span class="card-season">${nextLabel}</span>
+          <span class="card-season">${nextCard}</span>
         </div>
         ${expandBtn}
       </div>

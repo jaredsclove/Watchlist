@@ -183,6 +183,278 @@ test('B2: the shortcut sends the same single set_season_watched request as befor
   assert.ok(app.el('tbody').innerHTML.includes(`toggleWatch('${a.rows[0].id}')">✓ Watched</button>`), 'a season row keeps its own labels');
 });
 
+// ─── B6: Currently Watching layout, "Next:" wording, keyboard and focus ──────
+const tbody = app => app.el('tbody').innerHTML;
+const cards = app => app.el('cardList').innerHTML;
+const rowsOf = html => html.split('<tr').slice(1).map(x => '<tr' + x);
+const showRowOf = (app, key) => rowsOf(tbody(app)).find(r => r.includes(`data-show-row="${key}"`));
+const cardOf = (app, key) => { const c = cards(app); const i = c.indexOf(`<div class="item-card show-group-card" data-show-row="${key}"`); return i < 0 ? null : c.slice(i, c.indexOf('<div class="item-card', i + 10) > 0 ? c.indexOf('<div class="item-card', i + 10) : undefined); };
+const cellCount = row => (row.match(/<td[\s>]/g) || []).length;
+
+function cwLibrary() {
+  const p = show({ title: 'Progress', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }]);
+  const u = show({ title: 'Current', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(40) }]);
+  const none = show({ title: 'Nothing Left', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }]);
+  const tba = show({ title: 'Plain TBA', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, tba: true }]);
+  const text = show({ title: 'Text TBA', status: 'watching', tmdb_id: null }, [{ season: 'Season 1', w: true, date: day(-90) }, { season: 'Season 2', tba: true, display: '2026 (TBA)', date: '2026-01-01' }]);
+  return { p, u, none, tba, text, data: all(p, u, none, tba, text) };
+}
+
+test('B6: Currently Watching has no Status column; collapsed rows and cards have no status or priority control', async () => {
+  const { p, u, data } = cwLibrary();
+  const app = await boot(data);
+  assert.strictEqual(app.el('tableHead').innerHTML, '<tr><th>Show</th><th>Categories</th><th>Up next</th><th>Watched</th><th>Progress</th></tr>');
+  for (const html of [tbody(app), cards(app)]) {
+    assert.ok(!/\{ status: this\.value \}|\{ priority: this\.value \}/.test(html), 'no status or priority select while collapsed');
+    assert.ok(!html.includes('s-caughtup'), 'no Up to date pill in Currently Watching');
+  }
+  assert.strictEqual(cellCount(showRowOf(app, p.show.id)), 5, 'in progress: Show · Categories · Up next · Watched · Progress');
+  const cu = showRowOf(app, u.show.id);
+  assert.strictEqual(cellCount(cu), 3, 'caught up: Show · Categories · Up next (spanning)');
+  assert.ok(cu.includes('<td class="date-cell" colspan="3">'));
+  assert.ok(!/watched<\/td>|mini-progress|confirmed-lbl">—/.test(cu), 'caught up: no progress, no count, no "—"');
+});
+
+test('B6: headings: In progress (focusable, not collapsible) and Caught up (a real toggle button); empty-state wording', async () => {
+  const { data } = cwLibrary();
+  const app = await boot(data);
+  const html = tbody(app);
+  assert.ok(html.includes('<th colspan="6" scope="colgroup" tabindex="-1" data-section="inprogress">In progress'));
+  assert.ok(/<button type="button" class="section-toggle" data-section="uptodate" aria-expanded="true" onclick="toggleDerivedSection\('uptodate'\)">[^]*Caught up/.test(html));
+  assert.ok(!/Up to date/.test(html), 'the section is Caught up');
+  assert.ok(cards(app).includes('<h3 class="derived-section-card derived-heading-card" tabindex="-1" data-section="inprogress">In progress'));
+  app.ctx.toggleDerivedSection('uptodate'); await settle();
+  assert.ok(tbody(app).includes('data-section="uptodate" aria-expanded="false"'));
+  // only caught-up shows: the In progress message uses the new wording and can take focus
+  const only = show({ title: 'Only', status: 'watching' }, [{ num: 1, w: true, date: day(-9) }]);
+  const app2 = await boot(all(only));
+  assert.ok(tbody(app2).includes('tabindex="-1" data-empty="1">Nothing in progress. Every Watching show is caught up.'));
+});
+
+test('B6: next-season wording: no "Next:" prefix in Currently Watching, All TV or collections; TBA forms; No upcoming season listed', async () => {
+  const { p, u, none, tba, text, data } = cwLibrary();
+  data.shows.forEach(s => { s.collection = 'disney'; s.tmdb_id = s.tmdb_id && s.tmdb_id + 5000; });
+  data.rows.forEach(r => { r.collection = 'disney'; if (r.tmdb_id) r.tmdb_id += 5000; });
+  const app = await boot(data);
+  const check = (label) => {
+    const h = tbody(app) + cards(app);
+    assert.ok(!/Next: |Up next: |premiere date TBA|No new season on your list yet/.test(h), `${label}: no old wording`);
+    assert.ok(h.includes(`Season 2 · ${disp(day(-3))}`), `${label}: in progress`);
+    assert.ok(h.includes(`Season 2 · ${disp(day(40))}<span class="upcoming-tag">Upcoming`), `${label}: future`);
+    assert.ok(h.includes('Season 2 · Date TBA'), `${label}: a plain TBA reads Date TBA`);
+    assert.ok(h.includes('Season 2 · 2026 (TBA)'), `${label}: stored TBA text is kept`);
+    assert.ok(h.includes('No upcoming season listed'), `${label}: nothing remaining`);
+  };
+  check('Currently Watching');
+  app.ctx.switchView('alltv'); await settle();
+  check('All TV');
+  app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
+  check('collection');
+  assert.ok(app.el('tableHead').innerHTML.includes('<th>Next / Release</th>'), 'headings unchanged');
+});
+
+test('B6 (decision 6): the hidden "Next season: " is only on phone cards, only before an actual next-season value', async () => {
+  const { data } = cwLibrary();
+  const ended = show({ title: 'Ended Show', status: 'watching', ended: true }, [{ num: 1, w: true, date: day(-90) }]);
+  const skipped = show({ title: 'All Skipped', status: 'watching' }, [{ num: 1, s: true, date: day(-90) }]);
+  const other = show({ title: 'Nothing Remaining', status: 'confirmed' }, [{ num: 1, w: true, date: day(-90) }]);
+  const d = all(...[data].flatMap(x => []), ended, skipped, other);
+  d.rows.push(...data.rows); d.shows.push(...data.shows);
+  const app = await boot(d);
+  const SR = '<span class="visually-hidden">Next season: </span>';
+  for (const view of ['watching', 'alltv']) {
+    app.ctx.switchView(view); await settle();
+    assert.ok(!tbody(app).includes(SR), `${view}: not in desktop cells (the column heading says it)`);
+    const lines = [...cards(app).matchAll(/<span class="card-season">([^]*?)<\/span>\s*<\/div>/g)].map(m => m[1]);
+    assert.ok(lines.length >= 5);
+    for (const l of lines) {
+      const actual = /^(<span class="visually-hidden">Next season: <\/span>)?Season \d+ · /.test(l);
+      assert.strictEqual(l.startsWith(SR), actual, `${view}: "${l.slice(0, 80)}"`);
+    }
+    for (const status of ['No upcoming season listed', 'No remaining season on your list', 'Caught up · Ended', 'All seasons skipped']) {
+      assert.ok(!cards(app).includes(SR + status) && !cards(app).includes(SR + `<span title="Based on the seasons stored in your list. New seasons are added with + Add (Refresh shows or Add season) or by Catalog updates.">${status}`)
+        && !cards(app).includes(`${SR}<span class="caught-ended">${status}`) && !cards(app).includes(`${SR}<span class="confirmed-lbl">${status}`), `${view}: never before "${status}"`);
+    }
+  }
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
+  assert.ok(/\.visually-hidden \{[^}]*clip: rect\(0 0 0 0\)/.test(css));
+});
+
+test('B6: the expanded show has the labelled Status and Priority selects, a progress line and the existing actions, each with a focus hook', async () => {
+  const s = show({ title: 'Full', status: 'watching', priority: 'high', catalog_new: true, status_review: true, ended: true },
+    [{ num: 1, date: day(-900) }, { num: 2, w: true, date: day(-800) }, { num: 3, date: day(-10) }, { num: 4, date: day(30) }, { num: 5, s: true, date: day(-5) }]);
+  const app = await boot(all(s));
+  const row = showRowOf(app, s.show.id), card = cardOf(app, s.show.id);
+  for (const [where, h] of [['row', row], ['card', card]]) {
+    assert.ok(h.includes('class="priority-high"'), `${where}: ★ High in the title`);
+    assert.ok(h.includes('ended-tag') && h.includes('new-tag') && h.includes('review-tag-b45'), `${where}: Ended, New, Review status tags`);
+    // ("N earlier seasons unwatched" is shown today only beside "Caught up · Ended", which Currently Watching never lists; unchanged.)
+    assert.ok(!h.includes('earlier season unwatched'), `${where}: no gap note added`);
+    assert.ok(h.includes('Marked ended, but an upcoming season is listed'), `${where}: the ended note`);
+    assert.ok(h.includes('data-filter-kind') || h.includes('class="badge'), `${where}: categories / Original label`);
+  }
+  app.ctx.toggleDerivedShow(s.show.id); await settle();
+  for (const [where, h] of [['table', tbody(app)], ['cards', cards(app)]]) {
+    assert.ok(h.includes('<label class="state-field" data-action="status"><span class="state-field-label">Status</span> <select'), `${where}: Status`);
+    assert.ok(h.includes('<option value="" selected disabled>Choose a status…</option>'), `${where}: review starts on Choose a status…`);
+    assert.ok(h.includes('<label class="state-field" data-action="priority"><span class="state-field-label">Priority</span> <select'), `${where}: Priority`);
+    assert.ok(h.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && h.includes(`setShowStateById('${s.show.id}', { priority: this.value })`), `${where}: the same writes as All TV's selects`);
+    for (const a of ['details', 'ended', 'dismiss-new', 'keep-status', 'open-resume']) assert.ok(h.includes(`data-action="${a}"`), `${where}: ${a}`);
+  }
+  assert.ok(tbody(app).includes('<span class="show-progress-line">1 of 4 seasons watched · 1 skipped</span>'), 'desktop: progress line');
+  assert.ok(tbody(app).includes(`data-show-of="${s.show.id}"`) && tbody(app).includes(`data-season-row="${s.rows[0].id}"`), 'focus hooks on the actions row and seasons');
+  // the expanded seasons keep Watched before Skip / Keep under the five headings
+  const sub = rowsOf(tbody(app)).find(r => r.includes(`data-season-row="${s.rows[2].id}"`));
+  assert.strictEqual(cellCount(sub), 5);
+  assert.ok(sub.indexOf(`toggleWatch('${s.rows[2].id}')`) < sub.indexOf(`setSeasonSkipped('${s.rows[2].id}'`));
+});
+
+test('B6: the status written from the expanded show is the same guarded call; review and ended rules unchanged', async () => {
+  const s = show({ title: 'Move', status: 'watching' }, [{ num: 1, date: day(-3) }]);
+  const app = await boot(all(s));
+  app.ctx.toggleDerivedShow(s.show.id); await settle();
+  await app.ctx.setShowStateById(s.show.id, { status: 'confirmed' }); await settle();
+  const w = app.writes();
+  assert.strictEqual(w.length, 1);
+  assert.ok(w[0].url.endsWith('/rpc/library_set_show_state_b45'));
+  assert.deepStrictEqual(w[0].body.p_changes, { status: 'confirmed' });
+});
+
+test('B6: phone cards: in progress = title, season, categories, progress, shortcut; caught up collapsed = title and season only', async () => {
+  const { p, u, data } = cwLibrary();
+  const app = await boot(data);
+  const c = cardOf(app, p.show.id);
+  const at = s => c.indexOf(s);
+  assert.ok(at('card-title') < at('card-season') && at('card-season') < at('card-meta') && at('card-meta') < at('1/2 watched') && at('mini-progress') < at('show-shortcut'), 'in-progress order');
+  assert.ok(c.includes('<div class="card-actions shortcut-actions"'));
+  const cu = cardOf(app, u.show.id);
+  assert.ok(!cu.includes('card-meta') && !cu.includes('mini-progress') && !cu.includes('watched</span>'), 'caught up collapsed: no categories, no progress');
+  app.ctx.toggleDerivedShow(u.show.id); await settle();
+  const ex = cardOf(app, u.show.id);
+  assert.ok(ex.includes('card-meta') && ex.includes('1 of 2 seasons watched'), 'expanded: categories and progress text');
+  assert.ok(ex.indexOf('card-meta') < ex.indexOf('show-actions-state') && ex.indexOf('show-actions-state') < ex.indexOf('data-season-row'), 'expanded order: categories, actions, seasons');
+});
+
+test('B6: expand buttons: one per show row and card, labelled, aria-expanded, stopping the event; one activation toggles once', async () => {
+  const { p, data } = cwLibrary();
+  for (const view of ['watching', 'alltv']) {
+    const app = await boot(data);
+    app.ctx.switchView(view); await settle();
+    const btn = `<button type="button" class="expand-btn" data-show-key="${p.show.id}" aria-expanded="false" aria-label="Show seasons and actions of Progress" onclick="event.stopPropagation(); toggleDerivedShow('${p.show.id}')">`;
+    assert.ok(showRowOf(app, p.show.id).includes(btn), `${view}: row`);
+    assert.ok(cardOf(app, p.show.id).includes(btn), `${view}: card`);
+    // A click that started on a control inside the row belongs to that control.
+    const inner = { target: { closest: sel => (sel.includes('button') ? {} : null) } };
+    app.ctx.toggleDerivedShow(p.show.id, inner); await settle();
+    assert.ok(!app.get('expandedShows').has(p.show.id), `${view}: a click on an inner control doesn't toggle`);
+    const plain = { target: { closest: () => null } };
+    app.ctx.toggleDerivedShow(p.show.id, plain); await settle();
+    assert.ok(app.get('expandedShows').has(p.show.id), `${view}: a click on the row toggles once`);
+    app.ctx.toggleDerivedShow(p.show.id); await settle();
+    assert.ok(!app.get('expandedShows').has(p.show.id), `${view}: the button (no event) toggles once`);
+    assert.deepStrictEqual(app.writes(), []);
+  }
+});
+
+test('B6: Coming Soon and All TV Seasons section toggles are real buttons', async () => {
+  const s = show({ title: 'Soon', status: 'confirmed' }, [{ num: 1, date: day(3) }, { num: 2, tba: true }]);
+  const app = await boot(all(s));
+  app.ctx.switchView('comingsoon'); await settle();
+  assert.ok(tbody(app).includes('<button type="button" class="section-toggle" data-section="tba" aria-expanded="false"'));
+  app.ctx.switchView('alltv'); await settle();
+  app.ctx.setAllTvPresentation('seasons'); await settle();
+  assert.ok(tbody(app).includes('<button type="button" class="section-toggle" data-section="alltvTba" aria-expanded="false"'));
+  assert.ok(!/<tr class="derived-section-row" onclick=/.test(tbody(app)), 'the row itself is not the control');
+});
+
+test('B6: the sections drawn equal the derivation (membership unchanged) across a state matrix', async () => {
+  const shows = [
+    show({ title: 'A In progress', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-2) }]),
+    show({ title: 'B Future', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(9) }]),
+    show({ title: 'C TBA', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, tba: true }]),
+    show({ title: 'D None', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }]),
+    show({ title: 'E Ended exit', status: 'watching', ended: true }, [{ num: 1, w: true, date: day(-90) }]),
+    show({ title: 'F All skipped', status: 'watching' }, [{ num: 1, s: true, date: day(-90) }]),
+    show({ title: 'G Review', status: 'watching', status_review: true }, [{ num: 1, date: day(-90) }]),
+    show({ title: 'H New Low', status: 'watching', catalog_new: true, priority: 'low' }, [{ num: 1, date: day(-90) }]),
+    show({ title: 'I To Watch', status: 'confirmed' }, [{ num: 1, date: day(-90) }])
+  ];
+  const r = show({ title: 'J Range', status: 'watching' }, [{ num: 1, date: day(-900) }, { num: 2, w: true, date: day(-800) }]);
+  r.show.resume_start_season_id = r.rows[0].id; r.show.resume_end_season_id = r.rows[1].id;
+  const app = await boot(all(...shows, r));
+  const d = app.ctx.deriveCurrentlyWatching(app.get('derivedData').rows, app.get('tvShowsById'), day(0));
+  const drawn = sec => rowsOf(tbody(app)).filter(x => x.includes(`data-row-section="${sec}"`)).map(x => x.match(/data-show-row="([^"]*)"/)[1]);
+  assert.deepStrictEqual(drawn('inprogress'), Array.from(d.active, x => x.key));
+  assert.deepStrictEqual(drawn('uptodate'), Array.from(d.upToDate, x => x.key));
+  const titles = rowsOf(tbody(app)).map(x => (x.match(/show-title">([^<]*)</) || [])[1]).filter(Boolean);
+  assert.ok(!titles.includes('E Ended exit') && !titles.includes('F All skipped') && !titles.includes('I To Watch'));
+  assert.ok(titles.includes('J Range') && titles.includes('G Review') && titles.includes('H New Low'));
+});
+
+test('B6: the focus chain F-1 … F-7 (pure): every transition picks one visible, focusable target in order', async () => {
+  const app = await boot(all());
+  const F = (rec, listing, present = () => false) => JSON.parse(JSON.stringify(app.ctx.focusChainTarget(rec, listing, present)));
+  const L = (ip, cu, cuOpen = true) => ({ sections: [
+    { name: 'inprogress', shown: true, open: true, heading: true, keys: ip },
+    { name: 'uptodate', shown: cu.length > 0, open: cuOpen, heading: true, keys: cu }] });
+  const rec = (key, section, hook, next = [], prev = []) => ({ container: 'tbody', key, section, hook, next, prev, loading: false });
+  const sel = { kind: 'action', value: 'status', show: 'a' };
+  // T1, F-1: the same control is still there
+  assert.deepStrictEqual(F(rec('a', 'inprogress', sel), L(['a'], []), t => t.kind === 'action'), sel);
+  // T2, F-2: still in progress, the shortcut now names the next season (a new control)
+  const sc = { kind: 'shortcut', value: 'a' };
+  assert.deepStrictEqual(F(rec('a', 'inprogress', sc), L(['a'], []), t => t.kind === 'shortcut' && t.value === 'a' && false || (t.kind === 'shortcut')), sc);
+  assert.deepStrictEqual(F(rec('a', 'inprogress', { kind: 'action', value: 'details', show: 'a' }), L(['a'], []), t => t.kind === 'shortcut'), sc);
+  // T3: it moved into an open Caught up (its expand button), or a collapsed one (the toggle)
+  assert.deepStrictEqual(F(rec('a', 'inprogress', sc, ['b']), L(['b'], ['a'])), { kind: 'expand', value: 'a' });
+  assert.deepStrictEqual(F(rec('a', 'inprogress', sc, ['b']), L(['b'], ['a'], false)), { kind: 'section', value: 'uptodate' });
+  // T4, F-5: it left; the next neighbour, else the previous one
+  assert.deepStrictEqual(F(rec('b', 'inprogress', sel, ['c'], ['a']), L(['a', 'c'], [])), { kind: 'expand', value: 'c' });
+  assert.deepStrictEqual(F(rec('c', 'inprogress', sel, [], ['b', 'a']), L(['a', 'b'], [])), { kind: 'expand', value: 'b' });
+  // a neighbour only in another section isn't used
+  assert.deepStrictEqual(F(rec('c', 'uptodate', sel, ['x'], []), L(['x', 'p'], ['y'])), { kind: 'section', value: 'uptodate' });
+  // T5, F-7: the only Caught up show left (the section is gone at 0): the first heading, In progress
+  assert.deepStrictEqual(F(rec('u', 'uptodate', sel), L(['p'], [])), { kind: 'section', value: 'inprogress' });
+  // T6, F-6: the last In progress show left while Caught up still lists shows: the In progress heading (not F-4)
+  assert.deepStrictEqual(F(rec('p', 'inprogress', sel), L([], ['u'])), { kind: 'section', value: 'inprogress' });
+  // T7a, F-4: the view is empty: the empty-state message, never the always-present heading
+  assert.deepStrictEqual(F(rec('p', 'inprogress', sel), L([], [])), { kind: 'empty' });
+  assert.deepStrictEqual(F(rec('p', 'inprogress', sel, ['q']), L([], [])), { kind: 'empty' });
+  // T8: after a reload (the loading message was focused; it is gone): the same rules
+  const reload = { ...rec(null, null, { kind: 'loading', value: '1' }), loading: false };
+  assert.deepStrictEqual(F(reload, L([], [])), { kind: 'empty' });
+  assert.deepStrictEqual(F(reload, L(['p'], [])), { kind: 'section', value: 'inprogress' });
+  // All TV: one list without a heading; F-6 / F-7 fall back to its first listed show
+  const allTv = keys => ({ sections: [{ name: 'all', shown: true, open: true, heading: false, keys }] });
+  assert.deepStrictEqual(F(rec('a', 'all', sel, ['b']), allTv(['b', 'c'])), { kind: 'expand', value: 'b' });
+  assert.deepStrictEqual(F(rec('a', 'all', sel), allTv(['c'])), { kind: 'expand', value: 'c' });
+  assert.deepStrictEqual(F(rec('a', 'all', sel), allTv([])), { kind: 'empty' });
+  // no listing (Coming Soon, Seasons): only F-1
+  assert.strictEqual(app.ctx.focusChainTarget(rec('a', 'all', sel), null, () => false), null);
+});
+
+test('B6: filter redraws never use the focus chain: focus in the filter row, or on a filter pill, is not recorded', async () => {
+  const { data } = cwLibrary();
+  const app = await boot(data);
+  const fake = (inList, pill) => ({ closest: sel => (sel === '#tbody' && inList) ? {} : (sel === '.filter-pill' && pill) ? {} : null });
+  app.ctx.document.activeElement = fake(false, false); // Search, a filter select, Back
+  assert.strictEqual(app.ctx.captureListFocus(), null);
+  app.ctx.document.activeElement = fake(true, true);   // a filter pill in the list (render.js keeps its own rule)
+  assert.strictEqual(app.ctx.captureListFocus(), null);
+  delete app.ctx.document.activeElement;
+});
+
+test('B6: loading and failure messages carry their focus hooks (loading message focusable, Retry marked)', async () => {
+  const { data } = cwLibrary();
+  const app = await boot(data);
+  const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadDerivedView(); await g.reached;
+  assert.ok(tbody(app).includes('class="loading" tabindex="-1" data-loading="1">Loading…'));
+  assert.ok(cards(app).includes('class="loading" tabindex="-1" data-loading="1">Loading…'));
+  g.fail(); await settle();
+  assert.ok(tbody(app).includes('<button class="btn" data-retry="1" onclick="loadDerivedView()">Retry</button>'));
+});
+
 test('B2: the shortcut style wraps the full label and never truncates it', () => {
   const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
   const rule = (css.match(/\.watch-btn\.show-shortcut\s*\{([^}]*)\}/) || [])[1] || '';

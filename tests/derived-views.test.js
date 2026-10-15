@@ -166,24 +166,31 @@ async function viewApp(data) {
 const tbody = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 
-test('render: both kinds of Watching cards carry the show-level status control; Up to date is a tag, not a status', async () => {
+test('render (B6): Currently Watching rows and cards carry no status or priority control (the expanded show does); Caught up has no Up to date pill', async () => {
   const p = show({ title: 'Progress', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-3) }]);
   const u = show({ title: 'Current', status: 'watching', tmdb_id: 101 }, [{ num: 1, w: true }, { num: 2, date: day(40) }]);
   const app = await viewApp(all(p, u));
   for (const html of [tbody(app), cards(app)]) {
-    assert.strictEqual((html.match(/setShowStateById\('[^']*', \{ status: this\.value \}\)/g) || []).length, 2, 'one show status control per card');
+    assert.strictEqual((html.match(/\{ status: this\.value \}/g) || []).length, 0, 'no show status control while collapsed');
+    assert.strictEqual((html.match(/\{ priority: this\.value \}/g) || []).length, 0, 'no priority control while collapsed');
     assert.ok(!/setStatus\(/.test(html), 'no row-level status control for TV');
-    assert.ok(html.includes('Up to date</span>'));
-    assert.ok(html.includes(`Next: Season 2 · ${disp(day(40))}`));
+    assert.ok(!html.includes('s-caughtup'), 'no Up to date pill on Caught up shows');
+    assert.ok(html.includes(`Season 2 · ${disp(day(40))}`) && !html.includes('Next: '), 'no "Next:" prefix');
   }
-  assert.ok(app.el('statsRow').innerHTML.includes('In progress') && app.el('statsRow').innerHTML.includes('Up to date'));
+  assert.ok(app.el('statsRow').innerHTML.includes('In progress') && app.el('statsRow').innerHTML.includes('Caught up'));
   assert.ok(tbody(app).includes(`toggleWatch('${p.rows[1].id}')`), 'released up next: Mark watched');
   assert.ok(!tbody(app).includes(`toggleWatch('${u.rows[1].id}')`), 'up to date: no watch control for the future season');
+  app.ctx.toggleDerivedShow(p.show.id); app.ctx.toggleDerivedShow(u.show.id); await settle();
+  for (const html of [tbody(app), cards(app)]) {
+    assert.strictEqual((html.match(/setShowStateById\('[^']*', \{ status: this\.value \}\)/g) || []).length, 2, 'one show status control per expanded show');
+    assert.strictEqual((html.match(/setShowStateById\('[^']*', \{ priority: this\.value \}\)/g) || []).length, 2, 'one priority control per expanded show');
+  }
 });
 
 test('render: the show control shows the plain status and stays show-scoped (tooltip and "applies to all seasons")', async () => {
   const p = show({ title: 'Scoped', status: 'watching' }, [{ num: 1 }]);
   const app = await viewApp(all(p));
+  app.ctx.toggleDerivedShow(p.show.id); await settle(); // B6: in the expanded show
   assert.ok(tbody(app).includes('<option value="watching" selected>▶ Watching</option>'));
   assert.ok(!tbody(app).includes('Show: '), 'no "Show:" prefix on the options');
   assert.ok(tbody(app).includes('title="Show status — applies to every season of Scoped"'));

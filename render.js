@@ -463,15 +463,29 @@ function seasonRowControlHtml(r, opts = {}) {
 }
 
 // One season of a grouped show: a desktop sub-row and a mobile card row.
-// opts: { isNew, showMatch, showDelete, deleteTitle, requireReleased, today }
+// opts: { isNew, showMatch, showDelete, deleteTitle, requireReleased, today, showOf, cwOrder }
+// showOf: the show's key, and data-season-row, mark the row for focus after a redraw (B6).
+// cwOrder (Currently Watching, B6, which has no Status column): Watched under Watched, then
+// Skip / Keep, in five cells.
 function seasonSubRowHtml(r, opts) {
   const isSkipped = isOffList(r);
   const rowClass = isSkipped ? 'row-skipped' : '';
-  return `<tr class="${rowClass} sub-row">
-        <td style="padding-left:28px">
+  const hooks = ` data-season-row="${esc(r.id)}"${opts.showOf ? ` data-show-of="${esc(opts.showOf)}"` : ''}`;
+  const label = `<td style="padding-left:28px">
           <span class="season-lbl">${esc(r.season)}</span>
           ${opts.isNew?'<span class="new-tag">New</span>':''}
-        </td>
+        </td>`;
+  if (opts.cwOrder) {
+    return `<tr class="${rowClass} sub-row"${hooks}>
+        ${label}
+        <td></td>
+        <td class="date-cell">${esc(r.display_date)}</td>
+        <td>${seasonWatchControlHtml(r, opts, false)}</td>
+        <td>${seasonRowControlHtml(r)}</td>
+      </tr>`;
+  }
+  return `<tr class="${rowClass} sub-row"${hooks}>
+        ${label}
         <td>${opts.showMatch ? `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</td>
         <td class="date-cell">${esc(r.display_date)}</td>
         <td>${seasonRowControlHtml(r)}</td>
@@ -481,7 +495,7 @@ function seasonSubRowHtml(r, opts) {
 }
 
 function seasonSubCardHtml(r, opts) {
-  return `<div class="card-subseason-row">
+  return `<div class="card-subseason-row" data-season-row="${esc(r.id)}">
           <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}${opts.showMatch ? ` <button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : ''}</span>
           <div class="card-actions">
             ${seasonRowControlHtml(r)}

@@ -202,12 +202,13 @@ test('Up to date only for a Watching show (today’s rule; Ended plays no part):
   const ut = Object.fromEntries(Array.from(items, x => [x.title, x.upToDate]));
   assert.deepStrictEqual(ut, { C: true, F: false, P: false, T: false, W: true }, 'C: Watching, nothing remaining (today’s rule, unchanged)');
   const rowOf = title => app.el('tbody').innerHTML.split('<tr').find(x => x.includes(`show-title">${title}<`));
-  assert.ok(rowOf('W').includes('s-caughtup">Up to date') && rowOf('W').includes(`Next: Season 2 · ${disp(day(20))}`));
+  // B6: no "Next:" prefix in the Next column (the heading says it); wording only.
+  assert.ok(rowOf('W').includes('s-caughtup">Up to date') && rowOf('W').includes(`<td class="date-cell">Season 2 · ${disp(day(20))}<span class="upcoming-tag">Upcoming`) && !rowOf('W').includes('Next:'));
   assert.ok(rowOf('P').includes(`Season 2 · ${disp(day(-5))}`) && rowOf('P').includes('toggleWatch('), 'in progress: Mark watched on up next');
   assert.ok(!rowOf('P').includes('Next: '), 'an in-progress Watching show keeps the Watching up-next label');
   assert.ok(rowOf('C').includes('Caught up · Ended'), rowOf('C'));
-  assert.ok(rowOf('F').includes(`Next: Season 1 · ${disp(day(30))}<span class="upcoming-tag">Upcoming`) && !rowOf('F').includes('Up to date'));
-  assert.ok(rowOf('T').includes('Next: Season 1 · premiere date TBA'));
+  assert.ok(rowOf('F').includes(`<td class="date-cell">Season 1 · ${disp(day(30))}<span class="upcoming-tag">Upcoming`) && !rowOf('F').includes('Up to date'));
+  assert.ok(rowOf('T').includes('<td class="date-cell">Season 1 · Date TBA</td>'), 'a plain stored TBA reads "Date TBA" (B6)');
   for (const x of ['F', 'T']) {
     assert.ok(!rowOf(x).includes('toggleWatch('), `${x}: no collapsed watch control`);
     assert.ok(!/In progress/.test(rowOf(x)), `${x}: never labelled in progress`);
@@ -220,7 +221,7 @@ test('up next uses the whole show, not a filtered subset; Specials never move pr
   const app = await openAllTv(all(s));
   const item = app.ctx.deriveAllTv(app.get('derivedData').rows, app.get('tvShowsById'), TODAY).items[0];
   assert.strictEqual(item.upNext.season, 'Season 2');
-  assert.ok(app.el('tbody').innerHTML.includes(`Next: Season 2 · ${disp(day(-1))}</td>`), 'aired: no Upcoming tag');
+  assert.ok(app.el('tbody').innerHTML.includes(`<td class="date-cell">Season 2 · ${disp(day(-1))}</td>`), 'aired: no Upcoming tag');
 });
 
 // ─── Expansion and edits ─────────────────────────────────────────────────────

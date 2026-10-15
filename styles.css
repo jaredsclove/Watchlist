@@ -457,10 +457,27 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .upcoming-tag { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
 .today-tag { background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); }
 .not-aired-lbl { font-size: 11px; color: var(--text3); white-space: nowrap; }
-.derived-section-row td { cursor: pointer; background: var(--surface); padding: 7px 12px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.derived-section-card { cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; padding: 12px 4px 4px; }
+.derived-section-row td, .derived-heading-row th { text-align: left; background: var(--surface); padding: 7px 12px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.derived-section-card { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; padding: 12px 4px 4px; }
 .derived-section-row:hover .expand-chevron, .derived-section-card:hover .expand-chevron { border-color: var(--accent); color: var(--accent); }
 .section-count { color: var(--text3); }
+/* B6: Currently Watching's In progress heading (no toggle), focus targets and screen-reader text */
+.derived-heading-card { margin: 0; }
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+[tabindex="-1"]:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.expand-btn:focus-visible, .section-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* B6: the expanded show's labelled Status and Priority (Currently Watching) */
+.state-field { display: inline-flex; gap: 6px; align-items: center; }
+.state-field-label { font-size: 12px; color: var(--text2); }
+.show-progress-line { font-size: 12px; color: var(--text2); }
+.shortcut-actions .show-shortcut { flex: 1 1 100%; }
+@media (max-width: 700px) {
+  .show-actions-state { flex-direction: column; align-items: stretch; }
+  .show-actions-state > * { width: 100%; }
+  .show-actions-state .state-field { justify-content: space-between; }
+  .show-actions-state .state-field select { flex: 1; min-height: 44px; }
+  .shortcut-actions .show-shortcut { min-height: 44px; }
+}
 .status-pill { display: inline-block; padding: 4px 10px; border-radius: var(--radius); font-size: 12px; font-weight: 500; border: 1px solid; white-space: nowrap; }
 .status-pill.s-caughtup { background: var(--teal-bg); color: var(--teal); border-color: var(--teal); }
 .status-pill.s-confirmed { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
