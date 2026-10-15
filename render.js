@@ -436,13 +436,21 @@ document.addEventListener('click', function(e) {
 // The watch control for one season row. Derived views pass requireReleased, which
 // replaces "Mark watched" with a note until the season has aired (a row already
 // marked watched keeps its toggle so it can be undone). compact is the mobile label.
+// opts.shortcutOf (B2): the show whose show-level shortcut this is; the button then names
+// the season it marks ("Mark Season 1 watched"), in full (it wraps, never truncates), and
+// its accessible name names the show too. Same action as the season row's button.
 function seasonWatchControlHtml(r, opts, compact) {
   if (isOffList(r)) return compact ? '' : `<span class="confirmed-lbl">—</span>`;
   if (opts.requireReleased && !r.watched && !isReleasedRow(r, opts.today)) {
     return `<span class="not-aired-lbl">Not aired yet</span>`;
   }
+  const stop = opts.stopPropagation ? 'event.stopPropagation(); ' : '';
+  const show = opts.shortcutOf;
+  if (show && !r.watched) {
+    return `<button class="watch-btn show-shortcut" data-shortcut-show="${esc(show.id)}" aria-label="${esc(`Mark ${r.season} of ${show.title} watched`)}" onclick="${stop}toggleWatch('${r.id}')">Mark ${esc(r.season)} watched</button>`;
+  }
   const label = r.watched ? (compact ? '✓' : '✓ Watched') : 'Mark watched';
-  return `<button class="watch-btn${r.watched?' watched':''}" onclick="${opts.stopPropagation ? 'event.stopPropagation(); ' : ''}toggleWatch('${r.id}')">${label}</button>`;
+  return `<button class="watch-btn${r.watched?' watched':''}" onclick="${stop}toggleWatch('${r.id}')">${label}</button>`;
 }
 
 // The per-row control in a season list: Skip / Keep for a TV season (its status

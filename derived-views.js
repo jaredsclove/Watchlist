@@ -724,7 +724,10 @@ function derivedShowHtml(item, today) {
   const subOpts = r => ({ isNew: false, showMatch: allTv && isTmdbMatchEligible(r), showDelete: allTv && editPolicyOf(r).deleteEffect === 'delete',
     deleteTitle: 'Delete this season', requireReleased: true, today });
   const addSeasonBtn = allTv ? `<button class="btn btn-link" onclick="event.stopPropagation(); openAddSeason('${keyArg}')">+ Add season…</button>` : '';
-  const watchCell = inProgress ? seasonWatchControlHtml(upNext, { ...releaseOpts, stopPropagation: true }, false) : '<span class="confirmed-lbl">—</span>';
+  // B2: the show-level shortcut names the season it marks (the up-next season, or the
+  // earlier-seasons range's next one).
+  const shortcutOpts = { ...releaseOpts, shortcutOf: show };
+  const watchCell = inProgress ? seasonWatchControlHtml(upNext, { ...shortcutOpts, stopPropagation: true }, false) : '<span class="confirmed-lbl">—</span>';
   const actions = isExpanded ? showActionsHtml(item, keyArg) : '';
 
   let row = `<tr class="show-group-row derived-show-row${dimClass}" onclick="toggleDerivedShow('${keyArg}')">
@@ -759,7 +762,7 @@ function derivedShowHtml(item, today) {
       </div>
       <div class="card-actions" onclick="event.stopPropagation()">
         ${showStatusSelectHtml(show)} ${prioritySelectHtml(show, 'show')}${upToDatePill}
-        ${inProgress ? seasonWatchControlHtml(upNext, releaseOpts, false) : ''}
+        ${inProgress ? seasonWatchControlHtml(upNext, shortcutOpts, false) : ''}
       </div>
       ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${actions}</div>${seasons.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}${addSeasonBtn ? `<div class="card-subseason-row">${addSeasonBtn}</div>` : ''}</div>` : ''}
     </div>`;

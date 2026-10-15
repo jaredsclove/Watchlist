@@ -271,6 +271,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .watch-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 11px; cursor: pointer; font-size: 12px; color: var(--text2); transition: all 0.15s; white-space: nowrap; }
 .watch-btn:hover { border-color: var(--border2); color: var(--text); }
 .watch-btn.watched { background: var(--green-dim); border-color: var(--green-border); color: var(--green); }
+/* B2: the show-level shortcut names its season in full: it wraps, never truncates */
+.watch-btn.show-shortcut { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; overflow: visible; max-width: 100%; }
 .watch-btn:disabled { opacity: 0.3; cursor: default; }
 
 .row-maybe td { opacity: 0.65; }
