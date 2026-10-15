@@ -271,8 +271,12 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .watch-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 11px; cursor: pointer; font-size: 12px; color: var(--text2); transition: all 0.15s; white-space: nowrap; }
 .watch-btn:hover { border-color: var(--border2); color: var(--text); }
 .watch-btn.watched { background: var(--green-dim); border-color: var(--green-border); color: var(--green); }
-/* B2: the show-level shortcut names its season in full: it wraps, never truncates */
-.watch-btn.show-shortcut { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; overflow: visible; max-width: 100%; }
+/* B2: the show-level shortcut names its season in full: it wraps at word boundaries (a single
+   word longer than the button may still break), never truncates. In the desktop table it has room
+   for an ordinary label on about two lines ("Mark Season 2 / watched"); a longer stored label
+   wraps over more lines, still whole. */
+.watch-btn.show-shortcut { white-space: normal; overflow-wrap: break-word; word-break: normal; text-overflow: clip; overflow: visible; max-width: 100%; }
+#desktopTable .watch-btn.show-shortcut { min-width: 8.5em; max-width: 14em; text-align: center; }
 .watch-btn:disabled { opacity: 0.3; cursor: default; }
 
 .row-maybe td { opacity: 0.65; }

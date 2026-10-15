@@ -626,6 +626,15 @@ function parseSel(sel) {
 }
 function makeMiniDom(app) {
   const doc = app.ctx.document;
+  // Document- and window-level listeners (the page's focus-placement tracking uses them), and
+  // focusin on every focus, as a browser sends them.
+  const docL = {}, winL = {};
+  doc.addEventListener = (t, f) => { (docL[t] = docL[t] || []).push(f); };
+  doc.removeEventListener = (t, f) => { docL[t] = (docL[t] || []).filter(x => x !== f); };
+  app.ctx.addEventListener = (t, f) => { (winL[t] = winL[t] || []).push(f); };
+  app.ctx.removeEventListener = (t, f) => { winL[t] = (winL[t] || []).filter(x => x !== f); };
+  doc.defaultView = app.ctx;
+  const docEvent = (type, target) => (docL[type] || []).slice().forEach(f => f({ type, target }));
   const unesc = v => v.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   function node(tag, attrs, parent, root) {
     const n = { tagName: tag.toUpperCase(), tag, attrs, parent, root, children: [], listeners: {} };
@@ -644,7 +653,9 @@ function makeMiniDom(app) {
     const all = () => { const out = []; const walk = x => x.children.forEach(c => { out.push(c); walk(c); }); walk(n); return out; };
     n.querySelectorAll = sel => { const alts = parseSel(sel); return all().filter(x => alts.some(ch => x.matchesChain(ch))); };
     n.querySelector = sel => n.querySelectorAll(sel)[0] || null;
-    n.focus = () => { doc.activeElement = n; };
+    n.focus = () => { doc.activeElement = n; docEvent('focusin', n); };
+    n.ownerDocument = doc;
+    Object.defineProperty(n, 'isConnected', { get: () => ['tbody', 'cardList'].some(id => cache[id] && cache[id].root === n.root) || n.root === n });
     n.getClientRects = () => (n.root.hidden ? [] : [{}]);
     n.addEventListener = (t, f) => { (n.listeners[t] = n.listeners[t] || []).push(f); };
     n.removeEventListener = (t, f) => { n.listeners[t] = (n.listeners[t] || []).filter(x => x !== f); };
@@ -679,7 +690,13 @@ function makeMiniDom(app) {
     hide: (id, hidden = true) => { tree(id).hidden = hidden; },
     focus: (id, sel) => { const n = tree(id).querySelector(sel); assert.ok(n, `no ${sel} in ${id}`); n.focus(); return n; },
     active: () => doc.activeElement,
-    outside: () => { const n = node('input', { id: 'fSearch' }, null, null); n.root = n; doc.activeElement = n; return n; }
+    outside: () => { const n = node('input', { id: 'fSearch' }, null, null); n.root = n; n.focus(); return n; },
+    // What Chrome does when the focused element's layout becomes hidden: focus falls to the
+    // page (no focusin anywhere, no user event).
+    blurToBody: () => { doc.activeElement = null; },
+    docEvent,
+    winEvent: type => (winL[type] || []).slice().forEach(f => f({ type })),
+    listenerCount: () => Object.values(docL).reduce((n, l) => n + l.length, 0) + Object.values(winL).reduce((n, l) => n + l.length, 0)
   };
 }
 const desc = n => (n ? `${n.tag}${Object.entries(n.attrs).filter(([k]) => k.startsWith('data-') || k === 'class').map(([k, v]) => `[${k}=${v}]`).join('')}` : 'null');
@@ -889,10 +906,98 @@ test('correction 6: every full-width row of Currently Watching spans its five co
   assert.ok(spans().every(x => x === '6'), `All TV rows span 6: ${spans()}`);
 });
 
+// ─── Correction batch 2 (PV2-F2): a layout change during a pending reload ─────
+// The browser blurs a focused element whose layout becomes hidden (focus falls to the page,
+// with no user event). That alone keeps the reload's place; any owner action gives it up.
+async function heldReload(fixture, from) {
+  const app = await boot(fixture);
+  const dom = makeMiniDom(app);
+  if (from === 'cardList') dom.hide('tbody'); else dom.hide('cardList');
+  return { app, dom };
+}
+const PV2a = () => show({ title: 'Alpha', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }]);
+
+test('PV2-F2: crossing the breakpoint (both directions) during a held reload: success restores into the visible layout', async () => {
+  for (const [from, to] of [['tbody', 'cardList'], ['cardList', 'tbody']]) {
+    const a = PV2a();
+    const { app, dom } = await heldReload(all(a), from);
+    dom.focus(from, `[data-item="${a.show.id}"] [data-primary]`);
+    const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+    app.ctx.loadDerivedView(); await g.reached;
+    assert.strictEqual(dom.active(), dom.in(from, '[data-loading]'), `${from}: the loading message while reading`);
+    dom.hide(from); dom.hide(to, false); dom.blurToBody(); // the window crosses the breakpoint
+    g.release(); await settle();
+    assert.strictEqual(dom.active(), dom.in(to, `[data-item="${a.show.id}"] [data-primary]`), `${from} → ${to}: the same show's expand button, in the visible layout`);
+  }
+});
+
+test('PV2-F2: crossing the breakpoint during a held reload that fails: Retry in the visible layout', async () => {
+  for (const [from, to] of [['tbody', 'cardList'], ['cardList', 'tbody']]) {
+    const a = PV2a();
+    const { app, dom } = await heldReload(all(a), from);
+    dom.focus(from, `[data-item="${a.show.id}"] [data-primary]`);
+    const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+    app.ctx.loadDerivedView(); await g.reached;
+    dom.hide(from); dom.hide(to, false); dom.blurToBody();
+    g.fail(); await settle();
+    assert.strictEqual(dom.active(), dom.in(to, '[data-retry]'), `${from} → ${to}: Retry in the visible layout`);
+  }
+});
+
+test('PV2-F2: a deliberate owner action after the blur gives the place up: Search, another control, a key, a pointer, a dialog, leaving the app', async () => {
+  const cases = {
+    search: dom => dom.outside(),                                   // focus arrives in Search (focusin)
+    pointer: dom => dom.docEvent('pointerdown', null),              // a click anywhere (incl. opening a dialog)
+    key: dom => dom.docEvent('keydown', null),                      // a key press anywhere
+    outsideApp: dom => dom.winEvent('blur')                         // the window loses focus
+  };
+  for (const [name, act] of Object.entries(cases)) {
+    for (const outcome of ['release', 'fail']) {
+      const a = PV2a();
+      const { app, dom } = await heldReload(all(a), 'tbody');
+      dom.focus('tbody', `[data-item="${a.show.id}"] [data-primary]`);
+      const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+      app.ctx.loadDerivedView(); await g.reached;
+      dom.hide('tbody'); dom.hide('cardList', false); dom.blurToBody();
+      const owner = act(dom);
+      g[outcome](); await settle();
+      const expected = name === 'search' ? owner : null;
+      assert.strictEqual(dom.active(), expected, `${name} / ${outcome}: focus isn't taken back`);
+    }
+  }
+});
+
+test('PV2-F2: focus on the page body for another reason (the loading message still shown) is not a place to restore', async () => {
+  const a = PV2a();
+  const { app, dom } = await heldReload(all(a), 'tbody');
+  dom.focus('tbody', `[data-item="${a.show.id}"] [data-primary]`);
+  const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+  app.ctx.loadDerivedView(); await g.reached;
+  dom.blurToBody(); // focus left without the layout changing (the loading message is still shown)
+  g.release(); await settle();
+  assert.strictEqual(dom.active(), null, 'nothing restored');
+});
+
+test('PV2-F2: placement listeners are removed once the place is given up (no build-up across reloads)', async () => {
+  const a = PV2a();
+  const { app, dom } = await heldReload(all(a), 'tbody');
+  const base = dom.listenerCount();
+  for (let i = 0; i < 5; i++) {
+    dom.focus('tbody', `[data-item="${a.show.id}"] [data-primary]`);
+    const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+    app.ctx.loadDerivedView(); await g.reached;
+    g.release(); await settle();
+  }
+  assert.ok(dom.listenerCount() - base <= 6, `at most one live placement's listeners (${dom.listenerCount() - base})`);
+});
+
 test('B2: the shortcut style wraps the full label and never truncates it', () => {
   const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
   const rule = (css.match(/\.watch-btn\.show-shortcut\s*\{([^}]*)\}/) || [])[1] || '';
   assert.ok(/white-space:\s*normal/.test(rule), 'wraps (overrides .watch-btn nowrap)');
+  assert.ok(/overflow-wrap:\s*break-word/.test(rule) && !/anywhere/.test(rule), 'PV2-F1: wraps at word boundaries, not mid-word');
+  const desk = (css.match(/#desktopTable \.watch-btn\.show-shortcut\s*\{([^}]*)\}/) || [])[1] || '';
+  assert.ok(/min-width:\s*8\.5em/.test(desk) && /max-width:\s*14em/.test(desk), 'PV2-F1: room on desktop for an ordinary label');
   assert.ok(!/ellipsis/.test(rule) && !/text-overflow:\s*ellipsis/.test(css.match(/show-shortcut[^}]*\}/g).join('')), 'no ellipsis');
 });
 

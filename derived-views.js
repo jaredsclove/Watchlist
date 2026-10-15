@@ -1222,11 +1222,50 @@ function placeFocus(el, origin) {
   el[FOCUS_ORIGIN] = origin;
   const forget = () => { delete el[FOCUS_ORIGIN]; ['blur', 'keydown', 'pointerdown', 'mousedown', 'touchstart'].forEach(t => el.removeEventListener(t, forget)); };
   ['blur', 'keydown', 'pointerdown', 'mousedown', 'touchstart'].forEach(t => el.addEventListener(t, forget));
+  trackPlacement(el, origin);
 }
-// Focus is still on the element the page moved it to for this record.
+
+// The placement's own record of whether anything has happened since focus was put on el
+// (PV2-F2). The browser takes focus off an element whose layout becomes hidden (the window
+// crossing the phone width) without anyone acting; that alone doesn't give up the place. Any
+// of these does, for good: focus arriving anywhere else in the page, a key, pointer or touch
+// press anywhere, or the window losing focus (the owner went outside the app).
+const FOCUS_PLACEMENT = '__watchlistFocusPlacement';
+const PLACEMENT_ACTIONS = ['keydown', 'pointerdown', 'mousedown', 'touchstart'];
+function trackPlacement(el, origin) {
+  if (!origin || typeof origin !== 'object') return;
+  if (origin[FOCUS_PLACEMENT]) origin[FOCUS_PLACEMENT].stop();
+  const doc = el.ownerDocument || document;
+  const win = doc.defaultView || null;
+  const state = { el, superseded: false };
+  const supersede = () => { state.superseded = true; state.stop(); };
+  const onFocusIn = e => { if (e.target !== el) supersede(); };
+  state.stop = () => {
+    if (typeof doc.removeEventListener === 'function') {
+      doc.removeEventListener('focusin', onFocusIn, true);
+      PLACEMENT_ACTIONS.forEach(t => doc.removeEventListener(t, supersede, true));
+    }
+    if (win && typeof win.removeEventListener === 'function') win.removeEventListener('blur', supersede);
+  };
+  if (typeof doc.addEventListener === 'function') {
+    doc.addEventListener('focusin', onFocusIn, true);
+    PLACEMENT_ACTIONS.forEach(t => doc.addEventListener(t, supersede, true));
+  }
+  if (win && typeof win.addEventListener === 'function') win.addEventListener('blur', supersede);
+  origin[FOCUS_PLACEMENT] = state;
+}
+
+// Focus is still where the page moved it for this record: on that element, or, only when the
+// browser itself took it away because the element left the layout (hidden or removed) and
+// nothing else has happened since (trackPlacement), on the page body. Focus on the body for
+// any other reason (the owner clicked elsewhere, went outside the app) never counts.
 function focusIsPlaced(origin) {
   const active = document.activeElement;
-  return !!active && active[FOCUS_ORIGIN] === origin;
+  if (active && active[FOCUS_ORIGIN] === origin) return true;
+  const p = origin && origin[FOCUS_PLACEMENT];
+  if (!p || p.superseded) return false;
+  const onBody = !active || active === document.body || active === document.documentElement;
+  return onBody && (!p.el.isConnected || !isRendered(p.el));
 }
 // One element of the visible list container (the loading message, Retry).
 function placeListFocus(selector, origin) {
