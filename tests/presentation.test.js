@@ -634,6 +634,8 @@ function makeMiniDom(app) {
   app.ctx.addEventListener = (t, f) => { (winL[t] = winL[t] || []).push(f); };
   app.ctx.removeEventListener = (t, f) => { winL[t] = (winL[t] || []).filter(x => x !== f); };
   doc.defaultView = app.ctx;
+  let pageHasFocus = true;
+  doc.hasFocus = () => pageHasFocus;
   const docEvent = (type, target) => (docL[type] || []).slice().forEach(f => f({ type, target }));
   const unesc = v => v.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   function node(tag, attrs, parent, root) {
@@ -659,7 +661,8 @@ function makeMiniDom(app) {
     n.getClientRects = () => (n.root.hidden ? [] : [{}]);
     n.addEventListener = (t, f) => { (n.listeners[t] = n.listeners[t] || []).push(f); };
     n.removeEventListener = (t, f) => { n.listeners[t] = (n.listeners[t] || []).filter(x => x !== f); };
-    n.dispatch = t => (n.listeners[t] || []).slice().forEach(f => f({ type: t }));
+    // An event on an element also reaches the document's capturing listeners, as in a browser.
+    n.dispatch = t => { docEvent(t, n); (n.listeners[t] || []).slice().forEach(f => f({ type: t, target: n })); };
     return n;
   }
   const cache = {};
@@ -695,7 +698,7 @@ function makeMiniDom(app) {
     // page (no focusin anywhere, no user event).
     blurToBody: () => { doc.activeElement = null; },
     docEvent,
-    winEvent: type => (winL[type] || []).slice().forEach(f => f({ type })),
+    winEvent: type => { if (type === 'blur') pageHasFocus = false; if (type === 'focus') pageHasFocus = true; (winL[type] || []).slice().forEach(f => f({ type })); },
     listenerCount: () => Object.values(docL).reduce((n, l) => n + l.length, 0) + Object.values(winL).reduce((n, l) => n + l.length, 0)
   };
 }
@@ -988,7 +991,149 @@ test('PV2-F2: placement listeners are removed once the place is given up (no bui
     app.ctx.loadDerivedView(); await g.reached;
     g.release(); await settle();
   }
-  assert.ok(dom.listenerCount() - base <= 6, `at most one live placement's listeners (${dom.listenerCount() - base})`);
+  assert.ok(dom.listenerCount() - base <= 7, `at most one live placement's listeners: focusin, 4 actions, blur, resize (${dom.listenerCount() - base})`);
+});
+
+// ─── Correction batch 3: pending writes across the breakpoint; final cancellation ───
+// A write's optimistic redraw puts focus somewhere (placeFocus). The window then crosses the
+// phone width, so the browser drops focus from the now-hidden element to the page; the answer
+// (success, or failure and rollback) must still follow the original action, in the layout now
+// shown. Anything the owner does in between cancels that for good.
+const C3 = {
+  lib() {
+    const a = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }, { num: 3, date: day(40) }]);
+    const b = show({ title: 'Bravo', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-4) }]);
+    const c = show({ title: 'Charlie', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }]); // keeps Caught up present after a rollback
+    return { a, b, c, data: all(a, b, c) };
+  },
+  // Boot showing `from` (the other layout hidden), run `act` with the request held, cross to the
+  // other layout (focus falls to the page), then answer.
+  async run({ data, from, setup, act, match, outcome, between }) {
+    const app = await boot(data);
+    const dom = makeMiniDom(app);
+    const to = from === 'tbody' ? 'cardList' : 'tbody';
+    dom.hide(to);
+    if (setup) await setup(app, dom, from);
+    const g = app.hold(r => r.url.endsWith(match));
+    act(app, dom, from); await g.reached;
+    const optimistic = desc(dom.active());
+    // The layout switch: the browser drops focus from the hidden element, then the window's
+    // resize event (relocatePlacedFocus) follows it into the layout now shown.
+    dom.hide(from); dom.hide(to, false); dom.blurToBody(); dom.winEvent('resize');
+    const relocated = dom.active();
+    const owner = between ? between(dom, to) : undefined;
+    g[outcome](); await settle();
+    return { app, dom, to, optimistic, owner, relocated };
+  }
+};
+
+test('batch 3: a pending write across the breakpoint, both directions: the original control (F-1) on success and on failure', async () => {
+  for (const from of ['tbody', 'cardList']) for (const outcome of ['release', 'fail']) {
+    const { a, data } = C3.lib();
+    const r = await C3.run({ data, from, outcome, match: '/rpc/library_set_show_state_b45',
+      setup: async (app, dom, f) => { app.ctx.toggleDerivedShow(a.show.id); await settle(); dom.focus(f, `[data-item="${a.show.id}"] [data-action="ended"] input, [data-show-of="${a.show.id}"] [data-action="ended"] input`); },
+      act: app => { app.ctx.setShowStateById(a.show.id, { ended: true }); } });
+    assert.ok(r.dom.active() === r.dom.in(r.to, `[data-item="${a.show.id}"] [data-action="ended"] input, [data-show-of="${a.show.id}"] [data-action="ended"] input`), `${from} / ${outcome}: the same checkbox, in the visible layout` + ' → ' + desc(r.dom.active()));
+  }
+});
+
+test('batch 3: a pending shortcut across the breakpoint: moved show (F-2) on success; the original shortcut after rollback; both directions', async () => {
+  for (const from of ['tbody', 'cardList']) for (const outcome of ['release', 'fail']) {
+    const { a, data } = C3.lib();
+    const upNext = data.rows.find(x => x.show_id === a.show.id && x.season === 'Season 2');
+    const r = await C3.run({ data, from, outcome, match: '/rpc/set_season_watched',
+      setup: async (app, dom, f) => { dom.focus(f, `[data-shortcut-show="${a.show.id}"]`); },
+      act: app => { app.ctx.toggleWatch(upNext.id); } });
+    const want = outcome === 'release' ? `[data-item="${a.show.id}"] [data-primary]` : `[data-shortcut-show="${a.show.id}"]`;
+    assert.ok(r.dom.active() === r.dom.in(r.to, want), `${from} / ${outcome}` + ' → ' + desc(r.dom.active()));
+  }
+});
+
+test('batch 3: a pending shortcut into a collapsed Caught up, across the breakpoint: the toggle (F-3) on success, the shortcut after rollback', async () => {
+  for (const outcome of ['release', 'fail']) {
+    const { a, data } = C3.lib();
+    const upNext = data.rows.find(x => x.show_id === a.show.id && x.season === 'Season 2');
+    const r = await C3.run({ data, from: 'tbody', outcome, match: '/rpc/set_season_watched',
+      setup: async (app, dom, f) => { app.ctx.toggleDerivedSection('uptodate'); await settle(); dom.focus(f, `[data-shortcut-show="${a.show.id}"]`); },
+      act: app => { app.ctx.toggleWatch(upNext.id); } });
+    assert.strictEqual(r.optimistic, desc(r.dom.in('tbody', '.section-toggle[data-section="uptodate"]')), 'optimistic: the collapsed toggle ' + r.optimistic);
+    const want = outcome === 'release' ? '.section-toggle[data-section="uptodate"]' : `[data-shortcut-show="${a.show.id}"]`;
+    assert.strictEqual(r.dom.active(), r.dom.in('cardList', want), outcome);
+  }
+});
+
+test('batch 3: a pending status change that empties the view, across the breakpoint: the empty message (F-4); after rollback the original select', async () => {
+  for (const outcome of ['release', 'fail']) {
+    const only = show({ title: 'Only', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-3) }]);
+    const r = await C3.run({ data: all(only), from: 'cardList', outcome, match: '/rpc/library_set_show_state_b45',
+      setup: async (app, dom, f) => { app.ctx.toggleDerivedShow(only.show.id); await settle(); dom.focus(f, `[data-item="${only.show.id}"] [data-action="status"] select`); },
+      act: app => { app.ctx.setShowStateById(only.show.id, { status: 'confirmed' }); } });
+    const want = outcome === 'release' ? '[data-empty]' : `[data-show-of="${only.show.id}"] [data-action="status"] select`;
+    assert.strictEqual(r.dom.active(), r.dom.in('tbody', want), outcome);
+  }
+});
+
+test('batch 3: owner actions after the blur cancel a pending write\'s place: Tab / another control, a pointer, a key, a dialog, leaving the app', async () => {
+  const actions = {
+    tabOrOtherControl: (dom, to, { b }) => dom.focus(to, `[data-item="${b.show.id}"] [data-primary], [data-show-of="${b.show.id}"] [data-primary]`),  // focus arrives elsewhere
+    pointer: dom => { dom.docEvent('pointerdown', null); return dom.active(); },           // focus stays where it is
+    key: dom => { dom.docEvent('keydown', null); return dom.active(); },
+    dialog: dom => dom.outside(),                                               // focus arrives in a dialog control
+    outsideApp: dom => { dom.winEvent('blur'); return dom.active(); }                   // the document keeps its active element
+  };
+  for (const [name, between] of Object.entries(actions)) for (const outcome of ['release', 'fail']) {
+    const { a, b, data } = C3.lib();
+    const upNext = data.rows.find(x => x.show_id === a.show.id && x.season === 'Season 2');
+    const r = await C3.run({ data, from: 'tbody', outcome, match: '/rpc/set_season_watched', between: (dom, to) => between(dom, to, { a, b }),
+      setup: async (app, dom, f) => { dom.focus(f, `[data-shortcut-show="${a.show.id}"]`); },
+      act: app => { app.ctx.toggleWatch(upNext.id); } });
+    assert.strictEqual(desc(r.dom.active()), desc(r.owner), `${name} / ${outcome}: not reclaimed (the owner's element or its redrawn equivalent): ${desc(r.dom.active())} vs ${desc(r.owner)}`);
+  }
+});
+
+test('batch 3: leaving the app while the loading message is still focused (no breakpoint change): nothing is placed on success or failure', async () => {
+  for (const outcome of ['release', 'fail']) {
+    const { a, data } = C3.lib();
+    const app = await boot(data);
+    const dom = makeMiniDom(app);
+    dom.hide('cardList');
+    dom.focus('tbody', `[data-item="${a.show.id}"] [data-primary]`);
+    const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
+    app.ctx.loadDerivedView(); await g.reached;
+    const loading = dom.active();
+    assert.strictEqual(loading, dom.in('tbody', '[data-loading]'));
+    dom.winEvent('blur'); // the owner goes to another window; the loading message stays the document's active element
+    g[outcome](); await settle();
+    assert.ok(dom.active() === loading, `${outcome}: focus not moved (the page doesn't pull it back)` + ' → ' + desc(dom.active()));
+    dom.winEvent('focus'); // coming back later doesn't revive the cancelled place
+    app.ctx.renderTable(); await settle();
+    assert.ok(dom.active() === loading, `${outcome}: still nothing placed after the owner returns` + ' → ' + desc(dom.active()));
+  }
+});
+
+test('batch 3: a cancelled place is final while the placed element is still focused; a later genuine action has its own place; no element marker exists', async () => {
+  const { a, data } = C3.lib();
+  const app = await boot(data);
+  const dom = makeMiniDom(app);
+  dom.hide('cardList');
+  app.ctx.toggleDerivedSection('uptodate'); await settle();
+  const upNext = data.rows.find(x => x.show_id === a.show.id && x.season === 'Season 2');
+  dom.focus('tbody', `[data-shortcut-show="${a.show.id}"]`);
+  const g = app.hold(r => r.url.endsWith('/rpc/set_season_watched'));
+  app.ctx.toggleWatch(upNext.id); await g.reached;
+  const toggle = dom.active();
+  assert.ok(toggle === dom.in('tbody', '.section-toggle[data-section="uptodate"]'), 'placed on the collapsed toggle for the shortcut' + ' → ' + desc(toggle));
+  assert.ok(!('__watchlistFocusOrigin' in toggle), 'no per-element marker');
+  dom.docEvent('keydown', null); // the owner presses a key; focus stays on the toggle
+  assert.strictEqual(app.get('focusPlacement'), null, 'the place is gone, not just flagged');
+  g.fail(); await settle();
+  assert.strictEqual(desc(dom.active()), desc(dom.in('tbody', '.section-toggle[data-section="uptodate"]')), 'rollback: the owner\'s toggle (its redrawn equivalent), not the old shortcut → ' + desc(dom.active()));
+  assert.ok(dom.active() !== dom.in('tbody', `[data-shortcut-show="${a.show.id}"]`), 'not the old shortcut');
+  // A later genuine action (toggling the section) makes its own place.
+  app.ctx.toggleDerivedSection('uptodate'); await settle();
+  const p = app.get('focusPlacement');
+  assert.ok(p && !p.cancelled && p.origin.hook.kind === 'section' && p.origin.hook.value === 'uptodate', 'a new place for the new action');
+  assert.strictEqual(dom.active(), dom.in('tbody', '.section-toggle[data-section="uptodate"]'));
 });
 
 test('B2: the shortcut style wraps the full label and never truncates it', () => {

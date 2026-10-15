@@ -133,6 +133,7 @@ let stage5Phase = null; // the database's phase from stage5_capabilities(); this
 let derivedData = null; // { rows, loaded } — cross-TV rows for the derived views, kept apart from tabData
 let derivedLoadSeq = 0; // lets a late derived-view load see that it's been superseded
 let derivedSectionOpen = { uptodate: true, tba: false, alltvTba: false }; // collapsible sections in the derived views (Up to date starts open, TBA sections closed)
+let focusPlacement = null; // the page's one focus move after a redraw (derived-views.js placeFocus): { el, origin, cancelled, stop }; null when none
 let allTvPresentation = 'shows'; // All TV: 'shows' | 'seasons'; remembered on this device (derived-views.js)
 let allTvSeasonVis = 'notskipped'; // All TV Seasons: 'notskipped' (All (except Skipped), the default) | 'all' | 'towatch' | 'watched' | 'skipped'; kept across Shows/Seasons, reset when the view is entered
 let addOpen = false;

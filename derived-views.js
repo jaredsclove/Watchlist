@@ -1103,9 +1103,9 @@ function toggleDerivedShow(key, ev) {
 // page. Controls are found by identity (the item or season and data-action), never by position.
 //
 // The original action keeps its target across the redraws it causes (an optimistic redraw,
-// then the answer or the rollback): the element focus is moved to remembers the record it
-// came from, until the owner moves focus or presses a key or pointer on it.
-const FOCUS_ORIGIN = '__watchlistFocusOrigin';
+// then the answer or the rollback, or a reload): the page's one placement (focusPlacement in
+// watchlist.html) remembers the record focus was moved for, until the owner does anything
+// (placeFocus). A cancelled placement is final: nothing revives it.
 const FOCUS_HOOKS = [['shortcut', 'data-shortcut-show'], ['action', 'data-action'], ['item', 'data-primary'],
   ['section', 'data-section'], ['empty', 'data-empty'], ['loading', 'data-loading']];
 
@@ -1115,12 +1115,31 @@ function seasonItemAttrs(r, section) {
 }
 
 function captureListFocus() {
+  if (!documentHasFocus()) return null; // the owner is outside the app: nothing to carry back
+  const owned = placedOrigin();
+  if (owned) return owned; // still the page's placement: the original action's record
   const active = document.activeElement;
   if (!active || typeof active.closest !== 'function') return null;
-  if (active[FOCUS_ORIGIN]) return active[FOCUS_ORIGIN]; // still where the page put it: the original action's record
   const container = ['tbody', 'cardList'].find(id => active.closest(`#${id}`));
   if (!container || active.closest('.filter-pill')) return null;
+  // A loading message holds focus only for the page's own placement; once that placement is
+  // cancelled, focus left on it is no new action to carry.
+  if (active.closest('[data-loading]')) return null;
   const box = document.getElementById(container);
+  const { key, hook } = focusHookOf(active);
+  // The item's section and its neighbours in that section, in listed order.
+  const items = [...box.querySelectorAll('[data-item]')];
+  const own = key ? items.find(r => r.getAttribute('data-item') === key) : null;
+  const section = own ? own.getAttribute('data-row-section') : null;
+  const peers = items.filter(r => r.getAttribute('data-row-section') === section).map(r => r.getAttribute('data-item'));
+  const at = peers.indexOf(key);
+  return { container, key, section, hook,
+    next: at >= 0 ? peers.slice(at + 1) : [], prev: at >= 0 ? peers.slice(0, at).reverse() : [] };
+}
+
+// What identifies a focused element in the list, the same in both layouts: its item (show or
+// season) and its hook (shortcut, action, item's main control, section, message).
+function focusHookOf(active) {
   const attrOf = (el, a) => (el ? el.getAttribute(a) : null);
   const itemEl = active.closest('[data-item], [data-show-of]');
   const key = attrOf(itemEl, 'data-item') || attrOf(itemEl, 'data-show-of');
@@ -1132,14 +1151,7 @@ function captureListFocus() {
   }
   if (hook && hook.kind === 'action') { hook.item = key; hook.season = attrOf(seasonEl, 'data-season-row'); }
   if (hook && hook.kind === 'item') hook.value = key;
-  // The item's section and its neighbours in that section, in listed order.
-  const items = [...box.querySelectorAll('[data-item]')];
-  const own = key ? items.find(r => r.getAttribute('data-item') === key) : null;
-  const section = own ? own.getAttribute('data-row-section') : null;
-  const peers = items.filter(r => r.getAttribute('data-row-section') === section).map(r => r.getAttribute('data-item'));
-  const at = peers.indexOf(key);
-  return { container, key, section, hook,
-    next: at >= 0 ? peers.slice(at + 1) : [], prev: at >= 0 ? peers.slice(0, at).reverse() : [] };
+  return { key, hook };
 }
 
 // The target after a redraw, from what was recorded (rec) and what the view now lists
@@ -1213,69 +1225,87 @@ function focusTargetElement(box, t) {
   return isRendered(el) ? el : null;
 }
 
-// Moves focus to el and remembers which action it serves, until the owner moves focus or
-// acts on el (a key or pointer press there starts a new action of its own).
-function placeFocus(el, origin) {
-  if (!el || typeof el.focus !== 'function') return;
-  el.focus();
-  if (document.activeElement !== el) return;
-  el[FOCUS_ORIGIN] = origin;
-  const forget = () => { delete el[FOCUS_ORIGIN]; ['blur', 'keydown', 'pointerdown', 'mousedown', 'touchstart'].forEach(t => el.removeEventListener(t, forget)); };
-  ['blur', 'keydown', 'pointerdown', 'mousedown', 'touchstart'].forEach(t => el.addEventListener(t, forget));
-  trackPlacement(el, origin);
+// The page has keyboard focus (the owner hasn't gone to another window or outside the app's
+// frame); without a browser (the offline harness) it always has.
+function documentHasFocus() {
+  return typeof document.hasFocus !== 'function' || document.hasFocus();
 }
 
-// The placement's own record of whether anything has happened since focus was put on el
-// (PV2-F2). The browser takes focus off an element whose layout becomes hidden (the window
-// crossing the phone width) without anyone acting; that alone doesn't give up the place. Any
-// of these does, for good: focus arriving anywhere else in the page, a key, pointer or touch
-// press anywhere, or the window losing focus (the owner went outside the app).
-const FOCUS_PLACEMENT = '__watchlistFocusPlacement';
+// Moves focus to el for the action recorded in origin, and makes that the page's placement
+// (focusPlacement, watchlist.html; the previous one ends). The placement is cancelled, for
+// good, by anything that isn't the page's own doing: focus arriving anywhere else, a key,
+// pointer or touch press anywhere (on el too: that starts a new action of the owner's own),
+// or the window losing focus (the owner went outside the app).
 const PLACEMENT_ACTIONS = ['keydown', 'pointerdown', 'mousedown', 'touchstart'];
-function trackPlacement(el, origin) {
-  if (!origin || typeof origin !== 'object') return;
-  if (origin[FOCUS_PLACEMENT]) origin[FOCUS_PLACEMENT].stop();
+function placeFocus(el, origin) {
+  if (!el || typeof el.focus !== 'function') return;
+  endFocusPlacement();
+  el.focus();
+  if (document.activeElement !== el) return;
   const doc = el.ownerDocument || document;
   const win = doc.defaultView || null;
-  const state = { el, superseded: false };
-  const supersede = () => { state.superseded = true; state.stop(); };
-  const onFocusIn = e => { if (e.target !== el) supersede(); };
-  state.stop = () => {
+  const p = { el, origin, cancelled: false };
+  const cancel = () => { p.cancelled = true; p.stop(); if (focusPlacement === p) focusPlacement = null; };
+  const onFocusIn = e => { if (e.target !== el) cancel(); };
+  p.stop = () => {
     if (typeof doc.removeEventListener === 'function') {
       doc.removeEventListener('focusin', onFocusIn, true);
-      PLACEMENT_ACTIONS.forEach(t => doc.removeEventListener(t, supersede, true));
+      PLACEMENT_ACTIONS.forEach(t => doc.removeEventListener(t, cancel, true));
     }
-    if (win && typeof win.removeEventListener === 'function') win.removeEventListener('blur', supersede);
+    if (win && typeof win.removeEventListener === 'function') { win.removeEventListener('blur', cancel); win.removeEventListener('resize', relocatePlacedFocus); }
   };
   if (typeof doc.addEventListener === 'function') {
     doc.addEventListener('focusin', onFocusIn, true);
-    PLACEMENT_ACTIONS.forEach(t => doc.addEventListener(t, supersede, true));
+    PLACEMENT_ACTIONS.forEach(t => doc.addEventListener(t, cancel, true));
   }
-  if (win && typeof win.addEventListener === 'function') win.addEventListener('blur', supersede);
-  origin[FOCUS_PLACEMENT] = state;
+  if (win && typeof win.addEventListener === 'function') { win.addEventListener('blur', cancel); win.addEventListener('resize', relocatePlacedFocus); }
+  focusPlacement = p;
 }
 
-// Focus is still where the page moved it for this record: on that element, or, only when the
-// browser itself took it away because the element left the layout (hidden or removed) and
-// nothing else has happened since (trackPlacement), on the page body. Focus on the body for
-// any other reason (the owner clicked elsewhere, went outside the app) never counts.
-function focusIsPlaced(origin) {
+// The window was resized while the page's placement is held: if the placed element is no
+// longer shown (the phone / desktop layouts swapped), move focus to the same control in the
+// layout now shown, for the same action. A write whose answer comes without a redraw, or a
+// reload still reading, then ends with focus where its action left it (correction batch 3).
+function relocatePlacedFocus() {
+  const p = focusPlacement;
+  if (!p || p.cancelled || !documentHasFocus() || isRendered(p.el)) return;
   const active = document.activeElement;
-  if (active && active[FOCUS_ORIGIN] === origin) return true;
-  const p = origin && origin[FOCUS_PLACEMENT];
-  if (!p || p.superseded) return false;
+  if (active && active !== p.el && active !== document.body && active !== document.documentElement) return;
+  const { hook } = typeof p.el.closest === 'function' ? focusHookOf(p.el) : { hook: null };
+  const box = visibleListBox(p.origin.container);
+  const el = box && hook ? focusTargetElement(box, hook) : null;
+  if (el) placeFocus(el, p.origin);
+}
+function endFocusPlacement() {
+  if (focusPlacement) { focusPlacement.cancelled = true; focusPlacement.stop(); }
+  focusPlacement = null;
+}
+
+// The record the page's placement still holds, or null. Held while focus is on the placed
+// element, or (PV2-F2, and the same for a pending write) on the page body only because the
+// browser took it off an element that left the layout (hidden by the phone / desktop switch,
+// or removed). Any cancellation is final; focus on the body for any other reason never counts.
+function placedOrigin() {
+  const p = focusPlacement;
+  if (!p || p.cancelled || !documentHasFocus()) return null;
+  const active = document.activeElement;
+  if (active === p.el) return p.origin;
   const onBody = !active || active === document.body || active === document.documentElement;
-  return onBody && (!p.el.isConnected || !isRendered(p.el));
+  return onBody && (!p.el.isConnected || !isRendered(p.el)) ? p.origin : null;
+}
+function focusIsPlaced(origin) {
+  return !!origin && placedOrigin() === origin;
 }
 // One element of the visible list container (the loading message, Retry).
 function placeListFocus(selector, origin) {
+  if (!documentHasFocus()) return;
   const box = visibleListBox(origin.container);
   const el = box ? box.querySelector(selector) : null;
   if (isRendered(el)) placeFocus(el, origin);
 }
 
 function applyListFocus(rec, listing) {
-  if (!rec) return;
+  if (!rec || !documentHasFocus()) return; // never pull focus back from outside the app
   const box = visibleListBox(rec.container);
   if (!box) return;
   const t = focusChainTarget(rec, listing, x => !!focusTargetElement(box, x));
