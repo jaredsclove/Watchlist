@@ -94,7 +94,7 @@ function metadataEmpty(m) {
 // Details, the original label is shown instead (fallback: its badge HTML).
 function metadataChipsHtml(m, owner, fallback = '') {
   if (!m || (metadataEmpty(m) && !m.metadata_owner_set)) return fallback;
-  const chip = (kind, v) => filterPillHtml(kind, v, v, { cls: `badge meta-chip meta-${kind}`, title: `Filter by “${v}”`, owner });
+  const chip = (kind, v) => filterPillHtml(kind, v, v, { cls: `badge meta-chip meta-${kind}`, attrs: kind === 'network' ? networkChipStyle(v) : '', title: `Filter by “${v}”`, owner });
   const genres = m.genres || [];
   return genres.slice(0, 2).map(v => chip('genres', v)).join('')
     + (genres.length > 2 ? `<span class="meta-more" title="${esc(genres.slice(2).join(', '))}">+${genres.length - 2}</span>` : '')

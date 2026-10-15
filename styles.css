@@ -632,7 +632,25 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .state-tag.review-tag-b45 { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
 .state-tag.resume-tag { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
 .meta-chip { font-size: 11px; }
-.meta-more { font-size: 11px; color: var(--text3); }
+.meta-more { font-size: 11px; color: var(--text2); }
+/* Category chips (render.js metadataChipsHtml), button or text: explicit colours by kind, so a
+   chip never shows the browser's default button face. Genres and any other kind: slate; forms:
+   teal; franchises: amber. The network chip carries an inline style (networkChipStyle). */
+:root {
+  --chip-bg: #222938; --chip-fg: #c8d0e0; --chip-border: #343c50;
+  --chip-form-bg: #0e2b2a; --chip-form-fg: #6fd6c9; --chip-form-border: #1d4a46;
+  --chip-fr-bg: #2e2408; --chip-fr-fg: #e6c25a; --chip-fr-border: #554314;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --chip-bg: #eceff4; --chip-fg: #3b4357; --chip-border: #d2d8e3;
+    --chip-form-bg: #e3f4f2; --chip-form-fg: #135f57; --chip-form-border: #b3ddd7;
+    --chip-fr-bg: #fbf2d9; --chip-fr-fg: #6e5208; --chip-fr-border: #e6d4a0;
+  }
+}
+.meta-chip { background: var(--chip-bg); color: var(--chip-fg); border-color: var(--chip-border); }
+.meta-chip.meta-forms { background: var(--chip-form-bg); color: var(--chip-form-fg); border-color: var(--chip-form-border); }
+.meta-chip.meta-franchises { background: var(--chip-fr-bg); color: var(--chip-fr-fg); border-color: var(--chip-fr-border); }
 .caught-ended { font-size: 12px; color: var(--text2); }
 .gap-note { display: block; font-size: 11px; color: var(--text3); margin-top: 2px; }
 .show-actions-inner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }

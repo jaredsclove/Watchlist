@@ -36,6 +36,28 @@ function networkBadgeStyle(name) {
   }
   return `style="background:${color}22; color:${color}; border-color:${color}55"`;
 }
+// A network category chip (render.js): the network's colour (or the hashed fallback) as the
+// tinted background and border, like networkBadgeStyle, with the text colour moved toward white
+// (dark) or darkened (light) until it reads at 4.5:1 over the chip on the page's surfaces.
+// Chosen at render time, like networkBadgeStyle. Original-label badges keep networkBadgeStyle.
+const CHIP_SURFACES = { dark: ['#0d0f14', '#161a23', '#1e2330'], light: ['#f5f6f8', '#ffffff'] };
+function chipRgb(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function chipLuminance(c) {
+  const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+}
+function chipContrast(a, b) { const x = chipLuminance(a), y = chipLuminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+function networkChipStyle(name) {
+  const color = networkColor(name), c = chipRgb(color), light = isLightMode();
+  const alpha = light ? 0x1a / 255 : 0x22 / 255;
+  const surfaces = (light ? CHIP_SURFACES.light : CHIP_SURFACES.dark).map(chipRgb);
+  const worst = t => Math.min(...surfaces.map(s => chipContrast(t, c.map((v, i) => Math.round(v * alpha + s[i] * (1 - alpha))))));
+  let t = light ? chipRgb(darkenHex(color, 0.35)) : c.slice();
+  for (let i = 0; i < 40 && worst(t) < 4.5; i++) t = light ? t.map(v => Math.round(v * 0.92)) : t.map(v => Math.round(v + (255 - v) * 0.08));
+  const text = '#' + t.map(v => v.toString(16).padStart(2, '0')).join('');
+  return light ? `style="background:${color}1a; color:${text}; border-color:${color}66"`
+    : `style="background:${color}22; color:${text}; border-color:${color}55"`;
+}
 function darkenHex(hex, amount) {
   const n = parseInt(hex.slice(1), 16);
   let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
