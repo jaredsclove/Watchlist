@@ -104,10 +104,12 @@ const reached = gate => Promise.race([gate.reached, new Promise((_, no) => setTi
 // ─── No sources on the page ───────────────────────────────────────────────────
 test('the tab bars hold only the views; the Browse bar offers Catalog updates; no Source filter or storage badge in any view', async () => {
   const app = await boot();
-  for (const [media, views] of [['tv', ['watching', 'alltv', 'comingsoon']], ['movie', ['allmovies']]]) {
+  // B9: Movies has a single view (All Movies), so its secondary row is hidden and empty.
+  for (const [media, views, tabs] of [['tv', ['watching', 'alltv', 'comingsoon'], ['watching', 'alltv', 'comingsoon']], ['movie', ['allmovies'], []]]) {
     app.ctx.switchMediaType(media); await settle();
     const bar = app.el('tabBar').innerHTML;
-    assert.deepStrictEqual([...bar.matchAll(/switchView\('([^']+)'\)/g)].map(m => m[1]), views);
+    assert.deepStrictEqual([...bar.matchAll(/switchView\('([^']+)'\)/g)].map(m => m[1]), tabs);
+    assert.strictEqual(app.el('tabBar').hidden, media === 'movie');
     assert.ok(!bar.includes('switchTab(') && !bar.includes('legacy'));
     assert.ok(app.el('browseBar').innerHTML.includes('onclick="openCatalogChooser(this)"'));
     for (const v of views) {

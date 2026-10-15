@@ -128,7 +128,10 @@ test('Movies opens on All Movies; no storage tab is offered or kept (Stage 5); T
   assert.strictEqual(app.get('typeof activeTabId'), 'undefined', 'no storage tab state (Stage 5)');
   const bar = app.el('tabBar').innerHTML;
   assert.ok(!bar.includes('switchTab(') && !bar.includes('tab-sep') && !bar.includes('Movies (legacy)'));
-  assert.ok(/class="tab active" onclick="switchView\('allmovies'\)"/.test(bar));
+  // B9: Movies has one view, so it has no secondary row; the content heading names All Movies.
+  assert.strictEqual(app.el('tabBar').hidden, true);
+  assert.strictEqual(bar, '');
+  assert.ok(app.el('viewHead').innerHTML.includes('All Movies</h2>'));
   assert.strictEqual(app.get('typeof switchTab'), 'undefined', 'the storage tab code is gone (Stage 5)');
   assert.ok(html(app).includes("toggleWatch('f-wind')"), 'All Movies has the film actions');
   app.ctx.switchMediaType('tv'); await settle();

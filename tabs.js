@@ -3,7 +3,11 @@ function buildTabs() {
   const bar = document.getElementById('tabBar');
   // The views (Currently Watching, All TV, Coming Soon; All Movies). There are no
   // storage tabs (Stage 4b), and since Stage 5 no record has a storage at all.
-  bar.innerHTML = tabViewsFor(activeMediaType).map(v =>
+  // An area with a single view (Movies: All Movies) has no secondary row at all; its
+  // content heading names the view (B9).
+  const views = tabViewsFor(activeMediaType);
+  bar.hidden = views.length <= 1;
+  bar.innerHTML = views.length <= 1 ? '' : views.map(v =>
     `<div class="tab${v.id===activeViewId?' active':''}" onclick="switchView('${v.id}')">
       <span class="tab-icon">${v.icon}</span>${esc(v.label)}
     </div>`
