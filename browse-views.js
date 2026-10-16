@@ -585,7 +585,7 @@ function renderBrowseFilters() {
     ? `<div class="browse-toggles">${browseMedia !== 'movie' ? toggleGroup('TV presentation', 'presentation', 'setBrowsePresentation', BROWSE_PRESENTATIONS, browsePresentation) : ''}${browseMedia === 'all' ? toggleGroup('Grouping', 'grouping', 'setBrowseGrouping', BROWSE_GROUPINGS, browseGrouping) : ''}</div>`
     : '';
   const seasonVisSelect = dest && browseMedia !== 'movie' && browsePresentation === 'seasons'
-    ? `<select id="fSeasonVis" onchange="setBrowseSeasonVis(this.value)" aria-label="TV seasons">${Object.entries(BROWSE_SEASON_VIS_LABELS).map(([value, text]) =>
+    ? `<select id="fSeasonVis" class="season-vis-select" onchange="setBrowseSeasonVis(this.value)" aria-label="TV seasons">${Object.entries(BROWSE_SEASON_VIS_LABELS).map(([value, text]) =>
         `<option value="${value}"${browseSeasonVis === value ? ' selected' : ''}>TV seasons: ${text}</option>`).join('')}</select>`
     : '';
   const watchSelect = dest

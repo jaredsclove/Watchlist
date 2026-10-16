@@ -539,14 +539,14 @@ test('AC8: count lines keep their B8 wording with the bar, chips and panel', asy
 test('assets: one new token on every versioned file; config.js and identity.js unversioned; script order unchanged', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'watchlist.html'), 'utf8');
   const tokens = new Set([...html.matchAll(/\?v=([\w-]+)/g)].map(m => m[1]));
-  assert.deepStrictEqual([...tokens], ['20261015-filters1']);
+  assert.deepStrictEqual([...tokens], ['20261015-filters2']);
   const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1].split('?')[0]);
   // The order at the baseline (fa69c9a), unchanged.
   assert.deepStrictEqual(scripts, ['config.js', 'identity.js', 'api.js', 'ui-helpers.js', 'metadata.js', 'backup-restore.js', 'backup-format3.js', 'tabs.js',
     'render.js', 'row-actions.js', 'tmdb-search.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'refresh-shows.js', 'tmdb-match.js',
     'derived-views.js', 'tv-shows.js', 'organization.js', 'organization-manage.js', 'catalog-apply.js', 'browse-views.js', 'library.js']);
   assert.ok(/src="config\.js"/.test(html) && /src="identity\.js"/.test(html), 'unversioned');
-  assert.strictEqual((html.match(/\?v=20261015-filters1/g) || []).length, 22);
+  assert.strictEqual((html.match(/\?v=20261015-filters2/g) || []).length, 22);
 });
 
 // Contrast of the new styles' colour pairs, calculated from styles.css tokens (not rendered).
@@ -621,6 +621,60 @@ test('corr2 (D11): the Collection tag select and its ↻ Refresh share one field
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   assert.ok(/\.filter-field-row \{ display: flex; align-items: center; gap: 6px; min-width: 0; \}/.test(css) && /\.filter-field-row select \{ flex: 1 1 auto; min-width: 0; \}/.test(css)
     && /\.filter-field-row #collectionRefreshLink:empty \{ display: none; \}/.test(css), 'CSS: one row; the select shrinks; an empty link takes no space');
+});
+
+// B10 follow-up (FP-0 rev2, approved): F7, the ↻ Refresh link's readability and target; F6, a collection's TV seasons
+// choice on phones. Source checks and calculated contrast only: rendered contrast, sizes and fit are FV-2's.
+test('follow-up F7: ↻ Refresh is 13 px underlined accent text with the inherited font, a hover and focus treatment, ≥ 30 px desktop / 44 px phone targets; accent ≥ 4.5:1 and focus ring ≥ 3:1 on the panel — calculated, both schemes', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+  const rule = css.match(/\n\.collection-refresh-link \{([^}]*)\}/)[1];
+  for (const decl of ['font-size: 13px', 'font-family: inherit', 'color: var(--accent)', 'text-decoration: underline', 'min-height: 30px', 'padding: 4px 6px', 'white-space: nowrap']) {
+    assert.ok(rule.includes(decl), `rule has ${decl}`);
+  }
+  assert.ok(!/--text3|margin-left/.test(rule), 'the old muted colour and margin are gone');
+  assert.ok(/\.collection-refresh-link:hover \{ color: var\(--text\); \}/.test(css), 'hover');
+  assert.ok(/\.collection-refresh-link:focus-visible \{ outline: 2px solid var\(--accent\); outline-offset: 2px; \}/.test(css), 'focus ring');
+  const phone = css.slice(css.indexOf('/* B10 (D10)'));
+  assert.ok(/\.collection-refresh-link \{ min-height: 44px; padding: 0 10px; \}/.test(phone), 'phone target 44 px');
+  assert.ok(/\.filter-more \{[^}]*background: var\(--surface\)/.test(css), 'the panel background the pairs below assume');
+  for (const light of [false, true]) {
+    const t = { ...tokens(css, false), ...(light ? tokens(css, true) : {}) };
+    for (const [what, fg, bg, min] of [['Refresh text', t.accent, t.surface, 4.5], ['Refresh hover', t.text, t.surface, 4.5], ['Refresh focus ring', t.accent, t.surface, 3]]) {
+      assert.ok(contrast(fg, bg) >= min, `${light ? 'light' : 'dark'} ${what}: ${contrast(fg, bg).toFixed(2)}`);
+    }
+  }
+});
+
+test('follow-up F7: Refresh markup, name, visibility, action and place are unchanged — beside the Collection tag select, only for a person tag, reads only', async () => {
+  const data = library();
+  data.rows.push(film({ id: 'f-dir2', title: 'Director Film', collections: ['Some Director'] }));
+  const app = await boot(data, { customCollections: [{ id: 'cc-1', name: 'Some Director', tmdb_person_id: 42, role: 'director' }] });
+  await movies(app);
+  assert.ok(/<div class="filter-field-row"><select id="fCollection"[\s\S]*?<\/select><span id="collectionRefreshLink"><\/span><\/div>/.test(fb(app)), 'select, then the Refresh span, in one field row');
+  setFilter(app, 'fCollection', 'Some Director'); app.ctx.updateCollectionRefreshLink(); await settle();
+  assert.strictEqual(app.el('collectionRefreshLink').innerHTML, `<button class="collection-refresh-link" onclick="libraryRefreshPerson('Some Director')">↻ Refresh</button>`, 'same button, name and action');
+  setFilter(app, 'fCollection', ''); app.ctx.updateCollectionRefreshLink(); await settle();
+  assert.strictEqual(app.el('collectionRefreshLink').innerHTML, '', 'none for All collection tags');
+  assert.ok(readsOnly(app), 'nothing but reads; Refresh is never invoked');
+});
+
+test('follow-up F6: only a collection\'s TV seasons select carries the marker class; All TV\'s Seasons select does not; option wording, values, order and name unchanged; the phone rule widens the grid only for the marked select', async () => {
+  const app = await boot();
+  await collection(app);
+  app.ctx.setBrowsePresentation('seasons');
+  const sel = fb(app).match(/<select id="fSeasonVis"[^>]*>[\s\S]*?<\/select>/)[0];
+  assert.ok(sel.startsWith('<select id="fSeasonVis" class="season-vis-select" onchange="setBrowseSeasonVis(this.value)" aria-label="TV seasons">'), 'class added; handler and name unchanged');
+  assert.deepStrictEqual([...sel.matchAll(/<option value="(\w+)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2]]),
+    [['notskipped', 'TV seasons: All (except Skipped)'], ['all', 'TV seasons: All'], ['towatch', 'TV seasons: To watch'], ['watched', 'TV seasons: Watched'], ['skipped', 'TV seasons: Skipped']], 'options unchanged');
+  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'fSeasonVis', 'filterMoreBtn'], 'line order unchanged');
+  await allTv(app, 'seasons');
+  const tvSel = fb(app).match(/<select id="fSeasonVis"[^>]*>/)[0];
+  assert.ok(!tvSel.includes('season-vis-select') && tvSel.includes('aria-label="Seasons"'), 'All TV unchanged (outside scope)');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+  const phone = css.slice(css.indexOf('/* B10 (D10)'), css.indexOf('/* ─── Manage collections'));
+  assert.ok(/\.filter-line:has\(> \.season-vis-select\) \{ grid-template-columns: repeat\(auto-fit, minmax\(260px, 1fr\)\); \}/.test(phone), 'phone-only rule, 260 px columns');
+  assert.ok(/\.filter-line \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(140px, 1fr\)\); gap: 8px; \}/.test(phone), 'the general phone grid is unchanged');
+  assert.strictEqual((css.match(/season-vis-select/g) || []).length, 1, 'no desktop rule');
 });
 
 T.run();
