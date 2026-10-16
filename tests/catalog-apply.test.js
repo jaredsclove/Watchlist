@@ -431,11 +431,11 @@ test('an identified row holding a catalog key keeps it a no-op (the harness foll
   assert.strictEqual(doc.entries.find(e => e.key === `noop:${missingFilm.k}`).category, 'identified');
 });
 
-test('closing the dialog returns keyboard focus to what opened it, or to the Browse bar’s Catalog updates button when that is gone', async () => {
+test('closing the dialog returns keyboard focus to what opened it, or to Settings’ Catalog updates button when that is gone', async () => {
   const { app } = await behind();
   await openView(app);
   const focused = [];
-  app.ctx.document.querySelector = sel => (sel === '#browseBar .catalog-btn' ? { focus: () => focused.push('catalog-btn') } : null);
+  app.ctx.document.querySelector = sel => (sel === '#settingsScreen .settings-catalog-btn' ? { focus: () => focused.push('catalog-btn') } : null); // S1: the button is on Settings
   app.ctx.openCatalogUpdates('sheridan', { isConnected: true, focus: () => focused.push('opener') }); await settle();
   app.ctx.closeCatalogUpdates(); await settle();
   app.ctx.openCatalogUpdates('sheridan', { isConnected: false }); await settle();

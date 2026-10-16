@@ -221,6 +221,7 @@ test('restore: a format 2 file into this database is refused with guidance befor
   const src = await boot(library(), { org: false });
   const v2 = await legacyBackupFixture(src, 2);
   const app = await boot(library());
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   app.ctx.__b = v2;
   const before = app.requests.length;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
@@ -305,6 +306,7 @@ async function restoredBackup(app) {
   return { b, oldId: old.id, freshId: fresh };
 }
 async function restoreThrough(app, b) {
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings (no navigation if already there)
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
@@ -326,6 +328,7 @@ test('after a restore the selector and watch-with labels come from the restored 
 test('a restored-away collection that is still open (or chosen from a stale selector) says it isn’t available, with Back', async () => {
   const app = await boot(library());
   const { b, oldId } = await restoredBackup(app);
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
@@ -387,6 +390,7 @@ test('a startup read pending across a restore is discarded; the post-restore rea
   app.store.personal_collections = preRestore;
   g.release(); await pending; await settle();
   app.store.personal_collections = app.store.personal_collections_hold;
+  app.ctx.settingsBack(); await settle(); // S1: back to the list view, where the Browse selector is drawn
   assert.ok(options(app).some(([v]) => v === `browse:${freshId}`), 'still the restored collections: ' + JSON.stringify(options(app)));
 });
 
@@ -397,12 +401,14 @@ test('a pre-restore read that finishes before the post-restore read publishes no
   const pending = app.ctx.loadOrganization();
   await g.reached;
   const preRestore = JSON.parse(JSON.stringify(app.store.personal_collections));
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   const g2 = app.hold(r => r.url.includes('/personal_collections?')); // hold the post-restore read
   app.ctx.finishRestoreAndReload();
   await g2.reached;
+  app.ctx.settingsBack(); await settle(); // S1: back to the list view, where the Browse selector is drawn
   const restored = app.store.personal_collections;
   app.store.personal_collections = preRestore; // the pre-restore read answers with the old rows
   g.release(); await pending; await settle();
@@ -431,6 +437,7 @@ async function restoreChangedChoices(app) {
   b.tables.watch_with_choices = b.tables.watch_with_choices.filter(c => c.token !== 'Alone') // a removed choice
     .map(c => c.token === 'Suzanne' ? { ...c, label: 'Suzanne (restored)' } : c);
   b.rowCounts.watch_with_choices = b.tables.watch_with_choices.length;
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings (no navigation if already there)
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();

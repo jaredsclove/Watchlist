@@ -211,6 +211,7 @@ function yearFilterSelectHtml(rows) {
 
 // ─── The open view, read again ────────────────────────────────────────────────
 function reloadOpenView() {
+  if (typeof isSettingsView === 'function' && isSettingsView()) { renderSettings(); return true; } // Settings (S1): drawn again; nothing is read
   if (isBrowseView(activeViewId)) return loadBrowseView();
   else if (activeViewId) return loadDerivedView();
 }

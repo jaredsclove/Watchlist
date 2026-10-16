@@ -79,9 +79,22 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 .save-status { font-size: 11px; color: var(--green); opacity: 0; transition: opacity 0.3s; }
 .save-status.visible { opacity: 1; }
-.backup-age { font-size: 11px; color: var(--text3); white-space: nowrap; }
+.backup-age { font-size: 11px; color: var(--text2); white-space: nowrap; }
 .backup-age.warn { color: var(--amber); }
 .backup-age.urgent { color: var(--orange); font-weight: 600; }
+/* S1 (D8): the backup status is a link-styled button that opens Settings → Backup & Restore. */
+button.backup-age { background: none; border: 0; padding: 2px 4px; font-family: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+button.backup-age:hover { color: var(--text); }
+button.backup-age:focus-visible, .gear-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* S1: the gear (⚙ Settings) shows that Settings is the current page. */
+.gear-btn[aria-current="page"] { background: var(--accent-dim); border-color: var(--accent); color: #9db5ff; font-weight: 600; }
+.gear-btn[aria-current="page"]:hover { background: var(--accent-dim); }
+/* S1V-2 rev1: the S1 status texts and the current gear at 4.5:1 or more in light (scoped; tokens unchanged). */
+@media (prefers-color-scheme: light) {
+  .gear-btn[aria-current="page"] { color: #2a4fb8; }
+  .backup-age.warn { color: #7a5f17; }
+  .backup-age.urgent { color: #a8560a; }
+}
 
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; max-width: 480px; width: 100%; max-height: 85vh; overflow-y: auto; }
@@ -728,3 +741,38 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .details-value .search-input, .details-value .search-input:focus { flex: 1 1 auto; width: auto; min-width: 0; }
 .details-progress { font-size: 13px; color: var(--text2); margin-bottom: 4px; }
 @media (max-width: 700px) { .details-value .btn-link, #detailsModalBox .btn-link { min-height: 44px; } }
+
+/* ─── Settings & Management (B7, S1) ──────────────────────────────────────── */
+.settings-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
+.settings-title { font-size: 20px; font-weight: 600; margin: 0; }
+.settings-title:focus, .settings-card h3:focus { outline: none; }
+.settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.settings-card h3 { font-size: 14px; font-weight: 600; margin: 0; color: var(--text); }
+.settings-sub { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
+.settings-text { font-size: 13px; color: var(--text2); margin: 0; }
+.settings-status { font-size: 13px; color: var(--text); margin: 0; }
+.settings-status.warn { color: var(--amber); }
+.settings-status.urgent { color: var(--orange); font-weight: 600; }
+/* S1V-2 rev1: the same light-theme status colours as the header (4.5:1 or more on the card). */
+@media (prefers-color-scheme: light) {
+  .settings-status.warn { color: #7a5f17; }
+  .settings-status.urgent { color: #a8560a; }
+}
+.settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 700px) {
+  /* O5: logo · ⬇ Backup · ⚙ Settings on one line; the backup status on its own line. */
+  .topbar { padding: 10px 12px; gap: 8px; flex-wrap: nowrap; align-items: flex-start; }
+  .logo { min-height: 44px; flex-shrink: 0; }
+  .topbar-right { flex: 1 1 0; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+  #backupBtn, .gear-btn { min-height: 44px; }
+  button.backup-age { flex-basis: 100%; text-align: right; min-height: 32px; white-space: normal; overflow-wrap: anywhere; }
+  /* "Saved ✓" sits on the status line (left), so the first line keeps only the two buttons. */
+  .save-status { position: absolute; left: 12px; bottom: 10px; line-height: 32px; }
+  .settings-grid { grid-template-columns: 1fr; gap: 12px; }
+  .settings-title { font-size: 18px; flex-basis: 100%; }
+  .settings-head .btn, .settings-actions .btn { min-height: 44px; }
+  .settings-actions .btn { flex: 1 1 100%; }
+}
+/* S1V-2 rev1: below 421px the wordmark leaves room for the icon, a busy "Backing up…" and ⚙ Settings on one line. */
+@media (max-width: 420px) { .logo-text { display: none; } }

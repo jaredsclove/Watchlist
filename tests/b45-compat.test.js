@@ -199,10 +199,12 @@ async function stoppedChecks(app, lib, label) {
   assert.strictEqual(cap.phase, 'contracted-b45', `${label}: (the capability really does still say B4/B5)`);
   const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
   assert.match(res, /This page and the database don’t match[\s\S]*Reload the page\. No file was made\./, `${label}: no backup file`);
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   app.ctx.__b = { formatVersion: 5 };
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*This page and the database don’t match/, `${label}: no restore`);
   assert.match(app.el('phaseBanner').innerHTML, /Reload the page\. Until then this page changes nothing\./, `${label}: a persistent notice`);
+  app.ctx.switchView('alltv'); await settle(); // S1: back to the list view the checks started from
   app.ctx.loadDerivedView(); await settle();
   assert.match(app.el('phaseBanner').innerHTML, /Until then this page changes nothing/, `${label}: the notice survives a view read`);
   assert.strictEqual(app.writes().length, n);

@@ -30,7 +30,10 @@ const out = v => JSON.parse(JSON.stringify(v));
 const fileOf = obj => { const text = JSON.stringify(obj); return { text: async () => text, sha: crypto.createHash('sha256').update(text, 'utf8').digest('hex') }; };
 const modal = app => app.el('restoreModalBox').innerHTML.replace(/<[^>]+>/g, ' ').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 const restoreCalls = app => app.requests.filter(r => r.url.endsWith('/rpc/restore_backup'));
-async function choose(app, file) { await app.ctx.handleRestoreFileSelected({ target: { files: [file], value: 'x' } }); await settle(); }
+async function choose(app, file) {
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings (no navigation if already there)
+  await app.ctx.handleRestoreFileSelected({ target: { files: [file], value: 'x' } }); await settle();
+}
 async function send(app) { await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle(); }
 
 // A library with every old status (shows and films), for format 3 / 4 sources (no B4/B5 migration).

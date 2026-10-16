@@ -312,20 +312,20 @@ function takeBackNavFilters(viewId) {
   return values;
 }
 
-// Catalog updates (catalog-apply.js) is reached from here in both areas (Stage 4b).
-const CATALOG_BUTTON = `<button class="btn catalog-btn" onclick="openCatalogChooser(this)">Catalog updates</button>`;
-
 // The selector: your collections once loaded; while loading, or after a failed
-// load, it says so (with Retry) rather than showing an empty list.
+// load, it says so (with Retry) rather than showing an empty list. Manage and Catalog
+// updates are on Settings since S1 (tabs.js); Settings has no Browse row and only
+// refreshes its counts here.
 function buildBrowseBar() {
   const bar = document.getElementById('browseBar');
   if (!bar) return;
+  if (typeof isSettingsView === 'function' && isSettingsView()) { bar.innerHTML = ''; updateSettingsCounts(); return; }
   const label = `<label class="browse-bar-label" for="browseSelect">Browse collections</label>`;
   if (orgState !== 'ready') {
     const text = orgState === 'loading' ? 'Loading collections…' : 'Collections unavailable';
     const retry = orgState === 'loading' ? '' : ` <button class="btn" onclick="loadOrganization()">Retry</button>`;
     bar.innerHTML = `${label}
-    <select id="browseSelect" disabled><option value="" selected>${text}</option></select>${retry} ${CATALOG_BUTTON}`;
+    <select id="browseSelect" disabled><option value="" selected>${text}</option></select>${retry}`;
     return;
   }
   const list = activeBrowseCollections();
@@ -337,14 +337,12 @@ function buildBrowseBar() {
     <select id="browseSelect" onchange="openBrowseCollection(this.value)"${list.length ? '' : ' disabled'}>
       <option value=""${activeId ? '' : ' selected'}>${list.length ? 'Choose a collection…' : 'No collections yet'}</option>${list.map(c =>
         `<option value="${esc(c.id)}"${activeId === c.id ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}
-    </select> <button class="btn browse-manage" onclick="openManage('collections', null, this)">Manage</button> ${CATALOG_BUTTON}${stale}`;
+    </select>${stale}`;
 }
 
-// Restore is hidden (and its entry points do nothing) while a read-only view is
-// open; the view heading is shown only there.
+// The view heading is shown only in a browse view. (Restore has no header button since
+// S1: it is offered only on Settings, and its entry points refuse elsewhere.)
 function updateRestoreVisibility() {
-  const btn = document.getElementById('restoreBtn');
-  if (btn) btn.style.display = isBrowseView(activeViewId) ? 'none' : '';
   const head = document.getElementById('viewHead');
   if (head) head.innerHTML = isBrowseView(activeViewId) ? browseHeadHtml() : '';
 }

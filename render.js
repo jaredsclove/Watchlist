@@ -1,5 +1,6 @@
 // ─── Filters and table: each view draws its own (derived-views.js, browse-views.js) ──
 function renderFilters() {
+  if (typeof isSettingsView === 'function' && isSettingsView()) return; // Settings (S1) has no list filters
   if (isBrowseView(activeViewId)) { renderBrowseFilters(); return; }
   if (activeViewId) renderDerivedFilters();
 }
@@ -620,6 +621,7 @@ function watchWithPillsHtml(tokens, owner) {
 
 // ─── Render table ─────────────────────────────────────────────────────────────
 function renderTable() {
+  if (typeof isSettingsView === 'function' && isSettingsView()) return; // Settings (S1) has no list
   if (isBrowseView(activeViewId)) { renderBrowseTable(); return; }
   if (activeViewId) renderDerivedTable();
 }

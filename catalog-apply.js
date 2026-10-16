@@ -141,7 +141,7 @@ function closeCatalogChooser(keepOpen) {
   if (keepOpen) return opener;
   document.getElementById('catalogModalOverlay').style.display = 'none';
   document.getElementById('catalogModalBox').innerHTML = '';
-  const back = opener && opener.isConnected ? opener : document.querySelector('#browseBar .catalog-btn');
+  const back = opener && opener.isConnected ? opener : document.querySelector('#settingsScreen .settings-catalog-btn');
   if (back && typeof back.focus === 'function') back.focus();
   return opener;
 }
@@ -176,7 +176,7 @@ function closeCatalogUpdates() {
   document.getElementById('catalogModalBox').innerHTML = '';
   // Focus goes back to what opened the dialog, or the Browse bar's button; never the page.
   const back = opener && opener.isConnected ? opener
-    : document.querySelector('#browseBar .catalog-btn') || document.querySelector('#tabBar .tab.active');
+    : document.querySelector('#settingsScreen .settings-catalog-btn') || document.querySelector('#tabBar .tab.active');
   if (back && typeof back.focus === 'function') back.focus();
 }
 

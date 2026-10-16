@@ -539,14 +539,14 @@ test('AC8: count lines keep their B8 wording with the bar, chips and panel', asy
 test('assets: one new token on every versioned file; config.js and identity.js unversioned; script order unchanged', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'watchlist.html'), 'utf8');
   const tokens = new Set([...html.matchAll(/\?v=([\w-]+)/g)].map(m => m[1]));
-  assert.deepStrictEqual([...tokens], ['20261015-filters2']);
+  assert.deepStrictEqual([...tokens], ['20261016-settings1']);
   const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1].split('?')[0]);
   // The order at the baseline (fa69c9a), unchanged.
   assert.deepStrictEqual(scripts, ['config.js', 'identity.js', 'api.js', 'ui-helpers.js', 'metadata.js', 'backup-restore.js', 'backup-format3.js', 'tabs.js',
     'render.js', 'row-actions.js', 'tmdb-search.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'refresh-shows.js', 'tmdb-match.js',
     'derived-views.js', 'tv-shows.js', 'organization.js', 'organization-manage.js', 'catalog-apply.js', 'browse-views.js', 'library.js']);
   assert.ok(/src="config\.js"/.test(html) && /src="identity\.js"/.test(html), 'unversioned');
-  assert.strictEqual((html.match(/\?v=20261015-filters2/g) || []).length, 22);
+  assert.strictEqual((html.match(/\?v=20261016-settings1/g) || []).length, 22);
 });
 
 // Contrast of the new styles' colour pairs, calculated from styles.css tokens (not rendered).

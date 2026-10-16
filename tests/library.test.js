@@ -102,7 +102,7 @@ async function allTv(app) { app.ctx.switchView('alltv'); await settle(); }
 const reached = gate => Promise.race([gate.reached, new Promise((_, no) => setTimeout(() => no(new Error('the held request was never sent')), 3000))]);
 
 // ─── No sources on the page ───────────────────────────────────────────────────
-test('the tab bars hold only the views; the Browse bar offers Catalog updates; no Source filter or storage badge in any view', async () => {
+test('the tab bars hold only the views; Settings offers Catalog updates (S1); no Source filter or storage badge in any view', async () => {
   const app = await boot();
   // B9: Movies has a single view (All Movies), so its secondary row is hidden and empty.
   for (const [media, views, tabs] of [['tv', ['watching', 'alltv', 'comingsoon'], ['watching', 'alltv', 'comingsoon']], ['movie', ['allmovies'], []]]) {
@@ -111,7 +111,10 @@ test('the tab bars hold only the views; the Browse bar offers Catalog updates; n
     assert.deepStrictEqual([...bar.matchAll(/switchView\('([^']+)'\)/g)].map(m => m[1]), tabs);
     assert.strictEqual(app.el('tabBar').hidden, media === 'movie');
     assert.ok(!bar.includes('switchTab(') && !bar.includes('legacy'));
-    assert.ok(app.el('browseBar').innerHTML.includes('onclick="openCatalogChooser(this)"'));
+    assert.ok(!app.el('browseBar').innerHTML.includes('openCatalogChooser('), 'S1: not in the Browse bar');
+    app.ctx.openSettings(null);
+    assert.ok(app.el('settingsScreen').innerHTML.includes('onclick="openCatalogChooser(this)"'), 'S1: Catalog updates is on Settings');
+    app.ctx.switchMediaType(media); await settle();
     for (const v of views) {
       app.ctx.switchView(v); await settle();
       const page = app.el('filtersRow').innerHTML + app.el('tableHead').innerHTML + app.html();

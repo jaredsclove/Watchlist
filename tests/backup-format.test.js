@@ -78,6 +78,7 @@ test('a database without Stage 5 (format 1 or 2): restore isn’t offered for a 
   for (const opts of [{ rows: v1Rows(), format1: true }, { rows: v2Rows(), tvShows: v2Shows(), org: false }]) {
     for (const f of files) {
       const app = await createApp({ ...opts, stage5: null });
+      app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
       app.ctx.__b = f;
       await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
       assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*needs a database update/);
@@ -92,6 +93,7 @@ test('restore: a format 5 restore sends the flag as false', async () => {
   const app = await createApp({ rows: v2Rows(), tvShows: v2Shows() });
   const b = await app.run('buildBackupObject()');
   assert.strictEqual(b.formatVersion, 5);
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
   assert.strictEqual(app.get('pendingRestoreAllowV1Reset'), false);

@@ -250,18 +250,18 @@ test('missing defaults and a stale TBA date cause no write from any view or any 
   assert.deepStrictEqual(mutating(app), [], 'no POST/PATCH/DELETE/RPC/TMDB request');
 });
 
-test('every row action and Restore is inert while a read-only collection is open; Restore is hidden there and in All Movies only', async () => {
+test('every row action and Restore is inert while a read-only collection is open; Restore is offered only on Settings (S1, D11)', async () => {
   const app = await boot();
-  assert.notStrictEqual(app.el('restoreBtn').style.display, 'none');
+  assert.strictEqual(app.el('restoreBtn'), null, 'S1: no Restore control in the header');
   let clicked = 0;
   app.el('restoreFileInput').click = () => { clicked++; };
   app.ctx.switchMediaType('movie'); await settle();
-  assert.strictEqual(app.el('restoreBtn').style.display, 'none', 'All Movies (with film actions since Stage 4b) still hides Restore');
+  assert.strictEqual(app.el('restoreBtn'), null, 'S1: no Restore control in All Movies');
   app.ctx.handleRestoreClick(); await settle();
   assert.strictEqual(clicked, 0);
   for (const enter of [() => openCol(app, B['disney'])]) {
     await enter();
-    assert.strictEqual(app.el('restoreBtn').style.display, 'none');
+    assert.strictEqual(app.el('restoreBtn'), null, 'S1: no Restore control in a collection');
     const showId = app.get("[...browseData.showsById.values()].find(s => s.catalog_new).id");
     assert.ok(app.get(`tvShowsById.has(${JSON.stringify(showId)})`), 'the show is loaded page-wide, so only the guard stops the write');
     await app.ctx.toggleWatch('f-mando');
@@ -285,10 +285,12 @@ test('every row action and Restore is inert while a read-only collection is open
   assert.strictEqual(app.el('restoreModalOverlay').style.display, undefined, 'no restore dialog opened');
   assert.deepStrictEqual(mutating(app), []);
   app.ctx.switchView('alltv'); await settle();
-  assert.notStrictEqual(app.el('restoreBtn').style.display, 'none', 'Restore is back in the established views');
   assert.strictEqual(app.el('viewHead').innerHTML, '', 'the browse heading is gone in other views');
   app.ctx.handleRestoreClick();
-  assert.strictEqual(clicked, 1);
+  assert.strictEqual(clicked, 0, 'S1 (D11): a TV view no longer starts a restore');
+  app.ctx.openSettings(null);
+  app.ctx.handleRestoreClick();
+  assert.strictEqual(clicked, 1, 'S1 (D11): Restore runs on Settings');
 });
 
 // A restore started before navigating: a valid backup file whose text arrives late.
@@ -324,7 +326,7 @@ const restoreWrites = app => app.requests.filter(r => r.method !== 'GET');
 
 test('restore: without navigating, a late file still opens the restore dialog (control)', async () => {
   const { app, file, release } = await restoreSetup();
-  app.ctx.switchView('alltv'); await settle();
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   const done = app.ctx.handleRestoreFileSelected({ target: { files: [file], value: 'x' } });
   release(); await done; await settle();
   assert.ok(modalOpen(app) && app.el('restoreModalBox').innerHTML.includes('executeRestore()'), 'the test is armed: ' + app.el('restoreModalBox').innerHTML.slice(0, 300));
@@ -339,7 +341,7 @@ for (const [name, when] of [
 ]) {
   test(`restore race: navigating to a browse view while ${name} leaves no restore action and writes nothing`, async () => {
     const { app, file, release, downloads } = await restoreSetup();
-    app.ctx.switchView('alltv'); await settle();
+    app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
     const done = app.ctx.handleRestoreFileSelected({ target: { files: [file], value: 'x' } });
     let tail = done;
     if (when === 'text') {
@@ -399,12 +401,13 @@ test('restore: the confirmation steps refuse to run in a browse view even if a p
 
 test('restore: any navigation abandons a prepared restore; one already sent to the database is not interrupted', async () => {
   const { app, file, release } = await restoreSetup();
-  app.ctx.switchView('alltv'); await settle();
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   const done = app.ctx.handleRestoreFileSelected({ target: { files: [file], value: 'x' } });
   release(); await done; await settle();
   app.ctx.switchView('comingsoon'); await settle();
   assert.ok(!modalOpen(app) && app.get('pendingRestoreData') === null);
   // Sent: the RPC is in flight when navigation happens.
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   const done2 = app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => JSON.stringify(await app.ctx.buildBackupObject()) }], value: 'x' } });
   await done2; await settle();
   await app.ctx.executeRestore(); await settle();

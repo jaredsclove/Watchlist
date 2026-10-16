@@ -83,6 +83,8 @@ function setWatchWith(change) {
   const before = watchWithSignature();
   change();
   if (watchWithSignature() !== before) redrawForWatchWith();
+  // Settings (S1) shows the watch-with count / state: its text only, in place (tabs.js; no request).
+  if (typeof updateSettingsCounts === 'function') updateSettingsCounts();
 }
 
 function watchWithSignature() {

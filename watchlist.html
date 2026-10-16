@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261015-filters2">
+<link rel="stylesheet" href="styles.css?v=20261016-settings1">
 </head>
 <body>
 
@@ -14,11 +14,11 @@
     <div><div class="logo-text">Watchlist Tracker</div></div>
   </div>
   <div class="topbar-right">
-    <span class="backup-age" id="backupAgeIndicator"></span>
-    <button class="btn" id="backupBtn" onclick="handleBackupClick()">⬇ Backup</button>
-    <button class="btn" id="restoreBtn" onclick="handleRestoreClick()">⬆ Restore</button>
+    <button class="btn" id="backupBtn" onclick="handleBackupClick(this)">⬇ Backup</button>
+    <span id="settingsEntry"></span>
     <input type="file" id="restoreFileInput" accept="application/json" style="display:none" onchange="handleRestoreFileSelected(event)">
     <span class="save-status" id="saveStatus">Saved ✓</span>
+    <button class="backup-age" id="backupAgeIndicator" title="Open Backup &amp; Restore in Settings" onclick="openSettings(this, 'backup')"></button>
   </div>
 </div>
 
@@ -48,6 +48,7 @@
   <div id="banner"></div>
   <div id="errorBanner"></div>
   <div id="viewHead"></div>
+  <div id="settingsScreen" class="settings-screen" style="display:none"></div>
   <div class="filters" id="filtersRow"></div>
   <div class="stats-row" id="statsRow"></div>
 
@@ -82,27 +83,27 @@
      deliberately unversioned (the catalog-refresh workflow reloads it by plain URL). -->
 <script src="config.js"></script>
 <script src="identity.js"></script>
-<script src="api.js?v=20261015-filters2"></script>
-<script src="ui-helpers.js?v=20261015-filters2"></script>
-<script src="metadata.js?v=20261015-filters2"></script>
-<script src="backup-restore.js?v=20261015-filters2"></script>
-<script src="backup-format3.js?v=20261015-filters2"></script>
-<script src="tabs.js?v=20261015-filters2"></script>
-<script src="render.js?v=20261015-filters2"></script>
-<script src="row-actions.js?v=20261015-filters2"></script>
-<script src="tmdb-search.js?v=20261015-filters2"></script>
-<script src="collections-pull.js?v=20261015-filters2"></script>
-<script src="universe-pull.js?v=20261015-filters2"></script>
-<script src="person-pull.js?v=20261015-filters2"></script>
-<script src="refresh-shows.js?v=20261015-filters2"></script>
-<script src="tmdb-match.js?v=20261015-filters2"></script>
-<script src="derived-views.js?v=20261015-filters2"></script>
-<script src="tv-shows.js?v=20261015-filters2"></script>
-<script src="organization.js?v=20261015-filters2"></script>
-<script src="organization-manage.js?v=20261015-filters2"></script>
-<script src="catalog-apply.js?v=20261015-filters2"></script>
-<script src="browse-views.js?v=20261015-filters2"></script>
-<script src="library.js?v=20261015-filters2"></script>
+<script src="api.js?v=20261016-settings1"></script>
+<script src="ui-helpers.js?v=20261016-settings1"></script>
+<script src="metadata.js?v=20261016-settings1"></script>
+<script src="backup-restore.js?v=20261016-settings1"></script>
+<script src="backup-format3.js?v=20261016-settings1"></script>
+<script src="tabs.js?v=20261016-settings1"></script>
+<script src="render.js?v=20261016-settings1"></script>
+<script src="row-actions.js?v=20261016-settings1"></script>
+<script src="tmdb-search.js?v=20261016-settings1"></script>
+<script src="collections-pull.js?v=20261016-settings1"></script>
+<script src="universe-pull.js?v=20261016-settings1"></script>
+<script src="person-pull.js?v=20261016-settings1"></script>
+<script src="refresh-shows.js?v=20261016-settings1"></script>
+<script src="tmdb-match.js?v=20261016-settings1"></script>
+<script src="derived-views.js?v=20261016-settings1"></script>
+<script src="tv-shows.js?v=20261016-settings1"></script>
+<script src="organization.js?v=20261016-settings1"></script>
+<script src="organization-manage.js?v=20261016-settings1"></script>
+<script src="catalog-apply.js?v=20261016-settings1"></script>
+<script src="browse-views.js?v=20261016-settings1"></script>
+<script src="library.js?v=20261016-settings1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -149,6 +150,7 @@ let browseSeasonVis = 'notskipped'; // TV seasons (Seasons only): 'notskipped' (
 let browseSectionOpen = {}; // a collection's TBA / Date needs review sections (BROWSE_SECTION_DEFAULTS on every entry)
 let browseOrigin = null; // where Back returns from a collection: { mediaType, viewId, filters }
 let backNavFilters = null; // { view, values }: filters Back puts back on the view it returns to
+let settingsOrigin = null; // where Settings' "Back to library" returns: { mediaType, viewId, filters, browseOrigin } (tabs.js); null when none
 let filterPanelOpen = false; // B10: the More filters panel of the open view's visit is open (render.js filterPanelStart; never stored)
 let viewFilterMemory = { tag: null, values: {} }; // the open derived or browse view's filter values for this visit, including controls its current mode hides (browse-views.js)
 let personalCollections = null; // personal_collections rows (organization.js); null until loaded

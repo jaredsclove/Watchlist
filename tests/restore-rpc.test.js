@@ -33,6 +33,7 @@ async function setup() {
   assert.strictEqual(backup.formatVersion, 5);
   const app = await createApp({ rows: [linked('a1'), linked('a2')], tvShows: [show('a1'), show('a2')] });
   assert.deepStrictEqual(Array.from(app.get('validateBackupObject')(backup)), []);
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   app.ctx.__backup = backup;
   app.run(`pendingRestoreData = __backup`);
   return { app, backup };

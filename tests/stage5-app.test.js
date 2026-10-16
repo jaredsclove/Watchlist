@@ -241,6 +241,7 @@ test('B4/B5: backup is format 5 (no storage, theme_kind, governance tables, no o
   assert.ok(['catalog_show_links', 'catalog_film_links'].every(t => Array.isArray(b.tables[t])));
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(b)), []);
   app.ctx.__b = b;
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 5');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
@@ -253,6 +254,7 @@ for (const archive of ['active', 'retired']) {
     const f3 = await legacyBackupFixture(co.app, 3); // a format-3 file (the page no longer exports one, G8)
     assert.strictEqual(f3.formatVersion, 3);
     const { app } = await boot('contracted-b45', { recoveryArchive: archive });
+    app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
     await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle(); // the file is read (and fingerprinted) as when chosen
     const preview = app.el('restoreModalBox').innerHTML.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
     assert.match(preview, /format 3/i);
@@ -283,6 +285,7 @@ for (const [label, shift, verified] of [['the same instant in the database’s f
       for (const l of [...app.store.__links.shows, ...app.store.__links.films]) l.created_at = asDb(l.created_at);
       return r;
     };
+    app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
     await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle(); // the file is read (and fingerprinted) as when chosen
     const sent = app.get('pendingRestoreData');
     assert.ok(sent.tables.catalog_show_links.length > 0 && sent.tables.catalog_show_links.every(l => /Z$/.test(l.created_at)));
@@ -299,6 +302,7 @@ test('B4/B5: a format-5 file into a database that is not B4/B5 is refused before
   const f4 = await c.app.ctx.buildBackupObject();
   const { app } = await boot('coexistence');
   app.ctx.__b = f4;
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
   // (Its first view read lacked the B4/B5 columns, so the page has also stopped until it is reloaded.)
   assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*(restores only into a database in its own state \(format 5\)|This page and the database don’t match)/); // the gate comes first since G8
@@ -336,6 +340,7 @@ test('transition after a restore was previewed: the safety backup finds the data
   app.ctx.downloadJSON = () => { downloads++; };
   const f4 = await app.ctx.buildBackupObject();
   app.ctx.__b = f4;
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore database/);
   app.stage5 = 'coexistence'; // a (separately approved) rollback after the preview
@@ -349,6 +354,7 @@ test('transition after the safety backup was confirmed: the phase is read again 
   const { app } = await boot('contracted-b45');
   const f4 = await app.ctx.buildBackupObject();
   app.ctx.__b = f4;
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 5');
   app.stage5 = 'coexistence';
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle(); await settle();
@@ -366,9 +372,11 @@ test('a database without the Stage 5 update (or one rolled back meanwhile): no r
   await allTv(app);                                   // the page loaded while the database was updated …
   app.stage5 = null;                                  // … then the expansion was rolled back
   app.ctx.__b = b;
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*needs a database update/);
   assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 5');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore not sent[\s\S]*couldn’t be confirmed/);
@@ -412,6 +420,7 @@ for (const [label, stage5] of [['no Stage 5 (no capability)', null], ['an unknow
     assert.match(res, /makes backups only of a database in its own state \(format 5\), and this database isn’t in it, so no file was made/);
     assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities'], 'no personal_collections / tv_shows probe');
     app.ctx.__b = f4;
+    app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
     await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
     assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available/);
     assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
@@ -426,6 +435,7 @@ test('G8 N3: coexistence: a format-3 file is not restored (no direct restore): n
   app.ctx.downloadJSON = () => { downloads++; };
   const f3 = await legacyBackupFixture(app, 3);
   const before = app.requests.length;
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
   assert.match(modalText(app), /Restore isn't available This page and the database don’t match/);
   assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
@@ -441,6 +451,7 @@ test('G8 N4 (B4/B5): a document that is not format 5 is never sent at the send s
   const f3 = await legacyBackupFixture(co.app, 3);
   const { app } = await boot('contracted-b45');
   app.ctx.__b = f3;
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 5');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /Restore not sent/);
@@ -473,6 +484,7 @@ test('G8 N6: contracted: a format-3 file the converter refuses (a row that is ne
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(f3)), [], 'the file itself passes format-3 validation');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
   assert.match(modalText(app), /This format 3 backup can't be converted It breaks a rule your updated list enforces, so nothing was changed: a row that is neither a film nor a linked TV season/);
   assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
@@ -492,6 +504,7 @@ test('G8 N7: contracted: a converted document that fails format-4 validation is 
   app.run('convertFormat3To4 = () => __conv'); // test-only stand-in; the real converter is unchanged (G8 L6)
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
   assert.match(modalText(app), /This format 3 backup can't be converted The converted backup doesn’t pass validation, so nothing was changed:[\s\S]*theme_kind/);
   assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
@@ -510,6 +523,7 @@ test('G8 N8: contracted: format 1 and format 2 files are refused at preview, bef
     let downloads = 0;
     app.ctx.downloadJSON = () => { downloads++; };
     app.ctx.__b = f;
+    app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
     await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
     assert.match(app.el('restoreModalBox').innerHTML, re);
     assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
@@ -522,14 +536,17 @@ test('G8 N8: contracted: format 1 and format 2 files are refused at preview, bef
 test('G8 N9 (finding 4): a format-3 file refused at coexistence stays refused in that page after the database becomes B4/B5 (stop until reload); a reloaded page converts it', async () => {
   const { app } = await boot('coexistence');
   const f3 = await legacyBackupFixture(app, 3);
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
   assert.match(modalText(app), /Restore isn't available/);
   app.ctx.closeRestoreModal();
   app.migrateB45();
+  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
   assert.match(modalText(app), /Restore isn't available This page and the database don’t match/, 'still stopped until reload');
   assert.strictEqual(app.get('pendingRestoreData'), null);
   const r = (await boot('contracted-b45')).app;
+  r.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await r.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
   assert.match(modalText(r), /This is a format 3 backup; it is converted before restoring/);
   assert.ok(r.el('restoreModalBox').innerHTML.includes('executeRestore()'));

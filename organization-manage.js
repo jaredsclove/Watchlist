@@ -1,6 +1,7 @@
 // ─── Manage collections (Stage 3b-2) ─────────────────────────────────────────
-// One dialog, opened from the Browse collections bar (Manage), a collection's
-// heading (Edit members) or the Movies watch-with filter (Manage choices…). It
+// One dialog, opened from Settings (Manage collections… / Manage watch-with choices…,
+// since S1), a collection's heading (Edit members) or the Movies watch-with filter
+// (Manage choices…). It
 // changes only your organization: create, rename, archive and unarchive
 // collections and watch-with choices, and add or remove a whole show or a film in
 // a collection. Tracking (watched, status, dates) is never changed here, and the
@@ -88,7 +89,7 @@ function openManage(view, collectionId, openerEl) {
   const opener = openerEl || document.activeElement || null;
   // The control that opened the dialog may be redrawn meanwhile: remember how to find it again.
   const openerSelector = opener && typeof opener.matches === 'function'
-    ? ['.browse-manage', '.browse-edit-members', '.ww-filter .btn-link'].find(sel => opener.matches(sel)) || null : null;
+    ? ['.settings-manage-collections', '.settings-manage-choices', '.browse-edit-members', '.ww-filter .btn-link'].find(sel => opener.matches(sel)) || null : null;
   manage = {
     session: ++manageSession, epoch: orgEpoch, opener, openerSelector, view: view === 'choices' ? 'choices' : view === 'members' ? 'members' : 'collections',
     collectionId: collectionId || null, phase: 'checking', error: '', data: null, readSeq: 0, refreshing: false, refreshFor: null,

@@ -134,12 +134,28 @@ function timestampForFilename() {
 // ─── Collection definitions ───────────────────────────────────────────────────
 
 
-// ─── Backup button ──────────────────────────────────────────────────────────
-async function handleBackupClick() {
-  const btn = document.getElementById('backupBtn');
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Backing up…';
+// ─── Backup buttons ─────────────────────────────────────────────────────────
+// O5 (S1): ⬇ Backup in the header and ⬇ Download backup in Settings run the same backup
+// and share one busy state: while it runs both are disabled, the pressed one says
+// "Backing up…", and a second press (of either) does nothing.
+const BACKUP_LABELS = { backupBtn: '⬇ Backup', settingsBackupBtn: '⬇ Download backup' };
+let backupBusy = false;
+let backupPressedId = null;
+
+function setBackupButtons() {
+  Object.entries(BACKUP_LABELS).forEach(([id, label]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = backupBusy;
+    btn.textContent = backupBusy && backupPressedId === id ? 'Backing up…' : label;
+  });
+}
+
+async function handleBackupClick(opener) {
+  if (backupBusy) return;
+  backupBusy = true;
+  backupPressedId = opener && BACKUP_LABELS[opener.id] ? opener.id : 'backupBtn';
+  setBackupButtons();
   try {
     const backup = await buildBackupObject();
     downloadJSON(backup, `watchlist-backup-${timestampForFilename()}.json`);
@@ -148,14 +164,22 @@ async function handleBackupClick() {
   } catch(e) {
     showError(`Backup failed: ${e.message}`);
   } finally {
-    btn.disabled = false;
-    btn.textContent = originalText;
+    backupBusy = false;
+    backupPressedId = null;
+    setBackupButtons();
   }
 }
 
-// Restore isn't offered in the read-only browse views (browse-views.js).
+// D11 (S1): restore is prepared and confirmed only on Settings. The browse-view refusal
+// is kept as it was (a browse view is never Settings). Nothing checks this after
+// restore_backup has been sent (restoreInFlight): a submitted restore always finishes.
+function restoreEligibleView() {
+  return typeof isSettingsView === 'function' && isSettingsView(activeViewId) && !isBrowseView(activeViewId);
+}
+
+// Restore is offered only on Settings (tabs.js).
 function handleRestoreClick() {
-  if (isBrowseView(activeViewId)) return;
+  if (!restoreEligibleView()) return;
   document.getElementById('restoreFileInput').click();
 }
 
@@ -678,7 +702,7 @@ function identityLossErrors(currentItems, backupItems) {
 // download anything, least of all in a read-only browse view. Once restore_backup
 // has been sent, navigation no longer interrupts it.
 function restoreSessionLive(session) {
-  return session === restoreSessionSeq && !isBrowseView(activeViewId);
+  return session === restoreSessionSeq && restoreEligibleView();
 }
 
 function invalidateRestorePreparation() {
@@ -690,7 +714,7 @@ function invalidateRestorePreparation() {
 async function handleRestoreFileSelected(event) {
   const file = event.target.files[0];
   event.target.value = ''; // allow re-selecting the same file later
-  if (!file || isBrowseView(activeViewId)) return;
+  if (!file || !restoreEligibleView()) return;
   const session = ++restoreSessionSeq;
 
   let parsed, sourceSha256;
@@ -881,7 +905,7 @@ function closeRestoreModal() {
 
 async function executeRestore() {
   const backup = pendingRestoreData;
-  if (!backup || isBrowseView(activeViewId)) { closeRestoreModal(); return; }
+  if (!backup || !restoreEligibleView()) { closeRestoreModal(); return; }
   const session = restoreSessionSeq;
 
   const confirmBtn = document.getElementById('confirmRestoreBtn');
@@ -958,7 +982,11 @@ async function executeRestore() {
 
 async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
   const backup = pendingRestoreData;
-  if (!backup || isBrowseView(activeViewId)) { closeRestoreModal(); return; }
+  if (!backup || !restoreEligibleView()) { closeRestoreModal(); return; }
+  // The preparation this continuation belongs to (S1 review): after the awaited phase read
+  // below, a navigation (which abandoned it) or a newer preparation means it returns
+  // without any dialog or send, leaving the current view and any newer restore alone.
+  const session = restoreSessionSeq;
 
   const setProgress = (msg) => {
     showRestoreModal(`<div class="modal-title">Restoring…</div><div class="modal-progress">${esc(msg)}</div>`);
@@ -973,6 +1001,7 @@ async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
   // Nothing is sent otherwise.
   let sendCap = null;
   try { sendCap = await stage5Capabilities(); } catch (e) { sendCap = null; }
+  if (!restoreSessionLive(session) || pendingRestoreData !== backup) return;
   if (!pageMayWrite(sendCap) || sendCap.phase !== B45_PHASE || backup.formatVersion !== 5 || !pendingRestoreData) {
     showRestoreModal(`<div class="modal-title">Restore not sent</div>
       <div class="modal-error">The database’s update state ${sendCap ? 'changed after this restore was prepared' : 'couldn’t be confirmed'}, so nothing was sent and nothing was changed. Choose the file again to see what restoring it would do now.</div>
@@ -1060,8 +1089,14 @@ function finishRestoreAndReload() {
   closeRestoreModal();
   closeLibraryPanel(); // anything prepared before the restore no longer applies (library.js)
   tabData = {};
-  loadOrganization(); // the restored collections and watch-with choices (in the background)
-  if (isBrowseView(activeViewId)) loadBrowseView();
+  const organization = loadOrganization(); // the restored collections and watch-with choices (in the background)
+  if (typeof isSettingsView === 'function' && isSettingsView()) {
+    // Settings (S1): drawn again from the reset state, then its counts once the organization is read.
+    renderSettings();
+    Promise.resolve(organization).then(() => { if (isSettingsView()) updateSettingsCounts(); }, () => {});
+    const head = document.getElementById('settingsTitle');
+    if (head && typeof head.focus === 'function') head.focus();
+  } else if (isBrowseView(activeViewId)) loadBrowseView();
   else if (activeViewId) loadDerivedView();
 }
 
@@ -1072,25 +1107,28 @@ function recordBackupTimestamp() {
   updateBackupAgeIndicator();
 }
 
-function updateBackupAgeIndicator() {
-  const el = document.getElementById('backupAgeIndicator');
-  if (!el) return;
+// The backup status (this device's last backup, from localStorage; no request): the same
+// text and colour in the header link and on Settings (S1).
+function backupStatus() {
   const lastStr = localStorage.getItem(LAST_BACKUP_KEY);
-  if (!lastStr) {
-    el.textContent = 'No backup yet';
-    el.className = 'backup-age warn';
-    return;
-  }
+  if (!lastStr) return { text: 'No backup yet', cls: 'warn' };
   const last = new Date(lastStr);
   const days = Math.floor((Date.now() - last.getTime()) / (1000*60*60*24));
-  if (days < 14) {
-    el.textContent = days === 0 ? 'Backed up today' : `Backup: ${days}d ago`;
-    el.className = 'backup-age';
-  } else if (days < 30) {
-    el.textContent = `Backup: ${days}d ago`;
-    el.className = 'backup-age warn';
-  } else {
-    el.textContent = `Backup recommended (${days}d ago)`;
-    el.className = 'backup-age urgent';
+  if (days < 14) return { text: days === 0 ? 'Backed up today' : `Backup: ${days}d ago`, cls: '' };
+  if (days < 30) return { text: `Backup: ${days}d ago`, cls: 'warn' };
+  return { text: `Backup recommended (${days}d ago)`, cls: 'urgent' };
+}
+
+function updateBackupAgeIndicator() {
+  const status = backupStatus();
+  const el = document.getElementById('backupAgeIndicator');
+  if (el) {
+    el.textContent = status.text;
+    el.className = status.cls ? `backup-age ${status.cls}` : 'backup-age';
+  }
+  const onSettings = document.getElementById('settingsBackupStatus');
+  if (onSettings) {
+    onSettings.textContent = status.text;
+    onSettings.className = status.cls ? `settings-status ${status.cls}` : 'settings-status';
   }
 }

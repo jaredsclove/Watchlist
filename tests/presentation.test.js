@@ -64,7 +64,8 @@ test('B9: Movies has no secondary row (hidden, empty); TV keeps its three views'
   assert.strictEqual(app.el('tabBar').hidden, true);
   assert.strictEqual(app.el('tabBar').innerHTML, '');
   assert.ok(app.el('viewHead').innerHTML.includes('🎞️ All Movies</h2>'), 'the content heading stays');
-  assert.ok(app.el('browseBar').innerHTML.includes('openCatalogChooser(this)'), 'the Browse bar (and Catalog updates) stays');
+  assert.ok(app.el('browseBar').innerHTML.includes('id="browseSelect"'), 'the Browse bar stays');
+  assert.ok(!app.el('browseBar').innerHTML.includes('openCatalogChooser('), 'S1: Catalog updates is on Settings, not in the Browse bar');
   assert.deepStrictEqual(app.writes(), []);
 });
 
@@ -74,7 +75,7 @@ test('B9: All Movies keeps its filters, Unwatched-only default, actions and hidd
   assert.strictEqual(app.el('fWatch').value, 'unwatched');
   assert.ok(app.el('filtersRow').innerHTML.includes("openLibraryPanel('movie')"));
   assert.ok(app.html().includes('toggleWatch('), 'the film actions are there');
-  assert.strictEqual(app.el('restoreBtn').style.display, 'none', 'Restore stays hidden in All Movies');
+  assert.strictEqual(app.el('restoreBtn'), null, 'S1: no Restore control outside Settings');
 });
 
 test('B9: repeated TV ↔ Movies switches leave no stale row', async () => {
