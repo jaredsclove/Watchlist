@@ -19,6 +19,18 @@ const text = app => box(app).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').rep
 const rpcCalls = app => app.requests.filter(r => r.url.includes('/rpc/library_catalog_apply'));
 // The dialog opens from the Browse bar in any view (Stage 5: no storage tabs).
 const openView = async app => { app.ctx.switchView('alltv'); await settle(); };
+// The preview and the read-back hash with crypto.subtle (the thread pool), which under CPU load can
+// take more event-loop turns than one settle: these wait for the dialog's state, not a fixed count.
+const until = async done => { for (let i = 0; i < 500 && !done(); i++) await settle(); };
+const dialogPhase = app => app.get('catalogDialog && catalogDialog.phase');
+async function openUpdates(app, id) {
+  app.ctx.openCatalogUpdates(id); await settle();
+  await until(() => dialogPhase(app) !== 'checking');
+}
+async function applyUpdates(app) {
+  await app.ctx.catalogApply(); await settle();
+  await until(() => dialogPhase(app) !== 'applying' && app.get('catalogDialog && catalogDialog.readBack && catalogDialog.readBack.state') !== 'reading');
+}
 
 // Sheridan with its catalog applied, then: one season and one film missing again,
 // one season's date and one film's date back to TBA (the catalog now dates them).
@@ -56,7 +68,7 @@ test('entry, reload, Retry and the post-restore reload of the views and the coll
 test('review: freshness check, then a preview; Apply sends the same catalog with the preview hash; receipt read back as verified; the view reloads by GET', async () => {
   const { app, seasonDef, filmDef, missingSeason, missingFilm } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   const t = text(app);
   assert.match(t, /Applying this catalog would make these changes\. Nothing has changed yet\./);
   assert.match(t, /New seasons \(1\)/); assert.match(t, /New films \(1\)/); assert.match(t, /Date updates \(2\)/);
@@ -65,7 +77,7 @@ test('review: freshness check, then a preview; Apply sends the same catalog with
   assert.deepStrictEqual(writes(app), ['POST rpc/library_catalog_apply_b45'], 'the preview is the only call so far');
   const previewHash = app.get('catalogDialog.preview.hash');
   assert.strictEqual(rpcCalls(app)[0].body.p_approved, undefined);
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   const apply = rpcCalls(app)[1];
   assert.strictEqual(apply.body.p_approved, previewHash);
   assert.deepStrictEqual(apply.body.p_defaults, rpcCalls(app)[0].body.p_defaults);
@@ -83,7 +95,7 @@ test('review: freshness check, then a preview; Apply sends the same catalog with
 test('read-back reports differences instead of "verified" when a record changed after the commit', async () => {
   const { app, seasonDef } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   const g = app.hold(readBackRead);
   const done = app.ctx.catalogApply();
   await g.reached;
@@ -98,7 +110,7 @@ test('a page whose catalog is older than the published one offers no Apply and c
   const cfg = fs.readFileSync(require('path').join(__dirname, '..', 'config.js'), 'utf8').replace('k:"yellowstone|season 1",t:"Yellowstone"', 'k:"yellowstone|season 1",t:"Yellowstone (renamed)"');
   const { app } = await behind({ configText: cfg });
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   assert.match(text(app), /This page has an older catalog than the one published\. Reload the page and review again\. Nothing was changed\./);
   assert.strictEqual(rpcCalls(app).length, 0);
   assert.ok(!box(app).includes('catalogApply()'));
@@ -111,7 +123,7 @@ const readBackRead = r => r.method === 'GET' && r.url.includes('/watchlist_items
 test('read-back compares every approved value: a new film’s later title, status and watched changes are reported, not verified', async () => {
   const { app, missingFilm } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   const g = app.hold(readBackRead);
   const done = app.ctx.catalogApply();
   await g.reached;
@@ -126,7 +138,7 @@ test('read-back compares every approved value: a new film’s later title, statu
 test('read-back: an incomplete receipt and a membership in another collection are differences', async () => {
   const { app, missingFilm } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   const real = app.rpcHandlers.library_catalog_apply_b45;
   app.rpcHandlers.library_catalog_apply_b45 = body => {
     const res = real(body);
@@ -148,9 +160,9 @@ test('read-back: an incomplete receipt and a membership in another collection ar
 test('check state after a lost reply: a different exact date on the approved row is not "present"; the differences are named; nothing resent', async () => {
   const { app, seasonDef } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   loseReply(app, { commit: false });
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   Object.assign(app.store.watchlist_items.find(r => r.item_key === seasonDef.k), { display_date: 'Dec 31, 2030', date_sort: '2030-12-31' });
   await app.ctx.catalogCheckState(); await settle();
   const t = text(app);
@@ -163,9 +175,9 @@ test('check state after a lost reply: a different exact date on the approved row
 test('check state: "present" needs every approved outcome exactly; a committed apply whose new film was later edited is not "present"', async () => {
   const { app, missingFilm } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   loseReply(app, { commit: true });
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   app.store.watchlist_items.find(r => r.item_key === missingFilm.k).status = 'skipped';
   await app.ctx.catalogCheckState(); await settle();
   const t = text(app);
@@ -199,7 +211,7 @@ async function rich({ archived = false } = {}) {
 // Applies through the dialog; mutate(store, result) runs right after the commit, before the read-back.
 async function verifyAfter(app, mutate) {
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   const real = app.rpcHandlers.library_catalog_apply_b45;
   app.rpcHandlers.library_catalog_apply_b45 = body => {
     const res = real(body);
@@ -207,7 +219,7 @@ async function verifyAfter(app, mutate) {
     app.rpcHandlers.library_catalog_apply_b45 = real;
     return { ...res, text: async () => { const j = JSON.parse(await res.text()); mutate(app.store, j); return JSON.stringify(j); } };
   };
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   return { state: app.get('catalogDialog.readBack.state'), diffs: app.get('catalogDialog.readBack.differences') || [], text: text(app) };
 }
 const rowByKey = (st, k) => st.watchlist_items.find(r => r.item_key === k);
@@ -297,9 +309,9 @@ test('verification reads are strict: an empty membership answer without an exact
 test('check state uses the same comparison: a lost committed apply whose dated season’s show was later Skipped is not "present"; an incomplete read stays unknown', async () => {
   const x = await rich();
   await openView(x.app);
-  x.app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(x.app, 'sheridan');
   loseReply(x.app, { commit: true });
-  await x.app.ctx.catalogApply(); await settle();
+  await applyUpdates(x.app);
   const r = rowByKey(x.app.store, x.seasonFillDef.k);
   x.app.store.tv_shows.find(y => y.id === r.show_id).status = 'skipped';
   await x.app.ctx.catalogCheckState(); await settle();
@@ -316,10 +328,10 @@ test('check state uses the same comparison: a lost committed apply whose dated s
 test('stale: a film Skip between preview and apply → refused, nothing written; Review again shows the new preview', async () => {
   const { app, filmDef } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   app.store.watchlist_items.find(r => r.item_key === filmDef.k).status = 'skipped';
   const before = JSON.stringify(app.store.watchlist_items);
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   assert.match(text(app), /changed since this preview, so nothing was changed/);
   assert.strictEqual(JSON.stringify(app.store.watchlist_items), before);
   app.ctx.catalogReview(); await settle();
@@ -329,10 +341,10 @@ test('stale: a film Skip between preview and apply → refused, nothing written;
 test('busy: nothing written, no automatic retry', async () => {
   const { app } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   app.catalogBusyNext = 1;
   const before = JSON.stringify(app.store.watchlist_items);
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   assert.match(text(app), /The database was busy, so nothing was changed/);
   assert.strictEqual(rpcCalls(app).length, 2);
   assert.strictEqual(JSON.stringify(app.store.watchlist_items), before);
@@ -351,9 +363,9 @@ function loseReply(app, { commit }) {
 test('no reply after a committed apply: unknown, never resent; Check current state says the library holds the changes without saying who made them', async () => {
   const { app } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   loseReply(app, { commit: true });
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   assert.match(text(app), /We couldn’t confirm the result \(Failed to fetch\)\. Your request may still finish, may have finished, or may have been stopped\. It won’t be sent again automatically\./);
   await settle(50);
   assert.strictEqual(rpcCalls(app).filter(r => r.body.p_approved).length, 1, 'not resent');
@@ -364,9 +376,9 @@ test('no reply after a committed apply: unknown, never resent; Check current sta
 test('no reply and nothing committed: "aren’t in your library right now", never "not applied"; the same as applied-then-undone; applying again is the owner’s choice', async () => {
   const { app } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   loseReply(app, { commit: false });
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   await app.ctx.catalogCheckState(); await settle();
   const t = text(app);
   assert.match(t, /These changes aren’t in your library right now\. Your earlier request may still finish, or may have been stopped; this can’t be told apart from changes that were applied and later undone\./);
@@ -379,10 +391,10 @@ test('no reply and nothing committed: "aren’t in your library right now", neve
 test('applied, then undone elsewhere: Check current state can’t tell it from never applied', async () => {
   const { app } = await behind();
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   const snapshot = JSON.parse(JSON.stringify({ w: app.store.watchlist_items, s: app.store.tv_shows, m: app.store.collection_memberships }));
   loseReply(app, { commit: true });
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   Object.assign(app.store, { watchlist_items: snapshot.w, tv_shows: snapshot.s, collection_memberships: snapshot.m }); // reversed
   await app.ctx.catalogCheckState(); await settle();
   assert.match(text(app), /can’t be told apart from changes that were applied and later undone/);
@@ -393,9 +405,9 @@ test('archived target: the preview says new items won’t join it; the receipt h
   const { app } = await behind();
   app.store.personal_collections.find(c => c.legacy_source === 'sheridan').archived_at = '2026-10-08T00:00:00+00:00';
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   assert.match(text(app), /won’t join Sheridan \(archived\)/);
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   assert.match(text(app), /Verified/);
   const rc = app.get('catalogDialog.result.receipt');
   assert.ok(Object.keys(rc).filter(k => k.startsWith('membership:')).every(k => rc[k].membership_id === 'none'));
@@ -412,10 +424,10 @@ test('conflicts are listed as not included and reported as such after applying',
   const missing = rows.filter(r => r.season === 'Film').at(-1);
   const app = await createApp({ rows: rows.filter(r => r !== drop && r !== missing), tvShows: shows });
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   assert.match(text(app), /1 entry is not included; it needs review\./);
   assert.match(text(app), /Not included — needs review \(1\)/);
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   assert.match(text(app), /Applied 1 change; 1 entry not included \(listed below\)\./);
 });
 
@@ -425,7 +437,7 @@ test('an identified row holding a catalog key keeps it a no-op (the harness foll
     display_date: missingFilm.d, date_sort: missingFilm.ds, status: 'confirmed', watched: false, media_type: 'movie', tmdb_id: 990001, season_number: null,
     show_id: null, skipped: false, watch_with: [], collections: [] });
   await openView(app);
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   const doc = app.get('catalogDialog.preview.document');
   assert.ok(!doc.entries.some(e => e.kind === 'insert_film' || e.kind === 'membership'), JSON.stringify(doc.entries.filter(e => e.kind !== 'noop')));
   assert.strictEqual(doc.entries.find(e => e.key === `noop:${missingFilm.k}`).category, 'identified');
@@ -439,7 +451,7 @@ test('closing the dialog returns keyboard focus to what opened it, or to Setting
   app.ctx.openCatalogUpdates('sheridan', { isConnected: true, focus: () => focused.push('opener') }); await settle();
   app.ctx.closeCatalogUpdates(); await settle();
   app.ctx.openCatalogUpdates('sheridan', { isConnected: false }); await settle();
-  await app.ctx.catalogApply(); await settle();
+  await applyUpdates(app);
   app.ctx.closeCatalogUpdates(); await settle();
   assert.deepStrictEqual(focused, ['opener', 'catalog-btn']);
 });
@@ -459,7 +471,7 @@ test('a redraw keeps keyboard focus inside the dialog (preview → applied); con
   boxEl.focus = () => { focusedBox++; };
   boxEl.contains = () => true;
   app.ctx.document.activeElement = app.ctx.document.body = {};
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   const before = focusedBox;
   assert.ok(before >= 1);
   app.ctx.renderCatalogDialog();
@@ -471,7 +483,7 @@ test('a redraw keeps keyboard focus inside the dialog (preview → applied); con
 // ── Compatibility ──
 test('a database without the Stage 5 functions: Review says catalog updates aren’t available, nothing written, the Stage 4a function never called', async () => {
   const { app } = await behind({ stage5: null });
-  app.ctx.openCatalogUpdates('sheridan'); await settle();
+  await openUpdates(app, 'sheridan');
   assert.match(text(app), /Catalog updates aren’t available on this database yet\. Nothing was changed\./);
   assert.deepStrictEqual(app.writes().filter(r => !r.url.includes('/rpc/library_catalog_apply')), []);
   assert.ok(!app.requests.some(r => r.url.includes('/rpc/catalog_apply')));

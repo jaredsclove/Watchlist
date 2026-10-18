@@ -12,7 +12,6 @@ const T = runner('metadata-chips');
 const test = T.test;
 const ROOT = path.join(__dirname, '..');
 const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
-const html = fs.readFileSync(path.join(ROOT, 'watchlist.html'), 'utf8');
 
 function day(offset) {
   const d = new Date();
@@ -146,19 +145,6 @@ test('filtering: a network chip toggles its filter, shows the pressed state and 
   assert.strictEqual(app.el('fNetwork').value, '');
   assert.strictEqual(app.html(), before, 'clearing the filter restores the same markup');
   assert.deepStrictEqual(app.writes(), [], 'no write');
-});
-
-test('assets: one new token on every versioned file, ui-helpers.js now versioned, order unchanged', () => {
-  const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1]);
-  assert.deepStrictEqual(scripts.map(s => s.split('?')[0]), ['config.js', 'identity.js', 'api.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'backup-restore.js',
-    'backup-format3.js', 'tabs.js', 'render.js', 'row-actions.js', 'tmdb-search.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js',
-    'refresh-shows.js', 'tmdb-match.js', 'derived-views.js', 'tv-shows.js', 'organization.js', 'organization-manage.js', 'collection-members.js', 'catalog-apply.js',
-    'browse-views.js', 'history.js', 'library.js']);
-  const tokens = new Set([...html.matchAll(/\?v=([\w-]+)/g)].map(m => m[1]));
-  assert.deepStrictEqual([...tokens], ['20261018-s4s6']); // S4–S6 bumped the token once for the combined release (tests/filter-bar.test.js)
-  assert.ok(scripts.includes('ui-helpers.js?v=20261018-s4s6'), 'render.js and its helper load together');
-  assert.ok(scripts.includes('config.js') && scripts.includes('identity.js'), 'config.js and identity.js stay unversioned');
-  assert.strictEqual([...html.matchAll(/(?:src|href)="[^"]+\?v=/g)].length, 25, 'styles.css + 24 scripts (S4: collection-members.js; S6: history.js)');
 });
 
 T.run();

@@ -34,17 +34,17 @@ database; collaborative editing of a shared database is not a goal.
 
 | Area | Files |
 |---|---|
-| Boot, config, API | `watchlist.html`, `config.js`, `api.js`, `write-lane.js` (one change at a time; read freshness), `ui-helpers.js`, `identity.js`, `history.js` (routes, Back / Forward, leave warning) |
+| Boot, config, API | `watchlist.html`, `config.js`, `api.js` (the writable phase, the stop switch), `write-lane.js` (one change at a time; read freshness), `ui-helpers.js` (incl. dialog keyboard and focus return), `identity.js`, `history.js` (routes, Back / Forward, leave warning) |
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
-| Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views), `metadata.js` (Details) |
-| Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog), `collection-members.js` (Remove / Undo and the Add picker from a collection view) |
+| Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views, the movie tools' film row), `metadata.js` (Details) |
+| Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog; the membership request, answer and Undo rules both UIs use), `collection-members.js` (Remove / Undo and the Add picker from a collection view) |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `refresh-shows.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Catalogs | `catalog-apply.js` (Catalog updates); catalog definitions in `config.js` |
 | Backup / restore | `backup-restore.js`, `backup-format3.js` (format-3 → 4 → 5 converter) |
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261018-s4s6`).
+Every release bumps the `?v=` cache token in `watchlist.html` (released: `20261018-s4s6`; on the `simplify-batch-b` branch, not released: `20261018-batchb`).
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
 ## Where things stand (2026-10-18)
@@ -71,7 +71,19 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
   stage commits depend on each other: revert the whole set together, newest first, tested like any
   change. It needs its own approval.
 - **Simplification Batch A is complete** (A1 `e5cee7b`; A2–A5 `2f3050b` plus review corrections `9487ce8`,
-  PR #1). **Batch B is next** (not started, not authorized).
+  PR #1).
+- **Simplification Batch B: implemented on branch `simplify-batch-b`, not released** (PR #3 holds the B0
+  inventory, the changes, the review and the validation limits). B1 retired the pre-B4/B5 phases from
+  the app's checks, the harness and the tests (the fail-closed phase check, the stop switch and the
+  mismatch notice are unchanged); B2 shares the membership request / answer / Undo rules between Manage
+  and the collection view and one dialog keyboard / focus helper; B3 one film-row builder for the movie
+  tools; B4 tests and docs. No database change. Merge and release are the owner's decision.
+- **Recovery reference (not a recipe):** before and after Batch B, the deployed page meets a rolled-back
+  (`contracted`) database the same way: the mismatch notice, no usable list, no backup, every write
+  refused; Batch B adds no outage between P2 and P3′. P3′'s verified target stays the application files
+  of `aeb9f73` (documentation-only commits excluded); reaching it means removing every application commit
+  after `aeb9f73`, which now includes Batch A, S4–S6 and, once released, Batch B. The procedure is the
+  owner's (history §18).
 
 ## How we work
 
@@ -186,8 +198,11 @@ for f in tests/*.test.js tests/*.test.mjs; do perl -e 'alarm shift; exec @ARGV' 
 At `9487ce8`: 40 suites, 1,100 cases, all passing (Batch A removed the focus matrices and
 publication-number tests; `tests/write-lane.test.js` is new). At `f6a81fc`: 43 suites, 1,157 cases
 (`collection-films`, `collection-add`, `history-routes` are new; the harness has an opt-in session
-history, `routes: {}`). `catalog-apply`'s verification-audit cases can fail under CPU load (also at
-`9487ce8`); rerun alone before treating that as a regression. Check that every suite prints its
+history, `routes: {}`). On `simplify-batch-b` (not released): 43 suites, 1,153 cases. The harness models
+B4/B5, a rolled-back (5c) database, no Stage 5 and an unknown phase only (no older stages, no loading of
+earlier releases); `b45-compat` keeps C2 and the stop-until-reload cases. `catalog-apply` waits for the
+dialog's state instead of a fixed number of turns, so its load flake is fixed on the branch (at
+`f6a81fc` and earlier, rerun it alone before treating a failure as a regression). Check that every suite prints its
 "N/N passed" line: a suite can exit 0 without it. Syntax check:
 `node --check` on each `*.js`, `tests/*.js`, `tools/*.mjs`. Database rehearsals run locally on PGlite
 (`tools/db-rehearsal-*.mjs`; see `db/README.md`). The identity audit (`tools/identity-audit.mjs`)
