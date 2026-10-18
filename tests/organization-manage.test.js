@@ -636,6 +636,36 @@ test('closing returns to the page: the Browse bar is rebuilt and an open collect
   assert.match(app.el('tbody').innerHTML, /Severance/);
 });
 
+// Batch B (B2): the membership request and Undo rules Manage shares with the collection view
+// (collection-members.js). The answers each UI shows are covered through both UIs; this pins the
+// shared rules themselves.
+test('shared membership rules: exact arguments; Undo only for a change this request made, by the id its answer returned; answers classified the same for both UIs', async () => {
+  const app = await createApp();
+  const c = app.ctx;
+  const args = (a, t) => JSON.parse(JSON.stringify(c.membershipArgs(a, t)));
+  assert.deepStrictEqual(args('add', { collectionId: 'c1', itemId: 'f1' }), { p_collection_id: 'c1', p_show_id: null, p_item_id: 'f1' });
+  assert.deepStrictEqual(Object.keys(args('remove', { membershipId: 'm1', collectionId: 'c1', showId: 's1' })), ['p_membership_id', 'p_collection_id', 'p_show_id', 'p_item_id']);
+  assert.strictEqual(app.get('membershipFn')('add'), 'org_add_membership');
+  assert.strictEqual(app.get('membershipFn')('remove'), 'org_remove_membership');
+  const add = c.membershipArgs('add', { collectionId: 'c1', showId: 's1' });
+  const undo = (a, x, res) => JSON.parse(JSON.stringify(c.membershipUndo(a, x, res)));
+  assert.deepStrictEqual(undo('add', add, { added: true, membership: { id: 'm9' } }), { action: 'remove', collectionId: 'c1', showId: 's1', itemId: null, membershipId: 'm9' });
+  for (const res of [{ added: false, membership: { id: 'm9' } }, { added: true }, { added: 1, membership: { id: 'm9' } }, null]) assert.strictEqual(c.membershipUndo('add', add, res), null, JSON.stringify(res));
+  const rem = c.membershipArgs('remove', { membershipId: 'm1', collectionId: 'c1', itemId: 'f1' });
+  assert.deepStrictEqual(undo('remove', rem, { removed: true }), { action: 'add', collectionId: 'c1', showId: null, itemId: 'f1' });
+  assert.strictEqual(c.membershipUndo('remove', rem, { removed: false, reason: 'target_missing' }), null);
+  const err = (status, body) => new Error(`Supabase error ${status}: ${JSON.stringify(body)}`);
+  const state = (a, x, res, e) => c.membershipOutcome(a, x, res, e).state;
+  assert.strictEqual(state('add', add, null, new TypeError('Failed to fetch')), 'unconfirmed');
+  assert.strictEqual(state('add', add, null, new Error('Supabase error 502: <html>gateway</html>')), 'unconfirmed', 'an answer without a database code is not definitive');
+  assert.strictEqual(state('add', add, null, err(404, { code: 'PGRST202', message: 'Could not find the function' })), 'absent');
+  const refused = c.membershipOutcome('add', add, null, err(400, { code: 'P0001', message: 'org_archived: archived' }));
+  assert.deepStrictEqual([refused.state, refused.note], ['refused', 'This collection is archived; unarchive it to change its members.']);
+  assert.strictEqual(state('add', add, { added: false }), 'already');
+  const notRemoved = c.membershipOutcome('remove', rem, { removed: false, reason: 'target_missing' });
+  assert.deepStrictEqual([notRemoved.state, notRemoved.note, notRemoved.undo], ['notremoved', 'This is no longer saved, so it’s in no collection.', null]);
+});
+
 T.run();
 
 test('keyboard focus stays in the dialog when the focused control is redrawn away (Add, Undo); Escape still reaches the dialog (found in real Chrome)', async () => {

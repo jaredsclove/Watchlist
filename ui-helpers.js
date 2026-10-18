@@ -129,3 +129,26 @@ function formatDisplayDate(isoDate) {
   if (!y || !m || !d) return isoDate;
   return `${months[m-1]} ${d}, ${y}`;
 }
+
+// ─── Dialogs: keyboard and focus ──────────────────────────────────────────────
+// One dialog's keydown: Escape asks it to close (onEscape keeps that dialog's own rules: a busy
+// dialog refuses), and Tab / Shift+Tab stay inside the box, wrapping from the last control to the
+// first and back (Shift+Tab from the box itself goes to the last). selector: the controls that
+// take part; a disabled or hidden one is skipped.
+function dialogKeydown(event, box, selector, onEscape) {
+  if (event.key === 'Escape') { if (typeof event.preventDefault === 'function') event.preventDefault(); onEscape(); return; }
+  if (event.key !== 'Tab' || !box) return;
+  const items = [...box.querySelectorAll(selector)].filter(el => !el.disabled && el.offsetParent !== null);
+  if (!items.length) { event.preventDefault(); return; }
+  const first = items[0], last = items[items.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === box)) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}
+
+// After a dialog closes: focus goes back to the control that opened it if that is still in the
+// page, else to fallback() (its redrawn equivalent, or another sensible control), never the page.
+function returnDialogFocus(opener, fallback) {
+  const back = opener && opener.isConnected !== false ? opener : (fallback ? fallback() : null);
+  if (back && typeof back.focus === 'function') back.focus();
+  return back;
+}

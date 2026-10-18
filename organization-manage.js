@@ -119,8 +119,7 @@ function closeManage() {
   buildBrowseBar();
   const reread = wrote && isBrowseCollectionView(activeViewId) ? loadBrowseView() : null;
   // Focus goes back to the control that opened the dialog (or its redrawn equivalent).
-  const back = opener && opener.isConnected ? opener : (openerSelector && document.querySelector(openerSelector)) || null;
-  if (back && typeof back.focus === 'function') back.focus();
+  const back = returnDialogFocus(opener, () => (openerSelector && document.querySelector(openerSelector)) || null);
   // S2: the reread draws the collection's heading again when its read is in, which removes that
   // control. Focus still lost with it goes to the redrawn one — never after another load or
   // navigation, while a dialog is open, or once focus has moved elsewhere.
@@ -152,14 +151,7 @@ function manageInvalidate() {
 // Escape closes (unless a change is being saved); Tab stays inside the dialog.
 function manageKeydown(event) {
   if (!manage) return;
-  if (event.key === 'Escape') { event.preventDefault(); closeManage(); return; }
-  if (event.key !== 'Tab') return;
-  const box = document.getElementById('manageModalBox');
-  const items = [...box.querySelectorAll('button, input, select, [tabindex="0"]')].filter(el => !el.disabled && el.offsetParent !== null);
-  if (!items.length) { event.preventDefault(); return; }
-  const first = items[0], last = items[items.length - 1];
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === box)) { event.preventDefault(); last.focus(); }
-  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  dialogKeydown(event, document.getElementById('manageModalBox'), 'button, input, select, [tabindex="0"]', closeManage);
 }
 
 // ── Reads ──
@@ -381,6 +373,46 @@ function describeOutcome(op, res, info) {
   return { text, note: text };
 }
 
+// ── Membership requests (shared by Manage's member list and the collection view, S4 / S5) ──
+// Each UI keeps its own lifecycle (Manage's pending operations and Undo list; the collection
+// view's Remove / Undo and its Add batches); these are the request, the answer and the Undo
+// rule they share. action: 'add' | 'remove'.
+const membershipFn = action => (action === 'remove' ? 'org_remove_membership' : 'org_add_membership');
+
+// The arguments for one show or film: a removal names the membership id the view read, with
+// its collection and target (the database refuses a membership that no longer matches).
+function membershipArgs(action, { collectionId, showId = null, itemId = null, membershipId = null }) {
+  return action === 'remove'
+    ? { p_membership_id: membershipId, p_collection_id: collectionId, p_show_id: showId ?? null, p_item_id: itemId ?? null }
+    : { p_collection_id: collectionId, p_show_id: showId ?? null, p_item_id: itemId ?? null };
+}
+
+// The Undo a confirmed answer allows, for exactly the change that request made: an add that
+// added is undone by the membership id its answer returned; a removal that removed puts the
+// same show or film back. Anything else (already in, not removed, a refusal, no clear answer)
+// offers no Undo.
+function membershipUndo(action, args, res) {
+  const target = { collectionId: args.p_collection_id, showId: args.p_show_id ?? null, itemId: args.p_item_id ?? null };
+  if (action === 'add' && res && res.added === true && res.membership && res.membership.id) return { action: 'remove', ...target, membershipId: res.membership.id };
+  if (action === 'remove' && res && res.removed === true) return { action: 'add', ...target };
+  return null;
+}
+
+// What one answer means. 'absent': the function is missing (nothing ran); 'unconfirmed': no
+// clear answer, so it may or may not have happened (never sent again); 'refused': a database
+// refusal, with Manage's note. Otherwise the confirmed result: 'added' / 'already' for an add,
+// 'removed' / 'notremoved' (with the reason) for a removal, and the Undo it allows.
+function membershipOutcome(action, args, res, err) {
+  const info = err ? orgErrorInfo(err) : null;
+  if (info && orgMissingFunction(info)) return { state: 'absent', info };
+  if (info && info.kind !== 'database') return { state: 'unconfirmed', info };
+  if (info) { const o = describeOutcome({ kind: action, args }, null, info); return { state: 'refused', info, note: o.note || o.text }; }
+  const undo = membershipUndo(action, args, res);
+  if (action === 'add') return { state: res && res.added ? 'added' : 'already', undo };
+  if (res && res.removed) return { state: 'removed', undo };
+  return { state: 'notremoved', undo, note: res ? describeOutcome({ kind: action, args }, res, null).note : null };
+}
+
 // Apply a reply to the dialog's copy of exactly that record (guards checked by the caller).
 function applyOrgReply(op, res) {
   const d = manage.data;
@@ -391,15 +423,10 @@ function applyOrgReply(op, res) {
   if (op.kind === 'remove' && res.removed) d.memberships = d.memberships.filter(m => m.id !== op.args.p_membership_id);
 }
 
-// Undo only for a change this request actually made.
+// Undo only for a change this request actually made (membershipUndo).
 function addUndo(op, res) {
-  if (op.kind === 'add' && res.added === true && res.membership) {
-    manage.undo.unshift({ key: op.key, label: op.label, action: 'remove', collectionId: op.args.p_collection_id,
-      showId: op.args.p_show_id, itemId: op.args.p_item_id, membershipId: res.membership.id });
-  } else if (op.kind === 'remove' && res.removed === true) {
-    manage.undo.unshift({ key: op.key, label: op.label, action: 'add', collectionId: op.args.p_collection_id,
-      showId: op.args.p_show_id, itemId: op.args.p_item_id });
-  }
+  const u = op.kind === 'add' || op.kind === 'remove' ? membershipUndo(op.kind, op.args, res) : null;
+  if (u) manage.undo.unshift({ key: op.key, label: op.label, ...u });
   manage.undo = manage.undo.slice(0, 5);
 }
 
@@ -408,13 +435,7 @@ function manageUndo(index) {
   const u = manage.undo[Number(index)];
   if (!u || manage.pending[u.key]) return;
   manage.undo.splice(Number(index), 1);
-  if (u.action === 'remove') {
-    runOrgOp({ kind: 'remove', key: u.key, label: u.label, undoOf: true, fn: 'org_remove_membership',
-      args: { p_membership_id: u.membershipId, p_collection_id: u.collectionId, p_show_id: u.showId ?? null, p_item_id: u.itemId ?? null } });
-  } else {
-    runOrgOp({ kind: 'add', key: u.key, label: u.label, undoOf: true, fn: 'org_add_membership',
-      args: { p_collection_id: u.collectionId, p_show_id: u.showId ?? null, p_item_id: u.itemId ?? null } });
-  }
+  runOrgOp({ kind: u.action, key: u.key, label: u.label, undoOf: true, fn: membershipFn(u.action), args: membershipArgs(u.action, u) });
 }
 
 // After a reconciliation read: what is saved now, for an unconfirmed request. The
@@ -579,8 +600,8 @@ function manageAddMember(kind, targetId) {
   if (manage.pending[key]) return;
   const ix = manageIndex();
   const target = showId ? ix.shows.get(showId) : ix.rows.get(itemId);
-  runOrgOp({ kind: 'add', key, label: target ? `“${target.title}”` : '', fn: 'org_add_membership',
-    args: { p_collection_id: c, p_show_id: showId, p_item_id: itemId } });
+  runOrgOp({ kind: 'add', key, label: target ? `“${target.title}”` : '', fn: membershipFn('add'),
+    args: membershipArgs('add', { collectionId: c, showId, itemId }) });
 }
 
 function manageRemoveMember(membershipId) {
@@ -591,8 +612,8 @@ function manageRemoveMember(membershipId) {
   if (manage.pending[key]) return;
   const ix = manageIndex();
   const target = m.show_id != null ? ix.shows.get(m.show_id) : ix.rows.get(m.item_id);
-  runOrgOp({ kind: 'remove', key, label: target ? `“${target.title}”` : '', fn: 'org_remove_membership',
-    args: { p_membership_id: m.id, p_collection_id: m.collection_id, p_show_id: m.show_id ?? null, p_item_id: m.item_id ?? null } });
+  runOrgOp({ kind: 'remove', key, label: target ? `“${target.title}”` : '', fn: membershipFn('remove'),
+    args: membershipArgs('remove', { membershipId: m.id, collectionId: m.collection_id, showId: m.show_id, itemId: m.item_id }) });
 }
 
 // ── Rendering ──

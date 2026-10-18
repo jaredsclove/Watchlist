@@ -141,8 +141,7 @@ function closeCatalogChooser(keepOpen) {
   if (keepOpen) return opener;
   document.getElementById('catalogModalOverlay').style.display = 'none';
   document.getElementById('catalogModalBox').innerHTML = '';
-  const back = opener && opener.isConnected ? opener : document.querySelector('#settingsScreen .settings-catalog-btn');
-  if (back && typeof back.focus === 'function') back.focus();
+  returnDialogFocus(opener, () => document.querySelector('#settingsScreen .settings-catalog-btn'));
   return opener;
 }
 
@@ -175,21 +174,12 @@ function closeCatalogUpdates() {
   document.getElementById('catalogModalOverlay').style.display = 'none';
   document.getElementById('catalogModalBox').innerHTML = '';
   // Focus goes back to what opened the dialog, or the Browse bar's button; never the page.
-  const back = opener && opener.isConnected ? opener
-    : document.querySelector('#settingsScreen .settings-catalog-btn') || document.querySelector('#tabBar .tab.active');
-  if (back && typeof back.focus === 'function') back.focus();
+  returnDialogFocus(opener, () => document.querySelector('#settingsScreen .settings-catalog-btn') || document.querySelector('#tabBar .tab.active'));
 }
 
 function catalogKeydown(event) {
   if (!catalogDialog && !catalogChooser) return;
-  if (event.key === 'Escape') { event.preventDefault(); if (catalogDialog) closeCatalogUpdates(); else closeCatalogChooser(); return; }
-  if (event.key !== 'Tab') return;
-  const box = document.getElementById('catalogModalBox');
-  const items = [...box.querySelectorAll('button')].filter(el => !el.disabled && el.offsetParent !== null);
-  if (!items.length) { event.preventDefault(); return; }
-  const first = items[0], last = items[items.length - 1];
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === box)) { event.preventDefault(); last.focus(); }
-  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  dialogKeydown(event, document.getElementById('catalogModalBox'), 'button', () => { if (catalogDialog) closeCatalogUpdates(); else closeCatalogChooser(); });
 }
 
 // The published config.js, read again without the browser cache, evaluated in

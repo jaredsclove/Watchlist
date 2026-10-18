@@ -1315,7 +1315,7 @@ function answerEffectDialog(ok, returnFocus = true) {
   const box = document.getElementById('effectModalBox');
   if (overlay) overlay.style.display = 'none';
   if (box) box.innerHTML = '';
-  if (returnFocus && d.opener && d.opener.isConnected !== false && typeof d.opener.focus === 'function') d.opener.focus();
+  if (returnFocus) returnDialogFocus(d.opener, null);
   d.resolve(!!ok);
 }
 function cancelEffectDialog() {

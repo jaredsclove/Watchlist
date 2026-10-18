@@ -90,10 +90,9 @@ async function collectionRemoveNow(t) {
   const cap = await checkOrgCapability();
   if (cap !== 'yes') { showError(COLLECTION_CAPABILITY_TEXT[cap] || COLLECTION_CAPABILITY_TEXT.unknown); return; }
   if (activeViewId !== t.viewId || orgEpoch !== t.epoch) return; // left or restored while checking: nothing is sent
-  const args = { p_membership_id: t.membershipId, p_collection_id: t.collectionId,
-    p_show_id: t.kind === 'show' ? t.id : null, p_item_id: t.kind === 'film' ? t.id : null };
+  const args = membershipArgs('remove', { membershipId: t.membershipId, collectionId: t.collectionId, ...membershipTarget(t.kind, t.id) });
   let res = null, err = null;
-  try { res = await sbRpc('org_remove_membership', args); } catch (e) { err = e; }
+  try { res = await sbRpc(membershipFn('remove'), args); } catch (e) { err = e; }
   await collectionAnswer(t, 'remove', args, res, err);
 }
 
@@ -108,26 +107,30 @@ async function undoCollectionRemove() {
     const cap = await checkOrgCapability();
     if (cap !== 'yes') { showCollectionNotice('', false); showError(COLLECTION_CAPABILITY_TEXT[cap] || COLLECTION_CAPABILITY_TEXT.unknown); return; }
     if (activeViewId !== u.viewId || orgEpoch !== u.epoch) return;
-    const args = { p_collection_id: u.collectionId, p_show_id: u.kind === 'show' ? u.id : null, p_item_id: u.kind === 'film' ? u.id : null };
+    const args = membershipArgs('add', { collectionId: u.collectionId, ...membershipTarget(u.kind, u.id) });
     let res = null, err = null;
-    try { res = await sbRpc('org_add_membership', args); } catch (e) { err = e; }
+    try { res = await sbRpc(membershipFn('add'), args); } catch (e) { err = e; }
     await collectionAnswer(u, 'add', args, res, err);
   }, { list: true });
 }
 
+// The show or film a collection-view membership request is about.
+const membershipTarget = (kind, id) => ({ showId: kind === 'show' ? id : null, itemId: kind === 'film' ? id : null });
+
 // One answer to a Remove or an Undo: reported in Manage's words; the collection is read again.
 async function collectionAnswer(t, kind, args, res, err) {
-  const info = err ? orgErrorInfo(err) : null;
+  const outcome = membershipOutcome(kind, args, res, err);
+  const info = outcome.info || null;
   // Left the page and brought back from the back/forward cache meanwhile: not confirmed (history.js), so
   // the answer changes nothing; the list is read again.
   if (t.shown !== pageShowEpoch) { if (activeViewId === t.viewId) await reloadOpenView(); return; }
   const here = activeViewId === t.viewId && orgEpoch === t.epoch;
-  if (info && orgMissingFunction(info)) {
+  if (outcome.state === 'absent') {
     orgWriteCapability = null;
     if (here) { showCollectionNotice('', false); showError(COLLECTION_CAPABILITY_TEXT.absent); }
     return;
   }
-  if (info && info.kind !== 'database') {
+  if (outcome.state === 'unconfirmed') {
     // No clear answer: not confirmed, never sent again; what is saved now is read (no Undo).
     const text = kind === 'remove'
       ? `Removing “${t.title}” from ${t.name} wasn’t confirmed (${info.message}): it may or may not have been removed, and it won’t be sent again.`
@@ -141,17 +144,19 @@ async function collectionAnswer(t, kind, args, res, err) {
   }
   // An answer after you left the collection or after a restore changes nothing on the page.
   if (!here) return;
-  const outcome = describeOutcome({ kind, args }, res, info);
   let text, undo = false;
-  if (kind === 'remove' && res && res.removed) {
+  if (outcome.state === 'removed') {
     text = `Removed “${t.title}” from ${t.name}. It’s still in your library.`;
-    collectionUndo = { kind: t.kind, id: t.id, title: t.title, name: t.name, collectionId: t.collectionId, viewId: t.viewId, epoch: t.epoch };
-    undo = true;
+    // Undo puts back exactly this show or film (membershipUndo), once, in this collection's visit.
+    if (outcome.undo) {
+      collectionUndo = { kind: t.kind, id: t.id, title: t.title, name: t.name, collectionId: t.collectionId, viewId: t.viewId, epoch: t.epoch };
+      undo = true;
+    }
   } else if (kind === 'add' && res) {
-    text = res.added ? `“${t.title}” is back in ${t.name}.` : `“${t.title}” is already in ${t.name} (added again elsewhere).`;
+    text = outcome.state === 'added' ? `“${t.title}” is back in ${t.name}.` : `“${t.title}” is already in ${t.name} (added again elsewhere).`;
   } else {
     const what = kind === 'remove' ? `“${t.title}” wasn’t removed from ${t.name}` : `“${t.title}” wasn’t put back in ${t.name}`;
-    text = `${what}: ${outcome.note || outcome.text}`;
+    text = `${what}: ${outcome.note}`;
   }
   showCollectionNotice(text, undo);
   if (!res) showError('');
@@ -267,9 +272,7 @@ function dismissAddPicker(returnFocus) {
   if (overlay) overlay.style.display = 'none';
   if (box) box.innerHTML = '';
   if (addBatch && addBatch.viewId === activeViewId) renderAddNotice();
-  if (!returnFocus) return;
-  const back = p.opener && p.opener.isConnected !== false ? p.opener : document.getElementById('collectionAddBtn');
-  if (back && typeof back.focus === 'function') back.focus();
+  if (returnFocus) returnDialogFocus(p.opener, () => document.getElementById('collectionAddBtn'));
 }
 
 // Leaving the view (tabs.js switchView): an idle picker is cancelled (nothing sent); a submitting
@@ -283,14 +286,7 @@ function addPickerOnNavigate() {
 
 function addPickerKeydown(event) {
   if (!addPicker || !event) return;
-  if (event.key === 'Escape') { if (typeof event.preventDefault === 'function') event.preventDefault(); closeAddPicker(); return; }
-  if (event.key !== 'Tab') return;
-  const box = document.getElementById('addPickerBox');
-  const items = [...box.querySelectorAll('button, input, [tabindex="0"]')].filter(el => !el.disabled && el.offsetParent !== null);
-  if (!items.length) { event.preventDefault(); return; }
-  const first = items[0], last = items[items.length - 1];
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === box)) { event.preventDefault(); last.focus(); }
-  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  dialogKeydown(event, document.getElementById('addPickerBox'), 'button, input, [tabindex="0"]', closeAddPicker);
 }
 
 function addPickerSearch(el) {
@@ -362,10 +358,9 @@ async function runAddBatch(b) {
     if (it.of) it.of.undoTried = true;
     b.current = it;
     renderAddPicker();
-    const args = b.kind === 'add'
-      ? { p_collection_id: b.collectionId, p_show_id: it.kind === 'show' ? it.id : null, p_item_id: it.kind === 'film' ? it.id : null }
-      : { p_membership_id: it.membershipId, p_collection_id: b.collectionId, p_show_id: it.kind === 'show' ? it.id : null, p_item_id: it.kind === 'film' ? it.id : null };
-    const request = sbRpc(b.kind === 'add' ? 'org_add_membership' : 'org_remove_membership', args)
+    const action = b.kind === 'add' ? 'add' : 'remove';
+    const args = membershipArgs(action, { collectionId: b.collectionId, membershipId: it.membershipId, ...membershipTarget(it.kind, it.id) });
+    const request = sbRpc(membershipFn(action), args)
       .then(res => ({ res }), err => ({ err }));
     // Stop waiting (after 15 s): the item becomes Not confirmed and the batch stops; the request may
     // still answer, which is recorded but changes nothing.
@@ -384,22 +379,21 @@ async function runAddBatch(b) {
       break;
     }
     const late = !addBatchLive(b);
-    const info = answer.err ? orgErrorInfo(answer.err) : null;
-    if (info && orgMissingFunction(info)) {
+    const o = membershipOutcome(action, args, answer.res, answer.err);
+    if (o.state === 'absent') {
       orgWriteCapability = null;
       it.state = 'refused'; it.note = COLLECTION_CAPABILITY_TEXT.absent;
       b.stop = true;
-    } else if (info && info.kind !== 'database') {
+    } else if (o.state === 'unconfirmed') {
       it.state = 'unconfirmed';
       b.stop = true;
-    } else if (info) {
-      const o = describeOutcome({ kind: b.kind === 'add' ? 'add' : 'remove', args }, null, info);
-      it.state = 'refused'; it.note = o.note || o.text;
-    } else if (b.kind === 'add') {
-      if (answer.res && answer.res.added) { it.state = 'added'; it.membershipId = answer.res.membership && answer.res.membership.id; }
-      else it.state = 'already';
-    } else if (answer.res && answer.res.removed) { it.state = 'removed'; it.of.undone = true; }
-    else it.state = 'notremoved';
+    } else {
+      it.state = o.state;
+      if (o.state === 'refused') it.note = o.note;
+      // Undo removes exactly what this answer added, by the membership id it returned (membershipUndo).
+      if (o.state === 'added' && o.undo) it.membershipId = o.undo.membershipId;
+      if (o.state === 'removed') it.of.undone = true;
+    }
     if (late) it.after = orgEpoch !== b.epoch ? 'restore' : 'left';
   }
   b.items.forEach(it => { if (it.state === 'queued') it.state = 'notsent'; });
