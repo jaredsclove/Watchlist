@@ -44,13 +44,15 @@ database; collaborative editing of a shared database is not a goal.
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (released: `20261018-s4s6`; on the `simplify-batch-b` branch, not released: `20261018-batchb`).
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261018-batchb`).
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
 ## Where things stand (2026-10-18)
 
-- **App release:** `f6a81fc`, S4–S6 of the B3 / B1 / B7 plan in one release (PR #2; released
-  2026-10-18 UTC; previous release `9487ce8`, simplification Batch A).
+- **App release:** `1618e1a`, simplification Batch B (PR #3; released 2026-10-18 UTC by fast-forwarding
+  `main` from `5c33ca8`; previous release `f6a81fc`, S4–S6). The Pages build and deployment succeeded;
+  53 deployed responses (the page and every file it references, plain and versioned) were byte-identical
+  to `1618e1a` (GET only; no live app session, no production data access).
   GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 - **Database (as last recorded, not freshly observed):** phase `contracted-b45`, backup format 5,
   recovery archive active. G9 (archive retirement) is paused. Rollbacks follow the recorded order
@@ -72,17 +74,18 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
   change. It needs its own approval.
 - **Simplification Batch A is complete** (A1 `e5cee7b`; A2–A5 `2f3050b` plus review corrections `9487ce8`,
   PR #1).
-- **Simplification Batch B: implemented on branch `simplify-batch-b`, not released** (PR #3 holds the B0
-  inventory, the changes, the review and the validation limits). B1 retired the pre-B4/B5 phases from
+- **Simplification Batch B is complete and released** (B1 `5ea7b04`, B2 `eb1bd9c`, B3 `0e3a5c0`, B4 `0bf0a35`,
+  review follow-up `1618e1a`; PR #3 holds the B0 inventory, the changes, the review and the validation limits). B1 retired the pre-B4/B5 phases from
   the app's checks, the harness and the tests (the fail-closed phase check, the stop switch and the
   mismatch notice are unchanged); B2 shares the membership request / answer / Undo rules between Manage
   and the collection view and one dialog keyboard / focus helper; B3 one film-row builder for the movie
-  tools; B4 tests and docs. No database change. Merge and release are the owner's decision.
+  tools; B4 tests and docs. No database change and no change to saved-data behaviour, so reverting it is a
+  code revert of the five commits (newest first, tested like any change), with its own approval.
 - **Recovery reference (not a recipe):** before and after Batch B, the deployed page meets a rolled-back
   (`contracted`) database the same way: the mismatch notice, no usable list, no backup, every write
   refused; Batch B adds no outage between P2 and P3′. P3′'s verified target stays the application files
   of `aeb9f73` (documentation-only commits excluded); reaching it means removing every application commit
-  after `aeb9f73`, which now includes Batch A, S4–S6 and, once released, Batch B. The procedure is the
+  after `aeb9f73`, which now includes Batch A, S4–S6 and Batch B. The procedure is the
   owner's (history §18).
 
 ## How we work
@@ -185,7 +188,11 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
   If they match the scripts, anyone holding the public key can read and change the data. Moving
   configuration or adding sign-in does not by itself close anonymous access; the policies are the
   boundary. The read-only policy check needs its own authorization.
-- **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip).
+- **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip); on an
+  unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
+  instead of a sentence (polish, not a blocker).
+- **Deferred (owner, 2026-10-18):** archiving the historical `db/` and `tools/` scripts. They stay
+  unchanged unless their presence causes a concrete maintenance problem.
 - The rest of the backlog (accessibility, contrast and layout items; deferred features) is in
   history §14. Bring an item back only by owner request.
 
@@ -198,11 +205,11 @@ for f in tests/*.test.js tests/*.test.mjs; do perl -e 'alarm shift; exec @ARGV' 
 At `9487ce8`: 40 suites, 1,100 cases, all passing (Batch A removed the focus matrices and
 publication-number tests; `tests/write-lane.test.js` is new). At `f6a81fc`: 43 suites, 1,157 cases
 (`collection-films`, `collection-add`, `history-routes` are new; the harness has an opt-in session
-history, `routes: {}`). On `simplify-batch-b` (not released): 43 suites, 1,153 cases. The harness models
+history, `routes: {}`). At `1618e1a` (Batch B): 43 suites, 1,153 cases. The harness models
 B4/B5, a rolled-back (5c) database, no Stage 5 and an unknown phase only (no older stages, no loading of
 earlier releases); `b45-compat` keeps C2 and the stop-until-reload cases. `catalog-apply` waits for the
-dialog's state instead of a fixed number of turns, so its load flake is fixed on the branch (at
-`f6a81fc` and earlier, rerun it alone before treating a failure as a regression). Check that every suite prints its
+dialog's state instead of a fixed number of turns, so its load flake is fixed (at `f6a81fc` and
+earlier, rerun it alone before treating a failure as a regression). Check that every suite prints its
 "N/N passed" line: a suite can exit 0 without it. Syntax check:
 `node --check` on each `*.js`, `tests/*.js`, `tools/*.mjs`. Database rehearsals run locally on PGlite
 (`tools/db-rehearsal-*.mjs`; see `db/README.md`). The identity audit (`tools/identity-audit.mjs`)
