@@ -61,8 +61,11 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
   43 suites, 1,157/1,157 (capped); one independent review (Fable) plus a focused follow-up; bounded
   Claude in Chrome checks on a local synthetic backend (1280 / 375 px; S6 with real Back / Forward,
   reload and direct links); the Pages build and deployment succeeded and 53 deployed responses (the
-  page and every referenced file, plain and versioned) were byte-identical to `f6a81fc`. No live check
-  of the deployed app and no production read or write.
+  page and every referenced file, plain and versioned) were byte-identical to `f6a81fc`. A read-only
+  live check passed (owner-approved; non-GET requests refused in the page): the new version loaded;
+  routes, real Back / Forward and a reload on a collection route worked; a film's Remove dialog and
+  the Add picker opened and were cancelled; only GET requests, no console errors; browser storage
+  was unchanged and left as before. No production write.
 - **Rollback of S4–S6:** no database migration, but the app's new actions change saved data
   (memberships, film state, deletes, Match, Pull rest), and reverting code doesn't reverse them. The
   stage commits depend on each other: revert the whole set together, newest first, tested like any
