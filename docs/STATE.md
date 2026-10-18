@@ -44,7 +44,9 @@ database; collaborative editing of a shared database is not a goal.
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261018-batchb`).
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261018-batchb`). The tests
+check only that all 25 versioned files share one token; before releasing, check that it differs from
+the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
 ## Where things stand (2026-10-18)
@@ -199,8 +201,14 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 ## Tests
 
 ```bash
-for f in tests/*.test.js tests/*.test.mjs; do perl -e 'alarm shift; exec @ARGV' 120 node --max-old-space-size=1024 "$f" || echo "FAIL $f"; done
+tests/run.sh
 ```
+
+It runs every `tests/*.test.js` and `tests/*.test.mjs` with the caps above (120 s, 1024 MB) and fails a
+suite that exits non-zero, is killed by the time limit (or a signal), or whose last "N/N passed" line is
+missing or has unequal numbers (an incomplete run that exits 0). It prints one line per suite (a
+failure gives the reason, exit status and last summary line) and `suites=N failing=N cases=P/T`, and
+exits non-zero if any suite failed. `tests/run.sh tests/<suite>.test.js` runs only the suites named.
 
 At `9487ce8`: 40 suites, 1,100 cases, all passing (Batch A removed the focus matrices and
 publication-number tests; `tests/write-lane.test.js` is new). At `f6a81fc`: 43 suites, 1,157 cases
@@ -209,8 +217,7 @@ history, `routes: {}`). At `1618e1a` (Batch B): 43 suites, 1,153 cases. The harn
 B4/B5, a rolled-back (5c) database, no Stage 5 and an unknown phase only (no older stages, no loading of
 earlier releases); `b45-compat` keeps C2 and the stop-until-reload cases. `catalog-apply` waits for the
 dialog's state instead of a fixed number of turns, so its load flake is fixed (at `f6a81fc` and
-earlier, rerun it alone before treating a failure as a regression). Check that every suite prints its
-"N/N passed" line: a suite can exit 0 without it. Syntax check:
+earlier, rerun it alone before treating a failure as a regression). Syntax check:
 `node --check` on each `*.js`, `tests/*.js`, `tools/*.mjs`. Database rehearsals run locally on PGlite
 (`tools/db-rehearsal-*.mjs`; see `db/README.md`). The identity audit (`tools/identity-audit.mjs`)
 reads production, so it needs approval.
