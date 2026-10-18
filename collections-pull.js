@@ -122,6 +122,7 @@ async function addPulledCollectionMoviesNow() {
     showSaved();
     if (toolContextLive(tool)) resetTMDBSearchUI();
     await toolFinished(tool);
+    if (typeof collectionPullReport === 'function') collectionPullReport(tool, inserted); // S4: Pull rest from a collection
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {

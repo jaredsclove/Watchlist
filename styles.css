@@ -801,3 +801,10 @@ body.saving #tbody :is(button:not([data-primary], [data-section]), select, input
   .season-delete-link, #effectModalBox .modal-actions .btn, #effectModalBox .modal-actions .btn-danger, .reread-status .btn { min-height: 44px; }
 }
 
+
+/* S4: a collection's Remove controls (membership only) and its notice with Undo. */
+.collection-remove { font-size: 12px; white-space: nowrap; }
+.collection-notice .btn { margin-left: 6px; }
+@media (max-width: 700px) {
+  .collection-remove, .collection-notice .btn, .more-popover .popover-action { min-height: 44px; }
+}

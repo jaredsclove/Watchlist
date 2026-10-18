@@ -349,11 +349,12 @@ function renderLibraryPanel() {
   if (!el || !p) return;
   const modes = (LIBRARY_MODES[p.media] || []).map(([m, label]) =>
     `<button class="view-toggle-btn${p.mode === m ? ' active' : ''}" aria-pressed="${p.mode === m}" onclick="setLibraryMode('${m}')">${label}</button>`).join('');
-  const title = p.media === 'movie' ? 'Add films' : 'Add TV';
+  const pull = p.mode === 'pull'; // S4: Pull rest from a collection (no other modes)
+  const title = pull ? `Pull rest of ${p.pullName || 'the franchise'}` : p.media === 'movie' ? 'Add films' : 'Add TV';
   el.style.display = 'block';
   el.innerHTML = `<div class="library-head">
-      <strong>${title}</strong>
-      <div class="view-toggle" role="group" aria-label="How to add">${modes}</div>
+      <strong>${esc(title)}</strong>
+      ${pull ? '' : `<div class="view-toggle" role="group" aria-label="How to add">${modes}</div>`}
       <button class="btn" onclick="closeLibraryPanel()">Close</button>
     </div>
     <div id="libraryState" class="tmdb-refresh-summary"></div>
@@ -373,7 +374,7 @@ function renderLibraryBody() {
     </div>`;
   const results = '<div id="tmdbResults"></div><div id="tmdbPreview"></div>';
   if (p.mode === 'search') el.innerHTML = searchRow + results;
-  else if (p.mode === 'match') el.innerHTML = results;
+  else if (p.mode === 'match' || p.mode === 'pull') el.innerHTML = results;
   else if (p.mode === 'manual') el.innerHTML = p.media === 'movie' ? libraryManualFilmHtml() : libraryManualShowHtml();
   else if (p.mode === 'refresh') el.innerHTML = `<div class="tmdb-search-row"><button class="btn" onclick="libraryRefreshShows()">↻ Check for new seasons</button>
       <span class="tmdb-refresh-summary">Shows matched to TMDB whose seasons come from TMDB.</span></div>${results}`;
@@ -1168,10 +1169,13 @@ async function libraryRefreshPerson(name) {
   return libraryMovieTool('person-refresh', name);
 }
 
-// From a film's ⋯ menu in All Movies (a film whose theme is a genre): its franchise.
+// From a film's ⋯ menu in All Movies or (S4) a collection (a film whose theme is a genre): its
+// franchise. In a collection the panel shows only this preview (the general tools stay in Movies),
+// and the films it adds go to the library, not to the collection (collection-members.js reports it).
 async function libraryPullRest(rowId, collectionId, name) {
-  if (activeViewId !== ALL_MOVIES_VIEW.id) return;
-  openLibraryPanel('movie', 'tools');
+  const inCollection = isBrowseCollectionView(activeViewId);
+  if (activeViewId !== ALL_MOVIES_VIEW.id && !inCollection) return;
+  openLibraryPanel('movie', inCollection ? 'pull' : 'tools', inCollection ? { pullName: name } : {});
   if (!await libraryPrepareMovieTools()) return;
   return openPullCollection(rowId, collectionId, name);
 }
@@ -1189,7 +1193,7 @@ async function libraryPullRest(rowId, collectionId, name) {
 async function delRowInView(id) {
   const rows = actionRows();
   const row = rows.find(r => r.id === id);
-  if (!row || collectionFilmLocked(row)) return; // films stay read-only in collections (S3)
+  if (!row) return;
   const policy = editPolicyOf(row);
   if (policy.deleteEffect === 'unknown') {
     showNotice(`This page couldn’t confirm whether “${row.title}” is a built-in catalog entry, so nothing was deleted. The list has been read again; try again.`);
@@ -1225,14 +1229,18 @@ async function delRowInView(id) {
 // D6 (S3): what a delete from the library does, in the dialog's words. A season is named by its
 // show; "last season" is what this page's read shows (the database decides, and the answer says so).
 function deleteEffectText(row, show) {
-  if (!isTvSeason(row)) return `Delete “${row.title}” from your library? It is removed everywhere: All Movies and every collection it’s in.`;
+  // S4: in a collection the dialog also points to Remove, which changes only that collection.
+  const dest = isBrowseCollectionView(activeViewId) ? currentBrowseDest() : null;
+  if (!isTvSeason(row)) return `Delete “${row.title}” from your library? It is removed everywhere: All Movies and every collection it’s in.`
+    + (dest ? ` To keep it but take it out of ${dest.label} only, use Remove from ${dest.label} instead.` : '');
   const title = show ? show.title : row.title;
   const last = !actionRows().some(r => r.id !== row.id && r.show_id && r.show_id === row.show_id);
   // A season that starts or bounds its show's earlier-seasons range: deleting it ends that choice (§4.7.5).
   const endsRange = !!show && (show.resume_start_season_id === row.id || show.resume_end_season_id === row.id);
   return `Delete “${title} · ${row.season}” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in.`
     + (last ? ' This is the show’s last season, so the show is deleted too, along with its place in every collection.' : '')
-    + (endsRange ? ` The earlier-seasons choice for “${show.title}” ends too.` : '');
+    + (endsRange ? ` The earlier-seasons choice for “${show.title}” ends too.` : '')
+    + (dest ? ` To keep it but take the show out of ${dest.label} only, use Remove show from ${dest.label} instead.` : '');
 }
 
 async function deleteFromLibrary(row, viewId, what) {
@@ -1282,8 +1290,15 @@ function askEffect(text, confirmLabel) {
   const overlay = document.getElementById('effectModalOverlay');
   const box = document.getElementById('effectModalBox');
   if (!overlay || !box) return Promise.resolve(false);
+  // S4: a question asked from a film's ⋯ menu returns focus to that row's ⋯ button: the menu itself is
+  // closed by the click that answers the question, which would leave focus nowhere.
+  let opener = document.activeElement || null;
+  const menu = opener && typeof opener.closest === 'function' ? opener.closest('.more-popover') : null;
+  const row = menu ? menu.closest('.more-cell, .card-top') : null;
+  const more = row ? row.querySelector('.more-btn') : null;
+  if (more) opener = more;
   return new Promise(resolve => {
-    effectDialog = { resolve, opener: document.activeElement || null };
+    effectDialog = { resolve, opener };
     box.innerHTML = `<p class="effect-text" id="effectModalText">${esc(text)}</p>
       <div class="modal-actions"><button class="btn" id="effectCancel" onclick="answerEffectDialog(false)">Cancel</button>
         <button class="btn btn-danger" id="effectConfirm" onclick="answerEffectDialog(true)">${esc(confirmLabel)}</button></div>`;

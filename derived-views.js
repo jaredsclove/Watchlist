@@ -965,7 +965,7 @@ function derivedShowHtml(item, today, opts = {}) {
     return { row, card };
   }
 
-  const actions = isExpanded ? showActionsHtml(item, keyArg) : '';
+  const actions = isExpanded ? showActionsHtml(item, keyArg, { remove: collection }) : ''; // S4: a collection adds Remove show
   let row = `<tr class="show-group-row derived-show-row${dimClass}" ${showAttrs} onclick="toggleDerivedShow('${keyArg}', event)">
       <td>
         <div class="show-title-row">
@@ -1038,6 +1038,8 @@ function showActionsHtml(item, keyArg, opts = {}) {
         `<button class="btn" data-action="resume-start-${esc(r.id)}" onclick="startResume('${keyArg}', '${esc(r.id)}')">Start from ${esc(r.season)}</button>`).join(' ')}</div>`);
     }
   }
+  // opts.remove (S4, a collection): Remove show from <collection>… (browse-views.js); membership only.
+  if (opts.remove) parts.push(`<span class="state-action" data-action="remove">${collectionRemoveShowHtml(show, null)}</span>`);
   return `<div class="show-actions-inner${opts.state ? ' show-actions-state' : ''}">${parts.join(' ')}</div>`;
 }
 

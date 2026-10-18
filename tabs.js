@@ -56,6 +56,7 @@ function switchView(id) {
   // list being left (its busy mark and status line, an out-of-date mark) goes with it.
   if (typeof clearListReread === 'function') clearListReread();
   if (typeof cancelEffectDialog === 'function') cancelEffectDialog();
+  collectionUndo = null; // S4: Undo belongs to the collection visit it was offered in
   activeViewId = id;
   activeArea = areaOfView(id);
   // Back from a collection keeps its origin only while the Collections area is open,

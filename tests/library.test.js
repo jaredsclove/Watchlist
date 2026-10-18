@@ -123,7 +123,7 @@ test('the tab bars hold only the views; Settings offers Catalog updates (S1); no
     }
   }
   app.ctx.openBrowseCollection(app.browseId('sheridan')); await settle();
-  assert.ok(!/source-badge|Stored in/.test(app.html()) && app.el('viewHead').innerHTML.includes('Films can’t be changed here yet; change them in All Movies.'));
+  assert.ok(!/source-badge|Stored in/.test(app.html()) && app.el('viewHead').innerHTML.includes('Remove takes it out of'));
   assert.deepStrictEqual(app.writes(), []);
 });
 

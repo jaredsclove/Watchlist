@@ -541,12 +541,12 @@ test('assets: one new token on every versioned file; config.js and identity.js u
   const tokens = new Set([...html.matchAll(/\?v=([\w-]+)/g)].map(m => m[1]));
   assert.deepStrictEqual([...tokens], ['20261018-lane1']);
   const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1].split('?')[0]);
-  // The order at the baseline (fa69c9a), with write-lane.js after api.js (Batch A).
+  // The order at the baseline (fa69c9a), with write-lane.js after api.js (Batch A) and collection-members.js after organization-manage.js (S4).
   assert.deepStrictEqual(scripts, ['config.js', 'identity.js', 'api.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'backup-restore.js', 'backup-format3.js', 'tabs.js',
     'render.js', 'row-actions.js', 'tmdb-search.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'refresh-shows.js', 'tmdb-match.js',
-    'derived-views.js', 'tv-shows.js', 'organization.js', 'organization-manage.js', 'catalog-apply.js', 'browse-views.js', 'library.js']);
+    'derived-views.js', 'tv-shows.js', 'organization.js', 'organization-manage.js', 'collection-members.js', 'catalog-apply.js', 'browse-views.js', 'library.js']);
   assert.ok(/src="config\.js"/.test(html) && /src="identity\.js"/.test(html), 'unversioned');
-  assert.strictEqual((html.match(/\?v=20261018-lane1/g) || []).length, 23);
+  assert.strictEqual((html.match(/\?v=20261018-lane1/g) || []).length, 24);
 });
 
 // Contrast of the new styles' colour pairs, calculated from styles.css tokens (not rendered).

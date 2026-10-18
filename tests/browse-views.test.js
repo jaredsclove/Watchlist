@@ -118,25 +118,23 @@ const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'rende
   'toggleFilterPanel', 'filterPanelKeydown', 'removeFilterChip', 'clearViewFilters']);
 // S3: a collection's TV entries have All TV's controls (their parity is tests/collections-tv-edit.test.js);
 // its films stay read-only. The film-only form of this check: the heading, filters, counts and chooser
-// expose only navigation and filters as before; the list exposes nothing beyond All TV's TV controls, and
-// no control there acts on a film (no film control at all, and no handler naming a film's id).
+// expose only navigation and filters as before; the list exposes nothing beyond All TV's TV controls and
+// (S4) All Movies' film controls and the collection's Remove (tests/collection-films.test.js has their
+// positive checks).
 const TV_EDIT_HANDLERS = new Set(['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
   'keepCurrentStatus', 'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow']);
+const FILM_EDIT_HANDLERS = new Set(['setStatus', 'setFilmPriority', 'toggleMorePopover', 'toggleWatchWith', 'libraryPullRest', 'dismissCatalogNew',
+  'removeFromCollection']);
 function assertReadOnlyDom(app) {
   for (const id of ['filtersRow', 'statsRow', 'browseBar', 'viewHead']) {
     const bad = handlersIn(app.el(id).innerHTML).filter(h => !READ_ONLY_HANDLERS.has(h));
     assert.deepStrictEqual(bad, [], `${id} exposes ${bad.join(', ')}`);
   }
-  const filmIds = JSON.parse(app.get('JSON.stringify((browseData && browseData.rows || []).filter(r => isFilmRow(r)).map(r => r.id))'));
   for (const id of ['tbody', 'cardList']) {
     const s = app.el(id).innerHTML;
-    const bad = handlersIn(s).filter(h => !READ_ONLY_HANDLERS.has(h) && !TV_EDIT_HANDLERS.has(h));
+    const bad = handlersIn(s).filter(h => !READ_ONLY_HANDLERS.has(h) && !TV_EDIT_HANDLERS.has(h) && !FILM_EDIT_HANDLERS.has(h));
     assert.deepStrictEqual(bad, [], `${id} exposes ${bad.join(', ')}`);
-    const onFilm = [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"]*)"/g)].map(m => m[1])
-      .filter(h => filmIds.some(f => h.includes(`'${f}'`)) && !/^toggleFilterPill\(/.test(h));
-    assert.deepStrictEqual(onFilm, [], `${id}: a control acts on a film`);
   }
-  assert.ok(!/setStatus\(|setFilmPriority\(|toggleWatchWith\(|toggleMorePopover\(|libraryPullRest\(|more-btn|s-film-[a-z_]+" onchange/.test(html(app) + cards(app)), 'no film controls');
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
@@ -268,9 +266,9 @@ test('missing defaults and a stale TBA date cause no write from any view or any 
   assert.deepStrictEqual(mutating(app), [], 'no POST/PATCH/DELETE/RPC/TMDB request');
 });
 
-// S3: a collection's TV actions write now (their positive checks are tests/collections-tv-edit.test.js); every
-// film action and Restore stay inert there.
-test('every film action and Restore is inert while a collection is open (S3: films stay read-only); Restore is offered only on Settings (S1, D11)', async () => {
+// S3 / S4: a collection's TV and film actions write now (their positive checks are tests/collections-tv-edit.test.js
+// and tests/collection-films.test.js); Restore stays inert there.
+test('Restore is inert while a collection is open; Restore is offered only on Settings (S1, D11)', async () => {
   const app = await boot();
   assert.strictEqual(app.el('restoreBtn'), null, 'S1: no Restore control in the header');
   let clicked = 0;
@@ -282,20 +280,6 @@ test('every film action and Restore is inert while a collection is open (S3: fil
   for (const enter of [() => openCol(app, B['disney'])]) {
     await enter();
     assert.strictEqual(app.el('restoreBtn'), null, 'S1: no Restore control in a collection');
-    assert.ok(app.get("browseData.rows.some(r => r.id === 'f-mando')"), 'the film is in the collection read, so only the guard stops the write');
-    app.run("browseData.rows.find(r => r.id === 'f-mando').status_review = true; browseData.rows.find(r => r.id === 'f-mando').catalog_new = true");
-    await app.ctx.toggleWatch('f-mando');
-    await app.ctx.setStatus('f-mando', 'skipped', null);
-    await app.ctx.setFilmPriority('f-mando', 'high');
-    await app.ctx.dismissCatalogNew([{ kind: 'film', id: 'f-mando' }]);
-    await app.ctx.keepCurrentStatus('film', 'f-mando');
-    app.ctx.openDetails('film', 'f-mando'); await app.ctx.saveDetails(); app.ctx.closeDetails();
-    app.ctx.openTmdbMatch('f-mando');
-    await app.ctx.delRow('f-mando');
-    await app.ctx.delRow('f-wind');
-    await app.ctx.toggleWatchWith('f-wind', 'Kids', false);
-    assert.strictEqual(app.dialogs.length, 0, 'no delete or skip question for a film');
-    assert.strictEqual(app.get('detailsDialog'), null, 'no Details for a film');
     app.ctx.handleRestoreClick();
     await app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => '{}' }], value: 'x' } });
     await settle();
@@ -869,11 +853,13 @@ test('an All Movies load still in flight cannot paint over a browse view; it wri
 test('coming back after an edit made elsewhere shows the current saved state', async () => {
   const app = await boot();
   await openCol(app, B['sheridan']);
-  assert.ok(!html(app).split('<tr').find(r => r.includes('>F.A.S.T.<')).includes('✓ Watched'));
+  // S4: the film's Watched button shows the stored state.
+  const watchBtn = () => (html(app).split('<tr').find(r => r.includes('>F.A.S.T.<')).match(/<button class="watch-btn[^"]*"[^>]*>([^<]*)</) || [])[1];
+  assert.strictEqual(watchBtn(), 'Mark watched');
   app.ctx.switchMediaType('movie'); await settle();
   app.store.watchlist_items.find(r => r.id === 'f-fast').watched = true; // saved elsewhere meanwhile
   await openCol(app, B['sheridan']);
-  assert.ok(html(app).split('<tr').find(r => r.includes('>F.A.S.T.<')).includes('✓ Watched'));
+  assert.strictEqual(watchBtn(), '✓ Watched');
 });
 
 // ─── Regression ───────────────────────────────────────────────────────────────

@@ -417,7 +417,6 @@ function metadataExpected(rec, kind) {
   return m;
 }
 function openDetails(kind, id, opener) {
-  if (kind !== 'show' && isBrowseCollectionView(activeViewId)) return; // S3: films stay read-only in collections
   const rec = kind === 'show' ? tvShowsById.get(id) : actionRows().find(r => r.id === id);
   if (!rec) return;
   const snapshot = metadataExpected(rec, kind);
@@ -583,8 +582,6 @@ function renderDetails() {
 
 async function saveDetails() {
   const dlg = detailsDialog;
-  // S3: a collection saves a show's details; its films stay read-only (S4).
-  if (dlg && dlg.kind !== 'show' && isBrowseCollectionView(activeViewId)) return;
   if (!dlg || dlg.saving || dlg.stale) return;
   if (dlg.restored) { renderDetails(); return; } // a restore happened: nothing is sent (the dialog says so)
   const { metadata, problems } = detailsValidate(dlg);

@@ -252,8 +252,6 @@ async function reportStateFailure(e) {
 
 // O6: keep the current status (Needs status review cleared, the old status no longer kept).
 async function keepCurrentStatus(kind, id) {
-  // All Movies: films; a collection: shows only (S3; its films stay read-only).
-  if (isBrowseView(activeViewId) && activeViewId !== ALL_MOVIES_VIEW.id && kind !== 'show') return;
   const rec = kind === 'show' ? tvShowsById.get(id) : actionRows().find(r => r.id === id);
   if (!rec || !rec.status_review) return;
   await runWrite(`“${rec.title}” · status review`, async () => {
@@ -273,8 +271,6 @@ async function keepCurrentStatus(kind, id) {
 
 // O5: dismiss New from catalog for the records given ([{kind, id}]), all or nothing.
 async function dismissCatalogNew(list) {
-  // A collection dismisses only shows (S3; its films stay read-only).
-  if (isBrowseCollectionView(activeViewId) && (list || []).some(x => x.kind !== 'show')) return;
   if (!list || !list.length) return;
   if (list.length > 1 && !confirm(`Dismiss “New from catalog” on the ${list.length} records shown? Their status and priority don’t change.`)) return;
   await runWrite('New from catalog', async () => {

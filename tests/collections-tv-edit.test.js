@@ -126,7 +126,7 @@ function editCalls(s, ids) {
 const MEMBERS = ['alpha', 'bravo', 'charlie', 'gap', 'lone', 'promote', 'split', 'tba', 'zed'];
 for (const [media, grouping] of [['all', 'separate'], ['all', 'combined'], ['tv', 'separate'], ['tv', 'combined']]) {
   for (const box of ['tbody', 'cardList']) {
-    test(`G1 V3.1 Shows × ${grouping} × ${media} (${box}): each show has exactly All TV's controls and handler calls; no membership or Remove control; no film control`, async () => {
+    test(`G1 V3.1 Shows × ${grouping} × ${media} (${box}): each show has exactly All TV's controls and handler calls, plus (S4) one Remove show; no other membership control`, async () => {
       const L = lib();
       const app = await boot(L);
       app.ctx.switchView('alltv'); await settle();
@@ -138,19 +138,20 @@ for (const [media, grouping] of [['all', 'separate'], ['all', 'combined'], ['tv'
       app.ctx.setBrowseMedia(media); app.ctx.setBrowseGrouping(grouping); app.ctx.setBrowsePresentation('shows');
       expandAll(app, ids);
       for (const k of MEMBERS) {
-        const col = editCalls(app.el(box).innerHTML, [L[k].show.id, ...L[k].rows.map(r => r.id)]);
+        const all = editCalls(app.el(box).innerHTML, [L[k].show.id, ...L[k].rows.map(r => r.id)]);
+        const col = all.filter(h => !h.startsWith('removeFromCollection('));
         assert.ok(col.length > 0, `${k}: has controls`);
         assert.deepStrictEqual(col, allTv[k], `${k}: the same handler calls as All TV`);
+        assert.deepStrictEqual(all.filter(h => h.startsWith('removeFromCollection(')), [`removeFromCollection('show', '${L[k].show.id}', null)`], `${k}: S4 Remove show`);
       }
       const s = app.el(box).innerHTML;
-      assert.ok(!/org_|openManage|Remove/.test(s), 'no membership control and no Remove');
-      assert.ok(!editCalls(s, [L.filmA.id, L.filmB.id]).length, 'no control acts on a film');
+      assert.ok(!/org_|openManage/.test(s), 'no other membership control');
       assert.deepStrictEqual(writes(app), []);
     });
   }
 }
 for (const [media, grouping] of [['all', 'separate'], ['all', 'combined'], ['tv', 'separate'], ['tv', 'combined']]) {
-  test(`G1 V3.2 Seasons × ${grouping} × ${media}: each season entry has All TV Seasons' controls (read-only status pill; no status select, Delete, Match or Add season)`, async () => {
+  test(`G1 V3.2 Seasons × ${grouping} × ${media}: each season entry has All TV Seasons' controls (read-only status pill; no status select, Delete, Match or Add season) and (S4, O3) Remove show`, async () => {
     const L = lib();
     const app = await boot(L);
     app.ctx.switchView('alltv'); await settle();
@@ -162,8 +163,15 @@ for (const [media, grouping] of [['all', 'separate'], ['all', 'combined'], ['tv'
     await openTC(app);
     app.ctx.setBrowseMedia(media); app.ctx.setBrowseGrouping(grouping); app.ctx.setBrowsePresentation('seasons'); app.ctx.setBrowseSeasonVis('all');
     app.run("Object.keys(browseSectionOpen).forEach(k => { browseSectionOpen[k] = true; })"); app.ctx.renderTable();
-    for (const id of seasons) assert.deepStrictEqual(editCalls(html(app), [id]), allTv[id], `${id}: All TV Seasons' calls`);
-    assert.ok(!/status-select|delRow\(|openTmdbMatch\(|openAddSeason\(/.test(html(app) + cards(app)), 'no status select, Delete, Match or Add season on season entries');
+    for (const id of seasons) {
+      const all = editCalls(html(app), [id]);
+      assert.deepStrictEqual(all.filter(h => !h.startsWith('removeFromCollection(')), allTv[id], `${id}: All TV Seasons' calls`);
+      const showId = L[MEMBERS.find(k => L[k].rows.some(r => r.id === id))].show.id;
+      assert.deepStrictEqual(all.filter(h => h.startsWith('removeFromCollection(')), [`removeFromCollection('show', '${showId}', '${id}')`], `${id}: O3 Remove show`);
+    }
+    // (S4: films have their own controls; only the season entries are checked here.)
+    const seasonRows = html(app).split('<tr').filter(r => r.includes('browse-season-row')).join('');
+    assert.ok(seasonRows && !/status-select|delRow\(|openTmdbMatch\(|openAddSeason\(/.test(seasonRows), 'no status select, Delete, Match or Add season on season entries');
     assert.ok(html(app).includes('Switch to Shows to change it.'), 'the read-only status pill');
   });
 }
@@ -437,7 +445,7 @@ test('G3 F12 M8 no p_expansion is not reachable through the page (it always send
   const res = await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/rpc/library_match_season_b45`, { method: 'POST', body: JSON.stringify({ ...copy(rpc(app, 'library_match_season_b45')[0].body), p_expansion: null }) });
   assert.match(await res.text(), /match_needs_confirmation/);
 });
-test('G3 F13 M10 season → film (the show keeps a season): the row becomes a film with the show’s collections; listed read-only in Movies', async () => {
+test('G3 F13 M10 season → film (the show keeps a season): the row becomes a film with the show’s collections; listed in Movies with its film controls (S4)', async () => {
   const { app, L, d } = await flow(async (app, L) => {
     await match(app, L.split.rows[0].id, { mediaType: 'movie', details: { id: 8010, title: 'Split Film', release_date: '2020-01-01', genres: [{ name: 'Documentary' }], production_companies: [] } });
     if (app.el('tmdbMatchBody').innerHTML.includes('confirmTmdbMatchAck()')) { app.ctx.confirmTmdbMatchAck(); await settle(); await settle(); }
@@ -445,7 +453,7 @@ test('G3 F13 M10 season → film (the show keeps a season): the row becomes a fi
   assert.strictEqual(storeRow(app, L.split.rows[0].id).media_type, 'movie');
   assert.ok(d.collection_memberships.added.length === 1, 'the film joins the show’s collection');
   assert.ok(!d.tv_shows || !d.tv_shows.removed.length, 'the show keeps its other season');
-  assert.ok(html(app).includes(`data-item="${L.split.rows[0].id}"`) && !html(app).includes(`toggleWatch('${L.split.rows[0].id}')`), 'listed as a read-only film');
+  assert.ok(html(app).includes(`data-item="${L.split.rows[0].id}"`) && html(app).includes(`setStatus('${L.split.rows[0].id}'`), 'listed as a film with its film controls (S4)');
 });
 test('G3 F13 M11 season → film emptying an Ended show: acknowledgment declined writes nothing; accepted deletes the show with its memberships', async () => {
   const L = lib();
@@ -473,17 +481,13 @@ test('G3 F13 M12 a skipped + watched season asks for a state choice first; M14 a
   await match(app, L.split.rows[0].id, { mediaType: 'movie', details: { id: 8014, title: 'Known', release_date: '2020-01-01', genres: [], production_companies: [] } });
   assert.deepStrictEqual(diff(before, snap(app)), {}, 'M14: nothing written');
 });
-test('G3 M9 / M13 (film-origin, owner clarification): in a collection Match on a film is refused; in All Movies film → film is the existing behaviour', async () => {
+test('G3 M9 / M13 (film-origin, owner clarification): since S4 a film in a collection matches as in All Movies (film → film: identity only)', async () => {
   const L = lib();
   const app = await boot(L);
   await openTC(app);
-  app.ctx.openTmdbMatch(L.filmA.id); await settle();
-  assert.strictEqual(app.get('libraryPanel'), null, 'no Match panel for a film in a collection');
-  app.ctx.switchMediaType('movie'); await settle();
-  app.el('fWatch').value = ''; app.ctx.renderTable();
   await match(app, L.filmA.id, { mediaType: 'movie', details: { id: 8013, title: 'Doc One', release_date: '2019-01-01', genres: [{ name: 'Documentary' }], production_companies: [] } });
   assert.deepStrictEqual(rpc(app, 'library_match_film_b45').length, 1);
-  assert.strictEqual(storeRow(app, L.filmA.id).tmdb_id, 8013, 'M13 (All Movies): identity only');
+  assert.strictEqual(storeRow(app, L.filmA.id).tmdb_id, 8013, 'M13: identity only');
 });
 // F14 / F15 (D6)
 test('G3 F14 Delete… (last season): D6-b text, Cancel sends nothing; confirmed: delete_tv_season, the show and its memberships go, the collection is read again', async () => {
@@ -492,7 +496,7 @@ test('G3 F14 Delete… (last season): D6-b text, Cancel sends nothing; confirmed
   await openTC(app);
   app.dialogAnswer = 'cancel';
   await app.ctx.delRow(L.lone.rows[0].id); await settle();
-  assert.strictEqual(app.dialogs[0].text, 'Delete “Lone · Season 1” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in. This is the show’s last season, so the show is deleted too, along with its place in every collection.');
+  assert.strictEqual(app.dialogs[0].text, 'Delete “Lone · Season 1” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in. This is the show’s last season, so the show is deleted too, along with its place in every collection. To keep it but take the show out of True Crime / Docs only, use Remove show from True Crime / Docs instead.');
   assert.deepStrictEqual([app.dialogs[0].cancelLabel, app.dialogs[0].confirmLabel, app.dialogs[0].focus], ['Cancel', 'Delete from library', 'effectCancel']);
   assert.deepStrictEqual(writes(app), [], 'Cancel: nothing sent');
   app.dialogAnswer = 'confirm';
@@ -511,7 +515,7 @@ test('G3 F14 the earlier-seasons sentence is kept; not the last season: no last-
   await openTC(app);
   app.dialogAnswer = 'cancel';
   await app.ctx.delRow(L.gap.rows[0].id); await settle();
-  assert.strictEqual(app.dialogs[0].text, 'Delete “Gap · Season 1” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in. The earlier-seasons choice for “Gap” ends too.');
+  assert.strictEqual(app.dialogs[0].text, 'Delete “Gap · Season 1” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in. The earlier-seasons choice for “Gap” ends too. To keep it but take the show out of True Crime / Docs only, use Remove show from True Crime / Docs instead.');
 });
 for (const [label, act] of [
   ['the view changed', app => app.ctx.switchView('alltv')],
@@ -931,18 +935,11 @@ test('G7 V3.9: the phone rule gives the new controls (Delete…, the dialog’s 
 });
 
 // ═══ G8: films read-only, no new organization caller, the note ═══════════════
-test('G8: every film action refuses in a collection and sends nothing; no S3 flow sends org_*; Edit collection opens Manage at the members unchanged', async () => {
+test('G8: no S3 flow sends org_*; Edit collection opens Manage at the members unchanged (S4: film actions are tests/collection-films.test.js)', async () => {
   const L = lib();
   const app = await boot(L);
   await openTC(app);
-  const f = L.filmA.id;
-  await app.ctx.toggleWatch(f); await app.ctx.setStatus(f, 'skipped'); await app.ctx.setFilmPriority(f, 'high');
-  await app.ctx.toggleWatchWith(f, 'Rina', true); await app.ctx.delRow(f);
-  await app.ctx.dismissCatalogNew([{ kind: 'film', id: f }]); await app.ctx.keepCurrentStatus('film', f);
-  app.ctx.openDetails('film', f); app.ctx.openTmdbMatch(f);
-  await settle();
-  assert.deepStrictEqual(writes(app), []);
-  assert.ok(app.el('viewHead').innerHTML.includes('The shows and films in your True Crime / Docs collection. Changing a show here changes it in your library everywhere. Films can’t be changed here yet; change them in All Movies.'));
+  assert.ok(app.el('viewHead').innerHTML.includes('The shows and films in your True Crime / Docs collection. Changing a show or film here changes it in your library everywhere; Remove takes it out of True Crime / Docs only.'));
   assert.ok(app.el('viewHead').innerHTML.includes(`openManage('members', '${app.browseId('truecrime').split(':')[1]}', this)`));
   // S3 flows send no org_* request.
   await app.ctx.setShowStateById(L.bravo.show.id, { status: 'watching' }); await app.ctx.toggleWatch(L.alpha.rows[1].id);

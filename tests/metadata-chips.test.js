@@ -152,13 +152,13 @@ test('assets: one new token on every versioned file, ui-helpers.js now versioned
   const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1]);
   assert.deepStrictEqual(scripts.map(s => s.split('?')[0]), ['config.js', 'identity.js', 'api.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'backup-restore.js',
     'backup-format3.js', 'tabs.js', 'render.js', 'row-actions.js', 'tmdb-search.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js',
-    'refresh-shows.js', 'tmdb-match.js', 'derived-views.js', 'tv-shows.js', 'organization.js', 'organization-manage.js', 'catalog-apply.js',
+    'refresh-shows.js', 'tmdb-match.js', 'derived-views.js', 'tv-shows.js', 'organization.js', 'organization-manage.js', 'collection-members.js', 'catalog-apply.js',
     'browse-views.js', 'library.js']);
   const tokens = new Set([...html.matchAll(/\?v=([\w-]+)/g)].map(m => m[1]));
   assert.deepStrictEqual([...tokens], ['20261018-lane1']); // S3 bumped the token (tests/filter-bar.test.js)
   assert.ok(scripts.includes('ui-helpers.js?v=20261018-lane1'), 'render.js and its helper load together');
   assert.ok(scripts.includes('config.js') && scripts.includes('identity.js'), 'config.js and identity.js stay unversioned');
-  assert.strictEqual([...html.matchAll(/(?:src|href)="[^"]+\?v=/g)].length, 23, 'styles.css + 22 scripts');
+  assert.strictEqual([...html.matchAll(/(?:src|href)="[^"]+\?v=/g)].length, 24, 'styles.css + 23 scripts (S4: collection-members.js)');
 });
 
 T.run();

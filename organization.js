@@ -120,6 +120,8 @@ function invalidateOrganization() {
   orgCollectionsStale = 0;
   orgChoicesStale = 0;
   if (typeof manageInvalidate === 'function') manageInvalidate();
+  orgEpoch++; // S4: a membership change or Undo prepared before the restore sends nothing
+  collectionUndo = null;
   personalCollections = null;
   orgState = 'loading';
   setWatchWith(() => { watchWithChoices = null; watchWithState = 'loading'; });

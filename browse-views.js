@@ -6,8 +6,9 @@
 // TMDB credits add nothing. The loader only reads. All Movies (Stage 4b) has the film
 // actions — status, watched, watch-with, Match, delete — by the row's real id
 // (row-actions.js, library.js). Since S3 a collection's TV entries have All TV's
-// controls (the same functions and guards); its films stay read-only (S4 adds their
-// controls), and no collection control changes membership. A collection can list TV as
+// controls (the same functions and guards), and since S4 its films have All Movies'; its
+// Remove controls take a show or film out of that collection only (collection-members.js).
+// A collection can list TV as
 // Shows or Seasons and show TV and films Separate or Combined (remembered per
 // collection on this device); Shows and Movies only are A–Z, Seasons is oldest
 // first. While one of these is open,
@@ -710,7 +711,7 @@ async function loadBrowseView() {
     if (seq !== browseLoadSeq || activeViewId !== viewId) return null;
     if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === browseLoadSeq && activeViewId === viewId) loadBrowseView(); }); return null; }
     publishGovernance(governanceCovers(gov, rows, shows));
-    let dest = null, members = null;
+    let dest = null, members = null, memberRows = null;
     if (isCollection) {
       const hadFocus = chooserHasFocus();
       const published = publishCollections(collections, orgRead);
@@ -723,9 +724,10 @@ async function loadBrowseView() {
       if (published) buildBrowseBar({ hadFocus });
       dest = browseDestFromCollection(c);
       members = membersOf(memberships, c.id);
+      memberRows = memberships.filter(m => m.collection_id === c.id); // with their ids: Remove names the one it read (S4)
     }
     endListReread(true);
-    browseData = { rows, dest, members, loaded: true };
+    browseData = { rows, dest, members, memberRows, loaded: true };
     renderFilters();
     renderTable();
     return true;
@@ -788,8 +790,8 @@ function browseHeadHtml() {
   }
   const back = browseBackHtml();
   if (!dest) return back ? `<div class="browse-head">${back}</div>` : '';
-  // S3 (owner decision S3-D3): shows are edited here; films stay read-only until S4.
-  const notes = [dest.note, `The shows and films in your ${dest.label} collection. Changing a show here changes it in your library everywhere. Films can’t be changed here yet; change them in All Movies.`].filter(Boolean);
+  // S3-D3, as amended by S4: shows and films are edited here; Remove changes only the collection.
+  const notes = [dest.note, `The shows and films in your ${dest.label} collection. Changing a show or film here changes it in your library everywhere; Remove takes it out of ${dest.label} only.`].filter(Boolean);
   return `<div class="browse-head">
       <h2 class="browse-title">🗂 ${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
       ${back}
@@ -949,7 +951,7 @@ function browseSectionHtml(label, count, name) {
 // (Shows; Movies only) or chronological (Seasons) with TBA and Date needs review
 // apart. Counts keep shows, season entries and films apart and don't depend on
 // grouping. Status is the show's for TV and the film's own.
-// S3: TV entries carry All TV's controls; films stay read-only. Returns the focus chain's listing
+// S3 / S4: TV entries carry All TV's controls and films All Movies'. Returns the focus chain's listing
 // (B6, derived-views.js): per section its entries (dated), and its TBA and Date needs review parts.
 function renderBrowseCollection(dest, today, f) {
   const base = deriveBrowseCollection(browseData.rows, tvShowsById, browseData.members, today);
@@ -1061,11 +1063,6 @@ function renderAllMovies(today, f) {
   document.getElementById('cardList').innerHTML = cardHtml;
 }
 
-function browseFilmStatusPillHtml(r) {
-  const state = filmViewState(r);
-  return `<span class="status-pill s-film-${state}" title="Film status">${esc(FILM_STATE_LABELS[state])}</span>`;
-}
-
 // A stored date as text, with what it means: TBA (text or sentinel, whatever the
 // guessed date_sort), "date needs review" (no valid date), or Upcoming. Never a
 // release year that isn't stored.
@@ -1073,11 +1070,6 @@ function browseDateHtml(r, today) {
   if (isTbaRow(r)) return /TBA/i.test(r.display_date || '') ? esc(r.display_date) : `${esc(r.display_date)} <span class="ro-tag">TBA</span>`;
   if (!isValidDateSort(r.date_sort)) return `${esc(r.display_date)}<span class="review-tag">date needs review</span>`;
   return `${esc(r.display_date)}${r.date_sort > today ? '<span class="upcoming-tag">Upcoming</span>' : ''}`;
-}
-
-// A film's stored watched state as a label (films stay read-only in collections, S3).
-function browseWatchedHtml(watched) {
-  return watched ? '<span class="ro-watch watched">✓ Watched</span>' : '<span class="ro-watch">Not watched</span>';
 }
 
 // A show (S3): All TV's show entry — the status and priority selects, the season-named shortcut,
@@ -1097,9 +1089,11 @@ function browseShowHtml(item, today, combined, part) {
 // One TV season entry (Seasons): titled by its show, then its stored label. S3: All TV Seasons'
 // controls (derived-views.js allTvSeasonRowHtml) — the show's status as a read-only label (changed
 // in Shows), the existing Watched control (release rule unchanged) and Skip / Keep — with the B6
-// focus hooks. part: its focus section.
+// focus hooks. S4 (O3): Remove show…, which takes the whole show (every season) out of the
+// collection. part: its focus section.
 function browseSeasonEntryHtml(e, today, combined, part) {
   const { row: r, show } = e;
+  const remove = seasonActionHtml('remove', collectionRemoveShowHtml(show, r));
   const item = seasonItemAttrs(r, part || 'tv');
   const dimClass = isOffList(r) ? 'row-skipped' : '';
   const badges = metadataChipsHtml(show, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
@@ -1112,7 +1106,7 @@ function browseSeasonEntryHtml(e, today, combined, part) {
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusHtml}</td>
       <td>${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, false))}</td>
-      <td>${seasonActionHtml('season-control', seasonRowControlHtml(r))}</td>
+      <td>${seasonActionHtml('season-control', seasonRowControlHtml(r))} ${remove}</td>
     </tr>`;
   const card = `<div class="item-card ${dimClass}"${item}>
       <div class="card-top">
@@ -1125,29 +1119,55 @@ function browseSeasonEntryHtml(e, today, combined, part) {
         ${badges}
         <span class="card-date">${browseDateHtml(r, today)}</span>
       </div>
-      <div class="card-actions">${statusHtml} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))}</div>
+      <div class="card-actions">${statusHtml} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))} ${remove}</div>
     </div>`;
   return { row, card };
 }
 
-// A film: the row's own status and watched state; its existing collection tags and
-// watch-with choices as filter pills (they filter the list; they change nothing).
-// S3: films stay read-only in collections (until S4); the entry is a focus item only (B6 hooks),
-// so focus can land on it (for example a season matched as a film), and has no control.
+// A show's Remove control in a collection (S4): in its expanded actions, or (O3) on one of its
+// season entries, where it still takes the whole show out. Named by its whole effect.
+function collectionRemoveShowHtml(show, season) {
+  const dest = isBrowseCollectionView(activeViewId) ? currentBrowseDest() : null;
+  if (!dest || !show) return '';
+  const idArg = esc(show.id).replace(/'/g, "\\'");
+  const seasonArg = season ? `'${esc(season.id).replace(/'/g, "\\'")}'` : 'null';
+  const name = `Remove the show ${show.title} and all its seasons from ${dest.label}`;
+  return `<button class="btn btn-link collection-remove" onclick="removeFromCollection('show', '${idArg}', ${seasonArg})" aria-label="${esc(name)}">${esc(season ? 'Remove show…' : `Remove show from ${dest.label}…`)}</button>`;
+}
+
+// A film in a collection (S4): All Movies' controls — status, priority, Watched and the ⋯ menu
+// (watch-with, Categories…, the markers, Pull rest, Match) — with the B6 focus hooks. In place of
+// All Movies' ×, the menu ends with Remove from <collection>… and the library action named by its
+// effect: Delete from library…, or Skip film (built-in catalog)… (none for a Skipped catalog film).
 function browseFilmHtml(r, today, part) {
-  const dimClass = r.status === 'skipped' ? 'row-skipped' : '';
+  const dest = currentBrowseDest();
+  const policy = editPolicyOf(r);
+  const isSkipped = r.status === 'skipped';
+  const dimClass = isSkipped ? 'row-skipped' : '';
   const item = ` data-item="${esc(r.id)}" data-row-section="${esc(part || 'film')}"`;
   const badges = metadataChipsHtml(r, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
   const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
   const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
-  const statusHtml = browseFilmStatusPillHtml(r);
+  const idArg = esc(r.id).replace(/'/g, "\\'");
+  const statusCell = `<span class="state-action" data-action="status">${filmStatusSelectHtml(r)}</span> <span class="state-action" data-action="priority">${prioritySelectHtml(r, 'film')}</span>`;
+  const watchBtn = isSkipped ? '<span class="confirmed-lbl">—</span>'
+    : `<span class="state-action" data-action="watch"><button class="watch-btn${r.watched ? ' watched' : ''}" onclick="toggleWatch('${idArg}')">${r.watched ? '✓ Watched' : 'Mark watched'}</button></span>`;
+  const libraryAction = policy.deleteEffect === 'delete'
+    ? `<button class="popover-action" onclick="delRow('${idArg}')" aria-label="${esc(`Delete ${r.title} from your library`)}">Delete from library…</button>`
+    : policy.deleteEffect === 'skip-film' && !isSkipped
+      ? `<button class="popover-action" onclick="delRow('${idArg}')" aria-label="${esc(`Skip ${r.title} (built-in catalog film)`)}">Skip film (built-in catalog)…</button>` : '';
+  const extra = dest ? `<div class="popover-section-label" style="margin-top:8px">${esc(dest.label)}</div>
+        <button class="popover-action" onclick="removeFromCollection('film', '${idArg}', null)" aria-label="${esc(`Remove ${r.title} from ${dest.label}`)}">Remove from ${esc(dest.label)}…</button>`
+      + (libraryAction ? `<div class="popover-section-label" style="margin-top:8px">Library</div>${libraryAction}` : '') : '';
+  const popover = filmMenuHtml(r, policy, extra);
+  const moreBtn = `<button class="more-btn" data-action="more" onclick="toggleMorePopover('${idArg}', this)" title="Watch with, details, collection, TMDB" aria-label="${esc(`More for ${r.title}`)}">⋯</button>`;
   const row = `<tr class="browse-film-row ${dimClass}"${item}>
       <td tabindex="-1" data-primary="1">${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl"> · Film</span>${stateTagsHtml(r, 'film')}${labelsHtml}</td>
       <td>${badges}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
-      <td>${statusHtml}</td>
-      <td>${browseWatchedHtml(r.watched)}</td>
-      <td></td>
+      <td>${statusCell}</td>
+      <td>${watchBtn}</td>
+      <td class="more-cell">${moreBtn}${popover}</td>
     </tr>`;
   const card = `<div class="item-card ${dimClass}"${item}>
       <div class="card-top">
@@ -1155,15 +1175,36 @@ function browseFilmHtml(r, today, part) {
           <span class="card-title">${priorityMarkHtml(r.priority)}${esc(r.title)}${priorityMarkHtml(r.priority, true)}${stateTagsHtml(r, 'film')}</span>
           <span class="card-season">Film</span>
         </div>
+        <div class="card-row-actions">${moreBtn}</div>
+        ${popover}
       </div>
       <div class="card-meta">
         ${badges}
         <span class="card-date">${browseDateHtml(r, today)}</span>
       </div>
       ${labelsHtml}
-      <div class="card-actions">${statusHtml} ${browseWatchedHtml(r.watched)}</div>
+      <div class="card-actions">${statusCell} ${isSkipped ? '' : watchBtn}</div>
     </div>`;
   return { row, card };
+}
+
+// A film's ⋯ menu (All Movies and, since S4, collections): watch-with, Categories…, Dismiss “New”,
+// Keep current status, the rest of its franchise (a TMDB collection and a genre theme) and Match
+// (an eligible row); extra: what the view adds at the end.
+function filmMenuHtml(r, policy, extra = '') {
+  const idArg = esc(r.id).replace(/'/g, "\\'");
+  const stateActions = `<div class="popover-section-label" style="margin-top:8px">Details</div><button class="popover-action" onclick="openDetails('film', '${idArg}', this)">Categories…</button>`
+    + (r.catalog_new ? `<button class="popover-action" onclick="dismissCatalogNew([{ kind: 'film', id: '${idArg}' }])">Dismiss “New”</button>` : '')
+    + (r.status_review ? `<button class="popover-action" onclick="keepCurrentStatus('film', '${idArg}')">Keep current status</button>` : '');
+  const franchise = cleanCollectionName(r.tmdb_collection_name || '');
+  const pullBtn = r.tmdb_collection_id && filmThemeKindOf(r) === 'genre'
+    ? `<div class="popover-section-label" style="margin-top:8px">Collection</div><button class="popover-action" onclick="libraryPullRest('${r.id}', ${r.tmdb_collection_id}, '${esc(franchise).replace(/'/g, "\\'")}')">🔗 Pull rest of ${esc(franchise || 'collection')}</button>` : '';
+  const matchBtn = policy.matchable
+    ? `<div class="popover-section-label" style="margin-top:8px">TMDB</div><button class="popover-action" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : '';
+  return `<div class="more-popover" id="more-popover-${r.id}" style="display:none">
+        <div class="popover-section-label">Watch with</div>
+        <div class="ww-options-grid">${watchWithPickerHtml(r.id, r.watch_with || [])}</div>${stateActions}${pullBtn}${matchBtn}${extra}
+      </div>`;
 }
 
 // A film in All Movies (Stage 4b): the film actions of the old Movies tab, for every
@@ -1180,21 +1221,9 @@ function allMoviesFilmHtml(r, today, films) {
   const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
   const statusCell = `${filmStatusSelectHtml(r)} ${prioritySelectHtml(r, 'film')}`;
   const titleHtml = `${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl"> · Film</span>${stateTagsHtml(r, 'film')}`;
-  const idArg = esc(r.id).replace(/'/g, "\\'");
-  const stateActions = `<div class="popover-section-label" style="margin-top:8px">Details</div><button class="popover-action" onclick="openDetails('film', '${idArg}', this)">Categories…</button>`
-    + (r.catalog_new ? `<button class="popover-action" onclick="dismissCatalogNew([{ kind: 'film', id: '${idArg}' }])">Dismiss “New”</button>` : '')
-    + (r.status_review ? `<button class="popover-action" onclick="keepCurrentStatus('film', '${idArg}')">Keep current status</button>` : '');
   const watchBtn = isSkipped ? '<span class="confirmed-lbl">—</span>'
     : `<button class="watch-btn${r.watched ? ' watched' : ''}" onclick="toggleWatch('${r.id}')">${r.watched ? '✓ Watched' : 'Mark watched'}</button>`;
-  const franchise = cleanCollectionName(r.tmdb_collection_name || '');
-  const pullBtn = r.tmdb_collection_id && filmThemeKindOf(r) === 'genre'
-    ? `<div class="popover-section-label" style="margin-top:8px">Collection</div><button class="popover-action" onclick="libraryPullRest('${r.id}', ${r.tmdb_collection_id}, '${esc(franchise).replace(/'/g, "\\'")}')">🔗 Pull rest of ${esc(franchise || 'collection')}</button>` : '';
-  const matchBtn = policy.matchable
-    ? `<div class="popover-section-label" style="margin-top:8px">TMDB</div><button class="popover-action" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : '';
-  const popover = `<div class="more-popover" id="more-popover-${r.id}" style="display:none">
-        <div class="popover-section-label">Watch with</div>
-        <div class="ww-options-grid">${watchWithPickerHtml(r.id, r.watch_with || [])}</div>${stateActions}${pullBtn}${matchBtn}
-      </div>`;
+  const popover = filmMenuHtml(r, policy);
   const delTitle = policy.deleteEffect === 'skip-film' ? 'Skip (built-in catalog film)' : 'Delete';
   const delBtn = cls => policy.deleteEffect === 'skip-film' && isSkipped ? ''
     : `<button class="${cls}" onclick="delRow('${r.id}')" title="${delTitle}" aria-label="${esc(`${delTitle}: ${r.title}`)}">×</button>`;

@@ -7,12 +7,6 @@ function actionRows() {
   return activeViewId ? derivedData?.rows || [] : [];
 }
 
-// S3: a collection edits its shows and their seasons; its films stay read-only until S4, so every
-// film action refuses there and sends nothing.
-function collectionFilmLocked(row) {
-  return isBrowseCollectionView(activeViewId) && !!row && !isTvSeason(row);
-}
-
 // After a confirmed change, copy the saved fields onto every in-memory copy of that row
 // (the derived view's rows, the browse view's rows), without a refetch.
 function mirrorRowUpdate(id, fields) {
@@ -24,7 +18,7 @@ function mirrorRowUpdate(id, fields) {
 
 async function toggleWatch(id) {
   const row = actionRows().find(r => r.id === id);
-  if (!row || collectionFilmLocked(row)) return;
+  if (!row) return;
   // A skipped film's Watched changes only as a status choice (B5 §4.2: never Skipped + Watched).
   if (!isTvSeason(row) && row.status === 'skipped') {
     showError(`“${row.title}” is Skipped, so Watched changes only through its status (To Watch, Watched or Skipped). Nothing was changed.`);
@@ -78,7 +72,6 @@ function filmStatusSelectHtml(r) {
 // clears Watched; Cancel sends nothing.
 async function setStatus(id, state, selectEl) {
   const row = actionRows().find(r => r.id === id);
-  if (collectionFilmLocked(row)) return;
   if (!row || isTvSeason(row) || !['to_watch', 'watched', 'skipped'].includes(state)) { renderTable(); return; }
   const current = filmViewState(row);
   if (state === current && !row.status_review) { renderTable(); return; }
@@ -96,7 +89,7 @@ async function setStatus(id, state, selectEl) {
 // Priority (O2): status, watched and markers unchanged; an existing pair stays a pair.
 async function setFilmPriority(id, priority) {
   const row = actionRows().find(r => r.id === id);
-  if (!row || collectionFilmLocked(row) || isTvSeason(row) || !PRIORITIES.includes(priority)) return;
+  if (!row || isTvSeason(row) || !PRIORITIES.includes(priority)) return;
   if (row.priority === priority) { renderTable(); return; }
   await sendFilmState(row, { priority });
 }
@@ -134,7 +127,7 @@ function delRow(id) {
 
 async function toggleWatchWith(rowId, tag, checked) {
   const row = actionRows().find(r => r.id === rowId);
-  if (!row || collectionFilmLocked(row)) return;
+  if (!row) return;
   if (!watchWithUsable()) { showError('Watch-with choices aren’t loaded, so nothing was changed. Try again once they are.'); renderTable(); return; }
   const current = new Set(row.watch_with || []);
   if (checked) current.add(tag); else current.delete(tag);

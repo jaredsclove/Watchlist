@@ -113,10 +113,11 @@ function listed(app) {
 const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"]*)"/g)]
   .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1])).filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
 // S3: a collection's TV entries have All TV's controls (their parity is tests/collections-tv-edit.test.js); the
-// allowed set grows by exactly those handlers. Films stay read-only (checked below), and pressing nothing still
-// writes and reads nothing.
+// allowed set grows by exactly those handlers. S4: films have All Movies' controls and entries the collection's
+// Remove (tests/collection-films.test.js); pressing nothing still writes and reads nothing.
 const TV_EDIT = ['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
-  'keepCurrentStatus', 'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow'];
+  'keepCurrentStatus', 'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
+  'setStatus', 'setFilmPriority', 'toggleMorePopover', 'toggleWatchWith', 'libraryPullRest', 'dismissCatalogNew', 'removeFromCollection'];
 const READ_ONLY = new Set([...TV_EDIT, 'toggleFilterPill', 'toggleBrowseShow', 'setBrowseMedia', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
   'renderTable', 'browseBack', 'openBrowseCollection', 'loadBrowseView',
   'openManage', // Stage 3b-2: opens the Manage collections dialog (organization only, never tracking)
@@ -479,7 +480,7 @@ test('expanded shows stay expanded across presentation and grouping changes in a
 });
 
 // ─── Read-only ────────────────────────────────────────────────────────────────
-test('every control in every combination: films stay read-only and TV entries have only All TV’s controls (S3); no writes, no reads after loading', async () => {
+test('every control in every combination: list entries have only All TV’s and All Movies’ controls and Remove (S3, S4); no writes, no reads after loading', async () => {
   const probe = await createApp();
   const def = probe.get("COLLECTIONS.find(c => c.id === 'disney').defaults.find(d => d.s !== 'Film' && !/TBA/i.test(d.d))");
   const data = library();
@@ -498,13 +499,10 @@ test('every control in every combination: films stay read-only and TV entries ha
         for (const vis of ['towatch', 'watched', 'skipped', 'all']) app.ctx.setBrowseSeasonVis(vis);
         for (const sec of ['tvTba', 'filmTba', 'allTba', 'tvReview', 'filmReview', 'allReview']) app.ctx.toggleBrowseSection(sec);
         for (const key of app.get('[...tvShowsById.keys()]')) app.ctx.toggleBrowseShow(key);
-        const filmIds = JSON.parse(app.get('JSON.stringify(browseData.rows.filter(r => isFilmRow(r)).map(r => r.id))'));
         for (const id of ['tbody', 'cardList', 'filtersRow', 'statsRow', 'viewHead']) {
           const s = app.el(id).innerHTML;
           const bad = handlersIn(s).filter(h => !READ_ONLY.has(h) || (!['tbody', 'cardList'].includes(id) && TV_EDIT.includes(h)));
           assert.deepStrictEqual(bad, [], `${media}/${pres}/${grouping} ${id}: ${bad}`);
-          const onFilm = [...s.matchAll(/\bon(?:click|change)="([^"]*)"/g)].map(m => m[1]).filter(h => filmIds.some(f => h.includes(`'${f}'`)) && !/^toggleFilterPill\(/.test(h));
-          assert.deepStrictEqual(onFilm, [], `${media}/${pres}/${grouping} ${id}: a control acts on a film`);
         }
       }
     }
@@ -512,8 +510,6 @@ test('every control in every combination: films stay read-only and TV entries ha
   await settle();
   assert.strictEqual(app.requests.length, reads, 'presentation changes read nothing');
   assert.deepStrictEqual(mutating(app), []);
-  // S3: no film control (films stay read-only); TV controls are All TV's (checked above by handler).
-  assert.ok(!/more-btn|s-film-[a-z_]+" onchange|setStatus\(|setFilmPriority\(|toggleWatchWith\(|libraryPullRest\(/.test(html(app) + cards(app)));
 });
 
 T.run();

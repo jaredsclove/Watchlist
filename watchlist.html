@@ -106,6 +106,7 @@
 <script src="tv-shows.js?v=20261018-lane1"></script>
 <script src="organization.js?v=20261018-lane1"></script>
 <script src="organization-manage.js?v=20261018-lane1"></script>
+<script src="collection-members.js?v=20261018-lane1"></script>
 <script src="catalog-apply.js?v=20261018-lane1"></script>
 <script src="browse-views.js?v=20261018-lane1"></script>
 <script src="library.js?v=20261018-lane1"></script>
@@ -184,6 +185,8 @@ let catalogChooser = null; // the open Catalog updates chooser (catalog-apply.js
 let libraryPanel = null; // the open "+ Add" panel of a view (library.js); null while closed
 let libraryPanelSeq = 0; // bumped each time the panel opens; answers for an earlier opening never touch it
 let orgWriteCapability = null; // { value: 'yes' }: this database has the Stage 3b-2 functions (checked when Manage opens)
+let orgEpoch = 0; // S4: bumped by a restore made in this page (organization.js invalidateOrganization); a membership change or its Undo checks it before sending
+let collectionUndo = null; // S4: the open collection's Undo after a confirmed Remove: { viewId, epoch, collectionId, showId, itemId, label, name }; withdrawn on leaving the view or a restore
 let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.js)
 
 
