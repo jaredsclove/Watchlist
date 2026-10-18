@@ -56,6 +56,7 @@ function switchView(id) {
   // list being left (its busy mark and status line, an out-of-date mark) goes with it.
   if (typeof clearListReread === 'function') clearListReread();
   if (typeof cancelEffectDialog === 'function') cancelEffectDialog();
+  if (routeNavMode !== 'none' && typeof rememberRouteEntry === 'function') rememberRouteEntry(); // S6 (D15): the entry being left, in page memory
   collectionUndo = null; // S4: Undo belongs to the collection visit it was offered in
   if (typeof addPickerOnNavigate === 'function') addPickerOnNavigate(); // S5: an idle picker closes; a running batch stops after its current request
   activeViewId = id;
@@ -65,6 +66,7 @@ function switchView(id) {
   if (!isCollectionsAreaView(id)) browseOrigin = null;
   if (isBrowseCollectionView(id)) enterBrowseCollection(id);
   collectionEntry = isBrowseCollectionView(id) ? { viewId: id, kind: nextCollectionEntryKind || 'tab' } : null;
+  if (typeof noteRoute === 'function') noteRoute(id, nextCollectionEntryKind); // S6: push or replace this view's route
   nextCollectionEntryKind = null;
   if (!isSettingsView(id)) settingsOrigin = null; // Settings' Back applies only while Settings is open
   if (backNavFilters && backNavFilters.view !== id) backNavFilters = null;
@@ -173,6 +175,9 @@ function openSettings(opener, section) {
 // (put back once, as a collection's Back does); a collection keeps its own Back origin.
 function settingsBack() {
   const origin = settingsOrigin;
+  // S6 (D4): when the view it returns to is the entry directly behind, the browser's Back does it
+  // (its filters come back from page memory), so the two Backs agree.
+  if (origin && origin.viewId && typeof routeBehindIs === 'function' && routeBehindIs(origin.viewId)) { history.back(); return; }
   if (!origin || !origin.viewId) {
     activeMediaType = 'tv';
     buildMediaSwitch();

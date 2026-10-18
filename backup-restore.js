@@ -901,6 +901,7 @@ function closeRestoreModal() {
   pendingRestoreAllowV1Reset = false;
   pendingRestoreDbFormat = null;
   restoreInFlight = false;
+  if (typeof updateLeaveWarning === 'function') updateLeaveWarning(); // S6 (D18)
 }
 
 async function executeRestore() {
@@ -1024,6 +1025,7 @@ async function sendRestore(preRestoreFilename) {
   }
   setProgress(`Restoring ${restoredTables.length} tables…`);
   restoreInFlight = true; // sent to the database: navigation no longer abandons it
+  if (typeof updateLeaveWarning === 'function') updateLeaveWarning(); // S6 (D18): leaving now may leave its outcome unknown
   try {
     await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup, p_allow_v1_reset: pendingRestoreAllowV1Reset === true });
     // Collections and watch-with choices read before this point are stale now, and an open

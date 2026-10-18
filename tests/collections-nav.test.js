@@ -848,10 +848,11 @@ test('C12b resolution opens exactly one collection and reads it: from Collection
   assert.strictEqual(c.get('activeViewId'), 'watching');
 });
 
-test('C12c no History API, hash routing or leave-page handling (S6)', () => {
+test('C12c since S6 only history.js uses the History API, hash routes and the leave-page warning (tests/history-routes.test.js)', () => {
   const root = path.join(__dirname, '..');
-  const files = fs.readdirSync(root).filter(f => f.endsWith('.js')).concat('watchlist.html');
+  const files = fs.readdirSync(root).filter(f => f.endsWith('.js') && f !== 'history.js').concat('watchlist.html');
   for (const f of files) assert.ok(!/pushState|replaceState|popstate|hashchange|location\.hash|beforeunload/.test(fs.readFileSync(path.join(root, f), 'utf8')), f);
+  assert.ok(/pushState/.test(fs.readFileSync(path.join(root, 'history.js'), 'utf8')));
 });
 
 // ─── C13 (I-5 A) ──────────────────────────────────────────────────────────────

@@ -396,6 +396,9 @@ function renderCollectionsState() {
 function browseBack() {
   const origin = browseOrigin || { mediaType: activeMediaType, viewId: null, filters: null };
   const target = origin.viewId || landingViewFor(origin.mediaType).id;
+  // S6 (D3): when that view is the entry directly behind, the browser's Back does it (its filters
+  // come back from page memory); otherwise it is a new entry, as before.
+  if (origin.viewId && typeof routeBehindIs === 'function' && routeBehindIs(target)) { history.back(); return; }
   activeMediaType = origin.mediaType;
   backNavFilters = origin.viewId && origin.filters ? { view: target, values: origin.filters } : null;
   buildMediaSwitch();
@@ -599,6 +602,7 @@ function enterBrowseCollection(id) {
   const layout = readBrowseLayout(dest ? dest.layoutKey : null);
   browsePresentation = layout.presentation;
   browseGrouping = layout.grouping;
+  browseLayoutPending = !dest; // S6: opened by its route before the collections were read
 }
 
 // Anything missing, unknown or unreadable falls back to Shows + Separate.
@@ -723,6 +727,12 @@ async function loadBrowseView() {
       }
       if (published) buildBrowseBar({ hadFocus });
       dest = browseDestFromCollection(c);
+      if (browseLayoutPending) { // S6: its remembered layout, now that its key is known
+        const layout = readBrowseLayout(dest.layoutKey);
+        browsePresentation = layout.presentation;
+        browseGrouping = layout.grouping;
+        browseLayoutPending = false;
+      }
       members = membersOf(memberships, c.id);
       memberRows = memberships.filter(m => m.collection_id === c.id); // with their ids: Remove names the one it read (S4)
     }
@@ -753,10 +763,10 @@ function showUnavailableCollection(viewId, hadFocus) {
   const confirmed = listApplicable() && !list.some(d => d.id === viewId);
   if (kind === 'remembered' && confirmed) {
     if (list.length) openRememberedFallback(list[0]);
-    else { forgetLastCollection(); switchView(COLLECTIONS_VIEW_ID); }
+    else { forgetLastCollection(); routeNavMode = 'replace'; try { switchView(COLLECTIONS_VIEW_ID); } finally { routeNavMode = null; } }
     return;
   }
-  if (confirmed && (kind === 'tab' || kind === 'return') && readLastCollection() === collectionId) forgetLastCollection();
+  if (confirmed && (kind === 'tab' || kind === 'return' || kind === 'route') && readLastCollection() === collectionId) forgetLastCollection();
   const others = list.some(d => d.id !== viewId);
   const text = `This collection isn’t available any more.${others ? ' Choose another collection above.' : ''}`;
   const readAgain = kind === 'remembered' ? ` <button class="btn" onclick="loadBrowseView()">Read again</button>` : '';

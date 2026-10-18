@@ -39,6 +39,7 @@ function beginWrite(label, opts = {}) {
   writeLane = { label, after: [], held: true };
   writesInFlight++; dataVersion++; // pending from now: no read that overlaps the change publishes
   setSavingMark(true);
+  if (typeof updateLeaveWarning === 'function') updateLeaveWarning(); // S6 (D18)
   return writeLane;
 }
 
@@ -56,6 +57,7 @@ function endWrite(lane) {
   releaseLaneHold(lane);
   writeLane = null;
   setSavingMark(false);
+  if (typeof updateLeaveWarning === 'function') updateLeaveWarning(); // S6 (D18)
   lane.after.forEach(fn => { try { fn(); } catch (e) { console.error(e); } });
 }
 

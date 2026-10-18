@@ -112,6 +112,7 @@
 <script src="collection-members.js?v=20261018-lane1"></script>
 <script src="catalog-apply.js?v=20261018-lane1"></script>
 <script src="browse-views.js?v=20261018-lane1"></script>
+<script src="history.js?v=20261018-lane1"></script>
 <script src="library.js?v=20261018-lane1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
@@ -193,6 +194,10 @@ let addPicker = null; // S5: the open Add to <collection> picker (collection-mem
 let addBatch = null; // S5: this collection visit's latest Add or Undo batch (its results, notice and Undo); null when none
 let addPickerSeq = 0; // S5: bumped each time the picker opens
 let pullPreselect = null; // S5: { viewId, ids }: the films the last Pull rest in a collection added (its report's follow-up)
+let routeEntry = 0; // S6: the number of the history entry shown (history.js); kept in each entry's state
+let routeMemory = new Map(); // S6: page memory of the entries this page has shown: number → { viewId, filters, visit state } (D15; never stored)
+let routeNavMode = null; // S6: how the next switchView records its route: null (push), 'replace', 'none' (a traversal already on its entry)
+let browseLayoutPending = false; // S6: a collection opened by its route before the collections were read takes its remembered layout once read
 let collectionUndo = null; // S4: the open collection's Undo after a confirmed Remove: { viewId, epoch, collectionId, showId, itemId, label, name }; withdrawn on leaving the view or a restore
 let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.js)
 
@@ -255,9 +260,11 @@ let restoreInFlight = false; // restore_backup has been sent: navigation no long
 
 
 // ─── Boot ────────────────────────────────────────────────────────────────────
+const startView = startupView(); // S6 (D12): the route in the address, else Currently Watching
 buildMediaSwitch();
 buildTabs();
-switchView(activeViewId);
+switchView(startView);
+routeNavMode = null;
 updateBackupAgeIndicator();
 loadOrganization(); // the Browse collections selector and watch-with choices; doesn't hold up the first view
 loadStage5Capabilities(); // which backup format this database takes; doesn't hold up the first view

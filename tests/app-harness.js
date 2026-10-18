@@ -851,7 +851,7 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, stage = 'final', org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true, catalog4a = true, configText = null, addToShow = true, stage5, recoveryArchive = 'active', source = null } = {}) {
+  orgWrite = true, catalog4a = true, configText = null, addToShow = true, stage5, recoveryArchive = 'active', source = null, routes = null } = {}) {
   const page = source ? pageOf(source) : PAGE;
   // The default phase is B4/B5 (production's schema once B4/B5 is installed); a database
   // older than personal collections (org: false, format1) has no Stage 5.
@@ -932,8 +932,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       },
       scrollIntoView() {}, querySelector() { return null; }, querySelectorAll() { return []; },
       remove() {}, appendChild() {}, insertAdjacentElement() {},
-      // S3 (D6): the effect dialog's own elements take focus, so its default focus is observable (S5: and the Add picker's).
-      ...(/^(effect|addPicker)/.test(id || '') ? { focus() { document.activeElement = el; } } : {}),
+      // S3 (D6): the effect dialog's own elements take focus, so its default focus is observable (S5: and the Add picker's; S6: the area buttons, for focus after a traversal).
+      ...(/^(effect|addPicker|areaBtn-|settingsBtn)/.test(id || '') ? { focus() { document.activeElement = el; } } : {}),
       get innerHTML() { return html; },
       set innerHTML(v) {
         html = v;
@@ -1329,6 +1329,34 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     TextEncoder
   };
   ctx.window = ctx;
+  // S6 (opt-in, routes: { hash, state }): a session history of this one document. pushState drops the
+  // Forward entries; back / forward / go move within the entries and fire popstate afterwards (as a
+  // browser does, asynchronously, with the target entry's state). Moving past either end is recorded
+  // as leaving the document (app.history.left) and fires nothing. Window listeners are kept (beforeunload,
+  // popstate, pageshow) so tests can see them.
+  if (routes) {
+    const h = app.history = { entries: [{ url: routes.hash || '', state: routes.state || null }], at: 0, left: [], listeners: {} };
+    const base = 'https://example.test/watchlist.html';
+    ctx.location = { get hash() { return h.entries[h.at].url; }, get href() { return base + h.entries[h.at].url; } };
+    const fire = () => Promise.resolve().then(() => (h.listeners.popstate || []).slice().forEach(f => f({ type: 'popstate', state: h.entries[h.at].state })));
+    const go = n => { const to = h.at + n; if (n === 0) return; if (to < 0 || to >= h.entries.length) { h.left.push(n); return; } h.at = to; fire(); };
+    ctx.history = {
+      get state() { return h.entries[h.at].state; },
+      get length() { return h.entries.length; },
+      pushState(state, title, url) { h.entries.splice(h.at + 1); h.entries.push({ url: url || h.entries[h.at].url, state: JSON.parse(JSON.stringify(state)) }); h.at++; },
+      replaceState(state, title, url) { h.entries[h.at] = { url: url || h.entries[h.at].url, state: JSON.parse(JSON.stringify(state)) }; },
+      back() { go(-1); }, forward() { go(1); }, go
+    };
+    ctx.addEventListener = (t, f) => { (h.listeners[t] = h.listeners[t] || []).push(f); };
+    ctx.removeEventListener = (t, f) => { h.listeners[t] = (h.listeners[t] || []).filter(x => x !== f); };
+    app.back = () => go(-1);
+    app.forward = () => go(1);
+    app.go = go;
+    // A route typed or followed while the page is open: a new entry without state, then popstate.
+    app.followLink = url => { h.entries.splice(h.at + 1); h.entries.push({ url, state: null }); h.at++; fire(); };
+    app.firePageShow = persisted => (h.listeners.pageshow || []).slice().forEach(f => f({ type: 'pageshow', persisted }));
+    app.listenerCount = t => (h.listeners[t] || []).length;
+  }
   vm.createContext(ctx);
   for (const f of page.scripts) vm.runInContext(fs.readFileSync(path.join(page.root, f), 'utf8'), ctx, { filename: f });
   app.ctx = ctx;
