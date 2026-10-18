@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { createApp, runner, settle, legacyBackupFixture } = require('./app-harness');
+const { createApp, runner, settle, legacyBackupFixture, userKeyOf } = require('./app-harness');
 
 const T = runner('organization');
 const test = T.test;
@@ -105,7 +105,7 @@ test('archived collections are hidden; a renamed collection shows its new name a
   pcs.push({ id: uuid('0c', 9), name: 'Anime', legacy_source: null, sort_order: 0, archived_at: null, created_at: TS });
   const app = await boot(data, { personalCollections: pcs });
   assert.deepStrictEqual(options(app).map(o => o[1]), ['Anime', 'Mouse House', 'Sheridan', 'True Crime / Docs']);
-  const store = { data: { watchlist_browse_layout_disney: '{"presentation":"seasons","grouping":"combined"}' }, writes: [] };
+  const store = { data: { [userKeyOf('watchlist_browse_layout_disney')]: '{"presentation":"seasons","grouping":"combined"}' }, writes: [] };
   app.ctx.localStorage = { getItem: k => store.data[k] ?? null, setItem: (k, v) => { store.writes.push(k); store.data[k] = v; } };
   await open(app, B.disney);
   assert.strictEqual(app.get('browsePresentation'), 'seasons', 'the renamed Disney+ reads its old layout key');
@@ -113,7 +113,7 @@ test('archived collections are hidden; a renamed collection shows its new name a
   app.ctx.setBrowseGrouping('separate'); await settle();
   await open(app, `browse:${uuid('0c', 9)}`);
   app.ctx.setBrowsePresentation('seasons'); await settle();
-  assert.deepStrictEqual(store.writes, ['watchlist_browse_layout_disney', `watchlist_browse_layout_id_${uuid('0c', 9)}`]);
+  assert.deepStrictEqual(store.writes, [userKeyOf('watchlist_browse_layout_disney'), userKeyOf(`watchlist_browse_layout_id_${uuid('0c', 9)}`)]);
   assert.ok(html(app).includes('No TV shows in Anime.'), 'an empty collection says so');
 });
 
@@ -283,17 +283,15 @@ test('Match without an expansion keeps the row in its collections; a TV season m
 });
 
 // ── database without personal collections (previous schema) ──
-test('without personal collections: the selector is unavailable (never the storage tabs), no backup file, watch-with uses the configured list', async () => {
+// M1: a database without personal collections predates the signed-in state, so the page never
+// starts on it: the sign-in boot's notice, nothing read beyond the capability, no backup file.
+test('without personal collections: the page doesn’t start (the sign-in boot’s notice), nothing is read, no backup file', async () => {
   const data = library();
   const app = await boot(data, { org: false });
-  assert.strictEqual(app.get('orgState'), 'absent');
-  assert.match(chooser(app), /Collections aren’t available on this database\./); // S2 (I-1)
-  app.ctx.openBrowseCollection(B.disney); await settle();
-  assert.strictEqual(app.get('activeViewId'), 'watching', 'nothing to open');
-  const res = await app.run('buildBackupObject()').then(() => 'made', e => e.message); // not contracted: no file (G8)
+  assert.match(app.el('phaseBanner').innerHTML, /hasn’t been updated for signed-in libraries yet, so nothing is shown and nothing will be changed/);
+  assert.deepStrictEqual(app.requests.map(r => r.url.split('/rest/v1/')[1]), ['rpc/stage5_capabilities']);
+  const res = await app.run('buildBackupObject()').then(() => 'made', e => e.message);
   assert.match(res, /makes backups only of a database in its own state \(format 5\), and this database isn’t in it, so no file was made/);
-  assert.deepStrictEqual(JSON.parse(app.get('JSON.stringify(watchWithChoiceList().map(c => c.token))')), Array.from(app.get('WATCH_WITH_OPTIONS')));
-  // (Match against a database without the Stage 5 functions is covered in tests/stage5-app.test.js.)
 });
 
 // ── organization refresh (review finding 1) ──

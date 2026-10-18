@@ -311,7 +311,7 @@ function selectCollectionTab(collectionId) {
 }
 
 // ─── The remembered collection (O2, S2) ───────────────────────────────────────
-// One device key holds the id of the collection you last chose. Every storage access is
+// One device key per signed-in account (auth.js userStorage) holds the id of the collection you last chose. Every storage access is
 // guarded (a throwing localStorage getter included). This visit's memory wins over storage
 // once a save or removal has failed (diverged), and stands in for it when it can't be read.
 // Only a tab choice and the resolution to the remembered collection record it; no fallback does.
@@ -321,7 +321,7 @@ function readLastCollection() {
   const visit = lastCollectionVisit;
   if (visit.diverged) return visit.id;
   try {
-    const v = localStorage.getItem(LAST_COLLECTION_KEY);
+    const v = userStorage.getItem(LAST_COLLECTION_KEY);
     return typeof v === 'string' && v ? v : null;
   } catch (e) {
     return visit.known ? visit.id : null;
@@ -330,15 +330,14 @@ function readLastCollection() {
 
 function recordLastCollection(collectionId) {
   let saved = false;
-  try { localStorage.setItem(LAST_COLLECTION_KEY, collectionId); saved = true; } catch (e) { /* this visit only */ }
+  try { userStorage.setItem(LAST_COLLECTION_KEY, collectionId); saved = true; } catch (e) { /* this visit only */ }
   lastCollectionVisit = { known: true, id: collectionId, diverged: !saved };
 }
 
 function forgetLastCollection() {
   let removed = false;
   try {
-    const store = localStorage;
-    if (store && typeof store.removeItem === 'function') { store.removeItem(LAST_COLLECTION_KEY); removed = true; }
+    if (localStorage && typeof localStorage.removeItem === 'function') { userStorage.removeItem(LAST_COLLECTION_KEY); removed = true; }
   } catch (e) { /* this visit only */ }
   lastCollectionVisit = { known: true, id: null, diverged: !removed };
 }
@@ -610,7 +609,7 @@ function readBrowseLayout(key) {
   const layout = { presentation: 'shows', grouping: 'separate' };
   if (!key) return layout;
   try {
-    const saved = JSON.parse(localStorage.getItem(key));
+    const saved = JSON.parse(userStorage.getItem(key));
     if (saved && saved.presentation === 'seasons') layout.presentation = 'seasons';
     if (saved && saved.grouping === 'combined') layout.grouping = 'combined';
   } catch (e) { /* storage unavailable or unreadable: defaults */ }
@@ -621,7 +620,7 @@ function saveBrowseLayout() {
   const dest = currentBrowseDest();
   if (!dest) return;
   try {
-    localStorage.setItem(dest.layoutKey, JSON.stringify({ presentation: browsePresentation, grouping: browseGrouping }));
+    userStorage.setItem(dest.layoutKey, JSON.stringify({ presentation: browsePresentation, grouping: browseGrouping }));
   } catch (e) { /* storage unavailable: this visit only */ }
 }
 

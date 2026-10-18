@@ -52,9 +52,11 @@ test('restore is one rpc/restore_backup call with the whole backup; no table del
   assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
 });
 
-test('a failed restore call reports that nothing was changed and stops', async () => {
+// M1: only a confirmed refusal (a database or API error code) says nothing was changed; an
+// answer without one is an unknown outcome (tests/m1-auth.test.js).
+test('a refused restore call reports that nothing was changed and stops', async () => {
   const { app } = await setup();
-  app.failNext(r => r.url.includes('/rpc/restore_backup'));
+  app.refuseNext(r => r.url.includes('/rpc/restore_backup'), 'P0001', 'restore_invalid: simulated refusal');
   const before = app.requests.length;
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
   const after = app.requests.slice(before).filter(r => !r.url.endsWith('/rpc/stage5_capabilities')); // (the phase is read again before sending)

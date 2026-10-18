@@ -198,7 +198,7 @@ const ALLTV_SEASON_VIS_LABELS = { notskipped: 'All (except Skipped)', all: 'All 
 
 function readAllTvPresentation() {
   try {
-    return localStorage.getItem(ALLTV_PRESENTATION_KEY) === 'seasons' ? 'seasons' : 'shows';
+    return userStorage.getItem(ALLTV_PRESENTATION_KEY) === 'seasons' ? 'seasons' : 'shows';
   } catch (e) {
     return 'shows';
   }
@@ -244,7 +244,7 @@ function deriveAllTvSeasons(items, vis, rowMatches = () => true) {
 function setAllTvPresentation(mode) {
   if (activeViewId !== 'alltv' || (mode !== 'shows' && mode !== 'seasons') || mode === allTvPresentation) return;
   allTvPresentation = mode;
-  try { localStorage.setItem(ALLTV_PRESENTATION_KEY, mode); } catch (e) { /* storage unavailable: this page only */ }
+  try { userStorage.setItem(ALLTV_PRESENTATION_KEY, mode); } catch (e) { /* storage unavailable: this page only */ }
   renderFilters();
   renderTable();
 }

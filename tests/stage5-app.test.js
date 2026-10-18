@@ -23,7 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { createApp, runner, settle, legacyBackupFixture } = require('./app-harness');
+const { createApp, runner, settle, legacyBackupFixture, userKeyOf } = require('./app-harness');
 
 const T = runner('stage5-app');
 const test = T.test;
@@ -98,11 +98,13 @@ test('startup reads the phase once with GET (stage5_capabilities) and keeps it; 
   }
 });
 
-test('a database without the Stage 5 update: its own notice, which a view’s message never replaces; nothing is written; no older function is tried', async () => {
+// M1: the signed-in page starts only on a database in the signed-in state (access = members);
+// any other database (no Stage 5 at all here) gets the sign-in boot's notice and nothing is read.
+test('a database without the Stage 5 update: the sign-in boot’s notice; nothing is read beyond the capability; nothing is written', async () => {
   const { app } = await boot(null);
   assert.strictEqual(app.get('stage5Phase'), null);
-  for (const v of ['alltv', 'comingsoon']) { app.ctx.switchView(v); await settle(); }
-  assert.match(app.el('phaseBanner').innerHTML, /needs a database update that hasn’t been made yet/);
+  assert.match(app.el('phaseBanner').innerHTML, /hasn’t been updated for signed-in libraries yet, so nothing is shown and nothing will be changed/);
+  assert.deepStrictEqual(app.requests.map(r => r.url.split('/rest/v1/')[1]), ['rpc/stage5_capabilities']);
   assert.deepStrictEqual(app.writes(), []);
   noStorage(app);
 });
@@ -629,7 +631,7 @@ for (const phase of ['contracted-b45']) { // (since B4/B5 the page writes only t
   test(`(${phase}) True Crime / Docs keeps its note and its remembered layout key through its presentation key; nothing reads storage`, async () => {
     const { app } = await boot(phase);
     const tc = app.store.personal_collections.find(c => c.legacy_source === 'truecrime');
-    const store = { data: { watchlist_browse_layout_truecrime: '{"presentation":"seasons","grouping":"combined"}' } };
+    const store = { data: { [userKeyOf('watchlist_browse_layout_truecrime')]: '{"presentation":"seasons","grouping":"combined"}' } };
     app.ctx.localStorage = { getItem: k => store.data[k] ?? null, setItem: (k, v) => { store.data[k] = v; } };
     app.ctx.openBrowseCollection(`browse:${tc.id}`); await settle();
     assert.match(app.el('viewHead').innerHTML, /True Crime and Documentary are not yet classified separately/);

@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { createApp, runner, settle } = require('./app-harness');
+const { createApp, runner, settle, userKeyOf } = require('./app-harness');
 
 const T = runner('collections-nav');
 const test = T.test;
@@ -12,7 +12,7 @@ const test = T.test;
 const ID = { disney: '0c000000-0000-4000-8000-000000000001', sheridan: '0c000000-0000-4000-8000-000000000002',
   '90day': '0c000000-0000-4000-8000-000000000003', truecrime: '0c000000-0000-4000-8000-000000000004' };
 const V = k => `browse:${ID[k]}`;
-const KEY = 'watchlist_last_collection';
+const KEY = userKeyOf('watchlist_last_collection');
 const TS = '2026-10-01T00:00:00+00:00';
 const uuid = (p, n) => `${p}000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 let n = 0;
@@ -221,9 +221,7 @@ test('C5 states: Loading, Unavailable + Retry (a Retry that succeeds resolves), 
   app.ctx.openCollections(null); await app.ctx.loadOrganization(); await settle();
   assert.ok(!bar(app).includes('role="tablist"') && bar(app).includes('Collections unavailable'));
   // Absent and none.
-  const absent = await boot({ org: false });
-  absent.ctx.openCollections(null); await settle();
-  assert.strictEqual(bar(absent), '<p class="collections-state" role="status">Collections aren’t available on this database.</p>');
+  // (absent: since M1 the page doesn't start on a database without personal collections; tests/organization.test.js)
   const none = await boot({ personalCollections: [] });
   none.ctx.openCollections(null); await settle();
   assert.strictEqual(bar(none), '<p class="collections-state" role="status">No collections yet.</p> <button class="btn btn-link collections-create" id="collectionsCreate" onclick="openSettings(this)">Create one in Settings &amp; Management</button>');
@@ -394,8 +392,8 @@ test('C9a,b,i only this key, holding the id; a tab and the resolution to it writ
   // A layout change writes only its own key.
   app.ctx.openCollections(null); await settle();
   app.ctx.setBrowsePresentation('seasons'); await settle();
-  assert.deepStrictEqual(store.log.slice(2).map(x => x[1]).filter(k => k !== KEY), ['watchlist_browse_layout_sheridan']);
-  assert.ok(Object.keys(store.data).every(k => k === KEY || k.startsWith('watchlist_browse_layout_')), JSON.stringify(store.data));
+  assert.deepStrictEqual(store.log.slice(2).map(x => x[1]).filter(k => k !== KEY), [userKeyOf('watchlist_browse_layout_sheridan')]);
+  assert.ok(Object.keys(store.data).every(k => k === KEY || k.startsWith('watchlist_browse_layout_') && k.endsWith(userKeyOf(''))), JSON.stringify(store.data));
   // A new page with the same storage: boot is still Currently Watching; Collections opens it.
   const again = await boot({ storage: store });
   assert.strictEqual(again.get('activeViewId'), 'watching');

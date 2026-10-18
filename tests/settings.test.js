@@ -4,7 +4,7 @@
 // nothing; its buttons open the existing dialogs and flows.
 // Run from the repo root: node tests/settings.test.js
 const assert = require('assert');
-const { createApp, runner, settle } = require('./app-harness');
+const { createApp, runner, settle, userKeyOf } = require('./app-harness');
 
 const T = runner('settings');
 const test = T.test;
@@ -379,7 +379,7 @@ test('N13 the backup status is the same text and colour in the header link and o
     [20, 'Backup: 20d ago', 'warn'],
     [40, 'Backup recommended (40d ago)', 'urgent']
   ]) {
-    const storage = memStore(stored == null ? {} : { watchlist_last_backup_at: new Date(Date.now() - stored * day - 60 * 60 * 1000).toISOString() });
+    const storage = memStore(stored == null ? {} : { [userKeyOf('watchlist_last_backup_at')]: new Date(Date.now() - stored * day - 60 * 60 * 1000).toISOString() });
     const app = await boot({ storage });
     app.ctx.openSettings(null);
     const before = app.requests.length;
@@ -395,7 +395,7 @@ test('N13 the backup status is the same text and colour in the header link and o
   const app = await boot({ storage });
   app.ctx.openSettings(null);
   await app.ctx.handleBackupClick(app.el('settingsBackupBtn')); await settle();
-  assert.ok(storage.data.watchlist_last_backup_at, 'recorded');
+  assert.ok(storage.data[userKeyOf('watchlist_last_backup_at')], 'recorded');
   assert.strictEqual(app.el('backupAgeIndicator').textContent, 'Backed up today');
   assert.strictEqual(app.el('settingsBackupStatus').textContent, 'Backed up today');
   assert.strictEqual(app.el('settingsBackupStatus').className, 'settings-status');

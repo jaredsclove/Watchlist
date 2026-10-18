@@ -70,9 +70,10 @@ async function detectBackupFormat() {
 
 // At boot (doesn't hold up the first view): which phase this database is in. A database
 // without the update gets a notice of its own (#phaseBanner), which no view's message replaces.
-async function loadStage5Capabilities() {
+// M1: the sign-in boot (auth.js) has just read it; that answer is used (known) instead of a second read.
+async function loadStage5Capabilities(known) {
   try {
-    const cap = await stage5Capabilities();
+    const cap = known !== undefined ? known : await stage5Capabilities();
     stage5Phase = pageMayWrite(cap) ? cap.phase : null;
     const el = document.getElementById('phaseBanner');
     if (el && !b45Stopped) el.innerHTML = cap ? '' : '<div class="error-banner">⚠️ This page needs a database update that hasn’t been made yet. Your list may not load, and changes are refused until the update is made. Nothing will be changed.</div>';
@@ -956,6 +957,7 @@ async function executeRestore() {
   const preRestoreFilename = `watchlist-pre-restore-${timestampForFilename()}.json`;
   try {
     downloadJSON(preRestoreBackup, preRestoreFilename);
+    pendingSafetyBackup = { filename: preRestoreFilename, doc: preRestoreBackup };
   } catch(e) {
     showRestoreModal(`<div class="modal-title">Restore aborted</div>
       <div class="modal-error">The safety backup couldn't be downloaded, so nothing was changed:\n${esc(e.message)}</div>
@@ -1027,18 +1029,38 @@ async function sendRestore(preRestoreFilename) {
   restoreInFlight = true; // sent to the database: navigation no longer abandons it
   if (typeof updateLeaveWarning === 'function') updateLeaveWarning(); // S6 (D18): leaving now may leave its outcome unknown
   try {
-    await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup, p_allow_v1_reset: pendingRestoreAllowV1Reset === true });
+    await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup, p_allow_v1_reset: pendingRestoreAllowV1Reset === true },
+      { what: 'Restore from a backup file', note: { safetyBackup: preRestoreFilename } });
     // Collections and watch-with choices read before this point are stale now, and an open
     // Details dialog can no longer save its draft.
     if (orgState !== 'absent') invalidateOrganization();
     if (typeof detailsDialog !== 'undefined' && detailsDialog) { detailsDialog.restored = true; renderDetails(); }
   } catch(e) {
-    showRestoreModal(`<div class="modal-title">Restore failed — nothing was changed</div>
+    // M1: only a refusal (or a restore never sent) means nothing was changed. With no confirmed
+    // answer the outcome is unknown: the transaction is atomic, but it may still have committed,
+    // or still be running. What the library matches now is reported as an observation only.
+    if (writeOutcomeOf(e) !== 'unknown') {
+      showRestoreModal(`<div class="modal-title">Restore failed — nothing was changed</div>
       <div class="modal-error">${esc(e.message)}
 
-The restore runs as a single database transaction, so your data is exactly as it was before. The safety backup is still in your downloads as:
+The restore was refused (or never sent), so your data is as it was before. The safety backup is still in your downloads as:
 ${esc(preRestoreFilename)}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
+      return;
+    }
+    if (orgState !== 'absent') invalidateOrganization();
+    if (typeof detailsDialog !== 'undefined' && detailsDialog) { detailsDialog.restored = true; renderDetails(); }
+    setProgress('No answer from the database. Checking what your library matches now…');
+    const safety = pendingSafetyBackup && pendingSafetyBackup.filename === preRestoreFilename ? pendingSafetyBackup.doc : null;
+    const seen = await observeLibraryAgainst(restoredTables, backup, safety);
+    showRestoreModal(`<div class="modal-title">Restore outcome unknown</div>
+      <div class="modal-error">The restore got no answer (${esc(e.message)}), so it may or may not have been made. It was not sent again.
+
+${esc(seen)}
+
+This is what the library looks like right now; it doesn’t show whether the restore request finished. It could still be running and finish later. Check your library before making changes. The safety backup of your data from before the restore is in your downloads as:
+${esc(preRestoreFilename)}</div>
+      <div class="modal-actions"><button class="btn" onclick="finishRestoreAndReload()">Close &amp; reload data</button></div>`);
     return;
   }
 
@@ -1101,6 +1123,28 @@ ${esc(preRestoreFilename)}</div>
     <div class="modal-actions"><button class="btn-accent btn" onclick="finishRestoreAndReload()">Close &amp; reload data</button></div>`);
 }
 
+// After a restore with no answer: which of the two files the library matches right now (every
+// restored table, every backed-up field). An observation, never a verdict on the request.
+async function observeLibraryAgainst(tables, fileDoc, safetyDoc) {
+  const matchesDoc = (doc, current) => tables.every(t => {
+    const want = doc.tables[t] || [], have = current[t] || [];
+    if (want.length !== have.length) return false;
+    const byId = new Map(have.map(r => [r.id, r]));
+    return want.every(r => byId.has(r.id) && compareRowFields(r, byId.get(r.id), backupSpec(doc.formatVersion).columns[t]).length === 0);
+  });
+  let current = {};
+  try {
+    for (const t of tables) current[t] = await fetchAllRows(t, null, Object.keys(backupSpec(fileDoc.formatVersion).columns[t]).join(','));
+  } catch (e) {
+    return `Your library couldn’t be read just now (${e.message}), so it isn’t known what it matches. Reload and check it.`;
+  }
+  const file = matchesDoc(fileDoc, current), safety = safetyDoc && matchesDoc(safetyDoc, current);
+  if (file && safety) return 'Your library currently matches both the restore file and the safety backup (they hold the same data).';
+  if (file) return 'Your library currently matches the restore file.';
+  if (safety) return 'Your library currently matches the safety backup (your data from before the restore).';
+  return 'Your library currently matches neither the restore file nor the safety backup.';
+}
+
 // Clears the caches and reloads the open view from Supabase, so the page shows the
 // real post-restore state rather than stale in-memory data.
 function finishRestoreAndReload() {
@@ -1123,14 +1167,15 @@ function finishRestoreAndReload() {
 
 
 function recordBackupTimestamp() {
-  localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
+  try { userStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString()); } catch (e) { /* storage unavailable */ }
   updateBackupAgeIndicator();
 }
 
-// The backup status (this device's last backup, from localStorage; no request): the same
+// The backup status (this device's last backup for the signed-in account, from localStorage; no request): the same
 // text and colour in the header link and on Settings (S1).
 function backupStatus() {
-  const lastStr = localStorage.getItem(LAST_BACKUP_KEY);
+  let lastStr = null;
+  try { lastStr = userStorage.getItem(LAST_BACKUP_KEY); } catch (e) { lastStr = null; }
   if (!lastStr) return { text: 'No backup yet', cls: 'warn' };
   const last = new Date(lastStr);
   const days = Math.floor((Date.now() - last.getTime()) / (1000*60*60*24));

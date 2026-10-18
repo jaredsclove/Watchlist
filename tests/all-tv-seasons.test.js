@@ -10,7 +10,7 @@
 // Run from the repo root: node tests/all-tv-seasons.test.js
 // No network, no database (see tests/app-harness.js).
 const assert = require('assert');
-const { createApp, runner, settle } = require('./app-harness');
+const { createApp, runner, settle, userKeyOf } = require('./app-harness');
 
 const T = runner('all-tv-seasons');
 const test = T.test;
@@ -111,7 +111,7 @@ test('Watching and Coming Soon have no Shows/Seasons switch and are unaffected b
   const out = async app => { const o = []; for (const v of ['watching', 'comingsoon']) { app.ctx.switchView(v); await settle(); o.push(app.html(), app.el('filtersRow').innerHTML, app.el('tableHead').innerHTML); } return o; };
   const base = await out(plain);
   const stored = await createApp({ rows: a.rows, tvShows: [a.show] });
-  stored.ctx.localStorage = memoryStorage({ watchlist_alltv_presentation: 'seasons' });
+  stored.ctx.localStorage = memoryStorage({ [userKeyOf('watchlist_alltv_presentation')]: 'seasons' });
   stored.ctx.switchView('alltv'); await settle();
   assert.strictEqual(stored.get('allTvPresentation'), 'seasons');
   assert.deepStrictEqual(await out(stored), base);
@@ -172,7 +172,7 @@ test('leaving All TV or reloading resets visibility to All (except Skipped); the
   app.ctx.localStorage = storage;
   app.ctx.switchView('alltv'); await settle();
   await seasons(app);
-  assert.strictEqual(storage.m.get('watchlist_alltv_presentation'), 'seasons');
+  assert.strictEqual(storage.m.get(userKeyOf('watchlist_alltv_presentation')), 'seasons');
   app.ctx.setAllTvSeasonVis('watched'); await settle();
   app.ctx.switchView('watching'); await settle();
   app.ctx.switchView('alltv'); await settle();
@@ -447,7 +447,7 @@ test('counts and the four empty states', async () => {
 // ─── Device storage ──────────────────────────────────────────────────────────
 test('unusable storage falls back to Shows: a garbage value, a missing key, or storage that throws', async () => {
   const a = show({ title: 'Alpha' }, [{ num: 1 }]);
-  for (const storage of [memoryStorage({ watchlist_alltv_presentation: 'grid' }), memoryStorage()]) {
+  for (const storage of [memoryStorage({ [userKeyOf('watchlist_alltv_presentation')]: 'grid' }), memoryStorage()]) {
     const app = await createApp({ rows: a.rows, tvShows: [a.show] });
     app.ctx.localStorage = storage;
     app.ctx.switchView('alltv'); await settle();
@@ -468,7 +468,7 @@ test('unusable storage falls back to Shows: a garbage value, a missing key, or s
 test('opening All TV in Seasons (remembered) loads with GETs only and refuses an incomplete read', async () => {
   const a = show({ title: 'Alpha' }, [{ num: 1 }, { num: 2 }]);
   const app = await createApp({ rows: a.rows, tvShows: [a.show], countOverride: 9 });
-  app.ctx.localStorage = memoryStorage({ watchlist_alltv_presentation: 'seasons' });
+  app.ctx.localStorage = memoryStorage({ [userKeyOf('watchlist_alltv_presentation')]: 'seasons' });
   app.ctx.switchView('alltv'); await settle();
   assert.ok(tbody(app).includes('Failed to load') && !tbody(app).includes('season-lbl'));
   assert.ok(app.requests.every(r => r.method === 'GET'));

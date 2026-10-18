@@ -18,7 +18,7 @@ function stopB45Writes() {
 }
 // Whether this page may write to a database whose capability reads cap.
 function pageMayWrite(cap) {
-  return !b45Stopped && !!cap && cap.phase === B45_PHASE;
+  return !b45Stopped && !!cap && cap.phase === B45_PHASE && cap.access === 'members';
 }
 function stage5Refusal(text) {
   return new Error(`Supabase error 412: ${JSON.stringify({ code: 'P0001', details: null, hint: null, message: `update_required: ${text}` })}`);
@@ -48,31 +48,56 @@ function requireB45Shape(rows, field) {
 // Every request that changes data is sent from inside the write lane (write-lane.js) and
 // moves dataVersion on when it is sent and when it settles, so no read that overlapped it
 // publishes. opts.read: a POST that changes nothing (a catalog preview).
+// M1 (auth.js): every request carries the signed-in session's token (authHeaders), or is
+// refused before it is sent. A write saves a pending note just before it is sent; a confirmed
+// answer clears it, no answer leaves it (an unknown outcome, shown again after a reload).
+// opts.note: extra fields for that note (a restore's safety backup); opts.what: its description.
 async function sbFetch(method, path, body, opts = {}) {
   const write = method !== 'GET' && !opts.read;
   if (write && !writeLane) throw new Error('This change was not started through the write lane, so nothing was sent.');
   if (method !== 'GET') await requireWritablePhase();
+  const headers = await authHeaders({ 'Content-Type': 'application/json', 'Prefer': method === 'POST' ? 'return=representation' : 'return=minimal' });
+  const note = write ? savePendingNote(opts.what || writeLane.label, opts.note) : null;
   if (write) writeSent();
+  let answered = false;
   try {
-    return await sbRequest(method, path, body);
+    const out = await sbRequest(method, path, body, headers, () => { answered = true; });
+    return out;
   } finally {
-    if (write) writeSettled();
+    if (write) { if (answered) clearPendingNote(note); else keepPendingNote(note); writeSettled(); }
   }
 }
 
-async function sbRequest(method, path, body) {
+// A response is a confirmed answer when it succeeded, or when it carries a database or API
+// error code (the request ran and was refused, or never ran). A gateway or proxy error without
+// one doesn't show whether the database committed: no answer, like a lost connection.
+function confirmedAnswer(status, text) {
+  if (status >= 200 && status < 300) return true;
+  let body = null;
+  try { body = JSON.parse(text); } catch (e) { body = null; }
+  return !!(body && typeof body === 'object' && typeof body.code === 'string' && /^([0-9A-Z]{5}|PGRST\d+)$/.test(body.code));
+}
+
+// What an error from a write means: 'notsent' (refused before sending), 'refused' (a confirmed
+// answer: nothing was changed by it) or 'unknown' (no confirmed answer: it may or may not have
+// been made; never sent again).
+function writeOutcomeOf(e) {
+  if (e && e.notSent) return 'notsent';
+  const m = String(e && e.message || e || '').match(/^Supabase error (\d+): ([\s\S]*)$/);
+  if (m && confirmedAnswer(Number(m[1]), m[2])) return 'refused';
+  return 'unknown';
+}
+
+async function sbRequest(method, path, body, headers, onAnswer = () => {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method,
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': method === 'POST' ? 'return=representation' : 'return=minimal'
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined
   });
   if (!res.ok) {
     const err = await res.text();
+    if (confirmedAnswer(res.status, err)) onAnswer();
+    if (res.status === 401 && typeof sessionLost === 'function') sessionLost();
     // A B4/B5 function that doesn't exist: the database isn't (or is no longer) in this
     // page's phase. Nothing ran; the page stops writing until it is reloaded.
     if (res.status === 404 && /^rpc\/[a-z0-9_]+_b45$/.test(path) && /PGRST202/.test(err)) {
@@ -81,6 +106,7 @@ async function sbRequest(method, path, body) {
     }
     throw new Error(`Supabase error ${res.status}: ${err}`);
   }
+  onAnswer();
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
@@ -100,13 +126,11 @@ async function fetchAllRows(table, filter, select = '*') {
 
   while (total === null || offset < total) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${select}${filter ? `&${filter}` : ''}&order=id.asc`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
+      headers: await authHeaders({
         'Range-Unit': 'items',
         'Range': `${offset}-${offset + BACKUP_PAGE_SIZE - 1}`,
         'Prefer': 'count=exact'
-      }
+      })
     });
     if (!res.ok) {
       const err = await res.text();
@@ -152,13 +176,11 @@ async function fetchAllRowsStrict(table, filter, pageSize = BACKUP_PAGE_SIZE) {
   for (;;) {
     const offset = rows.length;
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*${filter ? `&${filter}` : ''}&order=id.asc`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
+      headers: await authHeaders({
         'Range-Unit': 'items',
         'Range': `${offset}-${offset + pageSize - 1}`,
         'Prefer': 'count=exact'
-      }
+      })
     });
     if (!res.ok) {
       const err = await res.text();

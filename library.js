@@ -1057,18 +1057,24 @@ async function libraryApplyRefresh() {
 async function libraryPatchReturning(path, body) {
   if (!writeLane) throw new Error('This change was not started through the write lane, so nothing was sent.');
   await requireWritablePhase();
+  const headers = await authHeaders({ 'Content-Type': 'application/json', 'Prefer': 'return=representation' });
+  const note = savePendingNote(writeLane.label);
   writeSent();
+  let answered = false;
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-      method: 'PATCH',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) throw new Error(`Supabase error ${res.status}: ${await res.text()}`);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { method: 'PATCH', headers, body: JSON.stringify(body) });
+    if (!res.ok) {
+      const err = await res.text();
+      if (confirmedAnswer(res.status, err)) answered = true;
+      if (res.status === 401) sessionLost();
+      throw new Error(`Supabase error ${res.status}: ${err}`);
+    }
+    answered = true;
     const text = await res.text();
     const rows = text ? JSON.parse(text) : [];
     return Array.isArray(rows) ? rows : [];
   } finally {
+    if (answered) clearPendingNote(note); else keepPendingNote(note);
     writeSettled();
   }
 }
