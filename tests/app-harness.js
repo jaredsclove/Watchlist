@@ -16,6 +16,9 @@ const B45 = require('./b45-harness');
 const isContracted = app => app.stage5 === 'contracted' || app.stage5 === B45.B45_PHASE;
 
 const ROOT = path.join(__dirname, '..');
+// Requests the harness can't model (a misuse, not an answer the page should handle): runner() fails
+// the test that made one, even if the page caught the rejected request.
+const harnessErrors = [];
 // The page: watchlist.html and its scripts, from the working tree.
 function pageOf(root) {
   const html = fs.readFileSync(path.join(root, 'watchlist.html'), 'utf8');
@@ -948,8 +951,11 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
         app.restored = (app.restored || 0) + 1;
         return response(200, { formatVersion: 5, restored: Object.fromEntries(Object.keys(t).map(k => [k, t[k].length])), recovery: b.recovery ? 'archived' : 'none' });
       }
-      // The page sends a restore only at B4/B5 (and so only format 5); anything else is a harness misuse.
-      throw new Error(`harness: restore_backup is modelled only on the B4/B5 database (phase ${app.stage5})`);
+      // The page sends a restore only at B4/B5 (and so only format 5). Anything else fails the test (the runner
+      // checks harnessErrors), whatever the page does with the rejected request.
+      const misuse = new Error(`harness: restore_backup is modelled only on the B4/B5 database (phase ${app.stage5})`);
+      harnessErrors.push(misuse);
+      throw misuse;
     },
     ...tvFunctions(app, store, () => `new-${nextId++}`, ORG),
     ...(orgOn && orgWrite ? orgWriteFunctions(store, () => `0d3b2000-0000-4000-8000-${String(nextId++).padStart(12, '0')}`, isFilmRow) : {})
@@ -1275,10 +1281,12 @@ function runner(title) {
       let passed = 0;
       for (const t of tests) {
         unhandled.length = 0;
+        harnessErrors.length = 0;
         try {
           await t.fn();
           await settle();
           if (unhandled.length) throw unhandled[0];
+          if (harnessErrors.length) throw harnessErrors[0];
           passed++;
           console.log(`  ok   ${t.name}`);
         } catch (e) {
