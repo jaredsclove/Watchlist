@@ -417,7 +417,7 @@ async function finishAddBatch(b, pending) {
   b.phase = b.items.some(it => it.state === 'unconfirmed') ? 'unknown' : b.items.some(it => it.state === 'notsent') ? 'partial' : 'completed';
   if (b.undoOf) b.undoOf.lastUndo = b;
   renderAddPicker(); renderAddNotice();
-  if (pending) await pending;
+  if (pending) { await pending; b.pending = null; } // the lane frees with it: Undo applies again
   if (!b.left && activeViewId === b.viewId && orgEpoch === b.epoch) {
     const ok = await reloadOpenView();
     b.reread = ok === true ? 'ok' : ok === false ? 'failed' : null;

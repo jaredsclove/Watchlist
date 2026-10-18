@@ -399,4 +399,22 @@ test('review 3: the picker doesn’t open while another change is being saved (r
   g.release(); await p; await settle();
 });
 
+test('review follow-up: Added, then Stop waiting on the next item: once its request settles, Undo is offered for the Added one only', async () => {
+  const L = lib();
+  const app = await boot(L);
+  await openTC(app);
+  app.ctx.openAddPicker(null);
+  pick(app, `i:${L.f1.id}`, `i:${L.f2.id}`, `i:${L.f3.id}`);
+  const g = app.hold(r => r.url.endsWith('/rpc/org_add_membership') && r.body.p_item_id === L.f3.id); // the second, A–Z
+  const p = app.ctx.submitAddPicker();
+  await g.reached;
+  app.ctx.addStopWaiting(); await settle();
+  assert.ok(!box(app).includes('undoAddBatch()'), 'not while the lane is held');
+  g.release(); await p; await settle();
+  assert.deepStrictEqual(resultsOf(app).map(i => i.state), ['added', 'unconfirmed', 'notsent']);
+  assert.ok(box(app).includes('Undo 1 confirmed addition<'), box(app));
+  await app.ctx.undoAddBatch(); await settle();
+  assert.deepStrictEqual(app.requests.filter(r => r.url.endsWith('/rpc/org_remove_membership')).map(r => r.body.p_item_id), [L.f1.id]);
+});
+
 T.run();
