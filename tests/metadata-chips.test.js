@@ -155,8 +155,8 @@ test('assets: one new token on every versioned file, ui-helpers.js now versioned
     'refresh-shows.js', 'tmdb-match.js', 'derived-views.js', 'tv-shows.js', 'organization.js', 'organization-manage.js', 'catalog-apply.js',
     'browse-views.js', 'library.js']);
   const tokens = new Set([...html.matchAll(/\?v=([\w-]+)/g)].map(m => m[1]));
-  assert.deepStrictEqual([...tokens], ['20261016-collections1']); // S1 bumped the token (tests/filter-bar.test.js)
-  assert.ok(scripts.includes('ui-helpers.js?v=20261016-collections1'), 'render.js and its helper load together');
+  assert.deepStrictEqual([...tokens], ['20261018-tvedit1']); // S3 bumped the token (tests/filter-bar.test.js)
+  assert.ok(scripts.includes('ui-helpers.js?v=20261018-tvedit1'), 'render.js and its helper load together');
   assert.ok(scripts.includes('config.js') && scripts.includes('identity.js'), 'config.js and identity.js stay unversioned');
   assert.strictEqual([...html.matchAll(/(?:src|href)="[^"]+\?v=/g)].length, 22, 'styles.css + 21 scripts');
 });

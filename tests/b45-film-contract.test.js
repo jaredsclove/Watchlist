@@ -117,15 +117,17 @@ test('catalog ×: To Watch → Skipped after the catalog confirmation; on a watc
   const [a, b, s, p] = [cat('to_watch', defs[0]), cat('watched', defs[1]), cat('skipped', defs[2]), cat('pair', defs[3])];
   const app = await allMovies([a, b, s, p]);
   for (const x of [s, p]) assert.ok(!rowHtml(app, x.id).includes(`delRow('${x.id}')`), 'no × on a skipped catalog film');
-  const asked = [];
-  app.ctx.confirm = q => { asked.push(q); return false; };
+  // D6 (S3): the in-page dialog (tests/app-harness.js records each one and answers it per app.dialogAnswer).
+  const asked = () => app.dialogs.map(d => d.text);
+  app.dialogAnswer = 'cancel';
   await app.ctx.delRow(b.id); await settle();
   assert.deepStrictEqual(sent(app), [], 'Cancel: nothing sent');
-  assert.match(asked[0], /It’s part of a built-in catalog, so it is marked Skipped rather than deleted\. This also clears Watched\./);
-  app.ctx.confirm = q => { asked.push(q); return true; };
+  assert.match(asked()[0], /It’s part of a built-in catalog, so it is marked Skipped rather than deleted\. This also clears Watched\./);
+  assert.strictEqual(app.dialogs[0].confirmLabel, 'Skip film');
+  app.dialogAnswer = 'confirm';
   await app.ctx.delRow(a.id); await settle();
   await app.ctx.delRow(b.id); await settle();
-  assert.ok(!/clears Watched/.test(asked[1]), 'an unwatched film: the catalog wording only');
+  assert.ok(!/clears Watched/.test(asked()[1]), 'an unwatched film: the catalog wording only');
   assert.deepStrictEqual(sent(app), [{ state: 'skipped' }, { state: 'skipped' }]);
   assert.deepStrictEqual([storedState(app, a.id), storedState(app, b.id)], [STATES.skipped, STATES.skipped]);
   assert.ok(!app.writes().some(r => r.method === 'DELETE'), 'never deleted');

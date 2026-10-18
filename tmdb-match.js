@@ -110,7 +110,7 @@ function tmdbMatchGenreTheme(row) {
 
 function openTmdbMatch(rowId) {
   const row = tmdbMatchRows().find(r => r.id === rowId);
-  if (!row || !isTmdbMatchEligible(row)) return;
+  if (!row || (typeof collectionFilmLocked === 'function' && collectionFilmLocked(row)) || !isTmdbMatchEligible(row)) return; // films stay read-only in collections (S3)
   openLibraryPanel(isFilmRow(row) ? 'movie' : 'tv', 'match');
   cancelTMDBPreview();
   document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');

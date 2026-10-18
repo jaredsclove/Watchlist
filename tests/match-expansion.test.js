@@ -390,14 +390,19 @@ async function matchNotCurrent(app, rowId, tmdb, name) {
 const rowGet = id => r => r.method === 'GET' && r.url.includes(`watchlist_items?id=eq.${id}`);
 const showsGet = r => r.method === 'GET' && r.url.includes('/tv_shows?select=');
 
+// U1 (S3 inventory amendment): since S3 the collection's own reread (after the Match) reads the shows
+// through the tracked path too, so it can satisfy the shows part. It is held as well and fails with the
+// refresh's own read, so the replacement read is still the only one that can own the shows part.
 test('a replacement show read still pending keeps "Refreshing…"; when it succeeds, "Refreshed."', async () => {
   const { app, f } = await boot();
   const ownShows = app.hold(showsGet);
+  const viewShows = app.hold(showsGet);                                 // the collection's reread (S3: tracked)
   const { g, p } = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
-  g.release(); await ownShows.reached;
+  g.release(); await ownShows.reached; await viewShows.reached;
   const replacement = app.hold(showsGet);
   const rp = app.run('loadAllTvShows()');                       // an ordinary show read starts
   await replacement.reached;
+  viewShows.fail();
   ownShows.fail(); await p; await settle();                             // the refresh's own show read fails: the replacement owns the shows
   assert.match(notice(app), /Matched “Target Show”\. Refreshing to show what is saved now…/, 'still pending: the replacement owns the shows part');
   assert.ok(!/Refreshed|couldn’t/.test(notice(app)));
@@ -408,11 +413,13 @@ test('a replacement show read still pending keeps "Refreshing…"; when it succe
 test('a replacement show read that fails leaves the Match outcome, the warning and a read-only Retry', async () => {
   const { app, f } = await boot();
   const ownShows = app.hold(showsGet);
+  const viewShows = app.hold(showsGet);                                 // the collection's reread (S3: tracked; U1)
   const { g, p } = await matchNotCurrent(app, f.legacy.id, 5000, 'Target Show');
-  g.release(); await ownShows.reached;
+  g.release(); await ownShows.reached; await viewShows.reached;
   const replacement = app.hold(showsGet);
   const rp = app.run('loadAllTvShows()').catch(() => {});
   await replacement.reached;
+  viewShows.fail();
   ownShows.fail(); await p; await settle();
   assert.match(notice(app), /Refreshing/);
   replacement.fail(); await rp; await settle();

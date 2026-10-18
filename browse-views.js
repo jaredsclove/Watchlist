@@ -1,12 +1,13 @@
-// ─── Browse collections and All Movies (read-only cross-media views) ─────────
+// ─── Collections and All Movies (cross-media views) ───────────────────────────
 // A collection destination (Disney+, Sheridan, 90 Day, True Crime / Docs, …; your
 // personal collections, organization.js) shows its member TV shows (with every
 // stored season) and films together, and All Movies shows every saved film.
 // Membership is the stored list of members only: tags, themes, titles, catalogs and
-// TMDB credits add nothing. The loader only reads; a collection's controls only
-// search, filter, expand and navigate. All Movies (Stage 4b) also has the film
+// TMDB credits add nothing. The loader only reads. All Movies (Stage 4b) has the film
 // actions — status, watched, watch-with, Match, delete — by the row's real id
-// (row-actions.js, library.js); TV is changed in All TV. A collection can list TV as
+// (row-actions.js, library.js). Since S3 a collection's TV entries have All TV's
+// controls (the same functions and guards); its films stay read-only (S4 adds their
+// controls), and no collection control changes membership. A collection can list TV as
 // Shows or Seasons and show TV and films Separate or Combined (remembered per
 // collection on this device); Shows and Movies only are A–Z, Seasons is oldest
 // first. While one of these is open,
@@ -106,7 +107,8 @@ function deriveBrowseCollection(rows, showsById, members, today) {
       upNextReleased: upNext ? isReleasedRow(upNext, today) : false,
       upToDate: show.status === 'watching' && !resuming && isShowUpToDate(seasons, today),
       resume: range,
-      endedExit: !resuming && isEndedExit(show, seasons)
+      endedExit: !resuming && isEndedExit(show, seasons),
+      allSkipped: allSeasonsSkipped(seasons) // S3: the same item fields as All TV (derived-views.js deriveAllTv)
     };
   });
   shows.sort((a, b) => compareTitles(a.title, b.title)
@@ -582,7 +584,7 @@ function setBrowseMedia(media) {
   const container = focusedContainerOf(['filtersRow']);
   browseMedia = media;
   renderFilters();
-  renderTable();
+  renderBrowseTable(null, false);
   refocus(container, `[data-media="${media}"]`);
 }
 
@@ -624,7 +626,7 @@ function setBrowsePresentation(mode) {
   browsePresentation = mode;
   saveBrowseLayout();
   renderFilters();
-  renderTable();
+  renderBrowseTable(null, false);
   refocus(container, `[data-presentation="${mode}"]`);
 }
 
@@ -634,7 +636,7 @@ function setBrowseGrouping(grouping) {
   browseGrouping = grouping;
   saveBrowseLayout();
   renderFilters();
-  renderTable();
+  renderBrowseTable(null, false);
   refocus(container, `[data-grouping="${grouping}"]`);
 }
 
@@ -650,7 +652,7 @@ function toggleBrowseSection(name) {
   if (!isBrowseCollectionView(activeViewId) || !(name in BROWSE_SECTION_DEFAULTS)) return;
   const container = focusedContainerOf(['tbody', 'cardList']);
   browseSectionOpen[name] = !browseSectionOpen[name];
-  renderTable();
+  renderBrowseTable(null, false);
   refocus(container, `[data-section="${name}"]`);
 }
 
@@ -659,7 +661,7 @@ function toggleBrowseShow(key) {
   const container = focusedContainerOf(['tbody', 'cardList']);
   if (expandedShows.has(key)) expandedShows.delete(key);
   else expandedShows.add(key);
-  renderTable();
+  renderBrowseTable(null, false);
   refocus(container, `[data-show-key=${JSON.stringify(String(key))}]`);
 }
 
@@ -671,27 +673,45 @@ function toggleBrowseShow(key) {
 // concurrent, not one transaction: a membership whose show or film wasn't read
 // is reported (Read again), never repaired.
 // Returns true once the view shows a complete read, false when it failed, null when superseded.
-async function loadBrowseView() {
+// S3: the show list is read through the tracked path (tmdb-match.js), as in the TV views, and the
+// collection draws from the page's one show list (tvShowsById), so an edit made here or in All TV is
+// the same object everywhere and a late read never replaces it.
+// Focus in a collection (S3, brief §7.2): the owner's own reload (Retry, Read again) keeps B6's rules.
+// An operation's reread (opts.operation, from reloadOpenView) may move focus only while that
+// operation's own placement is still held (opts.origin); otherwise it never moves focus, and when
+// the owner's focus is in the list it reads quietly, keeping the list on screen (derived-views.js).
+async function loadBrowseView(opts = {}) {
   const viewId = activeViewId;
   if (!isBrowseView(viewId)) return null;
   const seq = ++browseLoadSeq;
-  browseData = null;
-  document.getElementById('statsRow').innerHTML = '';
-  // The filter row's view tag stays: Retry (or a refresh) puts this visit's filters back
-  // (viewFilterMemory, holding the current controls first); a fresh entry has already reset them (switchView).
-  holdViewFilters(viewId);
-  document.getElementById('filtersRow').innerHTML = '';
-  document.getElementById('viewHead').innerHTML = browseHeadHtml();
-  showError('');
-  paintBrowseMessage('Loading…', false);
+  const isCollection = isBrowseCollectionView(viewId);
+  const op = !!(opts && opts.operation);
+  const focusRec = !isCollection ? null : op ? operationFocusOrigin(opts.origin) : captureListFocus();
+  const quiet = isCollection && op && !focusRec && !!browseData && browseData.loaded && listHasOwnerFocus();
+  const quietToken = quiet ? beginQuietReread() : null;
+  if (!quiet) {
+    dropQuietReread();
+    browseData = null;
+    document.getElementById('statsRow').innerHTML = '';
+    // The filter row's view tag stays: Retry (or a refresh) puts this visit's filters back
+    // (viewFilterMemory, holding the current controls first); a fresh entry has already reset them (switchView).
+    holdViewFilters(viewId);
+    document.getElementById('filtersRow').innerHTML = '';
+    document.getElementById('viewHead').innerHTML = browseHeadHtml();
+    showError('');
+    paintBrowseMessage('Loading…', false);
+    if (focusRec) placeListFocus('[data-loading]', focusRec);
+  }
+  const showsRead = typeof matchReadStart === 'function' ? matchReadStart('shows', '*') : null; // tracked (tmdb-match.js)
   try {
-    const isCollection = isBrowseCollectionView(viewId);
     const orgRead = orgReadStart();
     const [rows, shows, gov, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
       readGovernance(), ...(isCollection ? [readPersonalCollections(), fetchAllRowsStrict('collection_memberships')] : [])]);
-    if (seq !== browseLoadSeq || activeViewId !== viewId) return null;
     requireB45Shape(shows, 'priority');
     requireB45Shape(rows, 'priority');
+    publishAllTvShows(showsRead, shows);
+    if (showsRead) matchReadSettle(showsRead, null);
+    if (seq !== browseLoadSeq || activeViewId !== viewId) return null;
     publishGovernance(governanceCovers(gov, rows, shows));
     let dest = null, members = null;
     if (isCollection) {
@@ -699,6 +719,7 @@ async function loadBrowseView() {
       const published = publishCollections(collections, orgRead);
       const c = collections.find(x => BROWSE_VIEW_PREFIX + x.id === viewId);
       if (!c || c.archived_at) {
+        if (quiet) endQuietReread(quietToken, false);
         showUnavailableCollection(viewId, hadFocus);
         return true;
       }
@@ -706,15 +727,26 @@ async function loadBrowseView() {
       dest = browseDestFromCollection(c);
       members = membersOf(memberships, c.id);
     }
-    browseData = { rows, showsById: new Map(shows.map(s => [s.id, s])), dest, members, loaded: true };
+    const repair = lostFocusRepairDue(focusRec);
+    if (quiet) endQuietReread(quietToken, false);
+    browseData = { rows, dest, members, loaded: true };
+    const filterFocus = captureFilterFocus();
     renderFilters();
-    renderTable();
+    const listing = isCollection ? renderBrowseTable(focusRec && focusIsPlaced(focusRec) ? focusRec : null) : renderTable();
+    restoreFilterFocus(filterFocus);
+    if (repair) repairLostFocus(focusRec.container, listing);
     return true;
   } catch(e) {
     console.error(e);
+    if (showsRead && showsRead.state === 'pending') matchReadSettle(showsRead, e);
     if (seq !== browseLoadSeq || activeViewId !== viewId) return null;
+    if (quiet) { endQuietReread(quietToken, true, 'loadBrowseView'); return false; }
+    const owned = !!focusRec && focusIsPlaced(focusRec);
+    const repair = lostFocusRepairDue(focusRec);
     showError(`Couldn't read everything that's saved, so nothing is shown rather than an incomplete list. ${e.message}`);
     paintBrowseMessage('Failed to load.', true);
+    if (owned) placeListFocus('[data-retry]', focusRec);
+    else if (repair) placeListFocus('[data-retry]', blankFocusRecord(focusRec.container));
     return false;
   }
 }
@@ -743,10 +775,14 @@ function showUnavailableCollection(viewId, hadFocus) {
   buildBrowseBar({ hadFocus, resolve: false });
 }
 
+// In a collection (S3) the loading text can take focus from the page while a reread runs and
+// Retry is the focus after a failed one (B6, as derived-views.js paintDerivedMessage); All Movies is unchanged.
 function paintBrowseMessage(text, withRetry) {
-  const retry = withRetry ? ` <button class="btn" onclick="loadBrowseView()">Retry</button>` : '';
-  document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading">${esc(text)}${retry}</td></tr>`;
-  document.getElementById('cardList').innerHTML = `<div class="loading">${esc(text)}${retry}</div>`;
+  const hooks = isBrowseCollectionView(activeViewId);
+  const retry = withRetry ? ` <button class="btn"${hooks ? ' data-retry="1"' : ''} onclick="loadBrowseView()">Retry</button>` : '';
+  const hook = hooks && !withRetry ? ' tabindex="-1" data-loading="1"' : '';
+  document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading"${hook}>${esc(text)}${retry}</td></tr>`;
+  document.getElementById('cardList').innerHTML = `<div class="loading"${hook}>${esc(text)}${retry}</div>`;
 }
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
@@ -762,7 +798,8 @@ function browseHeadHtml() {
   }
   const back = browseBackHtml();
   if (!dest) return back ? `<div class="browse-head">${back}</div>` : '';
-  const notes = [dest.note, `Read-only: the shows and films in your ${dest.label} collection. Change shows in All TV and films in All Movies.`].filter(Boolean);
+  // S3 (owner decision S3-D3): shows are edited here; films stay read-only until S4.
+  const notes = [dest.note, `The shows and films in your ${dest.label} collection. Changing a show here changes it in your library everywhere. Films can’t be changed here yet; change them in All Movies.`].filter(Boolean);
   return `<div class="browse-head">
       <h2 class="browse-title">🗂 ${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
       ${back}
@@ -784,7 +821,7 @@ function browseFilterBase() {
   if (!browseData || !browseData.loaded) return { shows: [], films: [] };
   if (!isBrowseCollectionView(activeViewId)) return { shows: [], films: deriveAllMovies(browseData.rows).films };
   if (!browseData.members) return { shows: [], films: [] };
-  return deriveBrowseCollection(browseData.rows, browseData.showsById, browseData.members, localTodayStr());
+  return deriveBrowseCollection(browseData.rows, tvShowsById, browseData.members, localTodayStr());
 }
 
 // Collection tag and watch-with filters for the films' existing labels (offered
@@ -870,10 +907,16 @@ function renderBrowseFilters() {
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
-function renderBrowseTable() {
-  if (!browseData || !browseData.loaded) return;
+// carried: in a collection, the focus a reload recorded before its read (loadBrowseView); otherwise
+// the focus is recorded here, just before the redraw, and put back by the B6 chain (S3). All Movies
+// has no focus chain (unchanged). Returns a collection's focus listing (null otherwise).
+// chain: false for the layout and expansion toggles, which keep their own focus rule (refocus).
+function renderBrowseTable(carried, chain = true) {
+  if (!browseData || !browseData.loaded) return null;
+  const collection = isBrowseCollectionView(activeViewId);
+  const rec = collection && chain ? (carried || captureListFocus()) : null;
   const thead = document.getElementById('tableHead');
-  if (thead) thead.innerHTML = isBrowseCollectionView(activeViewId)
+  if (thead) thead.innerHTML = collection
     ? `<tr><th>Title</th><th>Categories</th><th>Next / Release</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`
     : `<tr><th>Title</th><th>Categories</th><th>Release</th><th>Status</th><th>Watched</th><th></th></tr>`;
   const today = localTodayStr();
@@ -883,24 +926,31 @@ function renderBrowseTable() {
     fTheme: val('fTheme'), fCollection: val('fCollection'), fWatchWith: val('fWatchWith'),
     fPriority: val('fPriority'), markers: markerFilterValues(), cats: categoryFilterValues() };
   const dest = currentBrowseDest();
-  if (isBrowseCollectionView(activeViewId)) { if (dest) renderBrowseCollection(dest, today, f); }
+  let listing = null;
+  if (collection) { if (dest) listing = renderBrowseCollection(dest, today, f); }
   else renderAllMovies(today, { ...f, fYear: val('fYear'), fWatch: val('fWatch') });
   renderFilterBarState(); // B10: chips, More filters count (render.js)
+  if (rec) applyListFocus(rec, listing);
+  return listing;
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-function browseNoteHtml(msg, extra = '') {
+// empty: the view's empty-state message (S3: focusable by the page only, the focus chain's F-4).
+function browseNoteHtml(msg, extra = '', empty = false) {
+  const hook = empty ? ' tabindex="-1" data-empty="1"' : '';
   return {
-    row: `<tr class="empty-row"><td colspan="6">${esc(msg)}${extra}</td></tr>`,
-    card: `<div class="empty-row" style="padding:1rem 0">${esc(msg)}${extra}</div>`
+    row: `<tr class="empty-row"><td colspan="6"${hook}>${esc(msg)}${extra}</td></tr>`,
+    card: `<div class="empty-row" style="padding:1rem 0"${hook}>${esc(msg)}${extra}</div>`
   };
 }
 
-function browseSectionHtml(label, count) {
+// name: the section's focus name (S3: a heading the page can focus, the focus chain's F-6).
+function browseSectionHtml(label, count, name) {
+  const hook = name ? ` tabindex="-1" data-section="${esc(name)}"` : '';
   return {
-    row: `<tr class="browse-section-row"><th colspan="6" scope="colgroup">${esc(label)} <span class="section-count">${esc(count)}</span></th></tr>`,
-    card: `<h3 class="browse-section-card">${esc(label)} <span class="section-count">${esc(count)}</span></h3>`
+    row: `<tr class="browse-section-row"><th colspan="6" scope="colgroup"${hook}>${esc(label)} <span class="section-count">${esc(count)}</span></th></tr>`,
+    card: `<h3 class="browse-section-card"${hook}>${esc(label)} <span class="section-count">${esc(count)}</span></h3>`
   };
 }
 
@@ -909,11 +959,14 @@ function browseSectionHtml(label, count) {
 // (Shows; Movies only) or chronological (Seasons) with TBA and Date needs review
 // apart. Counts keep shows, season entries and films apart and don't depend on
 // grouping. Status is the show's for TV and the film's own.
+// S3: TV entries carry All TV's controls; films stay read-only. Returns the focus chain's listing
+// (B6, derived-views.js): per section its entries (dated), and its TBA and Date needs review parts.
 function renderBrowseCollection(dest, today, f) {
-  const base = deriveBrowseCollection(browseData.rows, browseData.showsById, browseData.members, today);
+  const base = deriveBrowseCollection(browseData.rows, tvShowsById, browseData.members, today);
   const v = deriveBrowsePresentation(base, { media: browseMedia, presentation: browsePresentation, grouping: browseGrouping,
     seasonVis: browseSeasonVis, ...f });
   const { counts } = v;
+  const listing = { sections: [] };
 
   // B8: the counts are in the section headings (no tiles).
   document.getElementById('statsRow').innerHTML = '';
@@ -943,10 +996,11 @@ function renderBrowseCollection(dest, today, f) {
   const filmsPart = ofTotal(counts.films, v.baseFilms, 'film', 'films');
   const countLabel = { tv: `· ${showsPart}`, film: `· ${filmsPart}`, all: `· ${showsPart} · ${filmsPart}` };
   v.sections.forEach(section => {
-    add(browseSectionHtml(section.label, countLabel[section.key]));
-    const entryHtml = (e, needsReview) => browseEntryHtml(e, today, v.combined, needsReview);
+    add(browseSectionHtml(section.label, countLabel[section.key], section.key));
+    const entryHtml = (e, needsReview, part) => browseEntryHtml(e, today, v.combined, needsReview, part);
     if (!section.chrono) {
-      section.az.forEach(e => add(entryHtml(e, false)));
+      section.az.forEach(e => add(entryHtml(e, false, section.key)));
+      listing.sections.push({ name: section.key, shown: true, open: true, heading: true, keys: section.az.map(browseEntryId) });
     } else {
       let lastYear = '';
       section.dated.forEach(e => {
@@ -955,14 +1009,16 @@ function renderBrowseCollection(dest, today, f) {
           add({ row: `<tr class="year-group"><td colspan="6">${esc(year)}</td></tr>`, card: `<div class="card-year-group">${esc(year)}</div>` });
           lastYear = year;
         }
-        add(entryHtml(e, false));
+        add(entryHtml(e, false, section.key));
       });
+      listing.sections.push({ name: section.key, shown: true, open: true, heading: true, keys: section.dated.map(browseEntryId) });
       if (section.entries.length > 0 && section.dated.length === 0) add(browseNoteHtml('No dated entries; see below.'));
       [['Tba', 'TBA', section.tba, false], ['Review', 'Date needs review', section.review, true]].forEach(([suffix, label, list, needsReview]) => {
-        if (!list.length) return;
         const name = section.key + suffix;
+        listing.sections.push({ name, shown: list.length > 0, open: !!browseSectionOpen[name], heading: true, keys: list.map(browseEntryId) });
+        if (!list.length) return;
         add(browseSubsectionHtml(name, label, list.length));
-        if (browseSectionOpen[name]) list.forEach(e => add(entryHtml(e, needsReview)));
+        if (browseSectionOpen[name]) list.forEach(e => add(entryHtml(e, needsReview, name)));
       });
     }
     if (section.entries.length === 0) {
@@ -971,17 +1027,19 @@ function renderBrowseCollection(dest, today, f) {
         : section.key === 'film'
           ? (v.baseFilms === 0 ? 'No films in this collection.' : 'No films match these filters.')
           : (v.baseShows + v.baseFilms === 0 ? `Nothing in ${dest.label}.` : 'Nothing matches these filters.');
-      add(browseNoteHtml(msg, /match(es)? these filters/.test(msg) ? filterEmptyClearHtml() : ''));
+      add(browseNoteHtml(msg, /match(es)? these filters/.test(msg) ? filterEmptyClearHtml() : '', true));
     }
   });
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
+  return listing;
 }
 
-function browseEntryHtml(e, today, combined, needsReview) {
-  if (e.kind === 'show') return browseShowHtml(e.item, today, combined);
-  if (e.kind === 'film') return browseFilmHtml(e.row, today);
-  return browseSeasonEntryHtml(e, today, combined);
+// part: the focus listing's section the entry is drawn in (its data-row-section).
+function browseEntryHtml(e, today, combined, needsReview, part) {
+  if (e.kind === 'show') return browseShowHtml(e.item, today, combined, part);
+  if (e.kind === 'film') return browseFilmHtml(e.row, today, part);
+  return browseSeasonEntryHtml(e, today, combined, part);
 }
 
 // A collapsible date section (TBA, Date needs review): a real button, so it can
@@ -1013,9 +1071,6 @@ function renderAllMovies(today, f) {
   document.getElementById('cardList').innerHTML = cardHtml;
 }
 
-function browseStatusPillHtml(status, title) {
-  return `<span class="status-pill s-${esc(status)}" title="${esc(title)}">${esc(statusOptionLabel(status))}</span>`;
-}
 function browseFilmStatusPillHtml(r) {
   const state = filmViewState(r);
   return `<span class="status-pill s-film-${state}" title="Film status">${esc(FILM_STATE_LABELS[state])}</span>`;
@@ -1030,103 +1085,48 @@ function browseDateHtml(r, today) {
   return `${esc(r.display_date)}${r.date_sort > today ? '<span class="upcoming-tag">Upcoming</span>' : ''}`;
 }
 
-// The stored watched state as a label (not a control: these views change nothing).
+// A film's stored watched state as a label (films stay read-only in collections, S3).
 function browseWatchedHtml(watched) {
   return watched ? '<span class="ro-watch watched">✓ Watched</span>' : '<span class="ro-watch">Not watched</span>';
 }
 
-// A show: its status, progress and what's next, as text; a labelled button
-// expands every stored season (watched and skipped shown separately). Nothing
-// on it changes anything.
-function browseShowHtml(item, today, combined) {
-  const { key, show, seasons, upNext, upToDate } = item;
-  const inProgress = !upToDate && show.status === 'watching' && !!upNext;
-  const dimClass = show.status === 'skipped' ? ' row-skipped' : '';
-  const isExpanded = expandedShows.has(key);
-  const keyArg = esc(key).replace(/'/g, "\\'");
-  const theme = (upNext || seasons[0]).theme;
-  const badges = metadataChipsHtml(show, key, themeBadgeHtml(showCatalogOf(show), theme, key));
-  const titleHtml = `${priorityMarkHtml(show.priority)}<span class="show-title">${esc(item.title)}</span>${priorityMarkHtml(show.priority, true)}${stateTagsHtml(show, 'show')}`;
-  const trackable = seasons.filter(s => !s.skipped);
-  const watchedCount = trackable.filter(s => s.watched).length;
-  const skippedCount = seasons.length - trackable.length;
-  const pct = trackable.length > 0 ? Math.round(watchedCount / trackable.length * 100) : 0;
-  const watchedLabel = `${watchedCount}/${trackable.length} watched${skippedCount ? ` · ${skippedCount} skipped` : ''}`;
-  const entriesLabel = plural(seasons.length, 'season entry', 'season entries');
-  const bar = trackable.length > 0 ? `<div class="mini-progress-track"><div class="mini-progress-fill" style="width:${pct}%"></div></div>` : '';
-  // B6: no "Next:" / "Up next:" prefix (the column heading says it); a phone card's screen
-  // reader text adds "Next season:" before an actual next season only (derived-views.js).
-  const nextFor = card => item.endedExit
-    ? '<span class="caught-ended">Caught up · Ended</span>'
-    : upToDate
-    ? upToDateNextLabel(upNext, card)
-    : inProgress
-      ? nextSeasonLabel(upNext, item.upNextReleased, card, true)
-      : neutralNextLabel(upNext, item.upNextReleased, card);
-  const nextLabel = nextFor(false), nextCard = nextFor(true);
-  const statusHtml = browseStatusPillHtml(show.status, `Show status — applies to every season of ${show.title}`)
-    + (upToDate && !item.endedExit ? ' <span class="status-pill s-caughtup">Up to date</span>' : ''); // (F5: not beside “Caught up · Ended”)
-  const expandBtn = `<button class="expand-btn" data-show-key="${esc(key)}" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Hide' : 'Show'} seasons of ${esc(item.title)}" onclick="toggleBrowseShow('${keyArg}')"><span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span></button>`;
-
-  let row = `<tr class="show-group-row browse-show-row${dimClass}">
-      <td><div class="show-title-row"><div class="show-title-left">${titleHtml}${combined ? '<span class="ro-tag">TV show</span>' : ''}</div>${expandBtn}</div></td>
-      <td>${badges}</td>
-      <td class="date-cell">${nextLabel}</td>
-      <td>${statusHtml}</td>
-      <td class="card-date">${watchedLabel}</td>
-      <td class="card-date">${entriesLabel}${bar}</td>
-    </tr>`;
-  if (isExpanded) row += seasons.map(r => `<tr class="sub-row${r.skipped ? ' row-skipped' : ''}">
-        <td style="padding-left:28px"><span class="season-lbl">${esc(r.season)}</span></td>
-        <td></td>
-        <td class="date-cell">${browseDateHtml(r, today)}</td>
-        <td>${r.skipped ? '<span class="ro-tag">Season skipped</span>' : ''}</td>
-        <td>${browseWatchedHtml(r.watched)}</td>
-        <td></td>
-      </tr>`).join('');
-
-  const card = `<div class="item-card show-group-card${dimClass}">
-      <div class="card-top">
-        <div class="card-title-block">
-          <span class="card-title">${titleHtml}</span>${combined ? '<span class="ro-tag">TV show</span>' : ''}
-          <span class="card-season">${nextCard}</span>
-        </div>
-        ${expandBtn}
-      </div>
-      <div class="card-meta">
-        ${badges}
-        <span class="card-date">${watchedLabel} · ${entriesLabel}</span>
-        ${bar}
-      </div>
-      <div class="card-actions">${statusHtml}</div>
-      ${isExpanded ? `<div class="card-subseasons">${seasons.map(r => `<div class="card-subseason-row${r.skipped ? ' row-skipped' : ''}">
-          <span class="card-season">${esc(r.season)} · ${browseDateHtml(r, today)}</span>
-          <div class="card-actions">${browseWatchedHtml(r.watched)}${r.skipped ? ' <span class="ro-tag">Season skipped</span>' : ''}</div>
-        </div>`).join('')}</div>` : ''}
-    </div>`;
-  return { row, card };
+// A show (S3): All TV's show entry — the status and priority selects, the season-named shortcut,
+// Up to date, the expand button, and when expanded the show actions, every stored season with
+// Watched, Skip / Keep, Match (eligible rows) and Delete… (rows that aren't built-in catalog
+// entries), and + Add season… (derived-views.js derivedShowHtml, the same functions and guards).
+// The collection keeps its own date text and the Combined kind tag. part: its focus section.
+// Its expand button is the collection's own (S2's label and toggleBrowseShow, which keeps focus on it),
+// with the focus chain's hook (data-primary).
+function browseShowHtml(item, today, combined, part) {
+  const keyArg = esc(item.key).replace(/'/g, "\\'");
+  const expandBtn = isExpanded => `<button class="expand-btn" data-show-key="${esc(item.key)}" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Hide' : 'Show'} seasons of ${esc(item.title)}" data-primary="1" onclick="toggleBrowseShow('${keyArg}')"><span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span></button>`;
+  return derivedShowHtml(item, today, { section: part || 'tv', kindTag: combined ? '<span class="ro-tag">TV show</span>' : '',
+    dateHtml: r => browseDateHtml(r, today), expandBtn });
 }
 
-// One TV season entry (Seasons): titled by its show, then its stored label; the
-// show's status, the season's watched and skipped flags, all as text.
-function browseSeasonEntryHtml(e, today, combined) {
+// One TV season entry (Seasons): titled by its show, then its stored label. S3: All TV Seasons'
+// controls (derived-views.js allTvSeasonRowHtml) — the show's status as a read-only label (changed
+// in Shows), the existing Watched control (release rule unchanged) and Skip / Keep — with the B6
+// focus hooks. part: its focus section.
+function browseSeasonEntryHtml(e, today, combined, part) {
   const { row: r, show } = e;
-  const dimClass = show.status === 'skipped' || r.skipped ? 'row-skipped' : '';
+  const item = seasonItemAttrs(r, part || 'tv');
+  const dimClass = isOffList(r) ? 'row-skipped' : '';
   const badges = metadataChipsHtml(show, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
   const kindTag = combined ? '<span class="ro-tag">TV</span>' : '';
-  const statusHtml = browseStatusPillHtml(show.status, `Show status — applies to every season of ${show.title}`);
-  const skippedHtml = r.skipped ? '<span class="ro-tag">Season skipped</span>' : '';
-  const row = `<tr class="browse-season-row ${dimClass}">
-      <td>${priorityMarkHtml(show.priority)}<span class="show-title">${esc(show.title)}</span>${priorityMarkHtml(show.priority, true)}<span class="season-lbl"> · ${esc(r.season)}</span>${kindTag}</td>
+  const statusHtml = `<span class="status-pill s-${esc(show.status)}" title="Show status — applies to every season of ${esc(show.title)}. Switch to Shows to change it.">${esc(statusOptionLabel(show.status))}</span>`;
+  const releaseOpts = { requireReleased: true, today };
+  const row = `<tr class="browse-season-row ${dimClass}"${item}>
+      <td tabindex="-1" data-primary="1">${priorityMarkHtml(show.priority)}<span class="show-title">${esc(show.title)}</span>${priorityMarkHtml(show.priority, true)}<span class="season-lbl"> · ${esc(r.season)}</span>${kindTag}</td>
       <td>${badges}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusHtml}</td>
-      <td>${browseWatchedHtml(r.watched)}</td>
-      <td>${skippedHtml}</td>
+      <td>${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, false))}</td>
+      <td>${seasonActionHtml('season-control', seasonRowControlHtml(r))}</td>
     </tr>`;
-  const card = `<div class="item-card ${dimClass}">
+  const card = `<div class="item-card ${dimClass}"${item}>
       <div class="card-top">
-        <div class="card-title-block">
+        <div class="card-title-block" tabindex="-1" data-primary="1">
           <span class="card-title">${esc(show.title)}</span>
           <span class="card-season">${esc(r.season)}${kindTag}</span>
         </div>
@@ -1135,30 +1135,33 @@ function browseSeasonEntryHtml(e, today, combined) {
         ${badges}
         <span class="card-date">${browseDateHtml(r, today)}</span>
       </div>
-      <div class="card-actions">${statusHtml} ${browseWatchedHtml(r.watched)}${skippedHtml ? ` ${skippedHtml}` : ''}</div>
+      <div class="card-actions">${statusHtml} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))}</div>
     </div>`;
   return { row, card };
 }
 
 // A film: the row's own status and watched state; its existing collection tags and
 // watch-with choices as filter pills (they filter the list; they change nothing).
-function browseFilmHtml(r, today) {
+// S3: films stay read-only in collections (until S4); the entry is a focus item only (B6 hooks),
+// so focus can land on it (for example a season matched as a film), and has no control.
+function browseFilmHtml(r, today, part) {
   const dimClass = r.status === 'skipped' ? 'row-skipped' : '';
+  const item = ` data-item="${esc(r.id)}" data-row-section="${esc(part || 'film')}"`;
   const badges = metadataChipsHtml(r, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
   const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
   const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
   const statusHtml = browseFilmStatusPillHtml(r);
-  const row = `<tr class="browse-film-row ${dimClass}">
-      <td>${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl"> · Film</span>${stateTagsHtml(r, 'film')}${labelsHtml}</td>
+  const row = `<tr class="browse-film-row ${dimClass}"${item}>
+      <td tabindex="-1" data-primary="1">${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl"> · Film</span>${stateTagsHtml(r, 'film')}${labelsHtml}</td>
       <td>${badges}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusHtml}</td>
       <td>${browseWatchedHtml(r.watched)}</td>
       <td></td>
     </tr>`;
-  const card = `<div class="item-card ${dimClass}">
+  const card = `<div class="item-card ${dimClass}"${item}>
       <div class="card-top">
-        <div class="card-title-block">
+        <div class="card-title-block" tabindex="-1" data-primary="1">
           <span class="card-title">${priorityMarkHtml(r.priority)}${esc(r.title)}${priorityMarkHtml(r.priority, true)}${stateTagsHtml(r, 'film')}</span>
           <span class="card-season">Film</span>
         </div>

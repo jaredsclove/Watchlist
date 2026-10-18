@@ -412,11 +412,13 @@ function metadataExpected(rec, kind) {
   return m;
 }
 function openDetails(kind, id, opener) {
+  if (kind !== 'show' && isBrowseCollectionView(activeViewId)) return; // S3: films stay read-only in collections
   const rec = kind === 'show' ? tvShowsById.get(id) : actionRows().find(r => r.id === id);
   if (!rec) return;
   const snapshot = metadataExpected(rec, kind);
+  // A show's seasons are the open view's rows (a TV view's, or a collection's since S3).
   const labels = kind === 'show'
-    ? [...new Set(((derivedData && derivedData.rows) || []).filter(r => r.show_id === rec.id).map(r => r.theme).filter(Boolean))]
+    ? [...new Set(actionRows().filter(r => r.show_id === rec.id).map(r => r.theme).filter(Boolean))]
     : [rec.theme].filter(Boolean);
   detailsDialog = { session: ++detailsSessionSeq, kind, id, title: rec.title, epoch: orgEpoch, snapshot, labels, opener: opener || null,
     draft: { genres: snapshot.genres.slice(), forms: snapshot.forms.slice(), franchises: snapshot.franchises.slice(),
@@ -499,7 +501,7 @@ function detailsValidate(dialog) {
 // seasons with "Watch earlier seasons", the range's state and its recovery actions. Live (what
 // the page holds now); the actions are the same guarded calls as in the expanded show.
 function detailsProgressHtml(show) {
-  const seasons = ((derivedData && derivedData.rows) || []).filter(r => r.show_id === show.id);
+  const seasons = actionRows().filter(r => r.show_id === show.id);
   if (!seasons.length) return '';
   const range = resumeRange(show, seasons);
   const active = !!range && range.state === 'active';
@@ -575,8 +577,9 @@ function renderDetails() {
 }
 
 async function saveDetails() {
-  if (isBrowseView(activeViewId) && activeViewId !== ALL_MOVIES_VIEW.id) return; // read-only views never write
   const dlg = detailsDialog;
+  // S3: a collection saves a show's details; its films stay read-only (S4).
+  if (dlg && dlg.kind !== 'show' && isBrowseCollectionView(activeViewId)) return;
   if (!dlg || dlg.saving || dlg.stale) return;
   if (dlg.epoch !== orgEpoch) { renderDetails(); return; } // a restore happened: nothing is sent (the dialog says so)
   const { metadata, problems } = detailsValidate(dlg);
@@ -696,7 +699,10 @@ function seasonRowControlHtml(r, opts = {}) {
 }
 
 // One season of a grouped show: a desktop sub-row and a mobile card row.
-// opts: { isNew, showMatch, showDelete, deleteTitle, requireReleased, today, showOf, cwOrder }
+// opts: { isNew, showMatch, showDelete, deleteName, deleteLabel, dateHtml, requireReleased, today, showOf, cwOrder }
+// D6 / S3-D1: the delete control is named by its effect (deleteName: "Delete Season 3 of Andor from
+// your library"): × in All TV, the visible deleteLabel ("Delete…") in a collection. dateHtml: the
+// collection's date text for the season (S3); the stored text otherwise.
 // Focus hooks (B6): data-season-row names the season and data-action each of its controls,
 // so focus can return to the same control after a redraw (an identity, never a position);
 // showOf names the show the row belongs to.
@@ -704,6 +710,15 @@ function seasonRowControlHtml(r, opts = {}) {
 // Skip / Keep, in five cells.
 function seasonActionHtml(action, html) {
   return html ? `<span class="season-action" data-action="${action}">${html}</span>` : '';
+}
+function seasonDeleteHtml(r, opts, cls) {
+  const name = esc(opts.deleteName || 'Delete from your library');
+  return opts.deleteLabel
+    ? `<button class="btn btn-link season-delete-link" onclick="delRow('${r.id}')" title="${name}" aria-label="${name}">${esc(opts.deleteLabel)}</button>`
+    : `<button class="${cls}" onclick="delRow('${r.id}')" title="${name}" aria-label="${name}">×</button>`;
+}
+function seasonDateHtml(r, opts) {
+  return opts.dateHtml ? opts.dateHtml(r) : esc(r.display_date);
 }
 function seasonSubRowHtml(r, opts) {
   const isSkipped = isOffList(r);
@@ -727,20 +742,20 @@ function seasonSubRowHtml(r, opts) {
   return `<tr class="${rowClass} sub-row"${hooks}>
         ${label}
         <td>${opts.showMatch ? seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`) : ''}</td>
-        <td class="date-cell">${esc(r.display_date)}</td>
+        <td class="date-cell">${seasonDateHtml(r, opts)}</td>
         <td>${control}</td>
         <td>${watch}</td>
-        <td>${opts.showDelete ? seasonActionHtml('season-delete', `<button class="del-btn" onclick="delRow('${r.id}')" title="${esc(opts.deleteTitle || 'Remove')}">×</button>`) : ''}</td>
+        <td>${opts.showDelete ? seasonActionHtml('season-delete', seasonDeleteHtml(r, opts, 'del-btn')) : ''}</td>
       </tr>`;
 }
 
 function seasonSubCardHtml(r, opts) {
   return `<div class="card-subseason-row" data-season-row="${esc(r.id)}"${opts.showOf ? ` data-show-of="${esc(opts.showOf)}"` : ''}>
-          <span class="card-season">${esc(r.season)} · ${esc(r.display_date)}${opts.showMatch ? ` ${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}` : ''}</span>
+          <span class="card-season">${esc(r.season)} · ${seasonDateHtml(r, opts)}${opts.showMatch ? ` ${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}` : ''}</span>
           <div class="card-actions">
             ${seasonActionHtml('season-control', seasonRowControlHtml(r))}
             ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, true))}
-            ${opts.showDelete ? seasonActionHtml('season-delete', `<button class="card-del-btn" onclick="delRow('${r.id}')" title="${esc(opts.deleteTitle || 'Remove')}">×</button>`) : ''}
+            ${opts.showDelete ? seasonActionHtml('season-delete', seasonDeleteHtml(r, opts, 'card-del-btn')) : ''}
           </div>
         </div>`;
 }

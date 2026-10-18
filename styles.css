@@ -789,3 +789,12 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 }
 /* S1V-2 rev1: below 421px the wordmark leaves room for the icon, a busy "Backing up…" and ⚙ Settings on one line. */
 @media (max-width: 420px) { .logo-text { display: none; } }
+
+/* S3: a collection's Delete… link (D6), the effect-named dialog and a quiet reread's status line. */
+.season-delete-link { color: var(--red); font-size: 12px; white-space: nowrap; }
+.effect-text { margin: 0; line-height: 1.5; }
+.reread-status { margin: 0; font-size: 13px; color: var(--text2); }
+@media (max-width: 700px) {
+  .season-delete-link, #effectModalBox .modal-actions .btn, #effectModalBox .modal-actions .btn-danger, .reread-status .btn { min-height: 44px; }
+}
+

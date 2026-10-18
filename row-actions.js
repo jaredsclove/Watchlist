@@ -1,11 +1,16 @@
 // ─── Actions ──────────────────────────────────────────────────────────────────
-// The rows the visible controls came from: All Movies' films or the open derived
-// view's TV rows. Row actions PATCH by the row's real id. The read-only collection
-// views have none, so no row action can act there.
+// The rows the visible controls came from: All Movies' films, a collection's rows (S3: its
+// read of the library) or the open derived view's TV rows. Row actions PATCH by the row's real id.
 function actionRows() {
-  if (activeViewId === ALL_MOVIES_VIEW.id) return browseData?.rows || [];
+  if (activeViewId === ALL_MOVIES_VIEW.id || isBrowseCollectionView(activeViewId)) return browseData?.rows || [];
   if (isBrowseView(activeViewId)) return [];
   return activeViewId ? derivedData?.rows || [] : [];
+}
+
+// S3: a collection edits its shows and their seasons; its films stay read-only until S4, so every
+// film action refuses there and sends nothing.
+function collectionFilmLocked(row) {
+  return isBrowseCollectionView(activeViewId) && !!row && !isTvSeason(row);
 }
 
 // After a successful PATCH, copy the saved fields onto every other in-memory copy
@@ -36,7 +41,7 @@ async function staleAfterRestore(what) {
 
 async function toggleWatch(id) {
   const row = actionRows().find(r => r.id === id);
-  if (!row) return;
+  if (!row || collectionFilmLocked(row)) return;
   // A skipped film's Watched changes only as a status choice (B5 §4.2: never Skipped + Watched).
   if (!isTvSeason(row) && row.status === 'skipped') {
     showError(`“${row.title}” is Skipped, so Watched changes only through its status (To Watch, Watched or Skipped). Nothing was changed.`);
@@ -49,6 +54,7 @@ async function toggleWatch(id) {
   // Tracked like a publication of the row (tmdb-match.js): no older read replaces it.
   const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', LIBRARY_PARTITION, id, row) : null;
   renderTable();
+  const origin = typeof placedOrigin === 'function' ? placedOrigin() : null; // this action's focus placement (S3, brief §7.2)
   try {
     if (isTvSeason(row)) {
       // The database also keeps the show's compatibility values in step.
@@ -64,7 +70,14 @@ async function toggleWatch(id) {
     }
   } catch(e) {
     if (epoch !== orgEpoch) staleAfterRestore(`“${row.title}” · watched`);
-    else {
+    else if (orgErrorInfo(e).kind !== 'database') {
+      // S3-D2 B: no clear answer. It may or may not have been saved: the page claims neither, never
+      // resends it, and reads the open view again to show what is stored (tv-shows.js reportStateFailure).
+      row.watched = !newVal;
+      if (typeof matchEditEnd === 'function') matchEditEnd(edit); // ended first, so the reread can publish
+      await reportStateFailure(e, epoch, origin);
+      return;
+    } else {
       row.watched = !newVal;
       renderTable();
       showError(e.message);
@@ -95,6 +108,7 @@ function filmStatusSelectHtml(r) {
 // clears Watched; Cancel sends nothing.
 async function setStatus(id, state, selectEl) {
   const row = actionRows().find(r => r.id === id);
+  if (collectionFilmLocked(row)) return;
   if (!row || isTvSeason(row) || !['to_watch', 'watched', 'skipped'].includes(state)) { renderTable(); return; }
   const current = filmViewState(row);
   if (state === current && !row.status_review) { renderTable(); return; }
@@ -112,7 +126,7 @@ async function setStatus(id, state, selectEl) {
 // Priority (O2): status, watched and markers unchanged; an existing pair stays a pair.
 async function setFilmPriority(id, priority) {
   const row = actionRows().find(r => r.id === id);
-  if (!row || isTvSeason(row) || !PRIORITIES.includes(priority)) return;
+  if (!row || collectionFilmLocked(row) || isTvSeason(row) || !PRIORITIES.includes(priority)) return;
   if (row.priority === priority) { renderTable(); return; }
   await sendFilmState(row, { priority });
 }
@@ -152,14 +166,14 @@ async function sendFilmState(row, changes) {
   renderTable();
 }
 
-// × in All TV and All Movies (library.js decides Skip or Delete by catalog governance).
+// × in All TV and All Movies, Delete… in a collection (library.js decides Skip or Delete by catalog governance).
 function delRow(id) {
   if (activeViewId) return delRowInView(id);
 }
 
 async function toggleWatchWith(rowId, tag, checked) {
   const row = actionRows().find(r => r.id === rowId);
-  if (!row) return;
+  if (!row || collectionFilmLocked(row)) return;
   if (!watchWithUsable()) { showError('Watch-with choices aren’t loaded, so nothing was changed. Try again once they are.'); renderTable(); return; }
   const current = new Set(row.watch_with || []);
   if (checked) current.add(tag); else current.delete(tag);

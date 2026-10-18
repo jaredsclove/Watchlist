@@ -352,7 +352,7 @@ test('C7 the reread’s focus return never steals focus: not after navigating aw
 });
 
 // ─── C8 (V2.10) ───────────────────────────────────────────────────────────────
-test('C8 still read-only: no write from any Collections control; the read-only note verbatim in every collection; the chooser exposes navigation only', async () => {
+test('C8 no write from any Collections chooser control; the collection note verbatim in every collection (S3); the chooser exposes navigation only', async () => {
   const app = await boot();
   spyDom(app);
   app.ctx.openCollections(null); await settle();
@@ -360,7 +360,7 @@ test('C8 still read-only: no write from any Collections control; the read-only n
   for (const k of ['disney', 'sheridan', '90day', 'truecrime']) {
     app.ctx.selectCollectionTab(ID[k]); await settle();
     const name = coll(app, k).name.replace('&', '&amp;');
-    assert.ok(head(app).includes(`Read-only: the shows and films in your ${name} collection. Change shows in All TV and films in All Movies.`), k);
+    assert.ok(head(app).includes(`The shows and films in your ${name} collection. Changing a show here changes it in your library everywhere. Films can’t be changed here yet; change them in All Movies.`), k);
     const hs = [...bar(app).matchAll(/on(?:click|keydown)="([A-Za-z]+)\(/g)].map(m => m[1]);
     assert.ok(hs.every(h => allowed.has(h)), hs.join(','));
     app.ctx.collectionTabsKeydown({ key: 'ArrowRight', target: app.ctx.document.getElementById(`ctab-${ID[k]}`), preventDefault() {} });

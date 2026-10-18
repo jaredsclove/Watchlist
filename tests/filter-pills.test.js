@@ -400,7 +400,8 @@ test('a pill is plain text without its filter control; an unoffered value change
   assert.ok(/<button type="button" class="badge [^"]*filter-pill"/.test(html(app)), 'a real button: Enter and Space work');
 });
 
-test('selected-state styling survives a network badge’s inline colours; in a collection the watched state is a read-only label, in All Movies a control', async () => {
+// S3: in a collection a season's watched state is All TV's control; a film's stays a read-only label.
+test('selected-state styling survives a network badge’s inline colours; in a collection a season’s watched state is a control and a film’s a read-only label (S3), in All Movies a control', async () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   const rule = (css.match(/\.filter-pill\[aria-pressed="true"\] \{([^}]*)\}/) || [])[1] || '';
   assert.ok(/box-shadow/.test(rule) && /::after \{ content: ' ✕'; \}/.test(css));
@@ -408,10 +409,13 @@ test('selected-state styling survives a network badge’s inline colours; in a c
   const inline = app.get("networkBadgeStyle('HBO')");
   assert.ok(!/box-shadow|font-weight|outline/.test(inline), inline);
   app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
-  const mixed = app.get("[...browseData.showsById.values()].find(s => s.title === 'Mixed Show').id");
+  const mixed = app.get("[...tvShowsById.values()].find(s => s.title === 'Mixed Show').id");
   app.ctx.toggleBrowseShow(mixed); await settle();
-  assert.ok(html(app).includes('<span class="ro-watch">Not watched</span>') && html(app).includes('<span class="ro-watch watched">✓ Watched</span>'));
-  assert.ok(!/class="[^"]*(watch-btn|confirmed-lbl)[^"]*">(Not watched|✓ Watched)/.test(html(app) + cards(app)));
+  const seasons = JSON.parse(app.get(`JSON.stringify(browseData.rows.filter(r => r.show_id === ${JSON.stringify(mixed)}).map(r => r.id))`));
+  assert.ok(seasons.length === 2 && seasons.every(id => html(app).includes(`toggleWatch('${id}')`)), 'each season of the expanded show has the Watched control');
+  assert.ok(html(app).includes('<button class="watch-btn watched"') && html(app).includes('>✓ Watched</button>'), 'its watched season shows ✓ Watched as a control');
+  assert.ok(html(app).includes('<span class="ro-watch">Not watched</span>'), 'a film’s watched state is a read-only label');
+  assert.ok(!/toggleWatch\('f-(gamma|zeta)'\)/.test(html(app) + cards(app)), 'no film has a Watched control');
   app.ctx.switchMediaType('movie'); await settle();
   setFilter(app, 'fWatch', '');
   assert.ok(html(app).includes("toggleWatch('f-beta')") && !html(app).includes('ro-watch'), 'All Movies has the Watched control (Stage 4b)');

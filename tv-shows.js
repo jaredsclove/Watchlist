@@ -209,7 +209,7 @@ function showStateOf(show) {
 // (it resolves the review). Shown at once; put back if refused; an answer from before a
 // restore is set aside; an unknown outcome is never resent.
 async function setShowStateById(showId, changes) {
-  if (isBrowseView(activeViewId)) return; // read-only views never write
+  if (activeViewId === ALL_MOVIES_VIEW.id) return; // All Movies lists no show (S3: collections edit shows)
   const show = tvShowsById.get(showId);
   if (!show || !changes) return;
   const explicitReview = 'status' in changes && show.status_review;
@@ -223,6 +223,7 @@ async function setShowStateById(showId, changes) {
   if ('status' in changes) Object.assign(show, { catalog_new: false, status_review: false, legacy_status: null });
   const edit = typeof matchEditStart === 'function' ? matchEditStart('shows', LIBRARY_PARTITION, LIBRARY_PARTITION) : null;
   renderTable();
+  const origin = typeof placedOrigin === 'function' ? placedOrigin() : null; // this action's focus placement (S3, brief §7.2)
   try {
     const res = await sbRpc('library_set_show_state_b45', { p_show_id: showId, p_expected: expected, p_changes: changes });
     // An answer from before a restore never reaches the restored shows (Stage 4b).
@@ -234,7 +235,7 @@ async function setShowStateById(showId, changes) {
     Object.keys(show).forEach(k => { if (!(k in before)) delete show[k]; });
     Object.assign(show, before);
     if (typeof matchEditEnd === 'function') matchEditEnd(edit);
-    if (stateNeedsReread(e)) { await reportStateFailure(e, epoch); return; }
+    if (stateNeedsReread(e)) { await reportStateFailure(e, epoch, origin); return; }
     showError(stateErrorText(e));
     renderTable();
     return;
@@ -273,11 +274,13 @@ function rereadText(ok) {
 // Shows the failure, reads the open view again when that helps (same restore epoch only)
 // and shows the failure again with the reread's result (a view read clears the banner).
 // Returns the reread's result (true / false / null when none was made or it was superseded).
-async function reportStateFailure(e, epoch) {
+// origin (S3, brief §7.2): the action's own focus placement; the reread may move focus only while
+// that placement is still held (library.js reloadOpenView).
+async function reportStateFailure(e, epoch, origin) {
   const text = stateErrorText(e);
   showError(text);
   if (!stateNeedsReread(e) || epoch !== orgEpoch || typeof reloadOpenView !== 'function') { renderTable(); return null; }
-  const ok = await reloadOpenView();
+  const ok = await reloadOpenView({ origin });
   if (epoch !== orgEpoch) return null; // a restore happened meanwhile: its own reload stands
   showError(text + rereadText(ok));
   return ok ?? null;
@@ -285,7 +288,8 @@ async function reportStateFailure(e, epoch) {
 
 // O6: keep the current status (Needs status review cleared, the old status no longer kept).
 async function keepCurrentStatus(kind, id) {
-  if (isBrowseView(activeViewId) && activeViewId !== ALL_MOVIES_VIEW.id) return;
+  // All Movies: films; a collection: shows only (S3; its films stay read-only).
+  if (isBrowseView(activeViewId) && activeViewId !== ALL_MOVIES_VIEW.id && kind !== 'show') return;
   const rec = kind === 'show' ? tvShowsById.get(id) : actionRows().find(r => r.id === id);
   if (!rec || !rec.status_review) return;
   const expected = kind === 'show' ? showStateOf(rec) : filmStateOf(rec);
@@ -306,7 +310,8 @@ async function keepCurrentStatus(kind, id) {
 
 // O5: dismiss New from catalog for the records given ([{kind, id}]), all or nothing.
 async function dismissCatalogNew(list) {
-  if (isBrowseView(activeViewId) && activeViewId !== ALL_MOVIES_VIEW.id) return; // read-only views never write
+  // A collection dismisses only shows (S3; its films stay read-only).
+  if (isBrowseCollectionView(activeViewId) && (list || []).some(x => x.kind !== 'show')) return;
   if (!list || !list.length) return;
   if (list.length > 1 && !confirm(`Dismiss “New from catalog” on the ${list.length} records shown? Their status and priority don’t change.`)) return;
   const epoch = orgEpoch;
@@ -347,7 +352,7 @@ function openResumePicker(showId) {
 }
 async function startResume(showId, startId) {
   const show = tvShowsById.get(showId);
-  const seasons = (derivedData && derivedData.rows || []).filter(r => r.show_id === showId);
+  const seasons = actionRows().filter(r => r.show_id === showId); // the open view's rows (a collection's too, S3)
   if (!show) return;
   const main = mainSeasons(seasons);
   let furthest = -1;
@@ -364,7 +369,7 @@ async function stopResume(showId) {
   await sendResume(show, null, null, false);
 }
 async function sendResume(show, startId, endId, setWatching) {
-  if (isBrowseView(activeViewId)) return; // read-only views never write (the range is a TV-view action)
+  if (activeViewId === ALL_MOVIES_VIEW.id) return; // a show action (TV views and, since S3, collections)
   const expected = { status: show.status, resume_start_season_id: show.resume_start_season_id || null, resume_end_season_id: show.resume_end_season_id || null };
   const epoch = orgEpoch;
   try {
@@ -394,6 +399,7 @@ async function setSeasonSkipped(id, skipped) {
   row.skipped = skipped;
   const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', LIBRARY_PARTITION, id, row) : null;
   renderTable();
+  const origin = typeof placedOrigin === 'function' ? placedOrigin() : null; // this action's focus placement (S3, brief §7.2)
   try {
     const saved = await sbRpc('set_season_skipped', { p_row_id: id, p_skipped: skipped });
     if (!mirrorRowUpdate(id, saved || { skipped }, epoch)) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(`“${row.title}” · ${row.season}`); return; }
@@ -401,6 +407,13 @@ async function setSeasonSkipped(id, skipped) {
   } catch(e) {
     if (epoch !== orgEpoch) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(`“${row.title}” · ${row.season}`); return; }
     row.skipped = old;
+    if (orgErrorInfo(e).kind !== 'database') {
+      // S3-D2 B: no clear answer. It may or may not have been saved: the page claims neither, never
+      // resends it, and reads the open view again to show what is stored.
+      if (typeof matchEditEnd === 'function') matchEditEnd(edit); // ended first, so the reread can publish
+      await reportStateFailure(e, epoch, origin);
+      return;
+    }
     showError(e.message);
   }
   if (typeof matchEditEnd === 'function') matchEditEnd(edit);

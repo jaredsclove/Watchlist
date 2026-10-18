@@ -386,7 +386,7 @@ test('a failed season edit rolls back and reports the error', async () => {
   const a = show({ title: 'Alpha' }, [{ num: 1, date: day(-40) }]);
   const app = await openAllTv(all(a));
   await seasons(app);
-  app.failNext(r => r.url.endsWith('/rpc/set_season_watched'));
+  app.refuseNext(r => r.url.endsWith('/rpc/set_season_watched'), 'P0002', 'not_found: TV season'); // S3-D2 B: a refusal (an unclear answer now reads the view again)
   await app.ctx.toggleWatch(a.rows[0].id); await settle();
   assert.strictEqual(app.get('derivedData').rows[0].watched, false);
   assert.ok(app.el('errorBanner').innerHTML.length > 0);

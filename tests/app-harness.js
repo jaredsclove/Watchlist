@@ -932,6 +932,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       },
       scrollIntoView() {}, querySelector() { return null; }, querySelectorAll() { return []; },
       remove() {}, appendChild() {}, insertAdjacentElement() {},
+      // S3 (D6): the effect dialog's own elements take focus, so its default focus is observable.
+      ...(/^effect/.test(id || '') ? { focus() { document.activeElement = el; } } : {}),
       get innerHTML() { return html; },
       set innerHTML(v) {
         html = v;
@@ -946,6 +948,34 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     return el;
   }
   page.ids.forEach(id => registry.set(id, makeEl(id)));
+  // S3 (D6): the page's effect-named dialog (library.js askEffect). Each opening is recorded in
+  // app.dialogs ({ text, confirmLabel, cancelLabel, focus, answered }) and answered per
+  // app.dialogAnswer: 'confirm' (the default, as the confirm() stub below), 'cancel', or 'hold'
+  // (answered later with app.answerDialog(ok)).
+  app.dialogs = [];
+  app.dialogAnswer = 'confirm';
+  const effectOverlay = registry.get('effectModalOverlay');
+  if (effectOverlay) {
+    let shown = 'none';
+    effectOverlay.style = {
+      get display() { return shown; },
+      set display(v) { shown = v; if (v === 'flex') Promise.resolve().then(() => app.effectDialogShown()); }
+    };
+  }
+  const unescHtml = v => String(v).replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  app.effectDialogShown = () => {
+    const html = (registry.get('effectModalBox') || {}).innerHTML || '';
+    const pick = re => unescHtml((html.match(re) || [])[1] || '');
+    const active = document.activeElement;
+    app.dialogs.push({ text: pick(/id="effectModalText">([\s\S]*?)<\/p>/), confirmLabel: pick(/id="effectConfirm"[^>]*>([^<]*)</),
+      cancelLabel: pick(/id="effectCancel"[^>]*>([^<]*)</), focus: active && active.id ? active.id : null, answered: null });
+    if (app.dialogAnswer !== 'hold') app.answerDialog(app.dialogAnswer === 'confirm');
+  };
+  app.answerDialog = ok => {
+    const d = app.dialogs[app.dialogs.length - 1];
+    if (d && d.answered === null) d.answered = !!ok;
+    app.ctx.answerEffectDialog(!!ok);
+  };
   const document = {
     getElementById: id => registry.get(id) || null,
     querySelectorAll: sel => selectors[sel] || [],
@@ -961,15 +991,25 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   // hold(pred) pauses the first matching request until release()/fail() is called.
   // releaseWith({ table: rows }) answers the held request (only) from those rows,
   // as an older read would have seen them; later requests see the store as it is.
+  // S3: refuseWith(code, message) answers it as a database refusal (nothing applied); lose(mode)
+  // loses its answer, before ('before') or after ('after') the store applied it (loseNext below).
   app.hold = pred => {
     const g = { pred, hit: false };
-    g.gate = new Promise(r => { g.release = () => r('ok'); g.fail = () => r('fail'); g.releaseWith = tables => r({ tables }); });
+    g.gate = new Promise(r => { g.release = () => r('ok'); g.fail = () => r('fail'); g.releaseWith = tables => r({ tables });
+      g.refuseWith = (code, message) => r({ refuse: { code, message } }); g.lose = mode => r({ lose: mode }); });
     g.reached = new Promise(r => { g.onHit = r; });
     gates.push(g);
     return g;
   };
   // failNext(pred) makes the next matching request return HTTP 500.
   app.failNext = pred => failures.push(pred);
+  // S3: the two unknown-outcome loss modes. loseNext(pred, 'before') rejects the next matching
+  // request with a network error without applying it; 'after' applies it to the store, then rejects
+  // the same way (the answer is lost). refuseNext(pred, code, message) answers HTTP 400 with a
+  // PostgREST error body carrying that code (a database refusal), applying nothing.
+  const losses = [], refusals = [];
+  app.loseNext = (pred, mode) => losses.push({ pred, mode });
+  app.refuseNext = (pred, code, message) => refusals.push({ pred, code, message });
   // Database functions called as POST rpc/<name>. restore_backup replaces every
   // table with the backup's rows in one step, as the real function does.
   app.rpcHandlers = {
@@ -1052,17 +1092,26 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const req = { method, url, body, headers: opts.headers || {} };
     requests.push(req);
     const g = gates.find(x => !x.hit && x.pred(req));
-    let forceFail = false, older = null;
-    if (g) { g.hit = true; g.onHit(req); const v = await g.gate; forceFail = v === 'fail'; older = v && v.tables; }
+    let forceFail = false, older = null, refuse = null, lose = null;
+    if (g) { g.hit = true; g.onHit(req); const v = await g.gate; forceFail = v === 'fail'; older = v && v.tables; refuse = v && v.refuse; lose = v && v.lose; }
     if (forceFail) return response(500, { message: 'simulated failure' });
+    const ri = refusals.findIndex(x => x.pred(req));
+    if (ri !== -1) { refuse = refusals[ri]; refusals.splice(ri, 1); }
+    if (refuse) return response(400, { code: refuse.code, details: null, hint: null, message: refuse.message });
+    const li = losses.findIndex(x => x.pred(req));
+    if (li !== -1) { lose = losses[li].mode; losses.splice(li, 1); }
+    if (lose === 'before') throw new TypeError('Failed to fetch');
     if (older) {
       const now = {};
       for (const t of Object.keys(older)) { now[t] = store[t]; store[t] = older[t]; }
       try { return serveRequest(req, url, method, body); } finally { for (const t of Object.keys(now)) store[t] = now[t]; }
     }
     if (app.stage5 === B45.B45_PHASE) B45.normalize(store, isFilmRow);
-    try { return serveRequest(req, url, method, body); }
+    let res;
+    try { res = serveRequest(req, url, method, body); }
     finally { if (app.stage5 === B45.B45_PHASE && method !== 'GET') B45.normalize(store, isFilmRow); }
+    if (lose === 'after') throw new TypeError('Failed to fetch');
+    return res;
   }
 
   function serveRequest(req, url, method, body) {

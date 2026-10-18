@@ -210,11 +210,15 @@ function yearFilterSelectHtml(rows) {
 }
 
 // ─── The open view, read again ────────────────────────────────────────────────
-function reloadOpenView() {
+// Every caller is an operation's answer (S3, brief §7.2 R1): the reread may move focus only while
+// that operation's own placement (opts.origin) is still held; the owner's own reload (Retry, Read
+// again) calls the loaders directly.
+function reloadOpenView(opts = {}) {
   if (typeof isSettingsView === 'function' && isSettingsView()) { renderSettings(); return true; } // Settings (S1): drawn again; nothing is read
   if (typeof isCollectionsStateView === 'function' && isCollectionsStateView()) { renderCollectionsState(); buildBrowseBar({ resolve: false }); return true; } // the Collections state (S2): drawn again; nothing is read or opened
-  if (isBrowseView(activeViewId)) return loadBrowseView();
-  else if (activeViewId) return loadDerivedView();
+  const read = { operation: true, origin: (opts && opts.origin) || null };
+  if (isBrowseView(activeViewId)) return loadBrowseView(read);
+  else if (activeViewId) return loadDerivedView(read);
 }
 
 // What a write started from: answers are used only while the same view (and panel)
@@ -1179,10 +1183,14 @@ async function libraryPullRest(rowId, collectionId, name) {
 // deleted after a confirmation (a TV season through delete_tv_season, which also
 // removes a show left empty). The row leaves the view at once and comes back if
 // the delete is refused; an unclear answer is reported as such, never as done.
+// D6 (S3): the confirmation is an in-page dialog named by its effect (askEffect). What the page
+// showed is checked again after the answer: if the view, the restore epoch, the row or its editing
+// rule changed while the question was open, nothing is sent. In a collection a confirmed delete reads
+// the collection again (its last season takes the show and its memberships with it).
 async function delRowInView(id) {
   const rows = actionRows();
   const row = rows.find(r => r.id === id);
-  if (!row) return;
+  if (!row || collectionFilmLocked(row)) return; // films stay read-only in collections (S3)
   const policy = editPolicyOf(row);
   if (policy.deleteEffect === 'unknown') {
     showNotice(`This page couldn’t confirm whether “${row.title}” is a built-in catalog entry, so nothing was deleted. The list has been read again; try again.`);
@@ -1190,22 +1198,52 @@ async function delRowInView(id) {
     return;
   }
   if (policy.deleteEffect === 'skip') { await setSeasonSkipped(id, true); return; }
+  const viewId = activeViewId, epoch = orgEpoch;
+  // After the answer: the same view and epoch, the row still listed, its rule unchanged (D6).
+  const stillAsShown = () => {
+    if (activeViewId !== viewId || orgEpoch !== epoch) return null;
+    const now = actionRows().find(r => r.id === id);
+    if (now && editPolicyOf(now).deleteEffect === policy.deleteEffect) return now;
+    showNotice(`“${row.title}” changed while the question was open, so nothing was changed. The list has been read again.`);
+    reloadOpenView();
+    return null;
+  };
   if (policy.deleteEffect === 'skip-film') {
     // The film contract (B5): Skip is an explicit status choice; on a watched film it also clears Watched.
-    if (!confirm(`Skip “${row.title}”? It’s part of a built-in catalog, so it is marked Skipped rather than deleted.${row.watched ? ' This also clears Watched.' : ''}`)) return;
-    await sendFilmState(row, { state: 'skipped' });
+    if (!await askEffect(`Skip “${row.title}”? It’s part of a built-in catalog, so it is marked Skipped rather than deleted.${row.watched ? ' This also clears Watched.' : ''}`, 'Skip film')) return;
+    const now = stillAsShown();
+    if (now) await sendFilmState(now, { state: 'skipped' });
     return;
   }
+  const show = isTvSeason(row) ? showOfRow(row) : null;
   const what = isTvSeason(row) ? `“${row.title}” · ${row.season}` : `“${row.title}”`;
+  if (!await askEffect(deleteEffectText(row, show), 'Delete from library')) return;
+  const current = stillAsShown();
+  if (!current) return;
+  return deleteFromLibrary(current, viewId, epoch, what);
+}
+
+// D6 (S3): what a delete from the library does, in the dialog's words. A season is named by its
+// show; "last season" is what this page's read shows (the database decides, and the answer says so).
+function deleteEffectText(row, show) {
+  if (!isTvSeason(row)) return `Delete “${row.title}” from your library? It is removed everywhere: All Movies and every collection it’s in.`;
+  const title = show ? show.title : row.title;
+  const last = !actionRows().some(r => r.id !== row.id && r.show_id && r.show_id === row.show_id);
   // A season that starts or bounds its show's earlier-seasons range: deleting it ends that choice (§4.7.5).
-  const rangeShow = isTvSeason(row) ? showOfRow(row) : null;
-  const endsRange = !!rangeShow && (rangeShow.resume_start_season_id === row.id || rangeShow.resume_end_season_id === row.id);
-  if (!confirm(`Delete ${what}? This removes it from your list.${endsRange ? ` The earlier-seasons choice for “${rangeShow.title}” ends too.` : ''}`)) return;
-  const viewId = activeViewId, epoch = orgEpoch;
+  const endsRange = !!show && (show.resume_start_season_id === row.id || show.resume_end_season_id === row.id);
+  return `Delete “${title} · ${row.season}” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in.`
+    + (last ? ' This is the show’s last season, so the show is deleted too, along with its place in every collection.' : '')
+    + (endsRange ? ` The earlier-seasons choice for “${show.title}” ends too.` : '');
+}
+
+async function deleteFromLibrary(row, viewId, epoch, what) {
+  const id = row.id;
+  const rows = actionRows();
   const idx = rows.indexOf(row);
   rows.splice(idx, 1);
   const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', LIBRARY_PARTITION, id, null) : null;
   renderTable();
+  const origin = typeof placedOrigin === 'function' ? placedOrigin() : null; // this action's focus placement (S3, brief §7.2)
   try {
     if (isTvSeason(row)) {
       try {
@@ -1219,7 +1257,10 @@ async function delRowInView(id) {
     }
     if (epoch === orgEpoch) Object.values(tabData).forEach(td => { if (td && td.rows) td.rows = td.rows.filter(r => r.id !== id); });
     showSaved();
-    if (epoch === orgEpoch && activeViewId === viewId) renderTable();
+    if (epoch === orgEpoch && activeViewId === viewId) {
+      if (isBrowseCollectionView(viewId)) reloadOpenView({ origin }); // the collection's members may have changed (S3)
+      else renderTable();
+    }
   } catch (e) {
     const info = orgErrorInfo(e);
     if (epoch === orgEpoch && activeViewId === viewId && actionRows() === rows) {
@@ -1227,10 +1268,57 @@ async function delRowInView(id) {
       if (typeof matchEditRevert === 'function' && info.kind === 'database') matchEditRevert(edit, row);
     }
     // An unclear answer: the view is read again (that clears the error line, so it is reported after).
-    if (epoch === orgEpoch && activeViewId === viewId) { if (info.kind === 'database') renderTable(); else reloadOpenView(); }
+    if (epoch === orgEpoch && activeViewId === viewId) { if (info.kind === 'database') renderTable(); else reloadOpenView({ origin }); }
     showError(info.kind === 'database'
       ? `Couldn’t delete ${what}: ${info.message}. Nothing was changed.`
       : `The delete of ${what} was sent, but no clear answer came back (${info.message}). Reload and check before deleting again.`);
   }
   if (typeof matchEditEnd === 'function') matchEditEnd(edit);
+}
+
+// ─── Effect-named confirmations (D6, S3) ──────────────────────────────────────
+// One in-page dialog (effectModalOverlay, watchlist.html) whose buttons name the effect. Cancel has
+// the default focus; Escape cancels; Tab stays on its two buttons; focus returns to the control that
+// opened it. One at a time (a second question while one is open is answered Cancel), and leaving the
+// view answers Cancel (tabs.js switchView). Resolves true only for the effect button.
+let effectDialog = null; // { resolve, opener }
+function askEffect(text, confirmLabel) {
+  if (effectDialog) return Promise.resolve(false);
+  const overlay = document.getElementById('effectModalOverlay');
+  const box = document.getElementById('effectModalBox');
+  if (!overlay || !box) return Promise.resolve(false);
+  return new Promise(resolve => {
+    effectDialog = { resolve, opener: document.activeElement || null };
+    box.innerHTML = `<p class="effect-text" id="effectModalText">${esc(text)}</p>
+      <div class="modal-actions"><button class="btn" id="effectCancel" onclick="answerEffectDialog(false)">Cancel</button>
+        <button class="btn btn-danger" id="effectConfirm" onclick="answerEffectDialog(true)">${esc(confirmLabel)}</button></div>`;
+    overlay.style.display = 'flex';
+    const cancel = document.getElementById('effectCancel');
+    if (cancel && typeof cancel.focus === 'function') cancel.focus();
+  });
+}
+function answerEffectDialog(ok, returnFocus = true) {
+  const d = effectDialog;
+  if (!d) return;
+  effectDialog = null;
+  const overlay = document.getElementById('effectModalOverlay');
+  const box = document.getElementById('effectModalBox');
+  if (overlay) overlay.style.display = 'none';
+  if (box) box.innerHTML = '';
+  if (returnFocus && d.opener && d.opener.isConnected !== false && typeof d.opener.focus === 'function') d.opener.focus();
+  d.resolve(!!ok);
+}
+function cancelEffectDialog() {
+  answerEffectDialog(false, false);
+}
+function effectDialogKeydown(e) {
+  if (!e || !effectDialog) return;
+  if (e.key === 'Escape') { if (typeof e.preventDefault === 'function') e.preventDefault(); answerEffectDialog(false); return; }
+  if (e.key !== 'Tab') return;
+  const buttons = ['effectCancel', 'effectConfirm'].map(id => document.getElementById(id)).filter(Boolean);
+  if (buttons.length < 2) return;
+  const at = buttons.indexOf(document.activeElement);
+  const next = e.shiftKey ? (at <= 0 ? buttons.length - 1 : at - 1) : (at + 1) % buttons.length;
+  if (typeof e.preventDefault === 'function') e.preventDefault();
+  if (typeof buttons[next].focus === 'function') buttons[next].focus();
 }

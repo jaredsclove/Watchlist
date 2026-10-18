@@ -224,11 +224,11 @@ test('Watched from Currently Watching goes through set_season_watched by the rea
 
 test('a failed Watched write rolls back the local change and mirrors nothing', async () => {
   const app = await watchingApp();
-  app.failNext(r => r.url.endsWith('/rpc/set_season_watched'));
+  app.refuseNext(r => r.url.endsWith('/rpc/set_season_watched'), 'P0002', 'not_found: TV season'); // S3-D2 B: a refusal (an unclear answer now reads the view again)
   await app.ctx.toggleWatch('w1');
   assert.strictEqual(rowIn(app, 'derivedData.rows', 'w1').watched, false);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === 'w1').watched, false);
-  assert.ok(app.el('errorBanner').innerHTML.includes('Supabase error 500'));
+  assert.ok(app.el('errorBanner').innerHTML.includes('Supabase error 400'));
   assert.ok(app.el('tbody').innerHTML.includes("toggleWatch('w1')"), 'still up next');
 });
 

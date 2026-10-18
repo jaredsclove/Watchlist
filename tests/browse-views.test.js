@@ -116,13 +116,27 @@ const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'rende
   'openCatalogChooser',
   // B10: More filters, its Escape, a chip's removal and Clear filters only change filters and redraw (tests/filter-bar.test.js)
   'toggleFilterPanel', 'filterPanelKeydown', 'removeFilterChip', 'clearViewFilters']);
+// S3: a collection's TV entries have All TV's controls (their parity is tests/collections-tv-edit.test.js);
+// its films stay read-only. The film-only form of this check: the heading, filters, counts and chooser
+// expose only navigation and filters as before; the list exposes nothing beyond All TV's TV controls, and
+// no control there acts on a film (no film control at all, and no handler naming a film's id).
+const TV_EDIT_HANDLERS = new Set(['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
+  'keepCurrentStatus', 'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow']);
 function assertReadOnlyDom(app) {
-  for (const id of ['tbody', 'cardList', 'filtersRow', 'statsRow', 'browseBar', 'viewHead']) {
+  for (const id of ['filtersRow', 'statsRow', 'browseBar', 'viewHead']) {
     const bad = handlersIn(app.el(id).innerHTML).filter(h => !READ_ONLY_HANDLERS.has(h));
     assert.deepStrictEqual(bad, [], `${id} exposes ${bad.join(', ')}`);
   }
-  assert.ok(!/<select[^>]*class="[^"]*status-select/.test(html(app) + cards(app)), 'no status select');
-  assert.ok(!/watch-btn|skip-btn|del-btn|Match to TMDB|toggleWatchWith/.test(html(app) + cards(app)), 'no row controls');
+  const filmIds = JSON.parse(app.get('JSON.stringify((browseData && browseData.rows || []).filter(r => isFilmRow(r)).map(r => r.id))'));
+  for (const id of ['tbody', 'cardList']) {
+    const s = app.el(id).innerHTML;
+    const bad = handlersIn(s).filter(h => !READ_ONLY_HANDLERS.has(h) && !TV_EDIT_HANDLERS.has(h));
+    assert.deepStrictEqual(bad, [], `${id} exposes ${bad.join(', ')}`);
+    const onFilm = [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"]*)"/g)].map(m => m[1])
+      .filter(h => filmIds.some(f => h.includes(`'${f}'`)) && !/^toggleFilterPill\(/.test(h));
+    assert.deepStrictEqual(onFilm, [], `${id}: a control acts on a film`);
+  }
+  assert.ok(!/setStatus\(|setFilmPriority\(|toggleWatchWith\(|toggleMorePopover\(|libraryPullRest\(|more-btn|s-film-[a-z_]+" onchange/.test(html(app) + cards(app)), 'no film controls');
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
@@ -239,7 +253,7 @@ test('missing defaults and a stale TBA date cause no write from any view or any 
     for (const [id, vals] of [['fPriority', ['high', 'normal', 'low', 'highnormal', '']], ]) for (const v of vals) setFilter(app, id, v);
     for (const id of ['fNew', 'fReview']) for (const on of [true, false]) { app.el(id).checked = on; app.ctx.renderTable(); }
     setFilter(app, 'fStatus', 'all');
-    for (const key of app.get('[...browseData.showsById.keys()]')) { app.ctx.toggleBrowseShow(key); await settle(); }
+    for (const key of app.get('[...tvShowsById.keys()]')) { app.ctx.toggleBrowseShow(key); await settle(); }
     assertReadOnlyDom(app);
     setFilter(app, 'fSearch', 'zzz'); setFilter(app, 'fSearch', '');
     app.ctx.loadBrowseView(); await settle();
@@ -254,7 +268,9 @@ test('missing defaults and a stale TBA date cause no write from any view or any 
   assert.deepStrictEqual(mutating(app), [], 'no POST/PATCH/DELETE/RPC/TMDB request');
 });
 
-test('every row action and Restore is inert while a read-only collection is open; Restore is offered only on Settings (S1, D11)', async () => {
+// S3: a collection's TV actions write now (their positive checks are tests/collections-tv-edit.test.js); every
+// film action and Restore stay inert there.
+test('every film action and Restore is inert while a collection is open (S3: films stay read-only); Restore is offered only on Settings (S1, D11)', async () => {
   const app = await boot();
   assert.strictEqual(app.el('restoreBtn'), null, 'S1: no Restore control in the header');
   let clicked = 0;
@@ -266,21 +282,20 @@ test('every row action and Restore is inert while a read-only collection is open
   for (const enter of [() => openCol(app, B['disney'])]) {
     await enter();
     assert.strictEqual(app.el('restoreBtn'), null, 'S1: no Restore control in a collection');
-    const showId = app.get("[...browseData.showsById.values()].find(s => s.catalog_new).id");
-    assert.ok(app.get(`tvShowsById.has(${JSON.stringify(showId)})`), 'the show is loaded page-wide, so only the guard stops the write');
+    assert.ok(app.get("browseData.rows.some(r => r.id === 'f-mando')"), 'the film is in the collection read, so only the guard stops the write');
+    app.run("browseData.rows.find(r => r.id === 'f-mando').status_review = true; browseData.rows.find(r => r.id === 'f-mando').catalog_new = true");
     await app.ctx.toggleWatch('f-mando');
     await app.ctx.setStatus('f-mando', 'skipped', null);
-    await app.ctx.setSeasonSkipped(app.get("browseData.rows.find(r => r.show_id).id"), true);
-    await app.ctx.setShowStateById(showId, { status: 'watching' });
-    await app.ctx.setShowStateById(showId, { priority: 'high' });
     await app.ctx.setFilmPriority('f-mando', 'high');
-    await app.ctx.dismissCatalogNew([{ kind: 'show', id: showId }]);
-    await app.ctx.keepCurrentStatus('show', showId);
-    await app.ctx.startResume(showId, app.get("browseData.rows.find(r => r.show_id).id"));
-    await app.ctx.sendResume(app.get(`tvShowsById.get(${JSON.stringify(showId)})`), null, null, false);
-    app.ctx.openDetails('show', showId); await app.ctx.saveDetails(); app.ctx.closeDetails();
+    await app.ctx.dismissCatalogNew([{ kind: 'film', id: 'f-mando' }]);
+    await app.ctx.keepCurrentStatus('film', 'f-mando');
+    app.ctx.openDetails('film', 'f-mando'); await app.ctx.saveDetails(); app.ctx.closeDetails();
+    app.ctx.openTmdbMatch('f-mando');
+    await app.ctx.delRow('f-mando');
     await app.ctx.delRow('f-wind');
     await app.ctx.toggleWatchWith('f-wind', 'Kids', false);
+    assert.strictEqual(app.dialogs.length, 0, 'no delete or skip question for a film');
+    assert.strictEqual(app.get('detailsDialog'), null, 'no Details for a film');
     app.ctx.handleRestoreClick();
     await app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => '{}' }], value: 'x' } });
     await settle();
@@ -440,7 +455,7 @@ function focusRig(app, containerId) {
 test('expanding or collapsing a show keeps keyboard focus on that show’s button, in the table or the cards', async () => {
   const app = await boot();
   await openCol(app, B['sheridan']);
-  const id = app.get("[...browseData.showsById.values()].find(s => s.title === 'Yellowstone').id");
+  const id = app.get("[...tvShowsById.values()].find(s => s.title === 'Yellowstone').id");
   assert.ok(html(app).includes(`data-show-key="${id}"`) && cards(app).includes(`data-show-key="${id}"`));
   let focused = focusRig(app, 'tbody');
   app.ctx.toggleBrowseShow(id);
@@ -471,7 +486,8 @@ test('a collection lists its own TV shows and films only; Specials, Volumes, Par
     'Ewoks: The Battle for Endor', 'The Mandalorian &amp; Grogu']);
   assert.deepStrictEqual(cardTitles(app), titles(app), 'the cards hold the same content');
   assert.ok(!html(app).includes('Wind River') && !html(app).includes('Sicario'));
-  const filmTitles = [...html(app).matchAll(/<tr class="browse-film-row[^"]*">\s*<td><span class="show-title">([^<]*)</g)].map(m => m[1]);
+  // U3 (S3 inventory amendment): film rows carry the focus chain's hooks (data-item, data-row-section; data-primary on the title cell).
+  const filmTitles = [...html(app).matchAll(/<tr class="browse-film-row[^"]*"[^>]*>\s*<td[^>]*><span class="show-title">([^<]*)</g)].map(m => m[1]);
   assert.deepStrictEqual(filmTitles, ['Ewoks: The Battle for Endor', 'The Mandalorian &amp; Grogu'], 'legacy Film rows are the films');
   assert.strictEqual(stats(app).join(' | '), '6 Shows | 11 Season entries | 2 Films');
 });
@@ -503,7 +519,7 @@ test('All Movies lists every saved film, once, with the same row and state as it
   // Same UUID, same saved state in both projections.
   const inAll = app.get("deriveAllMovies(browseData.rows).films.find(r => r.id === 'f-sicario')");
   await openCol(app, B['sheridan']);
-  const inCol = app.get("deriveBrowseCollection(browseData.rows, browseData.showsById, browseData.members, localTodayStr()).films.find(r => r.id === 'f-sicario')");
+  const inCol = app.get("deriveBrowseCollection(browseData.rows, tvShowsById, browseData.members, localTodayStr()).films.find(r => r.id === 'f-sicario')");
   assert.deepStrictEqual(JSON.parse(JSON.stringify(inCol)), JSON.parse(JSON.stringify(inAll)));
   assert.strictEqual(inCol.watched, true);
   // The two Dunes (different TMDB ids) stay apart; order is title, source, id.
@@ -594,30 +610,34 @@ test('section labels carry their counts; season entries include Specials and par
   assert.ok(html(app).includes('Movies <span class="section-count">· 2 films</span>'));
   const reqs = app.requests.length;
   const before = app.el('statsRow').innerHTML;
-  const yid = app.get("[...browseData.showsById.values()].find(s => s.title === 'Yellowstone').id");
+  const yid = app.get("[...tvShowsById.values()].find(s => s.title === 'Yellowstone').id");
   app.ctx.toggleBrowseShow(yid); await settle();
   assert.strictEqual(app.el('statsRow').innerHTML, before);
   assert.strictEqual(app.requests.length, reqs);
   assert.ok(html(app).includes(`aria-expanded="true" aria-label="Hide seasons of Yellowstone"`));
-  const seasonOrder = [...html(app).matchAll(/padding-left:28px"><span class="season-lbl">([^<]*)<\/span>/g)].map(m => m[1]);
+  // U4 (S3 inventory amendment): an expanded show's season rows are All TV's (whitespace inside the cell).
+  const seasonOrder = [...html(app).matchAll(/padding-left:28px">\s*<span class="season-lbl">([^<]*)<\/span>/g)].map(m => m[1]);
   assert.deepStrictEqual(seasonOrder, ['Season 5 (Part 1)', 'Season 5 (Part 2)']);
   app.ctx.toggleBrowseShow(yid); await settle();
   assert.ok(!html(app).includes('sub-row'));
 });
 
-test('an expanded show lists every stored season in season order: numbered before Specials; watched, skipped and TBA shown as text', async () => {
+// S3: the seasons carry All TV's controls (Watched, Skip / ↩ Keep) instead of text; the same seasons in the same order.
+test('an expanded show lists every stored season in season order: numbered before Specials; watched and skipped with All TV’s controls (S3)', async () => {
   const app = await boot();
   await openCol(app, B['disney']);
   setFilter(app, 'fStatus', 'all');
   for (const t of ['The Bear', 'Wonder Man', 'Star Wars: Visions']) {
-    app.ctx.toggleBrowseShow(app.get(`[...browseData.showsById.values()].find(s => s.title === ${JSON.stringify(t)} && showCatalogOf(s) === 'disney').id`));
+    app.ctx.toggleBrowseShow(app.get(`[...tvShowsById.values()].find(s => s.title === ${JSON.stringify(t)} && showCatalogOf(s) === 'disney').id`));
   }
   await settle();
-  const labels = [...html(app).matchAll(/padding-left:28px"><span class="season-lbl">([^<]*)<\/span>/g)].map(m => m[1]);
+  const labels = [...html(app).matchAll(/padding-left:28px">\s*<span class="season-lbl">([^<]*)<\/span>/g)].map(m => m[1]);
   assert.deepStrictEqual(labels, ['Volume 1', 'Volume 2', 'Season 1', 'Season 2', 'Specials', 'Season 1', 'Season 2']);
-  assert.ok(html(app).includes('Season skipped'));
-  assert.ok((html(app).match(/✓ Watched/g) || []).length >= 3);
-  assert.strictEqual((cards(app).match(/card-subseason-row/g) || []).length, 7, 'the phone cards list the same seasons');
+  assert.ok(html(app).includes('<span class="confirmed-lbl">Show skipped</span>'), 'a Skipped show’s seasons say so (All TV’s Skip / Keep rule)');
+  // All TV's rule: a watched season has its ✓ Watched toggle (The Bear S1, Visions Volume 1); a Skipped show's season (Wonder Man S1, watched) shows —.
+  assert.strictEqual((html(app).match(/>✓ Watched<\/button>/g) || []).length, 2);
+  assert.ok(html(app).split('<tr').some(r => r.includes('data-show-of=') && r.includes('>Season 1<') && r.includes('<span class="confirmed-lbl">—</span>')), 'the Skipped show’s watched season shows —');
+  assert.strictEqual((cards(app).match(/class="card-subseason-row" data-season-row=/g) || []).length, 7, 'the phone cards list the same seasons');
 });
 
 test('Up to date only for a Watching show; other statuses get a neutral Next; dates: TBA text or sentinel wins over a guessed date, invalid dates need review', async () => {
@@ -653,7 +673,7 @@ test('order is deterministic: shuffled storage gives byte-identical views', asyn
     for (const id of [B['disney'], B['sheridan'], B['truecrime']]) {
       await openCol(app, id);
       setFilter(app, 'fStatus', 'all');
-      for (const key of app.get('[...browseData.showsById.keys()].sort()')) app.ctx.toggleBrowseShow(key);
+      for (const key of app.get('[...tvShowsById.keys()].sort()')) app.ctx.toggleBrowseShow(key);
       out += html(app) + cards(app);
     }
     app.ctx.switchMediaType('movie'); await settle();

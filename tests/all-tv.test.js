@@ -299,7 +299,7 @@ test('Watched and Skip from All TV: one function call each by row id, mirrored i
   assert.strictEqual(app.writes()[1].body.p_row_id, s.rows[1].id);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === s.rows[1].id).skipped, true);
   assert.ok(app.el('tbody').innerHTML.includes('s-caughtup">Up to date'), 'nothing aired remains: Up to date');
-  app.failNext(r => r.url.endsWith('/rpc/set_season_skipped'));
+  app.refuseNext(r => r.url.endsWith('/rpc/set_season_skipped'), 'P0002', 'not_found: TV season'); // S3-D2 B: a refusal (an unclear answer now reads the view again)
   await app.ctx.setSeasonSkipped(s.rows[1].id, false); await settle();
   assert.strictEqual(app.get('derivedData').rows.find(r => r.id === s.rows[1].id).skipped, true, 'rolled back');
   assert.ok(app.el('errorBanner').innerHTML.length > 0);
