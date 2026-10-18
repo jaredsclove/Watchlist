@@ -57,6 +57,7 @@ function switchView(id) {
   if (typeof clearListReread === 'function') clearListReread();
   if (typeof cancelEffectDialog === 'function') cancelEffectDialog();
   collectionUndo = null; // S4: Undo belongs to the collection visit it was offered in
+  if (typeof addPickerOnNavigate === 'function') addPickerOnNavigate(); // S5: an idle picker closes; a running batch stops after its current request
   activeViewId = id;
   activeArea = areaOfView(id);
   // Back from a collection keeps its origin only while the Collections area is open,

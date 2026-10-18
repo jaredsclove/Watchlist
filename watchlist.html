@@ -35,6 +35,9 @@
 <div id="detailsModalOverlay" class="modal-overlay" style="display:none">
   <div class="modal-box manage-box" id="detailsModalBox" role="dialog" aria-modal="true" aria-labelledby="detailsTitle" tabindex="-1" onkeydown="detailsKeydown(event)"></div>
 </div>
+<div id="addPickerOverlay" class="modal-overlay" style="display:none">
+  <div class="modal-box manage-box" id="addPickerBox" role="dialog" aria-modal="true" aria-labelledby="addPickerTitle" tabindex="-1" onkeydown="addPickerKeydown(event)"></div>
+</div>
 <div id="effectModalOverlay" class="modal-overlay" style="display:none">
   <div class="modal-box" id="effectModalBox" role="alertdialog" aria-modal="true" aria-labelledby="effectModalText" tabindex="-1" onkeydown="effectDialogKeydown(event)"></div>
 </div>
@@ -186,6 +189,10 @@ let libraryPanel = null; // the open "+ Add" panel of a view (library.js); null 
 let libraryPanelSeq = 0; // bumped each time the panel opens; answers for an earlier opening never touch it
 let orgWriteCapability = null; // { value: 'yes' }: this database has the Stage 3b-2 functions (checked when Manage opens)
 let orgEpoch = 0; // S4: bumped by a restore made in this page (organization.js invalidateOrganization); a membership change or its Undo checks it before sending
+let addPicker = null; // S5: the open Add to <collection> picker (collection-members.js); null while closed
+let addBatch = null; // S5: this collection visit's latest Add or Undo batch (its results, notice and Undo); null when none
+let addPickerSeq = 0; // S5: bumped each time the picker opens
+let pullPreselect = null; // S5: { viewId, ids }: the films the last Pull rest in a collection added (its report's follow-up)
 let collectionUndo = null; // S4: the open collection's Undo after a confirmed Remove: { viewId, epoch, collectionId, showId, itemId, label, name }; withdrawn on leaving the view or a restore
 let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.js)
 

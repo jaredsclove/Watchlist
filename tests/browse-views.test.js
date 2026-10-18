@@ -110,6 +110,8 @@ const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'rende
   'selectCollectionTab', 'collectionTabsKeydown',
   // Stage 3b-2: opens the Manage collections dialog (organization only; it never changes tracking — tests/organization-manage.test.js)
   'openManage',
+  // S5: opens the Add to <collection> picker (it reads nothing; adding is its own button — tests/collection-add.test.js)
+  'openAddPicker',
   // a filter pill: sets or clears a filter control and redraws (tests/filter-pills.test.js)
   'toggleFilterPill',
   // Stage 4b: opens the Catalog updates chooser (it reads; applying needs Review → Apply in its dialog — tests/catalog-apply.test.js)

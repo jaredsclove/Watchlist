@@ -121,6 +121,7 @@ const TV_EDIT = ['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSea
 const READ_ONLY = new Set([...TV_EDIT, 'toggleFilterPill', 'toggleBrowseShow', 'setBrowseMedia', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
   'renderTable', 'browseBack', 'openBrowseCollection', 'loadBrowseView',
   'openManage', // Stage 3b-2: opens the Manage collections dialog (organization only, never tracking)
+  'openAddPicker', // S5: opens the Add to <collection> picker (reads nothing; adds only on its own button)
   'toggleFilterPanel', 'filterPanelKeydown', 'removeFilterChip', 'clearViewFilters']); // B10: filters only (tests/filter-bar.test.js)
 // (The GET of rpc/stage5_capabilities is the read-only phase check made at startup.)
 const mutating = app => app.requests.filter(r => r.method !== 'GET' || (/\/rpc\//.test(r.url) && !r.url.endsWith('/rpc/stage5_capabilities')) || !r.url.includes('/rest/v1/'));

@@ -808,3 +808,11 @@ body.saving #tbody :is(button:not([data-primary], [data-section]), select, input
 @media (max-width: 700px) {
   .collection-remove, .collection-notice .btn, .more-popover .popover-action { min-height: 44px; }
 }
+/* S5: the Add to <collection> picker. */
+.add-pick-label { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-wrap: wrap; }
+.add-pick-label input { flex: none; }
+.add-results .manage-meta { white-space: normal; }
+@media (max-width: 700px) {
+  .add-pick-label { min-height: 44px; }
+  #addPickerBox .modal-actions .btn, .browse-add-items, .collection-notice .btn { min-height: 44px; }
+}

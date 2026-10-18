@@ -41,6 +41,7 @@ function showCollectionNotice(text, withUndo) {
   if (!el) return;
   const active = document.activeElement;
   const hadFocus = !!active && typeof active.closest === 'function' && !!active.closest('#collectionNotice');
+  if (text) addBatch = null; // the latest notice wins: an earlier batch's results and Undo give way
   el.innerHTML = text ? `<div class="banner collection-notice" id="collectionNotice" role="status" tabindex="-1">${esc(text)}${withUndo
     ? ` <button class="btn" id="collectionUndoBtn" onclick="undoCollectionRemove()">Undo</button>` : ''}</div>` : '';
   // A used Undo button is replaced: focus stays on the notice rather than falling to the page.
@@ -151,6 +152,406 @@ function collectionPullReport(tool, inserted) {
   const dest = currentBrowseDest();
   if (!dest) return;
   const n = inserted.length;
+  // S5: the follow-up opens the picker with exactly these films selected; nothing is added until you press Add.
+  pullPreselect = { viewId: tool.viewId, ids: inserted.map(r => r.id).filter(Boolean) };
+  const follow = collectionAddAllowed() ? ` <button class="btn" id="pullAddBtn" onclick="openAddPickerForPulled(this)">Add ${n === 1 ? 'this film' : `these ${n} films`} to ${esc(dest.label)}…</button>` : '';
   libraryReport({ session: tool.session, viewId: tool.viewId },
-    `Added ${n} film${n === 1 ? '' : 's'} to your library. ${n === 1 ? 'It isn’t' : 'They aren’t'} in ${dest.label}: Pull rest adds to your library, not to this collection.`, false);
+    `Added ${n} film${n === 1 ? '' : 's'} to your library. ${n === 1 ? 'It isn’t' : 'They aren’t'} in ${dest.label}: Pull rest adds to your library, not to this collection.`, false, follow);
+}
+
+// ─── Add existing shows and films to the open collection (S5: O4, D14) ────────
+// Add to <collection>… opens a picker drawn from the collection view's own complete read (every
+// saved show and film; nothing is read when it opens). Pressing Add N to <collection> starts one
+// batch: one change through the write lane ({ list: true }) that checks the capability, then sends
+// one org_add_membership at a time, in the listed order, never two at once, each only while the
+// picker session, the view and the restore epoch are unchanged. A refusal is reported and the batch
+// goes on; an answer that is missing or unclear makes that item Not confirmed and stops the batch
+// (the rest Not sent), with nothing sent again. Close, Escape or navigation while a request is out
+// means Stop after this one: that request may still finish; nothing further is sent. After the
+// batch the collection is read again (inside the lane). A membership seen in that read is never
+// taken as made by this batch: only an answer says so.
+// Undo is a new batch, by your press only: org_remove_membership for exactly the items reported
+// Added, by the membership ids their answers returned, under the same rules; each at most once.
+// The results stay in the dialog, then in a notice for the rest of that collection's visit
+// (Show details; Undo while it applies). Leaving the collection or a restore withdraws Undo; a batch
+// stopped by leaving reports a one-line summary in the view you went to.
+const ADD_STOP_WAIT_MS = 15000;
+const ADD_STATE_TEXT = {
+  queued: 'Waiting', sending: 'Adding…', added: 'Added', already: name => `Already in ${name}`, notsent: 'Not sent',
+  removing: 'Removing…', removed: 'Removed', notremoved: 'Not removed: already removed or changed elsewhere'
+};
+
+// The picker may open: the open collection, read completely (no member missing from the read), not
+// archived, and the list not marked out of date.
+function collectionAddAllowed() {
+  if (!isBrowseCollectionView(activeViewId) || !browseData || !browseData.loaded || !browseData.members || listStale) return false;
+  const dest = currentBrowseDest();
+  return !!dest && !dest.archived && browseFilterBase().badLinks === 0;
+}
+
+// Every saved show and film of the view's read, A–Z (a show before a film of the same title), and
+// how many rows are neither a TV season of a show nor a film (not offered).
+function addCandidates() {
+  const rows = uniqueById(browseData.rows || []);
+  const m = browseData.members;
+  const seasons = new Map();
+  rows.forEach(r => { if (r.show_id != null && isTvViewRow(r)) seasons.set(r.show_id, (seasons.get(r.show_id) || 0) + 1); });
+  const shows = [...tvShowsById.values()].map(s => ({ key: `s:${s.id}`, kind: 'show', id: s.id, title: s.title, seasons: seasons.get(s.id) || 0,
+    status: plainStatusLabel(s.status), skipped: s.status === 'skipped', member: m.showIds.has(s.id) }));
+  const films = rows.filter(isFilmRow).map(r => {
+    const state = filmViewState(r);
+    return { key: `i:${r.id}`, kind: 'film', id: r.id, title: r.title, status: String(FILM_STATE_LABELS[state] || '').replace(/^[✓✕] /, ''),
+      skipped: state === 'skipped' || state === 'pair', member: m.filmIds.has(r.id) };
+  });
+  const unclassified = rows.filter(r => !isFilmRow(r) && r.show_id == null).length;
+  const list = shows.concat(films).sort((a, b) => compareTitles(a.title, b.title) || (a.kind === 'film') - (b.kind === 'film') || cmpStr(a.id, b.id));
+  return { list, unclassified };
+}
+
+// preselect: ids of films to start selected (the Pull rest follow-up); only ones that can be added.
+function openAddPicker(opener, preselect) {
+  if (addPicker) return;
+  if (!collectionAddAllowed()) {
+    showError('Adding to this collection isn’t possible right now: the list may be incomplete or out of date. Read it again first. Nothing was changed.');
+    return;
+  }
+  const dest = currentBrowseDest();
+  const can = new Set(addCandidates().list.filter(c => !c.member).map(c => c.key));
+  const selected = new Set((preselect || []).map(id => `i:${id}`).filter(k => can.has(k)));
+  addPicker = { session: ++addPickerSeq, viewId: activeViewId, epoch: orgEpoch, collectionId: dest.collectionId, name: dest.label,
+    opener: opener || document.activeElement || null, query: '', selected, batch: null, details: false };
+  const overlay = document.getElementById('addPickerOverlay');
+  if (overlay) overlay.style.display = 'flex';
+  renderAddPicker();
+  const search = document.getElementById('addPickerSearch');
+  if (search && typeof search.focus === 'function') search.focus();
+}
+
+// The Pull rest follow-up (collectionPullReport): the films it just added, preselected.
+function openAddPickerForPulled(opener) {
+  const ids = pullPreselect && pullPreselect.viewId === activeViewId ? pullPreselect.ids : [];
+  openAddPicker(opener, ids);
+}
+
+function addBatchRunning(b) { return !!b && b.phase === 'submitting'; }
+
+// Close (or Escape): Idle and results close; while a batch is submitting it means Stop after this one,
+// and the dialog stays until the request out has answered.
+function closeAddPicker() {
+  const p = addPicker;
+  if (!p) return;
+  if (addBatchRunning(p.batch)) { p.batch.stop = true; renderAddPicker(); return; }
+  dismissAddPicker(true);
+}
+
+function dismissAddPicker(returnFocus) {
+  const p = addPicker;
+  if (!p) return;
+  addPicker = null;
+  const overlay = document.getElementById('addPickerOverlay');
+  const box = document.getElementById('addPickerBox');
+  if (overlay) overlay.style.display = 'none';
+  if (box) box.innerHTML = '';
+  if (addBatch && addBatch.viewId === activeViewId) renderAddNotice();
+  if (!returnFocus) return;
+  const back = p.opener && p.opener.isConnected !== false ? p.opener : document.getElementById('collectionAddBtn');
+  if (back && typeof back.focus === 'function') back.focus();
+}
+
+// Leaving the view (tabs.js switchView): an idle picker is cancelled (nothing sent); a submitting
+// batch stops after its current request and reports in the view you went to.
+function addPickerOnNavigate() {
+  const p = addPicker;
+  if (p && addBatchRunning(p.batch)) { p.batch.stop = true; p.batch.left = true; }
+  if (p) dismissAddPicker(false);
+  if (addBatch && !addBatchRunning(addBatch)) addBatch = null; // results and Undo belong to that visit
+}
+
+function addPickerKeydown(event) {
+  if (!addPicker || !event) return;
+  if (event.key === 'Escape') { if (typeof event.preventDefault === 'function') event.preventDefault(); closeAddPicker(); return; }
+  if (event.key !== 'Tab') return;
+  const box = document.getElementById('addPickerBox');
+  const items = [...box.querySelectorAll('button, input, [tabindex="0"]')].filter(el => !el.disabled && el.offsetParent !== null);
+  if (!items.length) { event.preventDefault(); return; }
+  const first = items[0], last = items[items.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === box)) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}
+
+function addPickerSearch(el) {
+  if (!addPicker || addPicker.batch) return;
+  addPicker.query = el ? el.value : '';
+  renderAddPicker();
+}
+
+function addPickerToggle(key, checked) {
+  if (!addPicker || addPicker.batch) return;
+  if (checked) addPicker.selected.add(key); else addPicker.selected.delete(key);
+  renderAddPicker();
+}
+
+// ── The batches ──
+async function submitAddPicker() {
+  const p = addPicker;
+  if (!p || p.batch || !p.selected.size) return;
+  if (activeViewId !== p.viewId || orgEpoch !== p.epoch) { dismissAddPicker(false); return; }
+  const chosen = addCandidates().list.filter(c => p.selected.has(c.key) && !c.member);
+  if (!chosen.length) return;
+  const batch = { kind: 'add', session: p.session, viewId: p.viewId, epoch: p.epoch, collectionId: p.collectionId, name: p.name,
+    items: chosen.map(c => ({ key: c.key, kind: c.kind, id: c.id, title: c.title, state: 'queued' })), phase: 'submitting', stop: false };
+  await startAddBatch(p, batch, `Adding to ${p.name}`);
+}
+
+// Undo: a new batch for exactly the items reported Added (their returned membership ids), each once.
+async function undoAddBatch() {
+  const root = addBatch && addBatch.kind === 'add' ? addBatch : addBatch && addBatch.undoOf;
+  if (!root || addBatchRunning(addBatch) || root.left || root.viewId !== activeViewId || root.epoch !== orgEpoch) return;
+  const targets = root.items.filter(it => it.state === 'added' && it.membershipId && !it.undoTried);
+  if (!targets.length) return;
+  const batch = { kind: 'undo', undoOf: root, session: addPicker ? addPicker.session : null, viewId: root.viewId, epoch: root.epoch,
+    collectionId: root.collectionId, name: root.name, phase: 'submitting', stop: false,
+    items: targets.map(it => ({ key: it.key, kind: it.kind, id: it.id, title: it.title, membershipId: it.membershipId, of: it, state: 'queued' })) };
+  await startAddBatch(addPicker, batch, `Undo adding to ${root.name}`);
+}
+
+async function startAddBatch(p, batch, label) {
+  const before = addBatch, beforeBatch = p ? p.batch : null;
+  if (p) p.batch = batch;
+  addBatch = batch;
+  collectionUndo = null; // a Remove's Undo notice gives way to this batch
+  renderAddPicker(); renderAddNotice();
+  const ran = await runWrite(label, () => runAddBatch(batch), { list: true });
+  if (ran === undefined && !batch.started) { // refused before anything was sent (another change, or the list out of date)
+    addBatch = before;
+    if (p && addPicker === p) p.batch = beforeBatch;
+    renderAddPicker(); renderAddNotice();
+  }
+}
+
+// The batch is still where it started: the same view and no restore since (and, while its picker is
+// open, the same picker).
+function addBatchLive(b) {
+  return !b.left && activeViewId === b.viewId && orgEpoch === b.epoch && (!addPicker || b.session == null || addPicker.session === b.session);
+}
+
+async function runAddBatch(b) {
+  b.started = true;
+  const cap = await checkOrgCapability();
+  if (cap !== 'yes') {
+    b.items.forEach(it => { it.state = 'notsent'; });
+    b.error = COLLECTION_CAPABILITY_TEXT[cap] || COLLECTION_CAPABILITY_TEXT.unknown;
+    return finishAddBatch(b, null);
+  }
+  for (const it of b.items) {
+    if (b.stop || !addBatchLive(b)) break;
+    it.state = b.kind === 'add' ? 'sending' : 'removing';
+    if (it.of) it.of.undoTried = true;
+    b.current = it;
+    renderAddPicker();
+    const args = b.kind === 'add'
+      ? { p_collection_id: b.collectionId, p_show_id: it.kind === 'show' ? it.id : null, p_item_id: it.kind === 'film' ? it.id : null }
+      : { p_membership_id: it.membershipId, p_collection_id: b.collectionId, p_show_id: it.kind === 'show' ? it.id : null, p_item_id: it.kind === 'film' ? it.id : null };
+    const request = sbRpc(b.kind === 'add' ? 'org_add_membership' : 'org_remove_membership', args)
+      .then(res => ({ res }), err => ({ err }));
+    // Stop waiting (after 15 s): the item becomes Not confirmed and the batch stops; the request may
+    // still answer, which is recorded but changes nothing.
+    let abandon;
+    const abandoned = new Promise(r => { abandon = r; });
+    b.abandon = () => abandon({ abandoned: true });
+    const timer = setTimeout(() => { if (b.current === it) { b.canStopWaiting = true; renderAddPicker(); } }, ADD_STOP_WAIT_MS);
+    const answer = await Promise.race([request, abandoned]);
+    clearTimeout(timer);
+    b.current = null; b.canStopWaiting = false; b.abandon = null;
+    if (answer.abandoned) {
+      it.state = 'unconfirmed'; it.waited = true;
+      b.stop = true;
+      request.then(late => { it.late = late.res ? addLateText(b, late.res) : 'no clear answer'; renderAddPicker(); renderAddNotice(); });
+      b.pending = request; // the lane stays held until it settles
+      break;
+    }
+    const late = !addBatchLive(b);
+    const info = answer.err ? orgErrorInfo(answer.err) : null;
+    if (info && orgMissingFunction(info)) {
+      orgWriteCapability = null;
+      it.state = 'refused'; it.note = COLLECTION_CAPABILITY_TEXT.absent;
+      b.stop = true;
+    } else if (info && info.kind !== 'database') {
+      it.state = 'unconfirmed';
+      b.stop = true;
+    } else if (info) {
+      const o = describeOutcome({ kind: b.kind === 'add' ? 'add' : 'remove', args }, null, info);
+      it.state = 'refused'; it.note = o.note || o.text;
+    } else if (b.kind === 'add') {
+      if (answer.res && answer.res.added) { it.state = 'added'; it.membershipId = answer.res.membership && answer.res.membership.id; }
+      else it.state = 'already';
+    } else if (answer.res && answer.res.removed) { it.state = 'removed'; it.of.undone = true; }
+    else it.state = 'notremoved';
+    if (late) it.after = orgEpoch !== b.epoch ? 'restore' : 'left';
+  }
+  b.items.forEach(it => { if (it.state === 'queued') it.state = 'notsent'; });
+  return finishAddBatch(b, b.pending || null);
+}
+
+function addLateText(b, res) {
+  if (b.kind === 'add') return res.added ? 'answered later: Added' : 'answered later: already in';
+  return res.removed ? 'answered later: Removed' : 'answered later: not removed';
+}
+
+// After the last request: the result is shown, then (while the batch is still where it started) the
+// collection is read again inside the lane; a batch that left reports in the view now open.
+async function finishAddBatch(b, pending) {
+  b.phase = b.items.some(it => it.state === 'unconfirmed') ? 'unknown' : b.items.some(it => it.state === 'notsent') ? 'partial' : 'completed';
+  if (b.undoOf) b.undoOf.lastUndo = b;
+  renderAddPicker(); renderAddNotice();
+  if (pending) await pending;
+  if (!b.left && activeViewId === b.viewId && orgEpoch === b.epoch) {
+    const ok = await reloadOpenView();
+    b.reread = ok === true ? 'ok' : ok === false ? 'failed' : null;
+    if (ok === true && browseData && browseData.members) {
+      b.items.filter(it => it.state === 'unconfirmed').forEach(it => {
+        it.nowIn = it.kind === 'show' ? browseData.members.showIds.has(it.id) : browseData.members.filmIds.has(it.id);
+      });
+    }
+    renderAddPicker(); renderAddNotice();
+  } else if (b.left || activeViewId !== b.viewId) {
+    showNotice(`${b.kind === 'add' ? 'Adding to' : 'Undoing the additions to'} ${b.name} stopped when you left: ${addSummaryCounts(b)}. Open ${b.name} to check.`);
+  } else {
+    showNotice(`${b.kind === 'add' ? 'Adding to' : 'Undoing the additions to'} ${b.name} stopped: your data was restored meanwhile (${addSummaryCounts(b)}). What is shown now is what is saved.`);
+  }
+}
+
+// ── Words ──
+function addItemText(b, it) {
+  const n = b.name;
+  let t;
+  if (it.state === 'refused') t = b.kind === 'add' ? `Couldn’t add: ${it.note}` : `Not removed: ${it.note}`;
+  else if (it.state === 'unconfirmed') {
+    const verb = b.kind === 'add' ? 'added' : 'removed';
+    t = `Not confirmed: no clear answer came back, so this may or may not have been ${verb}.`;
+    if (b.reread === 'ok' && it.nowIn != null) t += ` The list has been read again. It now shows ${it.title} as ${it.nowIn ? 'in' : 'not in'} ${n}, but that doesn’t show whether this request ${b.kind === 'add' ? 'added' : 'removed'} it.`;
+    else if (b.reread === 'failed') t += ' The list couldn’t be read again, so it may be out of date; use Retry.';
+    t += ' Nothing was sent again.';
+  } else {
+    const s = ADD_STATE_TEXT[it.state];
+    t = typeof s === 'function' ? s(n) : s || it.state;
+  }
+  if (it.after === 'left') t += ' (answered after you left)';
+  else if (it.after === 'restore') t += ' (answered after a restore: not applied here)';
+  if (it.late) t += ` (${it.late})`;
+  return t;
+}
+
+function addSummaryCounts(b) {
+  const count = s => b.items.filter(it => it.state === s).length;
+  const parts = b.kind === 'add'
+    ? [[count('added'), 'added'], [count('already'), 'already in'], [count('refused'), 'couldn’t be added'], [count('unconfirmed'), 'not confirmed'], [count('notsent'), 'not sent']]
+    : [[count('removed'), 'removed'], [count('notremoved') + count('refused'), 'not removed'], [count('unconfirmed'), 'not confirmed'], [count('notsent'), 'not sent']];
+  return parts.filter(([k]) => k > 0).map(([k, w]) => `${k} ${w}`).join(', ') || 'nothing sent';
+}
+
+function addSummaryText(b) {
+  return `${b.kind === 'add' ? `Add to ${b.name}` : `Undo adding to ${b.name}`}: ${addSummaryCounts(b)}.${b.error ? ` ${b.error}` : ''}`;
+}
+
+// The Undo button while it applies: the batch that added is this visit's, no batch is running, and
+// some item it added hasn't had its Undo sent.
+function addUndoHtml(b) {
+  const root = b && (b.kind === 'add' ? b : b.undoOf);
+  if (!root || addBatchRunning(b) || root.left || b.left || root.viewId !== activeViewId || root.epoch !== orgEpoch) return '';
+  const n = root.items.filter(it => it.state === 'added' && it.membershipId && !it.undoTried).length;
+  return n ? ` <button class="btn" id="addUndoBtn" onclick="undoAddBatch()">Undo ${n} confirmed addition${n === 1 ? '' : 's'}</button>` : '';
+}
+
+function addResultsListHtml(b) {
+  return `<ul class="manage-list add-results" aria-label="Results">${b.items.map(it =>
+    `<li class="manage-item"><span class="manage-name">${esc(it.title)}</span> <span class="manage-meta">${esc(addItemText(b, it))}</span></li>`).join('')}</ul>`;
+}
+
+// ── Drawing ──
+function renderAddPicker() {
+  const box = document.getElementById('addPickerBox');
+  const p = addPicker;
+  if (!box || !p) return;
+  const active = document.activeElement;
+  const inside = !!active && typeof box.contains === 'function' && box.contains(active);
+  const focusId = inside && active.id ? active.id : null;
+  const caret = focusId && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
+  box.innerHTML = addPickerHtml(p);
+  const again = focusId && document.getElementById(focusId);
+  if (again && typeof again.focus === 'function') {
+    again.focus();
+    if (caret && typeof again.setSelectionRange === 'function') try { again.setSelectionRange(caret[0], caret[1]); } catch (e) { /* not a text field */ }
+  } else if (inside && typeof box.focus === 'function') box.focus();
+}
+
+function addPickerHtml(p) {
+  const b = p.batch;
+  const title = `<h2 class="modal-title" id="addPickerTitle">Add to ${esc(p.name)}</h2>`;
+  if (!b) {
+    const { list, unclassified } = addCandidates();
+    const q = p.query.trim().toLowerCase();
+    const shown = q ? list.filter(c => String(c.title || '').toLowerCase().includes(q)) : list;
+    const n = p.selected.size;
+    const row = c => {
+      const kind = c.kind === 'show' ? `TV show · ${c.seasons} stored season${c.seasons === 1 ? '' : 's'}` : 'Film';
+      const meta = `${kind} · ${c.status}${c.skipped ? ' (hidden by default here)' : ''}`;
+      const cbId = `addPick-${c.key.replace(/[^\w-]/g, '_')}`;
+      return c.member
+        ? `<li class="manage-item add-pick"><span class="manage-name">${esc(c.title)}</span> <span class="manage-meta">${esc(meta)}</span> <span class="manage-in">Already in ${esc(p.name)}</span></li>`
+        : `<li class="manage-item add-pick"><label class="add-pick-label" for="${cbId}"><input type="checkbox" id="${cbId}"${p.selected.has(c.key) ? ' checked' : ''} onchange="addPickerToggle('${c.key}', this.checked)">
+            <span class="manage-name">${esc(c.title)}</span> <span class="manage-meta">${esc(meta)}</span></label></li>`;
+    };
+    return `${title}<div class="manage-body" id="addPickerBody">
+        <label for="addPickerSearch">Search your saved shows and films</label>
+        <input id="addPickerSearch" type="search" value="${esc(p.query)}" oninput="addPickerSearch(this)" placeholder="Search titles…">
+        <p class="manage-hint">A show is added whole: every stored season, and any added later. Nothing is copied or moved, and watched status is unchanged.</p>
+        <ul class="manage-list" aria-label="Shows and films">${shown.map(row).join('') || '<li class="manage-empty">Nothing saved matches.</li>'}</ul>
+        ${unclassified ? `<p class="manage-hint">${unclassified} saved row${unclassified === 1 ? ' is' : 's are'} neither a TV season nor a film, so ${unclassified === 1 ? 'it isn’t' : 'they aren’t'} offered.</p>` : ''}
+      </div>
+      <div class="modal-actions"><button class="btn" id="addPickerCancel" onclick="closeAddPicker()">Cancel</button>
+        <button class="btn btn-accent" id="addPickerSubmit" onclick="submitAddPicker()"${n ? '' : ' disabled'}>Add ${n} to ${esc(p.name)}</button></div>`;
+  }
+  const running = addBatchRunning(b);
+  const done = b.items.filter(it => !['queued', 'sending', 'removing'].includes(it.state)).length;
+  const at = b.items.indexOf(b.current) + 1;
+  const progress = running
+    ? `<p class="manage-status" role="status">${b.kind === 'add' ? 'Adding' : 'Undoing'} ${at || done} of ${b.items.length}… The selection is locked.${b.stop ? ' Stopping after this one: nothing further will be sent.' : ''}</p>`
+    : `<p class="manage-status" role="status">${esc(addSummaryText(b))}</p>`;
+  const actions = running
+    ? `<button class="btn" id="addPickerStop" onclick="closeAddPicker()"${b.stop ? ' disabled' : ''}>${b.stop ? 'Stopping…' : 'Stop after this one'}</button>`
+      + (b.canStopWaiting ? ` <button class="btn" id="addPickerStopWaiting" onclick="addStopWaiting()">Stop waiting</button>` : '')
+    : `${addUndoHtml(b)} <button class="btn" id="addPickerClose" onclick="closeAddPicker()">Close</button>`;
+  const root = b.undoOf;
+  const earlier = root ? `<h3 class="manage-subtitle">Added earlier</h3>${addResultsListHtml(root)}` : '';
+  return `${title}${progress}<div class="manage-body" id="addPickerBody">${addResultsListHtml(b)}${earlier}</div><div class="modal-actions">${actions}</div>`;
+}
+
+function addStopWaiting() {
+  const b = addPicker && addPicker.batch;
+  if (b && b.abandon) b.abandon();
+}
+
+// The collection's notice for this visit's batch (once the picker is closed): the summary, Show
+// details, and Undo while it applies.
+function renderAddNotice() {
+  const b = addBatch;
+  const el = document.getElementById('banner');
+  if (!el || !b || addPicker || b.left || b.viewId !== activeViewId) return;
+  const active = document.activeElement;
+  const hadFocus = !!active && typeof active.closest === 'function' && !!active.closest('#addNotice');
+  const focusId = hadFocus ? active.id : null;
+  const details = b.details ? addResultsListHtml(b) + (b.undoOf ? addResultsListHtml(b.undoOf) : '') : '';
+  el.innerHTML = `<div class="banner collection-notice" id="addNotice" role="status" tabindex="-1">${esc(addSummaryText(b))}
+      ${addBatchRunning(b) ? '' : ` <button class="btn" id="addDetailsBtn" aria-expanded="${!!b.details}" onclick="toggleAddDetails()">${b.details ? 'Hide details' : 'Show details'}</button>${addUndoHtml(b)}`}${details}</div>`;
+  if (hadFocus) {
+    const again = (focusId && document.getElementById(focusId)) || document.getElementById('addNotice');
+    if (again && typeof again.focus === 'function') again.focus();
+  }
+}
+
+function toggleAddDetails() {
+  if (!addBatch) return;
+  addBatch.details = !addBatch.details;
+  renderAddNotice();
 }

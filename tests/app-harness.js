@@ -932,8 +932,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       },
       scrollIntoView() {}, querySelector() { return null; }, querySelectorAll() { return []; },
       remove() {}, appendChild() {}, insertAdjacentElement() {},
-      // S3 (D6): the effect dialog's own elements take focus, so its default focus is observable.
-      ...(/^effect/.test(id || '') ? { focus() { document.activeElement = el; } } : {}),
+      // S3 (D6): the effect dialog's own elements take focus, so its default focus is observable (S5: and the Add picker's).
+      ...(/^(effect|addPicker)/.test(id || '') ? { focus() { document.activeElement = el; } } : {}),
       get innerHTML() { return html; },
       set innerHTML(v) {
         html = v;
@@ -1322,6 +1322,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     confirm: () => true,
     alert() {},
     setTimeout: () => 0,
+    clearTimeout: () => {}, // S5 (the timers never fire here)
     innerWidth: width,
     matchMedia: () => ({ matches: false }),
     crypto: require('crypto').webcrypto,

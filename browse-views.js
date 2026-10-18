@@ -796,6 +796,7 @@ function browseHeadHtml() {
       <h2 class="browse-title">🗂 ${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
       ${back}
       <button class="btn btn-link browse-edit-members" onclick="openManage('members', '${esc(dest.collectionId)}', this)">Edit collection</button>
+      ${collectionAddAllowed() ? `<button class="btn btn-link browse-add-items" id="collectionAddBtn" onclick="openAddPicker(this)">Add to ${esc(dest.label)}…</button>` : ''}
       ${notes.map(n => `<p class="browse-note">${esc(n)}</p>`).join('')}
     </div>`;
 }
