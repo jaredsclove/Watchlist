@@ -43,20 +43,21 @@ database; collaborative editing of a shared database is not a goal.
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current on `main`: `20261018-tvedit1`; Batch A branch: `20261018-lane1`).
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261018-lane1`).
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
 ## Where things stand (2026-10-18)
 
-- **App release:** `5907029` (S3). GitHub `main` is the source of truth; check it with
-  `git ls-remote origin main` at the start of a session.
+- **App release:** `9487ce8`, simplification Batch A (released 2026-10-18; previous release `5907029`, S3).
+  GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 - **Database (as last recorded, not freshly observed):** phase `contracted-b45`, backup format 5,
   recovery archive active. G9 (archive retirement) is paused. Rollbacks follow the recorded order
   (history §18: P1 → P2 → P3′ → D2), each with its own approval; a B4/B5 rollback is lossy.
 - **B3 / B1 / B7 plan:** S1–S3 released. Not started: **S4** (film controls and membership removal
   in collections, with Undo), **S5** (add existing items to a collection), **S6** (browser history
   and routes). D10 is deferred.
-- **Simplification Batch A** is approved and runs before S4 (below). A1 landed (`e5cee7b`); A2–A5 are implemented on branch `simplify-batch-a` (PR open, awaiting the one independent review; not merged or deployed). Batch B comes after S6.
+- **Simplification Batch A is complete** (A1 `e5cee7b`; A2–A5 `2f3050b` plus review corrections `9487ce8`,
+  PR #1). **S4 is next but not yet authorized**; Batch B comes after S6.
 
 ## How we work
 
@@ -113,30 +114,36 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 - `/refresh-catalogs` is user-invoked only.
 - When the owner must edit a local file, give a `nano` command, not `open -e`.
 
-## Batch A: simplification before S4 (approved 2026-10-18; remove this section when done)
+## Writes, reads and focus (since Batch A, `9487ce8`)
 
-- **Scope:** one write lane (one write at a time per page, affected controls disabled while saving,
-  held through the reconciliation reread); one reread path; one simple focus rule; representative
-  behavioural tests. No `db/` change, no server-side safeguard change, no phone-sizing work.
-- **Must hold:** an older read never publishes during or after a pending write; overlapping reads
-  don't publish out of order; results never reach a view the owner has left (keep small freshness
-  and view checks where the lane doesn't prevent these). Define what happens when the reread after
-  a write fails, so the next operation doesn't rely on invalid state. Filter options stay current
-  without disturbing the focused control, its value or its selection.
-- **Uncertain writes:** keep "not confirmed, never resent, read again". A fresh read doesn't prove an
-  unconfirmed write has finished on the server. If simplifying restore protection means accepting
-  that risk, report the tradeoff to the owner instead of weakening it. No server-completion detection.
-- Check each write path (Watched / Skip, deletes, additions, Match, Details, organization, restore)
-  rather than assuming `p_expected` covers it. Remove a safeguard only when the new lifecycle covers
-  its purpose, and say in the PR what replaces each removed mechanism.
-- **Tests:** remove tests for removed behaviour and redundant combinations; keep one test per
-  distinct data risk and key journey; no count target, no rebuilt focus matrices. Convert regex
-  markup assertions only when touched or repeatedly breaking.
-- **Validation:** offline suites (capped); one bounded browser check in Claude in Chrome against
-  synthetic local data (as in the S3 check: 1280 and 375 px). No production access or real writes.
-- **Authorized:** commits on a branch, and pushing that branch (not `main`) for review. Then one
-  independent review of the completed diff before merge. No merge to `main` or deploy until the owner
-  approves the reviewed result.
+- **One write lane** (`write-lane.js`): one change at a time per page, from before its optimistic
+  redraw until the reread that reconciles it has finished. While it is held the list's controls look
+  unavailable (focus kept) and any other change is refused before anything is shown or sent.
+  `api.js sbFetch` refuses a write sent outside the lane.
+- **Reads** publish only if no change overlapped them (`readFresh`) and they are the newest of their
+  kind; a refused read reads again once the lane is free.
+- **One reread path** (`reloadOpenView`): a shown list is read again in place. If that reread fails,
+  the list stays, marked out of date, and changes from it (Match included) are refused until a read
+  succeeds (Retry).
+- **Unconfirmed changes:** not confirmed, never resent, the list read again. A fresh read doesn't prove
+  the request finished; a request with no clear answer could still complete after a later restore
+  (unchanged from before Batch A; no server-completion detection).
+- **One focus rule:** a redraw moves focus only if it was in the list (B6 chain F-1…F-7); a filter-row
+  redraw keeps the focused control, its value and caret.
+- **Accepted limitations (owner-approved with the release):** after a refused change is rolled back,
+  focus doesn't return to the control it started from; focus doesn't follow a pending save across the
+  phone/desktop switch; opening another view during a change (a long Refresh shows or movie-tool run
+  included) shows "Loading…" until the lane is free; Manage has no Stop waiting; watch-with and
+  deletes still send no expected values (the lane and the out-of-date pause cover a stale list).
+- **Batch A release validation:** offline 40 suites, 1,100/1,100 (capped, each printing its summary);
+  one independent review plus a focused follow-up on its three findings; a bounded Claude in Chrome
+  check on a local synthetic backend (1280 px; 375 px in a fixed-width frame; light only; no 300 px,
+  dark or touch). Release: `main` fast-forwarded to the reviewed `9487ce8`; the Pages build and
+  deployment succeeded; the page and the 18 other changed files were byte-identical to the commit
+  (plain and versioned URLs). A read-only live smoke check passed with non-GET requests blocked in
+  the page: TV, a show expanded, Search, a collection, a show there, Delete… opened and cancelled;
+  only GET requests, none blocked, no console errors; the browser's stored preferences were checked
+  and left exactly as before. No production write.
 
 ## Open items
 
@@ -146,9 +153,7 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
   If they match the scripts, anyone holding the public key can read and change the data. Moving
   configuration or adding sign-in does not by itself close anonymous access; the policies are the
   boundary. The read-only policy check needs its own authorization.
-- **Carried limitations:** both (focus lost when a reread starts while focus is in a filter; typing during
-  a quiet reread overwrites its status line) are fixed on the Batch A branch; drop this line once it merges.
-- **Optional, not in Batch A:** phone controls under 44 px (status select, Show ended, Skip).
+- **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip).
 - The rest of the backlog (accessibility, contrast and layout items; deferred features) is in
   history §14. Bring an item back only by owner request.
 
@@ -158,8 +163,9 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 for f in tests/*.test.js tests/*.test.mjs; do perl -e 'alarm shift; exec @ARGV' 120 node --max-old-space-size=1024 "$f" || echo "FAIL $f"; done
 ```
 
-At `5907029`: 39 suites, 1,318 cases. On the Batch A branch: 40 suites, 1,100 cases, all passing (the
-removed focus matrices and publication-number tests account for the drop; `tests/write-lane.test.js` is new). Syntax check:
+At `9487ce8`: 40 suites, 1,100 cases, all passing (Batch A removed the focus matrices and
+publication-number tests; `tests/write-lane.test.js` is new). Check that every suite prints its
+"N/N passed" line: a suite can exit 0 without it. Syntax check:
 `node --check` on each `*.js`, `tests/*.js`, `tools/*.mjs`. Database rehearsals run locally on PGlite
 (`tools/db-rehearsal-*.mjs`; see `db/README.md`). The identity audit (`tools/identity-audit.mjs`)
 reads production, so it needs approval.
