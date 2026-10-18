@@ -134,66 +134,72 @@ Decide whether any useful community score is sufficient or whether critic/audien
 - [Rotten Tomatoes licensing](https://www.rottentomatoes.com/help_desk/licensing)
 - [MDBList API access and limits](https://docs.mdblist.com/docs/api)
 
-## 3 Multiple users with a separate database for each
+## 3 Multiple users with isolated personal libraries
 
-Added 2026-10-18. **Status: deferred exploration.** Owner requirement: each person has their own database; a paid Supabase plan is acceptable if needed. Sign-in should persist across ordinary app visits. No implementation, subscription purchase, project provisioning or production investigation is authorized by this entry.
+Added and clarified 2026-10-18. **Status: deferred exploration.** Each person must have a cleanly separated private library, with protection against cross-access and accidental mixing. Physically separate databases are not required. Prefer one shared Supabase project, subject to an ownership and authorization review. A paid plan is acceptable if useful. Sign-in should persist across ordinary app visits. No implementation, subscription purchase, provisioning or production investigation is authorized by this entry.
 
 ### Feasibility and architectural direction
 
-This follows the established model of one owner and one active user/device per database. Separate personal libraries do not require shared-database collaboration or a return to complex cross-user concurrency machinery. The design intent supports feasibility, but does not establish that current authentication, owner resolution, database functions and policies are ready without changes.
+Use one application, one Supabase project and one authentication system. Personal records share tables but belong to individual users through user_id. Supabase Auth identifies the caller; database Row Level Security (RLS), grants, constraints and function checks enforce which records that caller may read or change. Interface filtering alone is insufficient.
 
-The simplest candidate for a small family is one Supabase project per person, under one centrally managed organization, with one maintained Watchlist codebase. Each project provides its own database and Auth service. Do not fork application logic per person. Use a small configuration layer or separately configured deployments of the same release.
+The recorded schema already includes owner-scoped rows, which is a useful foundation, but having user_id columns does not establish complete isolation. Review current owner resolution, fixed-owner assumptions, database functions, views and relationships before designing the migration.
 
-A personal bookmarked entry URL or first-use library selection identifies the destination project before authentication. That selection only routes requests; it grants no access. Authenticate using that project's Supabase Auth, then require the authenticated identity to be the approved owner. A user-created account in a project must not automatically gain its owner's data. Keep onboarding invitation-only or otherwise server-enforced. App users do not need Supabase dashboard access.
+This refines the earlier physical-database assumption: the intended unit of independence is now the personal library. Each person edits their own records; shared-library collaborative editing remains outside scope. The one-active-device assumption can apply per user/library rather than per physical database. Independent users may use the application concurrently without sharing editable records, provided functions and constraints are correctly owner-scoped.
 
-A single universal login that discovers and routes a user to their database is another possible design, but adds a trusted identity-to-project directory and cross-project authentication design. A session from one Supabase project cannot simply be assumed valid in another. Do not introduce central authentication/proxy infrastructure unless the benefit outweighs the extra maintenance for a handful of users.
+Login should lead directly to the authenticated person's library at the same application URL. No project picker or cross-project identity directory is needed. For the initial family scope, prefer invitation-only onboarding or equivalent server-enforced admission. App users do not need Supabase dashboard access.
 
-### Supabase cost and project limits
+Separate projects remain an alternative if independent administration, project-level recovery or stronger operational separation becomes important. They add per-project costs and repeated configuration/migrations and are not the preferred starting point.
 
-Public documentation checked 2026-10-18: Free permits two active projects across organizations where the account is an owner/administrator. Thus payment is not inherently required for two small personal databases if both slots are available; existing production or hosted test projects consume slots. Free-project pausing and capacity limits also affect suitability.
+### Supabase cost
 
-Pro is billed per organization, with dedicated compute charged per project and one $10/month compute credit per paid organization. At the documented $25 base and approximately $10/month Micro compute per continuously active project, indicative totals are $25 for one project, $35 for two, $45 for three and $55 for four. These are base estimates before taxes, usage overages, larger compute and add-ons; recheck pricing before choosing. Pro does not include unlimited separately hosted databases for $25. Projects in a Pro organization do not pause for inactivity. Additional hosted staging projects add cost; local development remains an option.
+With one project, adding users does not incur a separate project charge per person. Storage, authentication, bandwidth and other usage accumulate within the project's and organization's applicable quotas. Free may suffice for a small family; paid service is not inherently required for multiple users or remembered sessions.
+
+Public documentation checked 2026-10-18: Free permits two active projects across organizations where the account is an owner/administrator. Pro has a $25/month organization base and a $10 compute credit, which approximately covers one continuously active Micro project. Usage overages, taxes, larger compute and add-ons can increase the cost. Pro projects do not pause for inactivity. A separately hosted staging project incurs additional compute; local development remains an option. Recheck pricing and operational needs before choosing a plan. The previously discussed per-person project estimates apply only to the separate-project alternative.
 
 ### Login and identification
 
-Proposed everyday experience: open a personal bookmark, restore the saved session, and use the app. On first use or a new browser/device, authenticate once. Supabase's JavaScript client supports persisted sessions and token refresh; Supabase documents no default fixed maximum session lifetime. Ordinary visits need not require signing in again, and this convenience does not itself require Pro. Sign-out, revoked sessions, cleared storage, private browsing or recovery events can require another login; never promise permanent login.
+Proposed everyday experience: open Watchlist, restore the saved session, and see the correct personal library. On first use or a new browser/device, authenticate once. Supabase's JavaScript client supports persisted sessions and token refresh; Supabase documents no default fixed maximum session lifetime. Ordinary visits need not require signing in again. Sign-out, revoked sessions, cleared storage, private browsing or recovery events can require another login; never promise permanent login.
 
 Choose one initial authentication method:
 
-- Google sign-in if all intended users are comfortable using Google; configure redirects and provider settings for each project.
-- Email one-time code or magic link if avoiding a shared social-login provider is preferable. Configure reliable email delivery; Supabase's default mail service has restrictions and is not a general production delivery solution. Codes may avoid links opening in the wrong browser context.
+- Google sign-in if all intended users are comfortable using Google, with provider and redirect configuration for the application.
+- Email one-time code or magic link if avoiding a social-login dependency is preferable. Configure reliable email delivery; Supabase's default mail service has restrictions and is not a general production delivery solution. Codes may avoid links opening in the wrong browser context.
 - Email/password is possible but introduces password recovery and another credential to manage.
 
-Use the authenticated user's stable ID for authorization. An email/name in local storage, a dropdown selection or a private-looking URL is not proof of identity. Save only project routing preferences as convenience state. Let the supported Auth client manage tokens rather than inventing a custom long-lived secret. Keep service-role keys and database passwords out of the public app.
+Use the authenticated user's stable ID for authorization. An email/name in local storage, a dropdown selection or a private-looking URL is not proof of identity. Let the supported Auth client manage tokens rather than inventing a custom long-lived secret. Keep service-role keys and database passwords out of the public app.
 
-### Security and saved-data implications
+### Isolation and saved-data protections
 
-Separate databases limit cross-user mixing but do not secure an anonymously accessible database. Authentication must be paired with appropriate table policies, grants and database-function authorization, including privileged functions, backups and restore. Every read/write path must resolve the intended authenticated owner and fail closed if the session or project is wrong. Audit existing fixed-owner or anonymous-role assumptions before planning migration.
+Database policies must enforce ownership for reads, inserts, updates and deletes, including attempts to forge an owner ID or address another user's known record ID. Review every exposed path, especially privileged database functions and views that may bypass ordinary RLS checks. Resolve ownership from the authenticated caller rather than trusting a supplied user ID.
 
-The previously recorded production access-policy concern remains unverified. Recording this feature does not authorize its investigation; a separately authorized policy/contract review is necessary before rollout. Adding a login screen alone does not resolve anonymous access.
+Relationships must not link one user's season, show or collection to another user's records. Check owner scoping of uniqueness rules as well: two people must be able to track the same TMDB title independently without collisions. Public catalog definitions or replaceable metadata may be shared where appropriate; personal membership, progress and choices remain private.
 
-Preserve existing saved data when associating the original database with its authenticated owner. Validate migrations offline first; changes to schema, policies, contracts and production remain subject to the existing approval rules. Preserve uncertain-outcome handling and restore protection.
+Verification should use at least two distinct authenticated identities plus signed-out access, testing both allowed and denied operations. Include collection relationships, deletes and restore, and prove that restoring one user's library leaves the other's unchanged. These are meaningful isolation checks, not evidence supplied by a login screen alone.
+
+The previously recorded production access-policy concern remains unverified. Recording this feature does not authorize its investigation; a separately authorized policy/contract review is necessary before rollout. Authentication must be paired with appropriate policies and grants; adding a login screen alone does not remove anonymous access.
+
+Preserve existing saved data when associating the current library with its authenticated owner. Validate migrations offline first; changes to schema, policies, contracts and production remain subject to existing approval rules. Preserve uncertain-outcome handling and restore protection.
 
 ### Operational and user-experience considerations
 
-- **One release, several databases:** maintain reproducible provisioning and versioned migrations. Track each project's schema/capability version so one app release cannot assume an upgrade succeeded everywhere.
-- **New libraries:** initialize schema and public catalog definitions without copying another person's viewing history, personal collections or preferences. Decide whether optional starter content is useful.
-- **Backups and restore:** identify the selected destination clearly. Guard against restoring one person's backup into another database. Existing portable backups omit user_id; decide how destination confirmation and intentional cross-database imports work without weakening restore safeguards.
-- **Account changes:** clear old library data from memory and namespace caches/preferences by project and user. Do not switch destinations during an in-flight write or uncertain outcome. A full app reload on an explicit library switch may be simpler.
+- **Updates and shared operations:** one database migration serves all users, reducing maintenance. A project outage or privileged administrative mistake can affect everyone; logical isolation does not isolate infrastructure failures or administrators.
+- **New libraries:** create personal starting state without copying another person's viewing history, collections or preferences. Decide whether optional starter content is useful.
+- **Backup and restore:** app exports and restores must operate only on the authenticated owner's records, with existing safety backups and verification retained. Existing portable backups omit user_id; define destination confirmation and intentional imports explicitly. Whole-project recovery affects all users and is distinct from personal-library restore.
+- **Account changes:** show the active account, clear previous library data from memory and namespace personal caches/preferences by user. Prevent stale reads from repopulating the old library after account changes. Do not switch identities during in-flight writes or unresolved outcomes; a full reload on explicit account switching may be simpler.
 - **Session loss:** stop new writes and offer reauthentication; never fall back to anonymous writes or blindly retry an uncertain mutation after login.
-- **Devices:** persistent login on several devices does not imply simultaneous editing is supported. Retain one active device per personal database unless changing that requirement explicitly.
-- **Administration:** decide who owns/pays for projects, handles recovery and offboarding, monitors backups and migrates a library if someone later wants independent ownership. Central administration is convenient but gives the administrator access; physical separation does not remove that relationship.
-- **Shared devices:** show the active library/account and provide sign-out. Remembered sessions are appropriate only where the device user accepts that access.
+- **Devices:** remembered login on several devices does not establish support for simultaneous editing of one person's library. Keep one active device per user unless this requirement changes explicitly.
+- **Administration:** decide who pays, handles account recovery and offboarding, monitors backups and exports a library if someone later wants independent ownership. The project administrator retains privileged access.
+- **Shared devices:** provide sign-out and make the active account visible. Remembered sessions assume the device user accepts that access.
 
 ### Smallest useful scope and next decision
 
-For a few known users, prefer manually provisioned personal projects, one common application release, a personal entry link, one login method and remembered sessions. Defer public signup, automated provisioning, universal cross-project login and shared editing.
+For a few known users, prefer one shared project, one application release and URL, invitation-only accounts, one login method and remembered sessions. Defer public signup, shared-library editing and separate-project routing.
 
-When revisiting, establish expected user count, hosted development needs and preferred login method. Then ask Claude for a concise proposal covering configuration selection, current owner/function assumptions, isolation, migration and recovery. The feature is architecturally plausible, with most new work in authentication, authorization and repeatable operation of several projects.
+When revisiting, establish expected user count and preferred login method. Ask Claude for a concise proposal covering current owner/function assumptions, RLS and grants, cross-owner relationships, migration of the original library, personal restore and account-switch behavior. The feature is architecturally plausible; completeness of the existing ownership protections remains to be established.
 
 ### Sources
 
-- [Supabase billing FAQ and multi-project cost example](https://supabase.com/docs/guides/platform/billing-faq)
+- [Supabase billing FAQ](https://supabase.com/docs/guides/platform/billing-faq)
 - [Supabase billing and free-project limits](https://supabase.com/docs/guides/platform/billing-on-supabase)
 - [Supabase user sessions](https://supabase.com/docs/guides/auth/sessions)
 - [JavaScript Auth persistence](https://supabase.com/docs/reference/javascript/auth)
@@ -201,3 +207,4 @@ When revisiting, establish expected user count, hosted development needs and pre
 - [Passwordless email sign-in](https://supabase.com/docs/guides/auth/auth-email-passwordless)
 - [Custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp)
 - [Row-level security](https://supabase.com/docs/guides/database/postgres/row-level-security)
+- [Database functions and execution privileges](https://supabase.com/docs/guides/database/functions)

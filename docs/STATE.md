@@ -18,7 +18,8 @@ database; collaborative editing of a shared database is not a goal.
 - **Views:** TV (Currently Watching, All TV, Coming Soon), Movies (All Movies), Collections
   (personal collections; TV shows and seasons editable there since S3, films read-only), Settings
   (Manage collections and watch-with choices, Catalog updates, Backup & Restore). ⬇ Backup is also
-  in the header.
+  in the header. *On branch `s4-s6`, not released:* films editable in collections, Remove from a
+  collection with Undo (S4), Add to <collection>… (S5), hash routes and browser Back / Forward (S6).
 - **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
   `catalog_film_links`. Rows are owner-scoped (`user_id`, never sent by the client).
@@ -33,17 +34,17 @@ database; collaborative editing of a shared database is not a goal.
 
 | Area | Files |
 |---|---|
-| Boot, config, API | `watchlist.html`, `config.js`, `api.js`, `write-lane.js` (one change at a time; read freshness), `ui-helpers.js`, `identity.js` |
+| Boot, config, API | `watchlist.html`, `config.js`, `api.js`, `write-lane.js` (one change at a time; read freshness), `ui-helpers.js`, `identity.js`, `history.js` (*branch `s4-s6`:* routes, Back / Forward, leave warning) |
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views), `metadata.js` (Details) |
-| Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog) |
+| Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog), `collection-members.js` (*branch `s4-s6`:* Remove / Undo and the Add picker from a collection view) |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `refresh-shows.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Catalogs | `catalog-apply.js` (Catalog updates); catalog definitions in `config.js` |
 | Backup / restore | `backup-restore.js`, `backup-format3.js` (format-3 → 4 → 5 converter) |
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261018-lane1`).
+Every release bumps the `?v=` cache token in `watchlist.html` (released: `20261018-lane1`; branch `s4-s6`: `20261018-s4s6`).
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
 ## Where things stand (2026-10-18)
@@ -53,11 +54,12 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 - **Database (as last recorded, not freshly observed):** phase `contracted-b45`, backup format 5,
   recovery archive active. G9 (archive retirement) is paused. Rollbacks follow the recorded order
   (history §18: P1 → P2 → P3′ → D2), each with its own approval; a B4/B5 rollback is lossy.
-- **B3 / B1 / B7 plan:** S1–S3 released. Not started: **S4** (film controls and membership removal
-  in collections, with Undo), **S5** (add existing items to a collection), **S6** (browser history
-  and routes). D10 is deferred.
+- **B3 / B1 / B7 plan:** S1–S3 released. **S4** (film controls and membership removal in
+  collections, with Undo), **S5** (add existing items to a collection) and **S6** (browser history
+  and hash routes) are **implemented on branch `s4-s6`, not released**: one PR into `main` awaits
+  the owner's decision (review and validation in its description). D10 is deferred.
 - **Simplification Batch A is complete** (A1 `e5cee7b`; A2–A5 `2f3050b` plus review corrections `9487ce8`,
-  PR #1). **S4 is next but not yet authorized**; Batch B comes after S6.
+  PR #1). Batch B comes after S6 is released.
 
 ## How we work
 
@@ -128,6 +130,10 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 - **Unconfirmed changes:** not confirmed, never resent, the list read again. A fresh read doesn't prove
   the request finished; a request with no clear answer could still complete after a later restore
   (unchanged from before Batch A; no server-completion detection).
+- **Branch `s4-s6` (not released):** Remove / Undo from a collection and each Add or Undo batch are
+  one change each through the lane (`{ list: true }`), using the existing `org_*` functions with the
+  ids the view read; the collection is read again inside the lane. History traversal only navigates
+  (reads); it never writes, resends, retries or undoes.
 - **One focus rule:** a redraw moves focus only if it was in the list (B6 chain F-1…F-7); a filter-row
   redraw keeps the focused control, its value and caret.
 - **Accepted limitations (owner-approved with the release):** after a refused change is rolled back,
@@ -164,7 +170,10 @@ for f in tests/*.test.js tests/*.test.mjs; do perl -e 'alarm shift; exec @ARGV' 
 ```
 
 At `9487ce8`: 40 suites, 1,100 cases, all passing (Batch A removed the focus matrices and
-publication-number tests; `tests/write-lane.test.js` is new). Check that every suite prints its
+publication-number tests; `tests/write-lane.test.js` is new). On branch `s4-s6`: 43 suites
+(`collection-films`, `collection-add`, `history-routes` are new; the harness has an opt-in session
+history, `routes: {}`). `catalog-apply`'s verification-audit cases can fail under CPU load (also at
+`9487ce8`); rerun alone before treating that as a regression. Check that every suite prints its
 "N/N passed" line: a suite can exit 0 without it. Syntax check:
 `node --check` on each `*.js`, `tests/*.js`, `tools/*.mjs`. Database rehearsals run locally on PGlite
 (`tools/db-rehearsal-*.mjs`; see `db/README.md`). The identity audit (`tools/identity-audit.mjs`)

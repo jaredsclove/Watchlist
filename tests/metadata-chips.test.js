@@ -155,8 +155,8 @@ test('assets: one new token on every versioned file, ui-helpers.js now versioned
     'refresh-shows.js', 'tmdb-match.js', 'derived-views.js', 'tv-shows.js', 'organization.js', 'organization-manage.js', 'collection-members.js', 'catalog-apply.js',
     'browse-views.js', 'history.js', 'library.js']);
   const tokens = new Set([...html.matchAll(/\?v=([\w-]+)/g)].map(m => m[1]));
-  assert.deepStrictEqual([...tokens], ['20261018-lane1']); // S3 bumped the token (tests/filter-bar.test.js)
-  assert.ok(scripts.includes('ui-helpers.js?v=20261018-lane1'), 'render.js and its helper load together');
+  assert.deepStrictEqual([...tokens], ['20261018-s4s6']); // S4–S6 bumped the token once for the combined release (tests/filter-bar.test.js)
+  assert.ok(scripts.includes('ui-helpers.js?v=20261018-s4s6'), 'render.js and its helper load together');
   assert.ok(scripts.includes('config.js') && scripts.includes('identity.js'), 'config.js and identity.js stay unversioned');
   assert.strictEqual([...html.matchAll(/(?:src|href)="[^"]+\?v=/g)].length, 25, 'styles.css + 24 scripts (S4: collection-members.js; S6: history.js)');
 });
