@@ -143,7 +143,8 @@ async function pullUniverseNow(universeKey) {
       </div>
     </div>
   `;
-  if (backfilled > 0) { showSaved(); renderTable(); }
+  // The tag backfills are reconciled by reading the open view again, inside the write lane (its panel is kept).
+  if (backfilled > 0) { showSaved(); if (activeViewId) await reloadOpenView(); }
 }
 
 // One change at a time (write-lane.js): held through the lookups, writes and the reread.

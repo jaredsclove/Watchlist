@@ -396,7 +396,7 @@ test('a startup read pending across a restore is discarded; the post-restore rea
   assert.ok(options(app).some(([v]) => v === `browse:${freshId}`), 'still the restored collections: ' + JSON.stringify(options(app)));
 });
 
-test('a pre-restore read that finishes before the post-restore read publishes nothing; the selector waits for the restored data', async () => {
+test('a pre-restore read that finishes before the post-restore read publishes nothing; the selector shows only restored data', async () => {
   const app = await boot(library());
   const { b, freshId, oldId } = await restoredBackup(app);
   const g = app.hold(r => r.url.includes('/personal_collections?'));
@@ -416,7 +416,9 @@ test('a pre-restore read that finishes before the post-restore read publishes no
   g.release(); await pending; await settle();
   app.store.personal_collections = restored;
   assert.ok(!options(app).some(([v]) => v === `browse:${oldId}`), 'the pre-restore read did not publish: ' + JSON.stringify(options(app)));
-  assert.match(chooser(app), /Loading collections…/);
+  // Either still loading, or already a read started after the restore (the refused pre-restore
+  // load reads again once the write lane is free): never the pre-restore rows.
+  assert.ok(/Loading collections…/.test(chooser(app)) || /Disney\+ \(restored\)/.test(chooser(app)), chooser(app));
   g2.release(); await settle();
   assert.ok(options(app).some(([v]) => v === `browse:${freshId}`));
 });

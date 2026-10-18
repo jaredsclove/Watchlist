@@ -210,7 +210,7 @@ test('the acknowledgment is bound to the row, TMDB id and season: Confirm after 
     throw new TypeError('Failed to fetch');
   };
   await app.ctx.confirmTmdbMatch(false, { ack: true }); await settle(); await settle(50);
-  assert.match(app.el('errorBanner').innerHTML, /no answer came back from the database[\s\S]*can't tell whether it was saved/);
+  assert.match(app.el('errorBanner').innerHTML, /wasn’t confirmed \(Failed to fetch\): it may or may not have been saved, and it won’t be sent again\. The list has been read again/);
   assert.strictEqual(calls(app, 'library_match_season_b45').length, 2, 'never resent');
 });
 

@@ -158,7 +158,7 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 for f in tests/*.test.js tests/*.test.mjs; do perl -e 'alarm shift; exec @ARGV' 120 node --max-old-space-size=1024 "$f" || echo "FAIL $f"; done
 ```
 
-At `5907029`: 39 suites, 1,318 cases. On the Batch A branch: 40 suites, 1,097 cases, all passing (the
+At `5907029`: 39 suites, 1,318 cases. On the Batch A branch: 40 suites, 1,100 cases, all passing (the
 removed focus matrices and publication-number tests account for the drop; `tests/write-lane.test.js` is new). Syntax check:
 `node --check` on each `*.js`, `tests/*.js`, `tools/*.mjs`. Database rehearsals run locally on PGlite
 (`tools/db-rehearsal-*.mjs`; see `db/README.md`). The identity audit (`tools/identity-audit.mjs`)

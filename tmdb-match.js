@@ -337,7 +337,7 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
     return;
   }
   // One change at a time (write-lane.js): the lane is held through the reread below.
-  const lane = beginWrite(`Match “${row.title}”`);
+  const lane = beginWrite(`Match “${row.title}”`, { list: true }); // refused while the list is out of date (write-lane.js)
   if (!lane) return;
   const stamp = { seq: ++matchRequestSeq, title: patch.title };
   m.inFlight = stamp.seq;
@@ -432,11 +432,15 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
   } catch(e) {
     if (m.inFlight === stamp.seq) m.inFlight = 0;
     const msg = String(e && e.message);
-    // The match was sent but no database answer came back (a network failure, not an
-    // error from the database): it may or may not have been saved.
-    if (stage === 'write' && !/^Supabase error \d+:/.test(msg)) {
-      showError(`The match was sent, but no answer came back from the database (${msg}), so the page can't tell whether it was saved. `
-        + 'Reload the page and check this row before matching it again.');
+    // The match was sent but no clear answer came back (no answer, or one that doesn't show
+    // whether it committed): not confirmed, never sent again; the open view is read again
+    // (the shared reconciliation; a failed reread pauses changes from the list until a read works).
+    if (stage === 'write' && orgErrorInfo(e).kind !== 'database') {
+      if (window.__tmdbMatch === m) { window.__tmdbMatch = null; cancelTMDBPreview(); }
+      const text = `The match of “${patch.title}” wasn’t confirmed (${orgErrorInfo(e).message}): it may or may not have been saved, and it won’t be sent again.`;
+      showError(text);
+      const ok = activeViewId ? await reloadOpenView() : null;
+      showError(text + rereadText(ok));
       return;
     }
     if (/catalog_candidate/.test(msg) && window.__tmdbMatch === m) {

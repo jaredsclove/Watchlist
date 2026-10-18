@@ -186,4 +186,28 @@ test('the status-conflict answer keeps its message; an old-shape call is never s
   assert.ok(rpcCalls(app).every(c => c.body.p_expansion !== undefined));
 });
 
+test('Batch A: Match respects the out-of-date pause; an unconfirmed Match is read again, never resent, and a failed reread keeps changes paused', async () => {
+  const { app, f } = await boot();
+  app.run('listStale = true'); // the list couldn't be read again after an earlier change
+  select(app, f.legacy.id);
+  await app.ctx.confirmTmdbMatch(); await settle();
+  assert.strictEqual(rpcCalls(app).length, 0, 'nothing sent from an out-of-date list');
+  assert.match(app.el('errorBanner').innerHTML, /may be out of date and nothing was changed/);
+  app.run('listStale = false');
+  app.loseNext(r => r.url.includes('/rpc/library_match_season_b45'), 'after');
+  app.failNext(r => r.method === 'GET' && r.url.includes('/tv_shows?select=*')); // the reread, not the Match's own check
+  select(app, f.legacy.id);
+  await app.ctx.confirmTmdbMatch(); await settle(); await settle();
+  assert.strictEqual(rpcCalls(app).length, 1);
+  assert.match(app.el('errorBanner').innerHTML, /wasn’t confirmed[\s\S]*won’t be sent again\. The list couldn’t be read again/);
+  assert.strictEqual(app.get('listStale'), true, 'changes stay paused');
+  assert.strictEqual(app.get('writeLane'), null);
+  select(app, f.legacy.id);
+  await app.ctx.confirmTmdbMatch(); await settle();
+  assert.strictEqual(rpcCalls(app).length, 1, 'not resent while paused');
+  await app.ctx.loadBrowseView(); await settle(); // Retry
+  assert.strictEqual(app.get('listStale'), false);
+});
+
 T.run();
+

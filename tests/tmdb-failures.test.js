@@ -167,6 +167,22 @@ test('Universe: outage → TMDB error, not "Couldn\'t find on TMDB"', async () =
   assert.strictEqual(env.preview(), `Couldn't check TMDB right now. ${n} of ${n} title lookups failed. Nothing was changed.`);
   assert.ok(!env.preview().includes("Couldn't find"));
 });
+test('Universe: a tag backfill is reconciled by reading the view again before the write lane is released (Batch A)', async () => {
+  const film = { id: 'f1', item_key: 'iron man|film', title: 'Iron Man', season: 'Film', theme: 'Action', media_type: 'movie', tmdb_id: 1726, collections: [], date_sort: '2008-05-02' };
+  const env = makeEnv({ rows: [film], tmdb: p => (p === '/movie/1726' ? { id: 1726, title: 'Iron Man', release_date: '2008-05-02' } : p.startsWith('/search') ? { results: [] } : fail(404)) });
+  const patches = [];
+  env.ctx.sbFetch = async (method, p, body) => { if (method !== 'PATCH') throw new Error(`unexpected ${method} ${p}`); patches.push(body); return null; };
+  let reread, laneDuringReread;
+  env.ctx.loadBrowseView = () => { laneDuringReread = vm.runInContext('writeLane && writeLane.label', env.ctx); return new Promise(r => { reread = r; }); };
+  const p = env.ctx.pullUniverse('mcu');
+  for (let i = 0; i < 50 && !reread; i++) await new Promise(r => setImmediate(r));
+  assert.strictEqual(JSON.stringify(patches), JSON.stringify([{ collections: ['MCU'] }]), 'the backfill was sent');
+  assert.ok(reread, 'the view is read again');
+  assert.ok(laneDuringReread, 'inside the write lane');
+  assert.ok(vm.runInContext('writeLane', env.ctx), 'still held while the reread runs');
+  reread(true); await p;
+  assert.strictEqual(vm.runInContext('writeLane', env.ctx), null, 'released once the reread is in');
+});
 test('Universe: a genuine 404 is "not found"; a failed request is reported separately', async () => {
   const titles = vm.runInContext('UNIVERSE_LISTS.mcu.titles', makeEnv({ tmdb: () => ({}) }).ctx);
   const [first, second] = [titles[0], titles[1]];

@@ -5,10 +5,12 @@
 // (body.saving, list aria-busy) and any other change is refused before anything is
 // shown or sent. Navigation and reads stay available.
 //
-// Reads: dataVersion moves on whenever a change is sent and whenever it is answered or
-// fails (api.js sbFetch). A read keeps the version it started with (readStamp) and may
-// publish only while that version is still current and no change is waiting for its
-// answer (readFresh). So a read that started before or during a write never shows its
+// Reads: dataVersion moves on when a change takes the lane, whenever it sends a request
+// and whenever that request is answered or fails (api.js sbFetch). From taking the lane
+// until its first request settles, the change counts as a pending write (its optimistic
+// redraw and any capability check come before it sends). A read keeps the version it
+// started with (readStamp) and may publish only while that version is still current and
+// no change is pending or waiting for its answer (readFresh). So a read that started before or during a write never shows its
 // older data, during the write or after it. Each reader also keeps its own "newest
 // started wins" number and its view check. A reader whose read was refused this way
 // reads again once the lane is free (readAgainWhenFree).
@@ -34,13 +36,24 @@ const LIST_STALE_TEXT = 'The list couldn’t be read again, so it may be out of 
 function beginWrite(label, opts = {}) {
   if (writeLane) { laneRefused(LANE_BUSY_TEXT(writeLane.label), opts); return null; }
   if (opts.list && listStale) { laneRefused(LIST_STALE_TEXT, opts); return null; }
-  writeLane = { label, after: [] };
+  writeLane = { label, after: [], held: true };
+  writesInFlight++; dataVersion++; // pending from now: no read that overlaps the change publishes
   setSavingMark(true);
   return writeLane;
 }
 
+// The hold ends with the change's first answer (writeSettled) or with the lane, so the
+// reread that reconciles it can publish.
+function releaseLaneHold(lane) {
+  if (!lane || !lane.held) return;
+  lane.held = false;
+  writesInFlight = Math.max(0, writesInFlight - 1);
+  dataVersion++;
+}
+
 function endWrite(lane) {
   if (!lane || writeLane !== lane) return;
+  releaseLaneHold(lane);
   writeLane = null;
   setSavingMark(false);
   lane.after.forEach(fn => { try { fn(); } catch (e) { console.error(e); } });
@@ -89,7 +102,7 @@ function readFresh(stamp) {
 
 // Called by api.js around every request that changes data.
 function writeSent() { writesInFlight++; dataVersion++; }
-function writeSettled() { writesInFlight = Math.max(0, writesInFlight - 1); dataVersion++; }
+function writeSettled() { writesInFlight = Math.max(0, writesInFlight - 1); dataVersion++; releaseLaneHold(writeLane); }
 
 // A read refused because a change overlapped it: read again once the lane is free.
 // fn checks for itself that it is still wanted (the same view, no newer read).

@@ -212,7 +212,9 @@ async function pullPersonFilmographyNow(personId, personName, isNewCollection, r
     // Re-render before writing the preview: renderFilters() rebuilds the whole
     // TMDB panel (including #tmdbPreview), so running it afterwards wiped the list.
     // In All Movies the view is read again instead (its panel is kept).
-    if (backfilled > 0) { if (tool.tab) { renderFilters(); renderTable(); } else reloadOpenView(); }
+    // The reread that reconciles the backfills finishes inside the write lane (awaited).
+    if (backfilled > 0) { if (tool.tab) { renderFilters(); renderTable(); } else await reloadOpenView(); }
+    if (!toolContextLive(tool)) return; // switched away while it read
     const previewTarget = document.getElementById('tmdbPreview');
     if (!previewTarget) return;
     previewTarget.innerHTML = `

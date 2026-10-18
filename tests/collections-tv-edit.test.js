@@ -790,7 +790,7 @@ for (const [F, rowOf, tgt, endpoint] of [
   ['F13', L => L.split.rows[0].id, () => ({ mediaType: 'movie', details: { id: 8010, title: 'Split Film', release_date: '2020-01-01', genres: [{ name: 'Documentary' }], production_companies: [] } }), 'library_match_film_b45']
 ]) {
   for (const o of F === 'F12' ? ['Ub'] : ['R', 'Ub']) {
-    test(`G3 ${F} Match ${o === 'R' ? 'R (refused as stale): nothing written; reported' : 'U lost before commit: can’t tell whether it was saved; never resent; nothing claimed'}`, async () => {
+    test(`G3 ${F} Match ${o === 'R' ? 'R (refused as stale): nothing written; reported' : 'U lost before commit: not confirmed, read again, never resent; nothing claimed'}`, async () => {
       const L = lib();
       const app = await boot(L);
       await openTC(app);
@@ -803,7 +803,7 @@ for (const [F, rowOf, tgt, endpoint] of [
       assert.deepStrictEqual(diff(before, snap(app)), {}, 'nothing written');
       const said = app.el('tmdbMatchBody').innerHTML + banner(app) + notice(app);
       if (o === 'R') assert.ok(/target_changed|changed since|nothing was changed/i.test(said) && !/can.t tell/.test(said), said);
-      else assert.match(said, /can.t tell whether it was saved/);
+      else assert.match(said, /wasn’t confirmed.*won’t be sent again\. The list has been read again/);
       assert.ok(!saved(app));
     });
   }

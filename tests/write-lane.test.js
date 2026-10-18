@@ -85,6 +85,26 @@ test('an older read never publishes during or after a pending change; the reread
   assert.strictEqual(app.get('writeLane'), null);
 });
 
+test('protection starts with the action: an older read that finishes while the capability check is pending never replaces the objects being changed', async () => {
+  const { a, data } = fixture();
+  const app = await open('alltv', data);
+  const older = app.hold(isShowsRead);
+  const pr = app.ctx.loadDerivedView(); // started before the action
+  await older.reached;
+  app.run('stage5Phase = null'); // the write reads the capability first (api.js requireWritablePhase)
+  const cap = app.hold(r => r.url.includes('/rpc/stage5_capabilities'));
+  const pw = app.ctx.setShowStateById(a.show.id, { priority: 'high' });
+  await cap.reached;
+  assert.strictEqual(app.get('tvShowsById').get(a.show.id).priority, 'high', 'shown at once');
+  older.release(); await pr; await settle(); // finishes before anything is sent
+  assert.strictEqual(app.get('tvShowsById').get(a.show.id).priority, 'high', 'the older read did not replace the show being changed');
+  cap.release(); await pw; await settle(); await settle();
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === a.show.id).priority, 'high');
+  assert.strictEqual(app.get('tvShowsById').get(a.show.id).priority, 'high', 'the confirmed answer is on the shown object');
+  assert.strictEqual(app.get('writeLane'), null);
+  assert.ok(!/Loading…|Reading the list again/.test(app.el('tbody').innerHTML + app.el('readStatus').innerHTML), 'the refused read was read again');
+});
+
 test('overlapping reads never publish out of order: an older view read that finishes last changes nothing', async () => {
   const { a, data } = fixture();
   const app = await open('alltv', data);

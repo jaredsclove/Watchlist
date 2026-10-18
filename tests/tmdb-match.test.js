@@ -407,13 +407,15 @@ test('film: library_match_film_b45 times out (57014, one transaction, cancelled)
   assert.strictEqual(env.log.saved, 0);
   assert.ok(env.banner().includes('didn’t finish the match in time, so it was cancelled and nothing was matched'), env.banner());
 });
-test('film: library_match_film_b45 gets no answer (network failure) → "can\'t tell whether it was saved", row untouched', async () => {
+test('film: library_match_film_b45 gets no answer (network failure) → not confirmed, never resent, the view read again; row untouched', async () => {
   const row = manual();
   const env = makeEnv({ rows: [row], tmdb: searchStub, db: { fail: (m, p) => p === 'rpc/library_match_film_b45' ? new TypeError('Failed to fetch') : null } });
   await confirmDune(env);
   assert.strictEqual(row.tmdb_id, null);
   assert.strictEqual(env.log.saved, 0);
-  assert.ok(/no answer came back from the database \(Failed to fetch\), so the page can't tell whether it was saved/.test(env.banner()), env.banner());
+  assert.ok(/wasn’t confirmed \(Failed to fetch\): it may or may not have been saved, and it won’t be sent again\. The list has been read again/.test(env.banner()), env.banner());
+  assert.strictEqual(env.log.rereads, 1, 'read again (the shared reconciliation)');
+  assert.strictEqual(env.log.writes.length, 1, 'never resent');
 });
 test('TV season: library_match_season_b45 times out (57014, one transaction) → "cancelled, nothing was matched"', async () => {
   const { row, env } = await matchSiloS1({ fail: (m, p) => p === 'rpc/library_match_season_b45' ? timeoutErr() : null });
@@ -421,10 +423,10 @@ test('TV season: library_match_season_b45 times out (57014, one transaction) →
   assert.strictEqual(env.log.saved, 0);
   assert.ok(env.banner().includes('didn’t finish the match in time, so it was cancelled and nothing was matched'), env.banner());
 });
-test('TV season: library_match_season_b45 gets no answer (network failure) → "can\'t tell whether it was saved"', async () => {
+test('TV season: library_match_season_b45 gets no answer (network failure) → not confirmed, read again', async () => {
   const { row, env } = await matchSiloS1({ fail: (m, p) => p === 'rpc/library_match_season_b45' ? new TypeError('Failed to fetch') : null });
   assert.strictEqual(row.tmdb_id, null);
-  assert.ok(/can't tell whether it was saved/.test(env.banner()), env.banner());
+  assert.ok(/wasn’t confirmed.*won’t be sent again/.test(env.banner()), env.banner());
 });
 
 (async () => {
