@@ -59,7 +59,6 @@ async function addPulledCollectionMoviesNow() {
   const collectionId = toolCollectionId(); // All Movies' panel (library.js)
   if (!collectionId) return;
   const tool = toolContext(collectionId);
-  const isMoviesTab = true; // films a tool adds carry genre themes (theme_kind 'genre')
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-movie-id]');
   const moviesById = {};
   data.movies.forEach(m => moviesById[m.id] = m);
@@ -84,29 +83,7 @@ async function addPulledCollectionMoviesNow() {
     // fetch full details for genre/runtime accuracy, same as a normal add
     let details;
     try { details = await tmdbFetch(`/movie/${movieId}`); } catch(e) { failedTitles.push(summary.title); continue; }
-    const network = isMoviesTab
-      ? ((details.genres && details.genres[0]?.name) || 'Film')
-      : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
-    const key = `${summary.title.toLowerCase().trim()}|film`;
-    const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
-    const dateSort = details.release_date || '2099-01-01';
-    toInsert.push({
-      item_key: key,
-      title: summary.title,
-      season: 'Film',
-      theme: network,
-      display_date: displayDate,
-      date_sort: dateSort,
-      watched: false,
-      status: 'confirmed',
-      ...creationMetadata('movie', details, summary.title),
-      tmdb_collection_id: data.collectionId,
-      tmdb_collection_name: data.tmdbCollectionName,
-      collections: [data.tmdbCollectionName],
-      media_type: 'movie',
-      tmdb_id: movieId,
-      season_number: null
-    });
+    toInsert.push(toolFilmRow(details, summary.title, movieId, { id: data.collectionId, name: data.tmdbCollectionName }, [data.tmdbCollectionName]));
   }
 
   const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');
@@ -219,7 +196,6 @@ async function addRefreshedCollectionMoviesNow() {
   const collectionId = toolCollectionId(); // All Movies' panel (library.js)
   if (!collectionId) return;
   const tool = toolContext(collectionId);
-  const isMoviesTab = true; // films a tool adds carry genre themes (theme_kind 'genre')
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-collection-idx]');
   const toInsert = [];
   const failedTitles = [];
@@ -236,29 +212,7 @@ async function addRefreshedCollectionMoviesNow() {
     selected++;
     let details;
     try { details = await tmdbFetch(`/movie/${movieId}`); } catch(e) { failedTitles.push(summary.title); continue; }
-    const network = isMoviesTab
-      ? ((details.genres && details.genres[0]?.name) || 'Film')
-      : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
-    const key = `${summary.title.toLowerCase().trim()}|film`;
-    const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
-    const dateSort = details.release_date || '2099-01-01';
-    toInsert.push({
-      item_key: key,
-      title: summary.title,
-      season: 'Film',
-      theme: network,
-      display_date: displayDate,
-      date_sort: dateSort,
-      watched: false,
-      status: 'confirmed',
-      ...creationMetadata('movie', details, summary.title),
-      tmdb_collection_id: entry.collectionId,
-      tmdb_collection_name: entry.collectionName,
-      collections: [entry.collectionName],
-      media_type: 'movie',
-      tmdb_id: movieId,
-      season_number: null
-    });
+    toInsert.push(toolFilmRow(details, summary.title, movieId, { id: entry.collectionId, name: entry.collectionName }, [entry.collectionName]));
   }
 
   const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');

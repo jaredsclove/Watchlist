@@ -159,7 +159,6 @@ async function addPulledUniverseMoviesNow() {
   const collectionId = toolCollectionId(); // All Movies' panel (library.js)
   if (!collectionId) return;
   const tool = toolContext(collectionId);
-  const isMoviesTab = true; // films a tool adds carry genre themes (theme_kind 'genre')
   const checkboxes = document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-tmdb-id]');
   const toInsert = [];
   const failedTitles = [];
@@ -173,31 +172,9 @@ async function addPulledUniverseMoviesNow() {
     selected++;
     let details;
     try { details = await tmdbFetch(`/movie/${tmdbId}`); } catch(e) { failedTitles.push(title); continue; }
-    const network = isMoviesTab
-      ? ((details.genres && details.genres[0]?.name) || 'Film')
-      : ((details.production_companies && details.production_companies[0]?.name) || 'Film');
-    const key = `${title.toLowerCase().trim()}|film`;
-    const displayDate = details.release_date ? formatDisplayDate(details.release_date) : 'TBA';
-    const dateSort = details.release_date || '2099-01-01';
     const belongsTo = details.belongs_to_collection;
     const collections = belongsTo ? [belongsTo.name, universe?.label || universeKey] : [universe?.label || universeKey];
-    toInsert.push({
-      item_key: key,
-      title,
-      season: 'Film',
-      theme: network,
-      display_date: displayDate,
-      date_sort: dateSort,
-      watched: false,
-      status: 'confirmed',
-      ...creationMetadata('movie', details, title),
-      tmdb_collection_id: belongsTo ? belongsTo.id : null,
-      tmdb_collection_name: belongsTo ? belongsTo.name : null,
-      collections,
-      media_type: 'movie',
-      tmdb_id: parseInt(tmdbId, 10),
-      season_number: null
-    });
+    toInsert.push(toolFilmRow(details, title, parseInt(tmdbId, 10), belongsTo, collections));
   }
 
   const failureNote = tmdbAddFailureNote(selected, failedTitles, 'film');

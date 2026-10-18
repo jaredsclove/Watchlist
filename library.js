@@ -1115,6 +1115,30 @@ function toolKnownRows(collectionId) {
   return (td && (td.known || td.rows)) || [];
 }
 
+// One film a movie tool adds (Pull collection, Refresh collections, a person or a universe
+// pull), from its TMDB details: titled as the tool listed it, with a genre theme (theme_kind
+// 'genre'), To Watch and unwatched. tmdbCollection: the TMDB collection it belongs to
+// ({ id, name }) or none; collections: its collection tags.
+function toolFilmRow(details, title, tmdbId, tmdbCollection, collections) {
+  return {
+    item_key: `${title.toLowerCase().trim()}|film`,
+    title,
+    season: 'Film',
+    theme: (details.genres && details.genres[0]?.name) || 'Film',
+    display_date: details.release_date ? formatDisplayDate(details.release_date) : 'TBA',
+    date_sort: details.release_date || '2099-01-01',
+    watched: false,
+    status: 'confirmed',
+    ...creationMetadata('movie', details, title),
+    tmdb_collection_id: tmdbCollection ? tmdbCollection.id : null,
+    tmdb_collection_name: tmdbCollection ? tmdbCollection.name : null,
+    collections,
+    media_type: 'movie',
+    tmdb_id: tmdbId,
+    season_number: null
+  };
+}
+
 // Films added by a tool, through library_add_films: each one inserted, or reported
 // as already on the list (added elsewhere meanwhile); never changed, never twice.
 async function libraryInsertFilms(rows) {
