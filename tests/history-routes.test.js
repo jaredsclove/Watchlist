@@ -313,4 +313,59 @@ test('V6.15 focus in the replaced content goes to the area’s button after a tr
   assert.strictEqual(app.ctx.document.activeElement, outside, 'not moved');
 });
 
+// ═══ Review corrections ════════════════════════════════════════════════════════
+test('review B1: a traversal onto a bare #/collections entry resolves by replacing that entry, so Back returns to the same collection with its filters', async () => {
+  const app = await boot();
+  await nav(app, () => app.ctx.switchView('alltv'));
+  app.followLink('#/collections'); await settle();
+  const A = app.get('activeViewId');
+  assert.strictEqual(at(app), `#/collections/${A.split(':')[1]}`, 'the resolution replaced the entry');
+  app.el('fSearch').value = 'alp'; app.ctx.renderTable();
+  await nav(app, () => app.ctx.selectCollectionTab(cid(app, 'truecrime')));
+  await back(app);
+  assert.strictEqual(view(app), A, 'the same collection');
+  assert.strictEqual(app.el('fSearch').value, 'alp', 'with its filters');
+});
+test('review 4: a route typed after going Back drops the Forward entries’ page memory (no stale filters)', async () => {
+  const app = await boot();
+  await nav(app, () => app.ctx.switchView('alltv'));
+  await nav(app, () => app.ctx.switchMediaType('movie'));
+  app.el('fWatch').value = 'watched'; app.ctx.renderTable();
+  await nav(app, () => app.ctx.openSettings(null));
+  app.go(-2); await settle(); // All TV
+  app.followLink('#/movies'); await settle();
+  assert.strictEqual(view(app), 'allmovies');
+  assert.strictEqual(app.el('fWatch').value, 'unwatched', 'defaults, not the old visit’s filters');
+});
+test('review 1: a back/forward-cache return during an Add batch stops it; the item out becomes Not confirmed; nothing further is sent; a late answer is only recorded', async () => {
+  const L = lib();
+  const app = await boot({}, L);
+  await nav(app, () => app.ctx.openCollections(null));
+  await nav(app, () => app.ctx.selectCollectionTab(cid(app, 'truecrime')));
+  app.ctx.openAddPicker(null);
+  app.ctx.addPickerToggle(`i:${L.f2.id}`, true); app.ctx.addPickerToggle(`s:${L.bravo.show.id}`, true);
+  const g = app.hold(r => r.url.endsWith('/rpc/org_add_membership'));
+  const p = app.ctx.submitAddPicker();
+  await g.reached;
+  app.firePageShow(true); await settle();
+  g.release(); await p; await settle();
+  assert.strictEqual(app.requests.filter(r => r.url.endsWith('/rpc/org_add_membership')).length, 1);
+  const st = JSON.parse(app.get('JSON.stringify(addBatch.items.map(i => i.state))'));
+  assert.deepStrictEqual(st, ['unconfirmed', 'notsent']);
+  assert.ok(!app.el('addPickerBox').innerHTML.includes('undoAddBatch()'), 'no Undo for it');
+});
+test('review 1: a Remove whose answer arrives after a back/forward-cache return changes nothing on the page (no Undo); the list is read again', async () => {
+  const L = lib();
+  const app = await boot({}, L);
+  await nav(app, () => app.ctx.openCollections(null));
+  await nav(app, () => app.ctx.selectCollectionTab(cid(app, 'truecrime')));
+  const g = app.hold(r => r.url.endsWith('/rpc/org_remove_membership'));
+  const p = app.ctx.removeFromCollection('film', L.f1.id, null);
+  await g.reached;
+  app.firePageShow(true); await settle();
+  g.release(); await p; await settle();
+  assert.ok(!app.el('banner').innerHTML.includes('undoCollectionRemove'), 'no Undo');
+  assert.strictEqual(app.get('collectionUndo'), null);
+});
+
 T.run();

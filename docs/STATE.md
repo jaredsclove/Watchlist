@@ -133,7 +133,9 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 - **Branch `s4-s6` (not released):** Remove / Undo from a collection and each Add or Undo batch are
   one change each through the lane (`{ list: true }`), using the existing `org_*` functions with the
   ids the view read; the collection is read again inside the lane. History traversal only navigates
-  (reads); it never writes, resends, retries or undoes.
+  (reads); it never writes, resends, retries or undoes. Accepted on the branch: the leave warning
+  stays registered through a change's reconciling reread (it over-warns, never under-warns); Back
+  with an idle Manage that saved changes starts its collection reread before navigating (a wasted read).
 - **One focus rule:** a redraw moves focus only if it was in the list (B6 chain F-1…F-7); a filter-row
   redraw keeps the focused control, its value and caret.
 - **Accepted limitations (owner-approved with the release):** after a refused change is rolled back,

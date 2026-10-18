@@ -197,8 +197,10 @@ let pullPreselect = null; // S5: { viewId, ids }: the films the last Pull rest i
 let routeEntry = 0; // S6: the number of the history entry shown (history.js); kept in each entry's state
 let routeMemory = new Map(); // S6: page memory of the entries this page has shown: number → { viewId, filters, visit state } (D15; never stored)
 let routeNavMode = null; // S6: how the next switchView records its route: null (push), 'replace', 'none' (a traversal already on its entry)
+let pageShowEpoch = 0; // S6: bumped when the page comes back from the back/forward cache (history.js); a membership answer from before it changes nothing
 let browseLayoutPending = false; // S6: a collection opened by its route before the collections were read takes its remembered layout once read
-let collectionUndo = null; // S4: the open collection's Undo after a confirmed Remove: { viewId, epoch, collectionId, showId, itemId, label, name }; withdrawn on leaving the view or a restore
+let collectionUndo = null; // S4: the open collection's Undo after a confirmed Remove: { kind, id, title, name, collectionId, viewId, epoch }; withdrawn on leaving the view or a restore
+let removeNotice = null; // S4: the open collection's Remove notice { text, withUndo }, drawn with the Add notice (collection-members.js renderCollectionBanner)
 let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.js)
 
 

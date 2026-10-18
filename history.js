@@ -65,7 +65,10 @@ function rememberRouteEntry() {
 // while a traversal is already on its entry).
 function noteRoute(id, entryKind) {
   if (!historyUsable()) return;
-  const mode = routeNavMode || (['remembered', 'default', 'fallback'].includes(entryKind) ? 'replace' : 'push');
+  const resolution = ['remembered', 'default', 'fallback'].includes(entryKind);
+  // The Collections area's resolution (or a fallback) replaces its entry, also when a traversal opened
+  // the Collections state (the entry number stays; nothing is pushed).
+  const mode = resolution ? 'replace' : routeNavMode || 'push';
   const url = routeOfView(id);
   if (!url || mode === 'none') return;
   if (mode === 'push' && location.hash === url) return; // already there: no extra entry
@@ -110,7 +113,10 @@ function onRouteTraversal(event) {
   closeDialogsForTraversal();
   rememberRouteEntry();
   if (state && state.watchlist && Number.isInteger(state.n)) routeEntry = state.n;
-  else routeEntry += 1; // a route typed or linked while the page is open: a new entry of its own
+  else { // a route typed or linked while the page is open: a new entry of its own (the Forward ones are gone)
+    routeEntry += 1;
+    for (const k of [...routeMemory.keys()]) if (k >= routeEntry) routeMemory.delete(k);
+  }
   // An unknown route is replaced by Currently Watching's; an entry without a number gets one.
   if (target === null || !(state && state.watchlist)) history.replaceState({ watchlist: 1, n: routeEntry }, '', target === null ? '#/tv/watching' : location.hash);
   const id = target || 'watching';
@@ -174,6 +180,10 @@ function updateLeaveWarning() {
 // sent again; the open view is read again.
 function onPageShow(event) {
   if (!event || !event.persisted) return;
+  // A running Add / Undo batch stops, and the item that was out becomes Not confirmed (Stop waiting's
+  // path: its late answer is only recorded); a Remove or Undo answer arriving now changes nothing.
+  pageShowEpoch++;
+  if (typeof addBatch !== 'undefined' && addBatch && addBatch.phase === 'submitting') { addBatch.stop = true; if (addBatch.abandon) addBatch.abandon(); }
   const text = writeLane ? `${writeLane.label} wasn’t confirmed: you left the page while it was being saved, so it may or may not have been saved, and it won’t be sent again. The list is being read again.` : '';
   if (typeof reloadOpenView === 'function') reloadOpenView(); // (a reread clears the error line, so the message follows it)
   if (text) showError(text);

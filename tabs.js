@@ -58,6 +58,7 @@ function switchView(id) {
   if (typeof cancelEffectDialog === 'function') cancelEffectDialog();
   if (routeNavMode !== 'none' && typeof rememberRouteEntry === 'function') rememberRouteEntry(); // S6 (D15): the entry being left, in page memory
   collectionUndo = null; // S4: Undo belongs to the collection visit it was offered in
+  removeNotice = null;
   if (typeof addPickerOnNavigate === 'function') addPickerOnNavigate(); // S5: an idle picker closes; a running batch stops after its current request
   activeViewId = id;
   activeArea = areaOfView(id);

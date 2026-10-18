@@ -35,18 +35,27 @@ const COLLECTION_CAPABILITY_TEXT = {
   unknown: 'Couldn’t check whether collection editing is available, so nothing was changed. Try again.'
 };
 
-// The notice above the list: a line of text and, while it applies, Undo.
+// The notice above the list: a Remove's line (with Undo while it applies) and, below it, this visit's
+// Add / Undo batch summary (renderAddNotice). Each keeps its own Undo until the visit ends or a restore.
 function showCollectionNotice(text, withUndo) {
+  removeNotice = text ? { text, withUndo: !!withUndo } : null;
+  renderCollectionBanner();
+}
+
+function renderCollectionBanner() {
   const el = document.getElementById('banner');
   if (!el) return;
   const active = document.activeElement;
-  const hadFocus = !!active && typeof active.closest === 'function' && !!active.closest('#collectionNotice');
-  if (text) addBatch = null; // the latest notice wins: an earlier batch's results and Undo give way
-  el.innerHTML = text ? `<div class="banner collection-notice" id="collectionNotice" role="status" tabindex="-1">${esc(text)}${withUndo
+  const focusId = active && typeof active.closest === 'function' && active.closest('#collectionNotice, #addNotice') ? active.id || null : null;
+  const inRemove = !!active && typeof active.closest === 'function' && !!active.closest('#collectionNotice');
+  const inAdd = !!active && typeof active.closest === 'function' && !!active.closest('#addNotice');
+  const r = removeNotice;
+  const removeHtml = r ? `<div class="banner collection-notice" id="collectionNotice" role="status" tabindex="-1">${esc(r.text)}${r.withUndo
     ? ` <button class="btn" id="collectionUndoBtn" onclick="undoCollectionRemove()">Undo</button>` : ''}</div>` : '';
-  // A used Undo button is replaced: focus stays on the notice rather than falling to the page.
-  if (hadFocus) {
-    const again = document.getElementById(withUndo ? 'collectionUndoBtn' : 'collectionNotice') || document.getElementById('collectionNotice');
+  el.innerHTML = removeHtml + addNoticeHtml();
+  // A used button is replaced: focus stays on its notice rather than falling to the page.
+  if (inRemove || inAdd) {
+    const again = (focusId && document.getElementById(focusId)) || document.getElementById(inRemove ? 'collectionNotice' : 'addNotice') || document.getElementById('collectionNotice');
     if (again && typeof again.focus === 'function') again.focus();
   }
 }
@@ -73,7 +82,7 @@ async function removeFromCollection(kind, id, seasonId) {
     reloadOpenView();
     return;
   }
-  const target = { kind, id, title: rec.title, name: dest.label, collectionId: dest.collectionId, membershipId: m.id, viewId, epoch };
+  const target = { kind, id, title: rec.title, name: dest.label, collectionId: dest.collectionId, membershipId: m.id, viewId, epoch, shown: pageShowEpoch };
   await runWrite(`Remove “${rec.title}” from ${dest.label}`, () => collectionRemoveNow(target), { list: true });
 }
 
@@ -95,6 +104,7 @@ async function undoCollectionRemove() {
   await runWrite(`Undo: “${u.title}” back to ${u.name}`, async () => {
     if (collectionUndo !== u) return;
     collectionUndo = null; // offered at most once, whatever the answer
+    u.shown = pageShowEpoch;
     const cap = await checkOrgCapability();
     if (cap !== 'yes') { showCollectionNotice('', false); showError(COLLECTION_CAPABILITY_TEXT[cap] || COLLECTION_CAPABILITY_TEXT.unknown); return; }
     if (activeViewId !== u.viewId || orgEpoch !== u.epoch) return;
@@ -108,6 +118,9 @@ async function undoCollectionRemove() {
 // One answer to a Remove or an Undo: reported in Manage's words; the collection is read again.
 async function collectionAnswer(t, kind, args, res, err) {
   const info = err ? orgErrorInfo(err) : null;
+  // Left the page and brought back from the back/forward cache meanwhile: not confirmed (history.js), so
+  // the answer changes nothing; the list is read again.
+  if (t.shown !== pageShowEpoch) { if (activeViewId === t.viewId) await reloadOpenView(); return; }
   const here = activeViewId === t.viewId && orgEpoch === t.epoch;
   if (info && orgMissingFunction(info)) {
     orgWriteCapability = null;
@@ -211,6 +224,7 @@ function addCandidates() {
 // preselect: ids of films to start selected (the Pull rest follow-up); only ones that can be added.
 function openAddPicker(opener, preselect) {
   if (addPicker) return;
+  if (writeLane) { showError(LANE_BUSY_TEXT(writeLane.label)); return; } // refused before anything is shown
   if (!collectionAddAllowed()) {
     showError('Adding to this collection isn’t possible right now: the list may be incomplete or out of date. Read it again first. Nothing was changed.');
     return;
@@ -319,7 +333,6 @@ async function startAddBatch(p, batch, label) {
   const before = addBatch, beforeBatch = p ? p.batch : null;
   if (p) p.batch = batch;
   addBatch = batch;
-  collectionUndo = null; // a Remove's Undo notice gives way to this batch
   renderAddPicker(); renderAddNotice();
   const ran = await runWrite(label, () => runAddBatch(batch), { list: true });
   if (ran === undefined && !batch.started) { // refused before anything was sent (another change, or the list out of date)
@@ -458,7 +471,7 @@ function addSummaryText(b) {
 // some item it added hasn't had its Undo sent.
 function addUndoHtml(b) {
   const root = b && (b.kind === 'add' ? b : b.undoOf);
-  if (!root || addBatchRunning(b) || root.left || b.left || root.viewId !== activeViewId || root.epoch !== orgEpoch) return '';
+  if (!root || addBatchRunning(b) || b.pending || root.left || b.left || root.viewId !== activeViewId || root.epoch !== orgEpoch) return '';
   const n = root.items.filter(it => it.state === 'added' && it.membershipId && !it.undoTried).length;
   return n ? ` <button class="btn" id="addUndoBtn" onclick="undoAddBatch()">Undo ${n} confirmed addition${n === 1 ? '' : 's'}</button>` : '';
 }
@@ -536,18 +549,16 @@ function addStopWaiting() {
 // details, and Undo while it applies.
 function renderAddNotice() {
   const b = addBatch;
-  const el = document.getElementById('banner');
-  if (!el || !b || addPicker || b.left || b.viewId !== activeViewId) return;
-  const active = document.activeElement;
-  const hadFocus = !!active && typeof active.closest === 'function' && !!active.closest('#addNotice');
-  const focusId = hadFocus ? active.id : null;
+  if (!b || addPicker || b.left || b.viewId !== activeViewId) return;
+  renderCollectionBanner();
+}
+
+function addNoticeHtml() {
+  const b = addBatch;
+  if (!b || addPicker || b.left || b.viewId !== activeViewId) return '';
   const details = b.details ? addResultsListHtml(b) + (b.undoOf ? addResultsListHtml(b.undoOf) : '') : '';
-  el.innerHTML = `<div class="banner collection-notice" id="addNotice" role="status" tabindex="-1">${esc(addSummaryText(b))}
+  return `<div class="banner collection-notice" id="addNotice" role="status" tabindex="-1">${esc(addSummaryText(b))}
       ${addBatchRunning(b) ? '' : ` <button class="btn" id="addDetailsBtn" aria-expanded="${!!b.details}" onclick="toggleAddDetails()">${b.details ? 'Hide details' : 'Show details'}</button>${addUndoHtml(b)}`}${details}</div>`;
-  if (hadFocus) {
-    const again = (focusId && document.getElementById(focusId)) || document.getElementById('addNotice');
-    if (again && typeof again.focus === 'function') again.focus();
-  }
 }
 
 function toggleAddDetails() {

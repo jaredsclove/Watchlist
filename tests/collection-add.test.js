@@ -325,10 +325,10 @@ test('the batch is one change: refused while another change is saved (nothing se
   const L = lib();
   const app = await boot(L);
   await openTC(app);
+  app.ctx.openAddPicker(null); pick(app, `i:${L.f1.id}`); // (opened first: it isn't offered while a change is saved)
   const g = app.hold(r => r.url.endsWith('/rpc/library_set_film_state_b45'));
   const pending = app.ctx.setFilmPriority(L.member.id, 'high');
   await g.reached;
-  app.ctx.openAddPicker(null); pick(app, `i:${L.f1.id}`);
   await app.ctx.submitAddPicker(); await settle();
   assert.ok(!rpc(app, 'org_add_membership').length && app.get('addPicker.batch') === null && app.get('addPicker.selected.size') === 1);
   g.release(); await pending; await settle();
@@ -369,6 +369,34 @@ test('V5.9 Pull rest in a collection offers “Add these films to <C>…”: the
   assert.ok(!rpc(app, 'org_add_membership').length, 'nothing added until Add');
   await app.ctx.submitAddPicker(); await settle();
   assert.strictEqual(rpc(app, 'org_add_membership').length, 2);
+});
+
+// ═══ Review corrections ════════════════════════════════════════════════════════
+test('review 2: a Remove after an Add batch keeps the batch’s summary and Undo (both notices shown); each Undo still works', async () => {
+  const L = lib();
+  const app = await boot(L);
+  await openTC(app);
+  app.ctx.openAddPicker(null); pick(app, `i:${L.f1.id}`);
+  await app.ctx.submitAddPicker(); await settle();
+  app.ctx.closeAddPicker();
+  await app.ctx.removeFromCollection('film', L.member.id, null); await settle(); await settle();
+  assert.ok(notice(app).includes('undoCollectionRemove()') && notice(app).includes('undoAddBatch()') && notice(app).includes('Add to True Crime / Docs: 1 added.'), notice(app));
+  await app.ctx.undoAddBatch(); await settle();
+  assert.ok(notice(app).includes('undoCollectionRemove()'), 'the Remove’s Undo stays');
+  await app.ctx.undoCollectionRemove(); await settle();
+  assert.deepStrictEqual(writes(app).map(r => r.url.split('/rpc/')[1]), ['org_add_membership', 'org_remove_membership', 'org_remove_membership', 'org_add_membership']);
+});
+test('review 3: the picker doesn’t open while another change is being saved (refused before anything is shown)', async () => {
+  const L = lib();
+  const app = await boot(L);
+  await openTC(app);
+  const g = app.hold(r => r.url.endsWith('/rpc/library_set_film_state_b45'));
+  const p = app.ctx.setFilmPriority(L.member.id, 'high');
+  await g.reached;
+  app.ctx.openAddPicker(null);
+  assert.strictEqual(app.get('addPicker'), null);
+  assert.ok(app.el('errorBanner').innerHTML.includes('is still being saved'));
+  g.release(); await p; await settle();
 });
 
 T.run();

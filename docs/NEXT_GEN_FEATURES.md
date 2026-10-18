@@ -208,3 +208,167 @@ When revisiting, establish expected user count and preferred login method. Ask C
 - [Custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp)
 - [Row-level security](https://supabase.com/docs/guides/database/postgres/row-level-security)
 - [Database functions and execution privileges](https://supabase.com/docs/guides/database/functions)
+
+## 4 Revisit catalog refresh discovery and review
+
+Added 2026-10-18. **Status: deferred maintenance and design exploration.** This is partly a compatibility review of existing functionality, not solely a new feature. Capture three workstreams: verify the refresh-catalogs skill against current database/UI behavior; consider an in-app replacement or integration; and reconsider the simplest way to deliver the required outcome. No refresh run, production access, skill modification, schedule or implementation is authorized by this entry.
+
+### Required functionality
+
+For a selected catalog such as Disney Plus, 90 Day or Sheridan:
+
+- Discover qualifying new shows and new seasons of existing shows, with supported release dates or explicitly uncertain release windows.
+- Include qualifying films where the catalog definition calls for them.
+- Match to TMDB where possible. Allow supported announcements before TMDB has an entry; revisit unmatched items in later runs and propose an identity match once available.
+- Support durable exclusion rules, for example always exclude every version of 90 Day Pillow Talk.
+- Support explicit catalog definitions. Example for discussion: Sheridan series where he is credited as writer or creator, and films where he is credited as director or writer. This is an illustrative definition, not an adopted replacement for the current curated scope.
+- Support manual discovery and potentially automatic scheduled discovery.
+- Present findings for user review before acceptance. Automatic discovery must not imply automatic additions, matching, metadata changes or other library mutations.
+
+The desired outcome is a maintained catalog and a reviewable set of additions/updates, without requiring the user to remember every announcement or repeatedly reject the same unwanted content.
+
+### Existing skill and initial observations
+
+The installed refresh-catalogs SKILL.md and the workspace copy at outputs/refresh-catalogs/SKILL.md were identical when inspected on 2026-10-18. They are reference material for this item; neither was changed or executed. This was a workflow inspection, not verification against the current deployed app or database.
+
+The skill already describes two discovery tracks: direct TMDB metadata for identified TV shows, and official/trade research for unmatched shows, films and announcements. It includes catalog-wide discovery, exclusions, standing decisions, provisional future seasons and safeguards for incompatible season structures. Findings are proposed before application.
+
+Its existing delivery path updates catalog defaults in config.js, deploys them, and explicitly applies a matching preview through the app's Catalog updates workflow. Some metadata corrections require separately approved operations. A config change alone is not a library update. The skill distinguishes catalog governance from personal collection membership and preserves intentional membership removals.
+
+Two specific matters deserve attention:
+
+- The document includes substantial historical stage branching and references to both current and old handoff paths, including docs/HANDOFF.md. Review whether those remain appropriate and simplify obsolete procedure after verifying current behavior; their presence alone does not prove that a refresh is broken.
+- Matching existing unmatched records is currently outside refresh scope and is treated as separate identity enrichment. The requested later-run matching would extend that scope. It must preserve curated names, labels, relationships and progress, with ambiguous matches held for review.
+
+### Part 1 Compatibility review
+
+Compare the skill with the then-current STATE.md, supported catalog preview/apply and matching functions, current UI, owner model, backup format and uncertainty handling. Check current supported paths rather than relying on historical stage names, row counts or test totals.
+
+Focus on meaningful behavior: new show/season/film additions, provisional entries, date fills and corrections, duplicates, identity conflicts, skipped and ended shows, archived collection targets and deliberately removed memberships. Preserve existing user status, watched/skipped marks, curation and organization. Catalog refresh must not silently reopen shows, restore removed memberships or merge identities.
+
+Use representative offline examples first. Any production inspection needs separate authorization. Revise the skill only under an implementation/maintenance task; do not turn this backlog item into an automatic broad review or execution gate for unrelated work.
+
+### Part 2 Possible in-app experience
+
+A possible flow is: select a catalog → Check for updates → review proposed additions, date changes and matches → accept selected findings → apply through guarded operations and verify the result. A scheduled check could populate the same review inbox and notify only when useful findings or a failure require attention.
+
+Each finding should show what was found, why it qualifies, source/date evidence, the proposed TMDB identity if available, and its exact effect on the library. Offer accept, defer and reject; distinguish a one-time rejection from a durable exclusion. Repeated runs should update an existing pending finding rather than create duplicate suggestions. Materially changed evidence may reopen a deferred or rejected case under explicit rules.
+
+The app already has a Catalog updates review/application surface, so examine extending it before building a second competing review system. Revalidate accepted proposals against current library state and keep unknown outcomes visible; never blindly resend an application after a timeout.
+
+An in-app button does not mean all discovery must execute in the browser. TMDB lookup is comparatively structured. Announcement discovery, scheduled checks while the app is closed, external credentials and broader web research may need a background service or an external research worker. Determine that boundary before committing to architecture or recurring costs.
+
+### Part 3 Better ways to provide the functionality
+
+Compare a few practical approaches, judged by coverage, maintenance, review effort and cost:
+
+- **Maintain the skill:** retain flexible announcement research and improve compatibility and brevity. Lowest initial product change, but retains an external workflow.
+- **Hybrid:** a skill or background researcher produces structured candidate findings with evidence; the app owns review, decisions and guarded application. This can move the user-facing workflow into Watchlist without first rebuilding all research capabilities.
+- **Mostly in-app structured discovery:** use TMDB and reliable feeds for routine checks, with a manual or assisted announcement path for content absent from those sources. Lower ambiguity, but may miss early announcements or franchise membership.
+
+Prefer a small catalog-definition model over an elaborate rules language. Separate discovery evidence, catalog eligibility, personal inclusion/exclusion decisions and application effects. Consider storing candidate updates as data rather than requiring a code deployment for every catalog change, but assess the migration and operational cost against the current config-based approach.
+
+### Rules and open decisions
+
+- **Catalog meaning:** Disney Plus could mean originals, selected franchises/themes, or everything available in a country. The existing skill uses selected themes. Provider availability is not the same as original production and can change by region.
+- **People and credits:** define whether any episode writing credit qualifies an entire series, whether creator credits qualify every future season, and how co-writing, uncredited work and development announcements count. TMDB may not yet contain announced credits.
+- **Release dates:** choose the relevant country/platform and whether to track original premiere, local streaming release or another date. Keep source and uncertainty; a guessed sort date must never appear as a confirmed premiere.
+- **Exclusions:** define show/franchise-level rules, aliases and precedence. Preserve current exclusions and standing decisions until explicitly revised; the new examples do not replace them automatically.
+- **Pre-TMDB identity:** keep a stable provisional identity and supporting evidence. Later matching should attach identity to the existing entry rather than create a duplicate; split seasons, parts and specials may require user choice.
+- **Later changes:** decide how date revisions, cancellation/shelving, changed titles and withdrawn announcements are surfaced. Missing TMDB data does not prove cancellation; do not automatically delete or skip existing items.
+- **Multiple users:** with item 3, public discovery may be shared, while acceptance, exclusions, status and collection membership remain scoped to each library. Catalog definitions may be shared defaults with personal overrides; this is not yet decided.
+- **Scheduling:** cadence, notifications, provider quotas and background hosting are open. No automation is created by recording this item.
+
+### When revisiting
+
+Start with a bounded compatibility review of the current skill and current catalog application paths, then choose the delivery approach. A hybrid research-to-review inbox is a promising candidate, not a selected implementation. Settle catalog definitions and date semantics before promising exhaustive discovery. Keep user review before acceptance as a core requirement across manual and scheduled modes.
+
+## 5 Video games section
+
+Added 2026-10-18. **Status: deferred design exploration.** Add video games as a major section of the app, with its own appropriate tracking model and interface. Series support is required, for example Call of Duty, along with genre metadata and filtering. The owner notes prior discussions; recover relevant prior decisions when revisiting rather than treating the open questions below as settled requirements. No implementation is approved.
+
+### Required direction
+
+Provide a personal game library with individual titles and meaningful series/franchise grouping. Genre should support discovery and browsing. Design this as a first-class section, not a relabelled TV season list. Reuse collections, search, navigation and private-library infrastructure where their behavior fits.
+
+### Design questions
+
+- **Tracking:** choose useful states such as Want to play, Playing, Finished, Paused or Dropped; these are candidates, not an approved status list. Define completion for open-ended, multiplayer and live-service games before adding detailed progress.
+- **Series:** distinguish a broad franchise from subseries and numbered release order. Decide how spin-offs, remakes, remasters and compilations appear and whether a title can belong to multiple groupings. Call of Duty is the motivating example, not a complete hierarchy specification.
+- **Identity:** determine whether the tracked entity is a game, an edition or a platform-specific release. Avoid accidentally duplicating one game across platforms while preserving meaningful differences.
+- **Metadata:** genre, platforms, release dates, developer/publisher and series are candidates. Decide which are essential, editable or sourced automatically, and how multi-valued genres work.
+- **Ownership and availability:** decide whether owned, subscription-accessible and wishlist games matter; ownership should not be confused with play status. Platform/store availability and regional release dates may require separate treatment.
+- **Collections:** support personal groupings where useful. Decide whether series views are metadata-driven and how they coexist with manually curated collections.
+- **Data provider:** investigate game metadata sources, identity coverage, licensing, access cost and maintenance before selecting one. No provider has been evaluated or chosen for this item.
+- **Interface:** design the landing view, series expansion/detail, add flow, filters and phone experience around common game-tracking tasks. Avoid importing TV-specific fields or rules without a reason.
+
+### Architecture and scope
+
+Respect per-user isolation from item 3 and include any new durable personal data in backup/restore. Assess shared media primitives versus game-specific tables and controls without forcing a framework rewrite or a universal content model. A series groups independent games; it should not inherit TV show/season behavior automatically.
+
+Start with a few representative examples and a small interactive mockup, then settle a minimal useful scope. Defer achievements, detailed playtime, platform-account synchronization and automatic progress unless later selected. Ratings or release discovery may connect to items 2 and 4, but source support and rules need their own assessment.
+
+## 6 Books section
+
+Added 2026-10-18. **Status: deferred design exploration.** Add books as a major section of the app, with a reading-specific model and interface. Book-series support is required, for example Cormoran Strike. Author collections are especially important, along with genre metadata and filtering. The owner notes prior discussions; recover relevant prior decisions when revisiting rather than assuming the details below were agreed. No implementation is approved.
+
+### Required direction
+
+Provide a personal book library organized around individual books, series and authors. Make an author's books easy to browse and collect. Design reading workflows directly rather than treating a book as a film or a series as a TV show. Reuse common app behavior where appropriate.
+
+### Design questions
+
+- **Tracking:** choose useful states such as Want to read, Reading, Finished, Paused or Abandoned; these are candidates. Decide whether page, percentage or audiobook progress is worthwhile initially, and whether rereads belong in a later version.
+- **Series:** represent ordered series such as Cormoran Strike. Consider publication order versus recommended reading order, prequels, novellas, unnumbered companions and books that belong to more than one series.
+- **Author collections:** determine whether these automatically include all known works, only tracked books, or a curated selection. Decide whether new works become suggestions requiring review. Distinguish authoritative authorship metadata from personal collection membership.
+- **Author identity:** handle pen names, coauthors and contributor roles without conflating authors, editors, translators and audiobook narrators. Decide how alternate names are displayed and searched.
+- **Book identity and editions:** distinguish the underlying work from editions, ISBNs, translations and formats. A paperback, ebook and audiobook may represent the same reading choice but have different page counts, narrators or dates. Decide what the user tracks and preserve meaningful differences without unnecessary duplicates.
+- **Metadata:** genre, authors, series/order, publication dates, language and format are candidates. Determine essential fields, multiple genres, curated overrides and missing metadata behavior.
+- **Ownership:** decide whether owned, borrowed, library availability and format belong in scope; keep them separate from reading progress.
+- **Data provider:** investigate coverage, identifiers, author/series relationships, licensing and access costs. No provider is selected. Announced books may need provisional entries and later matching, related to item 4.
+- **Interface:** design author browsing, series views, reading lists, add/search, filters and phone use. Author collections should be a central design example rather than an incidental filter.
+
+### Architecture and scope
+
+Maintain per-user library isolation and reliable backup/restore for all personal reading data. Assess book-specific entities and relationships alongside shared collection/navigation features. Provider metadata and replaceable caches should remain distinguishable from durable user progress and curation.
+
+Start with representative cases: one ordered series, one author collection, a coauthored or pen-name work, and multiple editions/formats of a book. Use those to resolve identity and organization before choosing a schema. Defer reading challenges, social features, quotations/notes and automated reader-device synchronization unless explicitly selected. Integrations with ratings and catalog discovery remain optional follow-on work.
+
+## 7 Up Next planning queues
+
+Added 2026-10-18. **Status: deferred design exploration.** Let each user plan what to watch, read and play next, in a personally chosen order. This captures near-term intent beyond the full library. No implementation is approved; the behavior below is the proposed direction to refine during design.
+
+### Proposed experience
+
+Prefer three separate ordered queues, shown together on a planning screen: Watch next, Read next and Play next. Ordering books against films or games is unnecessary for the initial scope. The watch queue can mix films and TV seasons. Books and games become available as items 5 and 6 are implemented; a watch-only queue could ship independently.
+
+- Add to queue from an item wherever it appears in the app.
+- Append to the end by default, with an explicit Watch/Read/Play next action to move it to the top.
+- Reorder with accessible controls, including simple move-up/down actions that work on phones; drag-and-drop may be an enhancement.
+- Remove from the queue without deleting the item or changing its collection memberships.
+- Show currently active items above the planned queue and let users start queued items with the normal status controls.
+- Starting an item should move it from the planned queue into the appropriate current activity view. Completing it reveals the next planned item without automatically starting it or marking anything completed.
+
+For TV, initially queue a specific season. A show-level shortcut could resolve its next eligible season, but must show which season it selects. Resolve how starting a queued season interacts with the existing show-level Watching status and optional episode progress from item 1; do not silently invent a new season status.
+
+### Behavior and boundaries
+
+The queue expresses chosen order, separately from status and priority. An item can be To Watch/Read/Play without being queued. High-priority items may be good queue candidates but should not enter or reorder themselves automatically.
+
+Allow unreleased items with a clear release date or TBA label. Preserve the user's chosen order rather than silently rearranging around availability. Starting an unqueued item should leave the existing queue intact. This is a flexible plan, not a calendar commitment or a restriction on what can be started.
+
+Keep queues private to each user under item 3. An item should not appear twice in the same queue; decide how adding an already queued item behaves, preferably revealing its current position with an explicit option to move it. Define what happens when queued items are skipped, completed elsewhere, deleted or rematched. Preserve identity and ordering through ordinary metadata changes.
+
+Queue membership and ordering are durable personal data and should be covered by backup/restore. Starting an item must not leave contradictory queue and activity state after a failed or uncertain save. Use the existing guarded write and reconciliation approach, with the precise storage design deferred.
+
+### Relationship to other ideas
+
+The queue could give a future cross-media home screen a practical focus: current activities followed by planned items. A release digest could later highlight when a queued item becomes available, but neither that digest nor a broader home-screen redesign is approved or added as a separate feature by this entry.
+
+Distinguish this planning queue from the existing TV Up next calculation, which identifies a season within a show. Naming and presentation should make the difference clear and avoid replacing established behavior accidentally.
+
+### Smallest useful scope and next decisions
+
+Begin with one ordered queue per supported activity, Add to queue, move controls, removal and an explicit start action. Defer deadlines, reminders, automatic recommendations, automatic sequencing across an entire series and elaborate scheduling.
+
+When revisiting, mock up the planning screen and entry points using films and TV seasons first, with book/game examples to test extensibility. Settle the start/completion behavior, treatment of unreleased or skipped items, and naming before selecting the data model. Preserve the ability to implement this independently of the other deferred features.
