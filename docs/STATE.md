@@ -1,6 +1,6 @@
 # Watchlist Tracker: current state
 
-Read this first in every session. It is the only startup document; keep it short (about 150 lines).
+Read this first in every session. It is the only startup document; keep it short.
 History lives in git and in `docs/history/` (the full handoff up to 2026-10-18). Read history only
 when a task needs it. The repo, the deployed site and the production database outrank this file;
 report any difference.
@@ -51,44 +51,30 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 
 ## Where things stand (2026-10-18)
 
-- **App release:** `1618e1a`, simplification Batch B (PR #3; released 2026-10-18 UTC by fast-forwarding
-  `main` from `5c33ca8`; previous release `f6a81fc`, S4–S6). The Pages build and deployment succeeded;
-  53 deployed responses (the page and every file it references, plain and versioned) were byte-identical
-  to `1618e1a` (GET only; no live app session, no production data access).
-  GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
+GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
+Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
+test runner and token check [#4].
+
+- **App release:** `1618e1a`, simplification Batch B (PR #3). Later `main` commits are tests and docs only.
 - **Database (as last recorded, not freshly observed):** phase `contracted-b45`, backup format 5,
   recovery archive active. G9 (archive retirement) is paused. Rollbacks follow the recorded order
   (history §18: P1 → P2 → P3′ → D2), each with its own approval; a B4/B5 rollback is lossy.
-- **B3 / B1 / B7 plan is complete:** S1–S6 released. S4–S6 (`afaba21` S4, `df69346` S5, `9c3a5f7` S6,
-  token and review corrections up to `f6a81fc`) shipped together; PR #2 holds the review, the
-  findings' dispositions and the validation limits. D10 is deferred. Release validation: offline
-  43 suites, 1,157/1,157 (capped); one independent review (Fable) plus a focused follow-up; bounded
-  Claude in Chrome checks on a local synthetic backend (1280 / 375 px; S6 with real Back / Forward,
-  reload and direct links); the Pages build and deployment succeeded and 53 deployed responses (the
-  page and every referenced file, plain and versioned) were byte-identical to `f6a81fc`. A read-only
-  live check passed (owner-approved; non-GET requests refused in the page): the new version loaded;
-  routes, real Back / Forward and a reload on a collection route worked; a film's Remove dialog and
-  the Add picker opened and were cancelled; only GET requests, no console errors; browser storage
-  was unchanged and left as before. No production write.
-- **Rollback of S4–S6:** no database migration, but the app's new actions change saved data
-  (memberships, film state, deletes, Match, Pull rest), and reverting code doesn't reverse them. The
-  stage commits depend on each other: revert the whole set together, newest first, tested like any
-  change. It needs its own approval.
-- **Simplification Batch A is complete** (A1 `e5cee7b`; A2–A5 `2f3050b` plus review corrections `9487ce8`,
-  PR #1).
-- **Simplification Batch B is complete and released** (B1 `5ea7b04`, B2 `eb1bd9c`, B3 `0e3a5c0`, B4 `0bf0a35`,
-  review follow-up `1618e1a`; PR #3 holds the B0 inventory, the changes, the review and the validation limits). B1 retired the pre-B4/B5 phases from
-  the app's checks, the harness and the tests (the fail-closed phase check, the stop switch and the
-  mismatch notice are unchanged); B2 shares the membership request / answer / Undo rules between Manage
-  and the collection view and one dialog keyboard / focus helper; B3 one film-row builder for the movie
-  tools; B4 tests and docs. No database change and no change to saved-data behaviour, so reverting it is a
-  code revert of the five commits (newest first, tested like any change), with its own approval.
-- **Recovery reference (not a recipe):** before and after Batch B, the deployed page meets a rolled-back
-  (`contracted`) database the same way: the mismatch notice, no usable list, no backup, every write
-  refused; Batch B adds no outage between P2 and P3′. P3′'s verified target stays the application files
-  of `aeb9f73` (documentation-only commits excluded); reaching it means removing every application commit
-  after `aeb9f73`, which now includes Batch A, S4–S6 and Batch B. The procedure is the
-  owner's (history §18).
+- **Done:** the B3 / B1 / B7 plan (S1–S6; D10 deferred), simplification Batches A and B.
+- **Reverting releases** (each needs its own approval, tested like any change):
+  - S4–S6: no database migration, but the app's actions change saved data (memberships, film state,
+    deletes, Match, Pull rest) and reverting code doesn't reverse them. The stage commits depend on each
+    other: revert the set together, newest first.
+  - Batch B: no saved-data effect; a code revert of its commits, newest first.
+- **Recovery reference (not a recipe):** the deployed page meets a rolled-back (`contracted`) database
+  with the mismatch notice, no usable list, no backup and every write refused. P3′'s verified target is
+  the application files of `aeb9f73` (documentation-only commits excluded); reaching it means removing
+  every application commit after `aeb9f73` (now including Batch A, S4–S6 and Batch B). The procedure is
+  the owner's (history §18).
+
+[#1]: https://github.com/jaredsclove/Watchlist/pull/1
+[#2]: https://github.com/jaredsclove/Watchlist/pull/2
+[#3]: https://github.com/jaredsclove/Watchlist/pull/3
+[#4]: https://github.com/jaredsclove/Watchlist/pull/4
 
 ## How we work
 
@@ -162,25 +148,16 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 - **Collection membership (S4, S5):** Remove / Undo from a collection and each Add or Undo batch are
   one change each through the lane (`{ list: true }`), using the existing `org_*` functions with the
   ids the view read; the collection is read again inside the lane. History traversal only navigates
-  (reads); it never writes, resends, retries or undoes. Accepted with the release: the leave warning
+  (reads); it never writes, resends, retries or undoes. Accepted (S4–S6): the leave warning
   stays registered through a change's reconciling reread (it over-warns, never under-warns); Back
   with an idle Manage that saved changes starts its collection reread before navigating (a wasted read).
 - **One focus rule:** a redraw moves focus only if it was in the list (B6 chain F-1…F-7); a filter-row
   redraw keeps the focused control, its value and caret.
-- **Accepted limitations (owner-approved with the release):** after a refused change is rolled back,
+- **Accepted limitations (Batch A):** after a refused change is rolled back,
   focus doesn't return to the control it started from; focus doesn't follow a pending save across the
   phone/desktop switch; opening another view during a change (a long Refresh shows or movie-tool run
   included) shows "Loading…" until the lane is free; Manage has no Stop waiting; watch-with and
   deletes still send no expected values (the lane and the out-of-date pause cover a stale list).
-- **Batch A release validation:** offline 40 suites, 1,100/1,100 (capped, each printing its summary);
-  one independent review plus a focused follow-up on its three findings; a bounded Claude in Chrome
-  check on a local synthetic backend (1280 px; 375 px in a fixed-width frame; light only; no 300 px,
-  dark or touch). Release: `main` fast-forwarded to the reviewed `9487ce8`; the Pages build and
-  deployment succeeded; the page and the 18 other changed files were byte-identical to the commit
-  (plain and versioned URLs). A read-only live smoke check passed with non-GET requests blocked in
-  the page: TV, a show expanded, Search, a collection, a show there, Delete… opened and cancelled;
-  only GET requests, none blocked, no console errors; the browser's stored preferences were checked
-  and left exactly as before. No production write.
 
 ## Open items
 
@@ -210,14 +187,8 @@ missing or has unequal numbers (an incomplete run that exits 0). It prints one l
 failure gives the reason, exit status and last summary line) and `suites=N failing=N cases=P/T`, and
 exits non-zero if any suite failed. `tests/run.sh tests/<suite>.test.js` runs only the suites named.
 
-At `9487ce8`: 40 suites, 1,100 cases, all passing (Batch A removed the focus matrices and
-publication-number tests; `tests/write-lane.test.js` is new). At `f6a81fc`: 43 suites, 1,157 cases
-(`collection-films`, `collection-add`, `history-routes` are new; the harness has an opt-in session
-history, `routes: {}`). At `1618e1a` (Batch B): 43 suites, 1,153 cases. The harness models
-B4/B5, a rolled-back (5c) database, no Stage 5 and an unknown phase only (no older stages, no loading of
-earlier releases); `b45-compat` keeps C2 and the stop-until-reload cases. `catalog-apply` waits for the
-dialog's state instead of a fixed number of turns, so its load flake is fixed (at `f6a81fc` and
-earlier, rerun it alone before treating a failure as a regression). Syntax check:
+The harness models B4/B5, a rolled-back (5c) database, no Stage 5 and an unknown phase only; its
+session history is opt-in (`routes: {}`). `b45-compat` keeps C2 and the stop-until-reload cases. Syntax check:
 `node --check` on each `*.js`, `tests/*.js`, `tools/*.mjs`. Database rehearsals run locally on PGlite
 (`tools/db-rehearsal-*.mjs`; see `db/README.md`). The identity audit (`tools/identity-audit.mjs`)
 reads production, so it needs approval.
