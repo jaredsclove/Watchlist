@@ -161,12 +161,12 @@ test runner and token check [#4].
 
 ## Open items
 
-- **Data access (unverified, needs a separate owner decision):** the page has no sign-in and uses
-  the publishable key, and the `db/` scripts give the `anon` role broad table access (recorded
-  earlier as an accepted family-app trade-off). Production's current policies have not been checked.
-  If they match the scripts, anyone holding the public key can read and change the data. Moving
-  configuration or adding sign-in does not by itself close anonymous access; the policies are the
-  boundary. The read-only policy check needs its own authorization.
+- **Data access (audited; remediation needs a separate owner decision):** the page has no sign-in and
+  uses the publishable key, and the `db/` scripts give the `anon` role broad table access (recorded
+  earlier as an accepted family-app trade-off). A read-only access audit of production was done on
+  2026-10-18; its findings and remediation options are in the owner's private report, not in this
+  repo. Moving configuration or adding sign-in does not by itself close anonymous access; the policies
+  are the boundary. Any remediation needs its own plan and approval.
 - **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip); on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
   instead of a sentence (polish, not a blocker).
