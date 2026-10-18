@@ -16,10 +16,10 @@ Each database has one owner using it from one device at a time. A second user wo
 database; collaborative editing of a shared database is not a goal.
 
 - **Views:** TV (Currently Watching, All TV, Coming Soon), Movies (All Movies), Collections
-  (personal collections; TV shows and seasons editable there since S3, films read-only), Settings
-  (Manage collections and watch-with choices, Catalog updates, Backup & Restore). ⬇ Backup is also
-  in the header. *On branch `s4-s6`, not released:* films editable in collections, Remove from a
-  collection with Undo (S4), Add to <collection>… (S5), hash routes and browser Back / Forward (S6).
+  (personal collections: shows, seasons and, since S4, films editable there; Remove from a
+  collection with Undo; Add to <collection>…, S5), Settings (Manage collections and watch-with
+  choices, Catalog updates, Backup & Restore). ⬇ Backup is also in the header. Since S6 every view
+  has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
 - **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
   `catalog_film_links`. Rows are owner-scoped (`user_id`, never sent by the client).
@@ -34,32 +34,41 @@ database; collaborative editing of a shared database is not a goal.
 
 | Area | Files |
 |---|---|
-| Boot, config, API | `watchlist.html`, `config.js`, `api.js`, `write-lane.js` (one change at a time; read freshness), `ui-helpers.js`, `identity.js`, `history.js` (*branch `s4-s6`:* routes, Back / Forward, leave warning) |
+| Boot, config, API | `watchlist.html`, `config.js`, `api.js`, `write-lane.js` (one change at a time; read freshness), `ui-helpers.js`, `identity.js`, `history.js` (routes, Back / Forward, leave warning) |
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views), `metadata.js` (Details) |
-| Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog), `collection-members.js` (*branch `s4-s6`:* Remove / Undo and the Add picker from a collection view) |
+| Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog), `collection-members.js` (Remove / Undo and the Add picker from a collection view) |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `refresh-shows.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Catalogs | `catalog-apply.js` (Catalog updates); catalog definitions in `config.js` |
 | Backup / restore | `backup-restore.js`, `backup-format3.js` (format-3 → 4 → 5 converter) |
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (released: `20261018-lane1`; branch `s4-s6`: `20261018-s4s6`).
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261018-s4s6`).
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
 ## Where things stand (2026-10-18)
 
-- **App release:** `9487ce8`, simplification Batch A (released 2026-10-18; previous release `5907029`, S3).
+- **App release:** `f6a81fc`, S4–S6 of the B3 / B1 / B7 plan in one release (PR #2; released
+  2026-10-18 UTC; previous release `9487ce8`, simplification Batch A).
   GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 - **Database (as last recorded, not freshly observed):** phase `contracted-b45`, backup format 5,
   recovery archive active. G9 (archive retirement) is paused. Rollbacks follow the recorded order
   (history §18: P1 → P2 → P3′ → D2), each with its own approval; a B4/B5 rollback is lossy.
-- **B3 / B1 / B7 plan:** S1–S3 released. **S4** (film controls and membership removal in
-  collections, with Undo), **S5** (add existing items to a collection) and **S6** (browser history
-  and hash routes) are **implemented on branch `s4-s6`, not released**: one PR into `main` awaits
-  the owner's decision (review and validation in its description). D10 is deferred.
+- **B3 / B1 / B7 plan is complete:** S1–S6 released. S4–S6 (`afaba21` S4, `df69346` S5, `9c3a5f7` S6,
+  token and review corrections up to `f6a81fc`) shipped together; PR #2 holds the review, the
+  findings' dispositions and the validation limits. D10 is deferred. Release validation: offline
+  43 suites, 1,157/1,157 (capped); one independent review (Fable) plus a focused follow-up; bounded
+  Claude in Chrome checks on a local synthetic backend (1280 / 375 px; S6 with real Back / Forward,
+  reload and direct links); the Pages build and deployment succeeded and 53 deployed responses (the
+  page and every referenced file, plain and versioned) were byte-identical to `f6a81fc`. No live check
+  of the deployed app and no production read or write.
+- **Rollback of S4–S6:** no database migration, but the app's new actions change saved data
+  (memberships, film state, deletes, Match, Pull rest), and reverting code doesn't reverse them. The
+  stage commits depend on each other: revert the whole set together, newest first, tested like any
+  change. It needs its own approval.
 - **Simplification Batch A is complete** (A1 `e5cee7b`; A2–A5 `2f3050b` plus review corrections `9487ce8`,
-  PR #1). Batch B comes after S6 is released.
+  PR #1). **Batch B is next** (not started, not authorized).
 
 ## How we work
 
@@ -130,10 +139,10 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 - **Unconfirmed changes:** not confirmed, never resent, the list read again. A fresh read doesn't prove
   the request finished; a request with no clear answer could still complete after a later restore
   (unchanged from before Batch A; no server-completion detection).
-- **Branch `s4-s6` (not released):** Remove / Undo from a collection and each Add or Undo batch are
+- **Collection membership (S4, S5):** Remove / Undo from a collection and each Add or Undo batch are
   one change each through the lane (`{ list: true }`), using the existing `org_*` functions with the
   ids the view read; the collection is read again inside the lane. History traversal only navigates
-  (reads); it never writes, resends, retries or undoes. Accepted on the branch: the leave warning
+  (reads); it never writes, resends, retries or undoes. Accepted with the release: the leave warning
   stays registered through a change's reconciling reread (it over-warns, never under-warns); Back
   with an idle Manage that saved changes starts its collection reread before navigating (a wasted read).
 - **One focus rule:** a redraw moves focus only if it was in the list (B6 chain F-1…F-7); a filter-row
@@ -172,7 +181,7 @@ for f in tests/*.test.js tests/*.test.mjs; do perl -e 'alarm shift; exec @ARGV' 
 ```
 
 At `9487ce8`: 40 suites, 1,100 cases, all passing (Batch A removed the focus matrices and
-publication-number tests; `tests/write-lane.test.js` is new). On branch `s4-s6`: 43 suites
+publication-number tests; `tests/write-lane.test.js` is new). At `f6a81fc`: 43 suites, 1,157 cases
 (`collection-films`, `collection-add`, `history-routes` are new; the harness has an opt-in session
 history, `routes: {}`). `catalog-apply`'s verification-audit cases can fail under CPU load (also at
 `9487ce8`); rerun alone before treating that as a regression. Check that every suite prints its
