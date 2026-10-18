@@ -1,0 +1,253 @@
+// M1 (auth.js, api.js): sign-in, the signed-in session on every request, the page bound to one
+// account, per-account remembered settings, the four write outcomes and the pending note that
+// survives a closed tab, and a restore with no answer (observations only).
+// Run from the repo root: node tests/m1-auth.test.js
+const assert = require('assert');
+const { createApp, runner, settle, HARNESS_USER, userKeyOf } = require('./app-harness');
+
+const T = runner('m1-auth');
+const test = T.test;
+const OTHER = '0b000000-0000-4000-8000-0000000000bb';
+const session = (id = HARNESS_USER, token = 'harness-token') => ({ access_token: token, user: { id, email: `${id.slice(0, 2)}@test.invalid` } });
+
+function memStorage(initial = {}) {
+  const m = new Map(Object.entries(initial));
+  return { m, get length() { return m.size; }, key: i => [...m.keys()][i] ?? null,
+    getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) };
+}
+const uuid = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const linkedRow = n => ({ id: uuid(n), collection: 'othertv', item_key: `show ${n}|season 1`, title: `Show ${n}`, season: 'Season 1', theme: 'HBO',
+  display_date: 'Jan 1, 2020', date_sort: '2020-01-01', watched: false, status: 'confirmed', created_at: '2026-01-01T00:00:00+00:00', watch_with: [],
+  collections: [], tmdb_collection_id: null, tmdb_collection_name: null, media_type: 'tv', tmdb_id: n, season_number: 1, show_id: uuid(5000 + n), skipped: false });
+const showRow = n => ({ id: uuid(5000 + n), collection: 'othertv', title: `Show ${n}`, show_key: `show ${n}`, tmdb_id: n, status: 'confirmed', created_at: '2026-01-01T00:00:00+00:00' });
+const lib = (...ns) => ({ rows: ns.map(linkedRow), tvShows: ns.map(showRow) });
+function reloads(app) { app.reloadCount = 0; app.ctx.location = Object.assign(app.ctx.location || {}, { reload: () => { app.reloadCount++; } }); }
+// A change through the lane: creating a collection (the harness's org_create_collection).
+const createCollection = (app, name = 'ZZ New') => app.run(`runWrite('Create collection', () => sbRpc('org_create_collection', { p_id: ${JSON.stringify(uuid(9100))}, p_name: ${JSON.stringify(name)} })).catch(e => (window.__lastError = e, null))`);
+const notes = (storage, user = HARNESS_USER) => JSON.parse(storage.getItem(userKeyOf('watchlist_pending_writes', user)) || '{}');
+
+// ─── Boot and sign-in ─────────────────────────────────────────────────────────
+test('no saved session: the sign-in screen, no request at all; the library is hidden', async () => {
+  const app = await createApp({ ...lib(1), session: null });
+  assert.deepStrictEqual(app.requests, [], 'nothing is read before sign-in');
+  assert.match(app.el('authScreen').innerHTML, /Sign in to Watchlist[\s\S]*Send code/);
+  assert.strictEqual(app.get('pageUser'), null);
+});
+
+test('sign-in: the email gets a code (never creating an account), the code signs in, then the library is read with the session’s token', async () => {
+  const app = await createApp({ ...lib(1), session: null });
+  app.el('authEmail').value = 'owner@test.invalid';
+  await app.ctx.submitSignInEmail(); await settle();
+  assert.strictEqual(JSON.stringify(app.authCalls[0]), JSON.stringify(['otp', { email: 'owner@test.invalid', options: { shouldCreateUser: false } }]));
+  assert.match(app.el('authScreen').innerHTML, /Enter your sign-in code/);
+  app.session = session();
+  app.el('authCode').value = '123456';
+  await app.ctx.submitSignInCode(); await settle(50);
+  assert.strictEqual(JSON.stringify(app.authCalls[1]), JSON.stringify(['verify', { email: 'owner@test.invalid', token: '123456', type: 'email' }]));
+  assert.strictEqual(JSON.parse(app.get('JSON.stringify(pageUser)')).id, HARNESS_USER);
+  assert.ok(app.requests.length > 1, 'the library is read');
+  assert.ok(app.requests.every(r => r.headers.Authorization === 'Bearer harness-token'), 'every request carries the session token, never the publishable key');
+  assert.strictEqual(app.el('authScreen').innerHTML, '');
+});
+
+test('a wrong code or a rate limit: a sentence, still signed out, nothing read', async () => {
+  const app = await createApp({ ...lib(1), session: null });
+  app.el('authEmail').value = 'owner@test.invalid';
+  await app.ctx.submitSignInEmail(); await settle();
+  app.verifyResult = { data: {}, error: { message: 'Token has expired or is invalid' } };
+  app.el('authCode').value = '000000';
+  await app.ctx.submitSignInCode(); await settle();
+  assert.match(app.el('authScreen').innerHTML, /didn’t work or has expired/);
+  app.otpResult = { data: {}, error: { message: 'For security purposes, you can only request this after 51 seconds.' } };
+  app.ctx.signInBack(); app.el('authEmail').value = 'owner@test.invalid';
+  await app.ctx.submitSignInEmail(); await settle();
+  assert.match(app.el('authScreen').innerHTML, /Too many requests for a code/);
+  assert.deepStrictEqual(app.requests, []);
+});
+
+test('a database not in the signed-in state (no access = members): its notice; only the capability is read', async () => {
+  const app = await createApp({ ...lib(1), access: null });
+  assert.match(app.el('phaseBanner').innerHTML, /hasn’t been updated for signed-in libraries yet/);
+  assert.deepStrictEqual(app.requests.map(r => r.url.split('/rest/v1/')[1]), ['rpc/stage5_capabilities']);
+});
+
+test('remembered settings are per account; the old un-namespaced ones are discarded at sign-in', async () => {
+  const storage = memStorage({ watchlist_last_backup_at: '2026-01-01T00:00:00Z', watchlist_alltv_presentation: 'seasons', watchlist_browse_layout_disney: '{}',
+    unrelated_key: 'kept', [userKeyOf('watchlist_alltv_presentation', OTHER)]: 'seasons' });
+  const app = await createApp({ ...lib(1), storage });
+  assert.ok(!storage.m.has('watchlist_last_backup_at') && !storage.m.has('watchlist_alltv_presentation') && !storage.m.has('watchlist_browse_layout_disney'), 'legacy keys removed');
+  assert.strictEqual(storage.getItem('unrelated_key'), 'kept');
+  assert.strictEqual(app.get('readAllTvPresentation()'), 'shows', 'another account’s choice doesn’t apply');
+  app.ctx.recordBackupTimestamp();
+  assert.ok(storage.m.has(userKeyOf('watchlist_last_backup_at')) && !storage.m.has(userKeyOf('watchlist_last_backup_at', OTHER)));
+});
+
+// ─── The session on every request ─────────────────────────────────────────────
+test('the session ended (no session any more): a change is refused before anything is sent; the notice offers sign-in', async () => {
+  const app = await createApp({ ...lib(1) });
+  app.session = null;
+  const before = app.requests.length;
+  await createCollection(app); await settle();
+  assert.strictEqual(app.requests.length, before, 'nothing sent');
+  assert.match(String(app.get('window.__lastError && window.__lastError.message')), /not_signed_in: .*nothing was sent and nothing was changed/);
+  assert.match(app.el('phaseBanner').innerHTML, /Your sign-in has ended[\s\S]*Sign in again/);
+});
+
+test('another account signed in elsewhere in this browser: nothing is sent from this page; it reloads (lane free, nothing unknown)', async () => {
+  const app = await createApp({ ...lib(1) });
+  reloads(app);
+  app.session = session(OTHER, 'other-token');
+  const before = app.requests.length;
+  await createCollection(app); await settle();
+  assert.strictEqual(app.requests.length, before, 'nothing sent with the other account’s token');
+  assert.strictEqual(app.reloadCount, 1);
+  assert.strictEqual(app.get('authStopped'), true);
+});
+
+test('an Auth event for another account while a change is out: the reload waits for the lane; nothing more is sent', async () => {
+  const app = await createApp({ ...lib(1) });
+  reloads(app);
+  const g = app.hold(r => r.url.includes('/rpc/org_create_collection'));
+  const p = createCollection(app); await g.reached; await settle();
+  app.authEvent('SIGNED_IN', session(OTHER, 'other-token')); await settle();
+  assert.strictEqual(app.reloadCount, 0, 'not while the change is out');
+  g.release(); await p; await settle(50);
+  assert.strictEqual(app.reloadCount, 1, 'after it answered');
+});
+
+test('a 401 (the token was rejected): a confirmed refusal, nothing changed; the sign-in notice', async () => {
+  const app = await createApp({ ...lib(1), storage: memStorage() });
+  app.refuseNext(r => r.url.includes('/rpc/org_create_collection'), 'PGRST303', 'JWT expired');
+  await createCollection(app); await settle();
+  assert.match(String(app.get('window.__lastError.message')), /JWT expired/);
+  assert.deepStrictEqual(app.store.personal_collections.filter(c => c.name === 'ZZ New'), []);
+});
+
+// ─── Write outcomes and the pending note ──────────────────────────────────────
+test('done or refused: the note saved before sending is cleared; no answer (lost, or a 5xx without a database code): it stays', async () => {
+  const storage = memStorage();
+  const app = await createApp({ ...lib(1), storage });
+  const g = app.hold(r => r.url.includes('/rpc/org_create_collection'));
+  const pa = createCollection(app, 'A'); await g.reached;
+  const seen = notes(storage);
+  g.release(); await pa; await settle();
+  assert.strictEqual(Object.keys(seen || {}).length, 1, 'saved before the request was sent');
+  assert.match(Object.values(seen)[0].what, /Create collection/);
+  assert.deepStrictEqual(notes(storage), {}, 'done: cleared');
+  app.refuseNext(r => r.url.includes('/rpc/org_create_collection'), '23505', 'collection_exists: refused');
+  await createCollection(app, 'B'); await settle();
+  assert.deepStrictEqual(notes(storage), {}, 'refused: cleared');
+  app.failNext(r => r.url.includes('/rpc/org_create_collection'));
+  await createCollection(app, 'C'); await settle();
+  assert.strictEqual(Object.keys(notes(storage)).length, 1, 'a 5xx without a database code: kept');
+  app.loseNext(r => r.url.includes('/rpc/org_create_collection'), 'after');
+  await createCollection(app, 'D'); await settle();
+  assert.strictEqual(Object.keys(notes(storage)).length, 2, 'lost answer: kept');
+  assert.strictEqual(app.get('unknownOutcomesHere().length'), 2);
+  assert.strictEqual(app.writes().filter(r => r.url.includes('org_create_collection')).length, 4, 'nothing was ever resent');
+});
+
+test('a closed tab after sending: the next page for that account shows the unknown outcome until dismissed; another account never sees it', async () => {
+  const storage = memStorage();
+  const app = await createApp({ ...lib(1), storage });
+  // The page goes away while the request is out: the note is already saved.
+  const g = app.hold(r => r.url.includes('/rpc/org_create_collection'));
+  createCollection(app, 'Closed'); await g.reached; await settle();
+  assert.strictEqual(Object.keys(notes(storage)).length, 1);
+  const other = await createApp({ ...lib(1), storage, session: session(OTHER) });
+  assert.strictEqual(other.el('unknownBanner').innerHTML, '', 'not shown to another account');
+  const next = await createApp({ ...lib(1), storage });
+  assert.match(next.el('unknownBanner').innerHTML, /got no answer, so it may or may not have been made[\s\S]*Create collection[\s\S]*Nothing was sent again/);
+  next.ctx.dismissLeftoverNotes();
+  assert.strictEqual(next.el('unknownBanner').innerHTML, '');
+  assert.deepStrictEqual(notes(storage), {});
+});
+
+test('one tab never clears another tab’s note', async () => {
+  const storage = memStorage();
+  const a = await createApp({ ...lib(1), storage });
+  const g = a.hold(r => r.url.includes('/rpc/org_create_collection'));
+  createCollection(a, 'From A'); await g.reached; await settle();
+  const b = await createApp({ ...lib(1), storage });
+  await createCollection(b, 'From B'); await settle();
+  assert.strictEqual(Object.keys(notes(storage)).length, 1, 'B’s confirmed change cleared only its own note');
+  assert.match(Object.values(notes(storage))[0].what, /Create collection/);
+});
+
+test('an account change with an unknown outcome pending: no reload until “I understand”; the note stays for that account', async () => {
+  const storage = memStorage();
+  const app = await createApp({ ...lib(1), storage });
+  reloads(app);
+  app.loseNext(r => r.url.includes('/rpc/org_create_collection'), 'after');
+  await createCollection(app); await settle();
+  app.authEvent('SIGNED_OUT', null); await settle();
+  assert.strictEqual(app.reloadCount, 0);
+  assert.match(app.el('authModalBox').innerHTML, /got no answer[\s\S]*I understand — reload/);
+  app.ctx.reloadPage();
+  assert.strictEqual(app.reloadCount, 1);
+  assert.strictEqual(Object.keys(notes(storage)).length, 1, 'kept for the next sign-in');
+});
+
+test('sign out: this device only (scope local), refused while a change is out', async () => {
+  const app = await createApp({ ...lib(1) });
+  reloads(app);
+  const g = app.hold(r => r.url.includes('/rpc/org_create_collection'));
+  const p = createCollection(app); await g.reached; await settle();
+  await app.ctx.signOutHere();
+  assert.ok(!app.authCalls.some(c => c[0] === 'signOut'), 'not while the lane is held');
+  g.release(); await p; await settle();
+  await app.ctx.signOutHere(); await settle();
+  assert.strictEqual(JSON.stringify(app.authCalls.find(c => c[0] === 'signOut')), JSON.stringify(['signOut', { scope: 'local' }]));
+  assert.strictEqual(app.reloadCount, 1);
+});
+
+test('Settings shows the account and Sign out', async () => {
+  const app = await createApp({ ...lib(1) });
+  app.ctx.openSettings(null);
+  assert.match(app.el('settingsScreen').innerHTML, /Signed in as <strong>owner@test\.invalid<\/strong>[\s\S]*Sign out on this device/);
+});
+
+// ─── Restore with no answer ───────────────────────────────────────────────────
+async function restoreSetup(storage, same = false) {
+  const app = await createApp({ ...lib(1), storage });
+  // same: the file is a backup of this very library (so it equals the safety backup).
+  const src = same ? app : await createApp({ ...lib(7) });
+  const backup = JSON.parse(JSON.stringify(await src.run('buildBackupObject()')));
+  app.ctx.openSettings(null);
+  app.ctx.__backup = backup;
+  app.run(`pendingRestoreData = __backup`);
+  const safety = JSON.parse(JSON.stringify(await app.run('buildBackupObject()')));
+  app.ctx.__safety = safety;
+  app.run(`pendingSafetyBackup = { filename: 'safety.json', doc: __safety }`);
+  return app;
+}
+test('a restore whose answer is lost after it ran: “outcome unknown”, what the library matches (the file), never “nothing was changed”; the note keeps the safety backup', async () => {
+  const storage = memStorage();
+  const app = await restoreSetup(storage);
+  app.loseNext(r => r.url.includes('/rpc/restore_backup'), 'after');
+  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle(50);
+  const html = app.el('restoreModalBox').innerHTML;
+  assert.match(html, /Restore outcome unknown/);
+  assert.match(html, /currently matches the restore file/);
+  assert.match(html, /doesn’t show whether the restore request finished/);
+  assert.doesNotMatch(html, /nothing was changed/i);
+  assert.doesNotMatch(html, /continueRestore|Try again|Retry/, 'no retry offered');
+  assert.strictEqual(Object.values(notes(storage))[0].safetyBackup, 'safety.json');
+  assert.strictEqual(app.writes().filter(r => r.url.includes('restore_backup')).length, 1);
+});
+test('a restore with a gateway error (no database code) that didn’t run: unknown; the library matches the safety backup, reported as an observation', async () => {
+  const app = await restoreSetup(memStorage());
+  app.failNext(r => r.url.includes('/rpc/restore_backup'));
+  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle(50);
+  const html = app.el('restoreModalBox').innerHTML;
+  assert.match(html, /Restore outcome unknown[\s\S]*currently matches the safety backup/);
+  assert.doesNotMatch(html, /nothing was changed/i);
+});
+test('when the file and the safety backup hold the same data, the comparison says so and decides nothing', async () => {
+  const app = await restoreSetup(memStorage(), true);
+  app.loseNext(r => r.url.includes('/rpc/restore_backup'), 'before');
+  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle(50);
+  assert.match(app.el('restoreModalBox').innerHTML, /may or may not have been made[\s\S]*matches both the restore file and the safety backup/);
+});
+
+T.run();

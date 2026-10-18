@@ -306,10 +306,10 @@ test('an answer naming another show is not reported as an addition to the chosen
 });
 
 test('a database without the Stage 5 functions: the views say so (never an incomplete list), nothing can be added, and no older function is used', async () => {
+  // M1: such a database never gets as far as a view (the sign-in boot's notice; nothing is read).
   const app = await boot(library(), { stage5: null });
-  assert.match(banners(app), /needs a database update|Couldn.t load every TV row/);
-  await allTv(app); await openPanel(app);
-  assert.match(app.el('libraryState').innerHTML + outcome(app), /Couldn’t read your whole list|couldn’t be read/i);
+  assert.match(app.el('phaseBanner').innerHTML, /hasn’t been updated for signed-in libraries yet, so nothing is shown and nothing will be changed/);
+  assert.deepStrictEqual(app.requests.map(r => r.url.split('/rest/v1/')[1]), ['rpc/stage5_capabilities']);
   assert.deepStrictEqual(app.writes(), [], 'nothing sent');
   // A library function answering 404 (removed after the page loaded) is reported, never replaced by an older one.
   const app2 = await boot();

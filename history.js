@@ -167,6 +167,11 @@ function leaveWarning(event) {
   return '';
 }
 // Registered only while a change is out or a restore has been sent.
+// M1: signing out returns to the start (no route of this account survives into the next sign-in).
+function resetRouteAfterSignOut() {
+  if (historyUsable()) history.replaceState(null, '', '#/');
+}
+
 function updateLeaveWarning() {
   if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
   const need = !!writeLane || (typeof restoreInFlight !== 'undefined' && !!restoreInFlight);

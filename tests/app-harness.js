@@ -22,11 +22,14 @@ const harnessErrors = [];
 // The page: watchlist.html and its scripts, from the working tree.
 function pageOf(root) {
   const html = fs.readFileSync(path.join(root, 'watchlist.html'), 'utf8');
-  return { root, scripts: [...html.matchAll(/<script src="([^"?]+)(?:\?[^"]*)?"><\/script>/g)].map(m => m[1]),
+  // vendor/ (supabase-js) is not run here: the harness supplies a stand-in Auth client (fakeSupabase).
+  return { root, scripts: [...html.matchAll(/<script src="([^"?]+)(?:\?[^"]*)?"><\/script>/g)].map(m => m[1]).filter(f => !f.startsWith('vendor/')),
     inline: html.match(/<script>\n([\s\S]*?)<\/script>/)[1],
     ids: [...html.replace(/<script[\s\S]*?<\/script>/g, '').matchAll(/id="([^"]+)"/g)].map(m => m[1]) };
 }
 const PAGE = pageOf(ROOT);
+// M1: the signed-in user the harness's session belongs to (createApp({ session, access })).
+const HARNESS_USER = '0a000000-0000-4000-8000-0000000000aa';
 
 const cmpC = (a, b) => (a < b ? -1 : a > b ? 1 : 0); // code-point order, as collate "C"
 // Canonical JSON (keys by code point, arrays in order, no whitespace) and SHA-256: db/phase4a_catalog.sql's form.
@@ -761,7 +764,7 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null } = {}) {
+  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null, access = 'members', session } = {}) {
   const page = PAGE;
   // The default phase is B4/B5 (production's schema once B4/B5 is installed); a database
   // older than personal collections (org: false, format1) has no Stage 5.
@@ -1045,7 +1048,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     if (u.pathname.includes('/rpc/') && table === 'stage5_capabilities') {
       if (!app.stage5) return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.stage5_capabilities in the schema cache' });
       return response(200, { stage5: 1, phase: app.stage5, backup_format: b45 ? 5 : contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none',
-        ...(b45 ? { b45: 1 } : {}) });
+        ...(b45 ? { b45: 1 } : {}), ...(app.access ? { access: app.access } : {}) });
     }
     // A B4/B5 function on a database without B4/B5 doesn't exist.
     if (u.pathname.includes('/rpc/') && /_b45$/.test(table) && !b45) {
@@ -1193,7 +1196,22 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     throw new Error(`harness: unsupported ${method}`);
   }
 
+  // M1: the signed-in session (auth.js). app.session is what getSession returns; app.authEvent(event,
+  // session) delivers an Auth event as the client would. Requests carry the session's token.
+  app.access = access;
+  app.session = session === undefined ? { access_token: 'harness-token', user: { id: HARNESS_USER, email: 'owner@test.invalid' } } : session;
+  app.authListeners = [];
+  app.authCalls = [];
+  const fakeSupabase = { createClient: () => ({ auth: {
+    getSession: async () => ({ data: { session: app.session }, error: null }),
+    onAuthStateChange: fn => { app.authListeners.push(fn); return { data: { subscription: { unsubscribe() {} } } }; },
+    signInWithOtp: async a => { app.authCalls.push(['otp', a]); return app.otpResult || { data: {}, error: null }; },
+    verifyOtp: async a => { app.authCalls.push(['verify', a]); return app.verifyResult || { data: { session: app.session }, error: null }; },
+    signOut: async a => { app.authCalls.push(['signOut', a]); app.session = null; return { error: null }; }
+  } }) };
+  app.authEvent = (event, s) => { app.session = s; vm.runInContext('onAuthEvent', ctx)(event, s); };
   const ctx = {
+    supabase: fakeSupabase,
     console: { log() {}, warn() {}, error: (...a) => consoleErrors.push(a.map(String).join(' ')) },
     document,
     fetch: fetchStub,
@@ -1322,4 +1340,6 @@ async function legacyBackupFixture(app, formatVersion) {
   return { format: app.get('BACKUP_FORMAT'), formatVersion, exportedAt: new Date().toISOString(), rowCounts, tables };
 }
 
-module.exports = { createApp, runner, settle, clone, legacyBackupFixture };
+// A remembered setting's key as the page stores it for the harness's signed-in user (auth.js userKey).
+const userKeyOf = (key, user = HARNESS_USER) => `${key}::${user}`;
+module.exports = { createApp, runner, settle, clone, legacyBackupFixture, HARNESS_USER, userKeyOf };

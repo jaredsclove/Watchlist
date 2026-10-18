@@ -4,7 +4,7 @@
 // checked in Chrome separately.
 // Run from the repo root: node tests/history-routes.test.js
 const assert = require('assert');
-const { createApp, runner, settle } = require('./app-harness');
+const { createApp, runner, settle, userKeyOf } = require('./app-harness');
 
 const T = runner('history-routes');
 const test = (name, fn) => (!process.env.ONLY || name.includes(process.env.ONLY)) && T.test(name, fn);
@@ -93,14 +93,14 @@ test('D12 a direct link to a collection opens it with its remembered layout once
   const s = store();
   const probe = await boot();
   const D = cid(probe, 'disney'), TC = cid(probe, 'truecrime');
-  s.setItem('watchlist_last_collection', TC);
-  s.setItem(`watchlist_browse_layout_id_${D}`, JSON.stringify({ presentation: 'seasons', grouping: 'combined' }));
+  s.setItem(userKeyOf('watchlist_last_collection'), TC);
+  s.setItem(userKeyOf(`watchlist_browse_layout_id_${D}`), JSON.stringify({ presentation: 'seasons', grouping: 'combined' }));
   const key = probe.get(`browseCollectionOf(${JSON.stringify(probe.browseId('disney'))}).layoutKey`);
-  s.setItem(key, JSON.stringify({ presentation: 'seasons', grouping: 'combined' }));
+  s.setItem(userKeyOf(key), JSON.stringify({ presentation: 'seasons', grouping: 'combined' }));
   const app = await boot({ routes: { hash: `#/collections/${D}` }, storage: s });
   assert.strictEqual(view(app), app.browseId('disney'));
   assert.deepStrictEqual([app.get('browsePresentation'), app.get('browseGrouping')], ['seasons', 'combined'], 'its remembered layout');
-  assert.strictEqual(s.getItem('watchlist_last_collection'), TC, 'a route doesn’t record the remembered collection');
+  assert.strictEqual(s.getItem(userKeyOf('watchlist_last_collection')), TC, 'a route doesn’t record the remembered collection');
   const app2 = await boot({ routes: { hash: '#/collections' }, storage: s });
   await settle();
   assert.strictEqual(view(app2), app2.browseId('truecrime'));

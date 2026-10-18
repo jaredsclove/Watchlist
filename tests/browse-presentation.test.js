@@ -8,7 +8,7 @@
 // Run from the repo root: node tests/browse-presentation.test.js
 // No network, no database (see tests/app-harness.js).
 const assert = require('assert');
-const { createApp, runner, settle } = require('./app-harness');
+const { createApp, runner, settle, userKeyOf } = require('./app-harness');
 
 const T = runner('browse-presentation');
 const test = T.test;
@@ -417,8 +417,8 @@ test('the layout is remembered per collection, written only when changed, apart 
   app.ctx.setBrowseGrouping('combined');
   setFilter(app, 'fSearch', 'andor');
   app.ctx.setBrowseMedia('tv');
-  assert.deepStrictEqual(app.store_.writes.map(w => w[0]), ['watchlist_browse_layout_disney', 'watchlist_browse_layout_disney']);
-  assert.deepStrictEqual(JSON.parse(app.store_.data.watchlist_browse_layout_disney), { presentation: 'seasons', grouping: 'combined' });
+  assert.deepStrictEqual(app.store_.writes.map(w => w[0]), [userKeyOf('watchlist_browse_layout_disney'), userKeyOf('watchlist_browse_layout_disney')]);
+  assert.deepStrictEqual(JSON.parse(app.store_.data[userKeyOf('watchlist_browse_layout_disney')]), { presentation: 'seasons', grouping: 'combined' });
   await open(app, B['sheridan']);
   assert.deepStrictEqual(J(app, '[browsePresentation, browseGrouping]'), ['shows', 'separate'], 'per collection');
   await open(app);
@@ -426,11 +426,11 @@ test('the layout is remembered per collection, written only when changed, apart 
   assert.deepStrictEqual([app.el('fSearch').value, app.el('fStatus').value], ['', '']);
   app.ctx.switchView('alltv'); await settle();
   assert.strictEqual(app.get('allTvPresentation'), 'shows', 'All TV is independent');
-  assert.ok(!app.store_.writes.some(w => w[0] === 'watchlist_alltv_presentation'));
+  assert.ok(!app.store_.writes.some(w => w[0] === userKeyOf('watchlist_alltv_presentation')));
 });
 
 test('missing, invalid or unavailable storage falls back to Shows + Separate without an error', async () => {
-  for (const stored of [{}, { watchlist_browse_layout_disney: 'not json' }, { watchlist_browse_layout_disney: '{"presentation":"timeline","grouping":7}' }]) {
+  for (const stored of [{}, { [userKeyOf('watchlist_browse_layout_disney')]: 'not json' }, { [userKeyOf('watchlist_browse_layout_disney')]: '{"presentation":"timeline","grouping":7}' }]) {
     const app = await boot(library(), { stored });
     await open(app);
     assert.deepStrictEqual(J(app, '[browsePresentation, browseGrouping]'), ['shows', 'separate']);
@@ -441,7 +441,7 @@ test('missing, invalid or unavailable storage falls back to Shows + Separate wit
   app.ctx.setBrowsePresentation('seasons');
   assert.strictEqual(app.get('browsePresentation'), 'seasons', 'works for the visit');
   assert.strictEqual(app.consoleErrors.length, 0);
-  const half = await boot(library(), { stored: { watchlist_browse_layout_disney: '{"grouping":"combined"}' } });
+  const half = await boot(library(), { stored: { [userKeyOf('watchlist_browse_layout_disney')]: '{"grouping":"combined"}' } });
   await open(half);
   assert.deepStrictEqual(J(half, '[browsePresentation, browseGrouping]'), ['shows', 'combined'], 'each value independently');
 });
