@@ -6,8 +6,8 @@ record may be edited becomes **catalog governance** (the built-in catalog that g
 record), and what a film's theme means becomes **`theme_kind`** (`genre` or `other`).
 Personal collections stay many-to-many and independent of governance.
 
-This file is the implementation contract for the G1 implementation. `docs/HANDOFF.md`
-stays the authoritative project handoff; nothing here authorizes a production step.
+This file is the implementation contract for the G1 implementation. `docs/STATE.md`
+is the current project state; nothing here authorizes a production step.
 
 **Status (2026-10-14).** Stage 5 ran through 5c and its clean-up (G8); the phase-specific statements below describe
 Stage 5 as implemented and are **historical** unless marked "since B4/B5". Since then **B4/B5 Batch A** (database
@@ -15,7 +15,7 @@ Stage 5 as implemented and are **historical** unless marked "since B4/B5". Since
 (format-4 and format-3 files are converted in the restore preview). The **recovery archive remains active**.
 **G9 (archive retirement) is PAUSED** (owner decision, 2026-10-13: keep rollback available): its earlier brief was
 written against the pre-B4/B5 state, so its pins are stale, and any resumption needs a revised brief and separate
-approvals. B4/B5 details: `docs/HANDOFF.md` §4g and §18; scripts: `db/README.md`.
+approvals. B4/B5 details: `docs/history/HANDOFF-2026-10-18.md` §4g and §18; scripts: `db/README.md`.
 
 ## Phases
 
@@ -42,7 +42,7 @@ backup made by the B4/B5 page, validated (P1); (2) the B4/B5 rollback: the dry-r
 the report, the P1 file and any accepted loss (`tools/b45-backup-digest.mjs`), then `db/rollback/b45.sql` and its
 verification against the stored pre-B4/B5 baseline; (3) revert the B4/B5 app commits so the page is the G8 app
 again, verify on Pages and reload every page; (4) only then the D2 sequence described below (5b app, format-4
-backup, `db/rollback/phase5c.sql`, format-3 backup). Details: `db/README.md`, `docs/HANDOFF.md` §18.
+backup, `db/rollback/phase5c.sql`, format-3 backup). Details: `db/README.md`, `docs/history/HANDOFF-2026-10-18.md` §18.
 
 ## The write boundary (U4)
 
