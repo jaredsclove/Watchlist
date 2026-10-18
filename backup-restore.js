@@ -980,7 +980,21 @@ async function executeRestore() {
   `);
 }
 
+// One change at a time (write-lane.js): no other change runs from the phase check before
+// sending to the end of verification, and no read that overlapped the restore publishes.
 async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
+  if (!pendingRestoreData || !restoreEligibleView()) { closeRestoreModal(); return; }
+  if (writeLane) {
+    showRestoreModal(`<div class="modal-title">Restore not sent</div>
+      <div class="modal-error">${esc(LANE_BUSY_TEXT(writeLane.label))} Nothing was restored; continue again when it has finished.</div>
+      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button>
+        <button class="btn-danger" onclick="continueRestoreAfterSafetyConfirm('${esc(preRestoreFilename).replace(/'/g, "\\'")}')">Continue restore</button></div>`);
+    return;
+  }
+  return runWrite('Restore', () => sendRestore(preRestoreFilename));
+}
+
+async function sendRestore(preRestoreFilename) {
   const backup = pendingRestoreData;
   if (!backup || !restoreEligibleView()) { closeRestoreModal(); return; }
   // The preparation this continuation belongs to (S1 review): after the awaited phase read
@@ -1012,8 +1026,10 @@ async function continueRestoreAfterSafetyConfirm(preRestoreFilename) {
   restoreInFlight = true; // sent to the database: navigation no longer abandons it
   try {
     await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup, p_allow_v1_reset: pendingRestoreAllowV1Reset === true });
-    // Collections and watch-with choices read before this point are stale now.
+    // Collections and watch-with choices read before this point are stale now, and an open
+    // Details dialog can no longer save its draft.
     if (orgState !== 'absent') invalidateOrganization();
+    if (typeof detailsDialog !== 'undefined' && detailsDialog) { detailsDialog.restored = true; renderDetails(); }
   } catch(e) {
     showRestoreModal(`<div class="modal-title">Restore failed — nothing was changed</div>
       <div class="modal-error">${esc(e.message)}

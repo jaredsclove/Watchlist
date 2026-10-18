@@ -10,7 +10,7 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'metadata.js', 'tmdb-search.js', 'tmdb-match.js', 'tv-shows.js', 'library.js', 'organization-manage.js'];
+const FILES = ['config.js', 'identity.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'tmdb-search.js', 'tmdb-match.js', 'tv-shows.js', 'library.js', 'organization-manage.js'];
 const CATALOGS = ['disney', 'sheridan', '90day'];
 // Governance as the read views give it (coexistence: derived from where a row is stored).
 function governanceOf(rows) {
@@ -42,7 +42,7 @@ const SILO = { id: 125988, name: 'Silo', networks: [{ name: 'Apple TV' }], seaso
 function makeEnv({ rows = [], tmdb = () => ({}), db = {} } = {}) {
   const els = new Map();
   const el = id => { if (!els.has(id)) els.set(id, { id, innerHTML: '', value: '', style: {}, classList: { add() {}, remove() {} }, scrollIntoView() {} }); return els.get(id); };
-  const log = { writes: [], saved: 0 };
+  const log = { writes: [], saved: 0, rereads: 0, stored: {} };
   const ctx = {
     console, setTimeout: () => 0,
     document: { getElementById: el, querySelectorAll: () => [] },
@@ -50,11 +50,13 @@ function makeEnv({ rows = [], tmdb = () => ({}), db = {} } = {}) {
     tvShowsById: new Map(),
     // a view is open (All TV / All Movies: the rows its Match controls came from)
     activeViewId: 'alltv', libraryPanel: null, libraryPanelSeq: 0, actionRows: () => rows, libraryGovernance: governanceOf(rows),
-    isBrowseView: () => false, loadDerivedView() {}, loadBrowseView() {},
+    isBrowseView: () => false, loadBrowseView() {},
+    // The open view read again after a confirmed Match (library.js reloadOpenView): it shows what is stored.
+    loadDerivedView() { log.rereads++; rows.forEach(r => { if (log.stored[r.id]) Object.assign(r, log.stored[r.id]); }); return true; },
     fetchAllRows: async table => (table === 'tv_shows' ? [] : (() => { throw new Error(`unexpected read ${table}`); })()), // api.js (the show list after a TV match)
     isFilmRow: r => !!r && (r.media_type === 'movie' || (r.media_type == null && r.season === 'Film')), // browse-views.js
-    // page state the Match flow reads (watchlist.html): request stamps and the restore epoch
-    matchRequestSeq: 0, matchLatestByRow: {}, matchRefreshSeq: 0, matchRefreshStamp: null, orgEpoch: 0, matchRefreshProgress: null, matchReadSeq: 0, matchReads: [], matchPublished: { epoch: 0, rows: {}, shows: {} },
+    // page state the Match flow reads (watchlist.html): request numbers
+    matchRequestSeq: 0,
     tmdbFetch: async p => tmdb(p),
     sbFetch: async (method, p, body) => {
       if (method === 'GET') {
@@ -68,13 +70,15 @@ function makeEnv({ rows = [], tmdb = () => ({}), db = {} } = {}) {
       if (p === 'rpc/library_match_season_b45') {
         if (db.blocked) return { blocked: true, legacy_status: 'watching', target_status: 'confirmed', legacy_show_id: 'L', target_show_id: 'T' };
         const row = rows.find(r => r.id === body.p_row_id);
-        return { blocked: false, row: { ...row, ...body.p_patch, show_id: 'show-silo' }, show_id: 'show-silo' };
+        log.stored[row.id] = { ...row, ...body.p_patch, show_id: 'show-silo' };
+        return { blocked: false, row: { ...log.stored[row.id] }, show_id: 'show-silo' };
       }
       if (p === 'rpc/library_match_film_b45') {
         if (db.filmAnswer) return db.filmAnswer;
         const row = rows.find(r => r.id === body.p_row_id);
         const former = row.show_id || null;
-        return { row: { ...row, ...body.p_patch, show_id: null }, former_show_id: former, former_show_deleted: !!former && !db.formerKeepsSeasons, memberships_carried: 0 };
+        log.stored[row.id] = { ...row, ...body.p_patch, show_id: null };
+        return { row: { ...log.stored[row.id] }, former_show_id: former, former_show_deleted: !!former && !db.formerKeepsSeasons, memberships_carried: 0 };
       }
       throw new Error(`unexpected write ${method} ${p}`);
     },
@@ -240,7 +244,7 @@ test('12b. choosing a series without a season → Confirm does nothing', async (
   await env.ctx.confirmTmdbMatch();
   assert.strictEqual(env.log.writes.length, 0);
 });
-test('confirm movie: one library_match_film_b45 call with exactly the patch and the row’s show (none), row updated in place, Saved shown', async () => {
+test('confirm movie: one library_match_film_b45 call with exactly the patch and the row’s show (none), the view read again shows it, Saved shown', async () => {
   const row = manual(); const env = makeEnv({ rows: [row], tmdb: searchStub });
   await openAndSearch(env);
   await env.ctx.chooseTmdbMatchResult(env.ctx.__tmdbMatch.results.findIndex(r => r.id === 438631));
@@ -302,7 +306,7 @@ test('confirm film for a row linked as a TV season → one library_match_film_b4
   assert.deepStrictEqual(env.log.writes[0].body.p_expected, { show_id: 'show-legacy' });
   assert.ok(!('show_id' in env.log.writes[0].body.p_patch), 'the database unlinks it');
   assert.deepStrictEqual([row.show_id, row.media_type], [null, 'movie']);
-  assert.strictEqual(env.ctx.tvShowsById.has('show-legacy'), false, 'the removed show is dropped from the page');
+  assert.strictEqual(env.log.rereads, 1, 'the open view (and with it the show list) is read again, not merged from the answer');
   assert.strictEqual(env.log.saved, 1);
 });
 test('confirm film, the former show still has seasons → matched, the show kept, no error', async () => {

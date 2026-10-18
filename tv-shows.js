@@ -11,10 +11,6 @@
 
 const TV_STATUS_ORDER = ['confirmed', 'watching', 'skipped'];
 
-// The one partition tracked reads and edits use (tmdb-match.js): the whole
-// library. Show lists and rows are never divided by where they were stored.
-const LIBRARY_PARTITION = 'library';
-
 // A TV season: media_type 'tv', or a row without an identity that isn't a film
 // (every row is a film or a linked TV season; the database checks it).
 function isTvSeason(r) {
@@ -43,37 +39,16 @@ function noteTvShows(shows) {
   (shows || []).forEach(s => tvShowsById.set(s.id, s));
 }
 
-// Every show, paginated and exact-count checked. Show reads are tracked
-// (tmdb-match.js): each publishes only if it is the newest read of the list in the
-// current restore epoch and no edit of a show is pending or newer, so a read that
-// finishes late never replaces newer shows, and each can satisfy a refresh after a Match.
-async function loadAllTvShows() {
-  const read = typeof matchReadStart === 'function' ? matchReadStart('shows', '*') : null;
-  try {
-    const shows = await fetchAllRows('tv_shows');
-    publishAllTvShows(read, shows);
-    if (read) matchReadSettle(read, null);
-  } catch (e) {
-    if (read) matchReadSettle(read, e);
-    throw e;
-  }
+// The show list, read with every view (derived-views.js, browse-views.js). A read publishes
+// only if it is the newest one started and no change overlapped it (write-lane.js readFresh),
+// so a read that finishes late never replaces newer shows. Returns whether it published.
+let showsReadSeq = 0;
+function startShowsRead() {
+  return { seq: ++showsReadSeq, stamp: readStamp() };
 }
-
-// Replaces the whole show list; nothing if a newer full read published or the epoch
-// changed. While a show edit is pending, or one ended after this read started, the
-// shows already on the page are kept (that newer state wins) and this read covers nothing.
 function publishAllTvShows(read, shows) {
-  if (read && !matchMayPublishShows(read, '*')) return false;
-  let next = new Map(shows.map(s => [s.id, s]));
-  if (read) {
-    const e = matchPublished.shows[LIBRARY_PARTITION];
-    const newer = !!e && (e.id > read.id || matchEditPending('shows', LIBRARY_PARTITION));
-    if (newer) next = new Map(tvShowsById);
-    // A show list kept because of an edit isn't covered by this read.
-    read.keptRows = new Set(newer && e.kind === 'edit' ? [LIBRARY_PARTITION] : []);
-    matchNotePublished('shows', '*', read);
-  }
-  tvShowsById = next;
+  if (read.seq !== showsReadSeq || !readFresh(read.stamp)) return false;
+  tvShowsById = new Map(shows.map(s => [s.id, s]));
   return true;
 }
 
@@ -215,41 +190,33 @@ async function setShowStateById(showId, changes) {
   const explicitReview = 'status' in changes && show.status_review;
   const differs = Object.keys(changes).some(k => (k === 'ended' ? !!show.ended !== !!changes.ended : show[k] !== changes[k]));
   if (!differs && !explicitReview) { renderTable(); return; }
-  const expected = showStateOf(show);
-  const before = { ...show };
-  const epoch = orgEpoch;
   const what = `“${show.title}” · ${'status' in changes ? 'show status' : 'priority' in changes ? 'priority' : 'Show ended'}`;
-  Object.assign(show, changes);
-  if ('status' in changes) Object.assign(show, { catalog_new: false, status_review: false, legacy_status: null });
-  const edit = typeof matchEditStart === 'function' ? matchEditStart('shows', LIBRARY_PARTITION, LIBRARY_PARTITION) : null;
-  renderTable();
-  const origin = typeof placedOrigin === 'function' ? placedOrigin() : null; // this action's focus placement (S3, brief §7.2)
-  try {
-    const res = await sbRpc('library_set_show_state_b45', { p_show_id: showId, p_expected: expected, p_changes: changes });
-    // An answer from before a restore never reaches the restored shows (Stage 4b).
-    if (epoch !== orgEpoch) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(what); return; }
-    if (res && res.show) Object.assign(show, res.show);
-    showSaved();
-  } catch(e) {
-    if (epoch !== orgEpoch) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(what); return; }
-    Object.keys(show).forEach(k => { if (!(k in before)) delete show[k]; });
-    Object.assign(show, before);
-    if (typeof matchEditEnd === 'function') matchEditEnd(edit);
-    if (stateNeedsReread(e)) { await reportStateFailure(e, epoch, origin); return; }
-    showError(stateErrorText(e));
+  await runWrite(what, async () => {
+    const expected = showStateOf(show);
+    const before = { ...show };
+    Object.assign(show, changes);
+    if ('status' in changes) Object.assign(show, { catalog_new: false, status_review: false, legacy_status: null });
     renderTable();
-    return;
-  }
-  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
-  renderTable();
+    try {
+      const res = await sbRpc('library_set_show_state_b45', { p_show_id: showId, p_expected: expected, p_changes: changes });
+      if (res && res.show) Object.assign(show, res.show);
+      showSaved();
+    } catch(e) {
+      Object.keys(show).forEach(k => { if (!(k in before)) delete show[k]; });
+      Object.assign(show, before);
+      if (stateNeedsReread(e)) { await reportStateFailure(e); return; }
+      showError(stateErrorText(e));
+    }
+    renderTable();
+  }, { list: true });
 }
 
 // ─── A refused or unconfirmed state change (every B4/B5 action) ───────────────
 // A refusal changed nothing. An answer that never came (or can't be read) is reported as
 // not confirmed and is never resent. When the page's copy is what was wrong (the record
 // changed, went away, or no longer allows the change) or the outcome is unknown, the open
-// view is read again — only while no restore has happened since the change was sent — and
-// the message says whether that read succeeded.
+// view is read again (inside the change's write lane) and the message says whether that
+// read succeeded.
 const STALE_STATE_CODES = ['target_changed', 'target_missing', 'invalid_range', 'invalid_state'];
 function stateUnconfirmed(e) {
   return orgErrorInfo(e).kind !== 'database';
@@ -271,17 +238,14 @@ function rereadText(ok) {
   return ok === true ? ' The list has been read again; look at it again.'
     : ok === false ? ' The list couldn’t be read again, so what is shown may be out of date; use Retry.' : '';
 }
-// Shows the failure, reads the open view again when that helps (same restore epoch only)
-// and shows the failure again with the reread's result (a view read clears the banner).
-// Returns the reread's result (true / false / null when none was made or it was superseded).
-// origin (S3, brief §7.2): the action's own focus placement; the reread may move focus only while
-// that placement is still held (library.js reloadOpenView).
-async function reportStateFailure(e, epoch, origin) {
+// Shows the failure, reads the open view again when that helps and shows the failure again
+// with the reread's result (a view read clears the banner). Returns the reread's result
+// (true / false / null when none was made or it was superseded).
+async function reportStateFailure(e) {
   const text = stateErrorText(e);
   showError(text);
-  if (!stateNeedsReread(e) || epoch !== orgEpoch || typeof reloadOpenView !== 'function') { renderTable(); return null; }
-  const ok = await reloadOpenView({ origin });
-  if (epoch !== orgEpoch) return null; // a restore happened meanwhile: its own reload stands
+  if (!stateNeedsReread(e) || typeof reloadOpenView !== 'function') { renderTable(); return null; }
+  const ok = await reloadOpenView();
   showError(text + rereadText(ok));
   return ok ?? null;
 }
@@ -292,20 +256,19 @@ async function keepCurrentStatus(kind, id) {
   if (isBrowseView(activeViewId) && activeViewId !== ALL_MOVIES_VIEW.id && kind !== 'show') return;
   const rec = kind === 'show' ? tvShowsById.get(id) : actionRows().find(r => r.id === id);
   if (!rec || !rec.status_review) return;
-  const expected = kind === 'show' ? showStateOf(rec) : filmStateOf(rec);
-  const epoch = orgEpoch;
-  try {
-    const res = await sbRpc('library_dismiss_review_b45', { p_kind: kind, p_id: id, p_expected: expected });
-    if (epoch !== orgEpoch) { staleAfterRestore(`“${rec.title}” · status review`); return; }
-    if (kind === 'show' && res && res.show) Object.assign(rec, res.show);
-    else if (res && res.row) mirrorRowUpdate(id, res.row, epoch);
-    showSaved();
-  } catch (e) {
-    if (epoch !== orgEpoch) { staleAfterRestore(`“${rec.title}” · status review`); return; }
-    await reportStateFailure(e, epoch);
-    return;
-  }
-  renderTable();
+  await runWrite(`“${rec.title}” · status review`, async () => {
+    const expected = kind === 'show' ? showStateOf(rec) : filmStateOf(rec);
+    try {
+      const res = await sbRpc('library_dismiss_review_b45', { p_kind: kind, p_id: id, p_expected: expected });
+      if (kind === 'show' && res && res.show) Object.assign(rec, res.show);
+      else if (res && res.row) mirrorRowUpdate(id, res.row);
+      showSaved();
+    } catch (e) {
+      await reportStateFailure(e);
+      return;
+    }
+    renderTable();
+  }, { list: true });
 }
 
 // O5: dismiss New from catalog for the records given ([{kind, id}]), all or nothing.
@@ -314,22 +277,21 @@ async function dismissCatalogNew(list) {
   if (isBrowseCollectionView(activeViewId) && (list || []).some(x => x.kind !== 'show')) return;
   if (!list || !list.length) return;
   if (list.length > 1 && !confirm(`Dismiss “New from catalog” on the ${list.length} records shown? Their status and priority don’t change.`)) return;
-  const epoch = orgEpoch;
-  try {
-    await sbRpc('library_dismiss_catalog_new_b45', { p_expected: list.map(x => ({ kind: x.kind, id: x.id })) });
-    if (epoch !== orgEpoch) { staleAfterRestore('New from catalog'); return; }
-    list.forEach(x => {
-      const rec = x.kind === 'show' ? tvShowsById.get(x.id) : null;
-      if (rec) { rec.catalog_new = false; if (rec.legacy_status === 'pending') rec.legacy_status = null; }
-      else mirrorRowUpdate(x.id, { catalog_new: false }, epoch);
-    });
-    showSaved();
-  } catch (e) {
-    if (epoch !== orgEpoch) { staleAfterRestore('New from catalog'); return; }
-    await reportStateFailure(e, epoch);
-    return;
-  }
-  renderTable();
+  await runWrite('New from catalog', async () => {
+    try {
+      await sbRpc('library_dismiss_catalog_new_b45', { p_expected: list.map(x => ({ kind: x.kind, id: x.id })) });
+      list.forEach(x => {
+        const rec = x.kind === 'show' ? tvShowsById.get(x.id) : null;
+        if (rec) { rec.catalog_new = false; if (rec.legacy_status === 'pending') rec.legacy_status = null; }
+        else mirrorRowUpdate(x.id, { catalog_new: false });
+      });
+      showSaved();
+    } catch (e) {
+      await reportStateFailure(e);
+      return;
+    }
+    renderTable();
+  }, { list: true });
 }
 function dismissShowNew(id) { dismissCatalogNew([{ kind: 'show', id }]); }
 // O5, all: the New-from-catalog records the open view shows — exactly that set, in one call
@@ -370,24 +332,23 @@ async function stopResume(showId) {
 }
 async function sendResume(show, startId, endId, setWatching) {
   if (activeViewId === ALL_MOVIES_VIEW.id) return; // a show action (TV views and, since S3, collections)
-  const expected = { status: show.status, resume_start_season_id: show.resume_start_season_id || null, resume_end_season_id: show.resume_end_season_id || null };
-  const epoch = orgEpoch;
-  try {
-    const res = await sbRpc('library_set_resume_b45', { p_show_id: show.id, p_expected: expected, p_start: startId, p_end: endId, p_set_watching: setWatching });
-    if (epoch !== orgEpoch) { staleAfterRestore(`“${show.title}” · earlier seasons`); return; }
-    if (res && res.show) Object.assign(show, res.show);
-    resumePickerFor = null;
-    if (detailsDialog) detailsDialog.picker = false;
-    showSaved();
-  } catch (e) {
-    if (epoch !== orgEpoch) { staleAfterRestore(`“${show.title}” · earlier seasons`); return; }
-    resumePickerFor = null;
-    await reportStateFailure(e, epoch);
+  await runWrite(`“${show.title}” · earlier seasons`, async () => {
+    const expected = { status: show.status, resume_start_season_id: show.resume_start_season_id || null, resume_end_season_id: show.resume_end_season_id || null };
+    try {
+      const res = await sbRpc('library_set_resume_b45', { p_show_id: show.id, p_expected: expected, p_start: startId, p_end: endId, p_set_watching: setWatching });
+      if (res && res.show) Object.assign(show, res.show);
+      resumePickerFor = null;
+      if (detailsDialog) detailsDialog.picker = false;
+      showSaved();
+    } catch (e) {
+      resumePickerFor = null;
+      await reportStateFailure(e);
+      if (typeof renderDetails === 'function' && detailsDialog) renderDetails();
+      return;
+    }
+    renderTable();
     if (typeof renderDetails === 'function' && detailsDialog) renderDetails();
-    return;
-  }
-  renderTable();
-  if (typeof renderDetails === 'function' && detailsDialog) renderDetails();
+  }, { list: true });
 }
 
 async function setSeasonSkipped(id, skipped) {
@@ -395,29 +356,25 @@ async function setSeasonSkipped(id, skipped) {
   if (!row || !isTvSeason(row)) return;
   const old = !!row.skipped;
   if (old === skipped) return;
-  const epoch = orgEpoch;
-  row.skipped = skipped;
-  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', LIBRARY_PARTITION, id, row) : null;
-  renderTable();
-  const origin = typeof placedOrigin === 'function' ? placedOrigin() : null; // this action's focus placement (S3, brief §7.2)
-  try {
-    const saved = await sbRpc('set_season_skipped', { p_row_id: id, p_skipped: skipped });
-    if (!mirrorRowUpdate(id, saved || { skipped }, epoch)) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(`“${row.title}” · ${row.season}`); return; }
-    showSaved();
-  } catch(e) {
-    if (epoch !== orgEpoch) { if (typeof matchEditEnd === 'function') matchEditEnd(edit); staleAfterRestore(`“${row.title}” · ${row.season}`); return; }
-    row.skipped = old;
-    if (orgErrorInfo(e).kind !== 'database') {
-      // S3-D2 B: no clear answer. It may or may not have been saved: the page claims neither, never
-      // resends it, and reads the open view again to show what is stored.
-      if (typeof matchEditEnd === 'function') matchEditEnd(edit); // ended first, so the reread can publish
-      await reportStateFailure(e, epoch, origin);
-      return;
+  await runWrite(`“${row.title}” · ${row.season}`, async () => {
+    row.skipped = skipped;
+    renderTable();
+    try {
+      const saved = await sbRpc('set_season_skipped', { p_row_id: id, p_skipped: skipped });
+      mirrorRowUpdate(id, saved || { skipped });
+      showSaved();
+    } catch(e) {
+      row.skipped = old;
+      if (orgErrorInfo(e).kind !== 'database') {
+        // S3-D2 B: no clear answer. It may or may not have been saved: the page claims neither, never
+        // resends it, and reads the open view again to show what is stored.
+        await reportStateFailure(e);
+        return;
+      }
+      showError(e.message);
     }
-    showError(e.message);
-  }
-  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
-  renderTable();
+    renderTable();
+  }, { list: true });
 }
 
 function showNotice(msg) {

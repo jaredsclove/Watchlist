@@ -17,8 +17,8 @@
 //   * a matching title is shown and the user chooses; "add as new" sends the ids of
 //     the same-named unmatched records the page showed (distinct_from), so a repeat
 //     or a race is refused, never a second copy. Nothing is merged or guessed.
-// Results are never merged into what the page shows: the open view is read again
-// (only while it is still the view and the restore epoch the request started in).
+// Results are never merged into what the page shows: the open view is read again,
+// inside the change's write lane (write-lane.js), only while it is still the view.
 // Collections are a separate, optional step after a creation, reported separately.
 
 // The movie tools' cache of films (tabData; not a storage): see libraryPrepareMovieTools.
@@ -27,19 +27,20 @@ const TOOL_FILMS = 'films';
 // ─── Catalog governance (read with every view and library read) ───────────────
 // A snapshot: { shows: Map(show_id → catalog), films: Map(item_id → catalog),
 // kinds: Map(item_id → 'genre' | 'other'), knownShows / knownItems: the shows and rows
-// read in the same operation (what the snapshot can speak for), seq, epoch }.
-// Each read takes its number and the restore epoch when it starts. Only a read newer
-// than the published snapshot, in the current epoch, publishes; an older read that
-// finishes late never replaces newer governance. A record the published snapshot
-// doesn't cover has no known policy: it is neither deleted nor matched (editPolicyOf).
+// read in the same operation (what the snapshot can speak for), seq, stamp }.
+// Each read takes its number and a read stamp when it starts. Only a read newer than
+// the published snapshot that no change overlapped (write-lane.js readFresh) publishes;
+// an older read that finishes late never replaces newer governance. A record the
+// published snapshot doesn't cover has no known policy: it is neither deleted nor
+// matched (editPolicyOf).
 let governanceReadSeq = 0;
 
 async function readGovernance() {
-  const seq = ++governanceReadSeq, epoch = orgEpoch;
+  const seq = ++governanceReadSeq, stamp = readStamp();
   const [shows, films, kinds] = await Promise.all([fetchAllRowsStrict('library_catalog_shows'),
     fetchAllRowsStrict('library_catalog_films'), fetchAllRowsStrict('library_film_theme_kinds')]);
   return { shows: new Map(shows.map(x => [x.show_id, x.catalog])), films: new Map(films.map(x => [x.item_id, x.catalog])),
-    kinds: new Map(kinds.map(x => [x.item_id, x.theme_kind])), knownShows: new Set(), knownItems: new Set(), seq, epoch };
+    kinds: new Map(kinds.map(x => [x.item_id, x.theme_kind])), knownShows: new Set(), knownItems: new Set(), seq, stamp };
 }
 
 // The rows and shows read together with a snapshot: what it can speak for.
@@ -50,16 +51,16 @@ function governanceCovers(gov, rows, shows) {
 }
 
 function publishGovernance(gov) {
-  if (!gov || gov.epoch !== orgEpoch || gov.seq <= (libraryGovernance.seq || 0)) return false;
+  if (!gov || !readFresh(gov.stamp) || gov.seq <= (libraryGovernance.seq || 0)) return false;
   libraryGovernance = gov;
   return true;
 }
 
 // After a restore nothing read before it speaks for the data: no record has a known
-// policy until a read in the new epoch publishes one.
+// policy until a read started after it publishes one.
 function resetGovernance() {
   libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(),
-    seq: governanceReadSeq, epoch: orgEpoch };
+    seq: governanceReadSeq };
 }
 
 // Whether the published snapshot speaks for this record (a season through its show).
@@ -210,34 +211,26 @@ function yearFilterSelectHtml(rows) {
 }
 
 // ─── The open view, read again ────────────────────────────────────────────────
-// Every caller is an operation's answer (S3, brief §7.2 R1): the reread may move focus only while
-// that operation's own placement (opts.origin) is still held; the owner's own reload (Retry, Read
-// again) calls the loaders directly.
-function reloadOpenView(opts = {}) {
+// The one reread path: after a change (inside its write lane), Retry and Read again.
+// A view that already shows a complete list is read in place (derived-views.js
+// loadDerivedView, browse-views.js loadBrowseView). Returns true / false (failed) /
+// null (superseded, or nothing to read).
+function reloadOpenView() {
   if (typeof isSettingsView === 'function' && isSettingsView()) { renderSettings(); return true; } // Settings (S1): drawn again; nothing is read
   if (typeof isCollectionsStateView === 'function' && isCollectionsStateView()) { renderCollectionsState(); buildBrowseBar({ resolve: false }); return true; } // the Collections state (S2): drawn again; nothing is read or opened
-  const read = { operation: true, origin: (opts && opts.origin) || null };
-  if (isBrowseView(activeViewId)) return loadBrowseView(read);
-  else if (activeViewId) return loadDerivedView(read);
+  if (isBrowseView(activeViewId)) return loadBrowseView();
+  else if (activeViewId) return loadDerivedView();
+  return null;
 }
 
-// What a write started from: answers are used only while the same view (and panel)
-// is open and no restore has happened since.
+// What a write started from: answers are reported in the panel only while the same
+// view and panel are open.
 function libraryContext() {
-  return { session: libraryPanel ? libraryPanel.session : 0, viewId: activeViewId, epoch: orgEpoch };
+  return { session: libraryPanel ? libraryPanel.session : 0, viewId: activeViewId };
 }
 
 function libraryLive(session) {
-  return !!libraryPanel && libraryPanel.session === session && libraryPanel.viewId === activeViewId && libraryPanel.epoch === orgEpoch;
-}
-
-// After a confirmed answer: false (nothing published) when a restore came in
-// between — the answer is discarded and the view read again.
-function libraryAnswerCurrent(ctx, title) {
-  if (ctx.epoch === orgEpoch) return true;
-  showNotice(`An addition sent before the restore (“${title}”) answered afterwards. The list has been read again. This doesn’t show whether the addition ran before or after the restore; check “${title}” before adding it again.`);
-  if (activeViewId) reloadOpenView();
-  return false;
+  return !!libraryPanel && libraryPanel.session === session && libraryPanel.viewId === activeViewId;
 }
 
 // Reported in the panel while it is open, otherwise above the list. Callers report
@@ -299,7 +292,7 @@ function openLibraryPanel(media, mode = 'search', extra = {}) {
   if (!activeViewId || (media !== 'tv' && media !== 'movie')) return;
   if (window.__tmdbMatch) window.__tmdbMatch = null;
   cancelTMDBPreview();
-  libraryPanel = { session: ++libraryPanelSeq, media, mode, viewId: activeViewId, epoch: orgEpoch, lib: null, libState: 'reading',
+  libraryPanel = { session: ++libraryPanelSeq, media, mode, viewId: activeViewId, lib: null, libState: 'reading',
     libError: '', choice: null, bound: null, seasonShowId: null, seasonDetails: null, refresh: null, manualConfirm: null, ...extra };
   renderLibraryPanel();
   libraryLoad(libraryPanel.session);
@@ -576,26 +569,26 @@ function libraryFilmFromTmdb(tmdbId, name, details) {
 // Seasons for a show already on the list: refused by the database if that show is
 // gone or changed. The answer's show is checked again here.
 async function librarySendToShow(ctx, show, seasons, network) {
-  let res;
-  try {
-    res = await sbRpc('library_add_seasons_b45', { p_show_id: show.id, p_expected: libraryExpected(show, network), p_seasons: seasons });
-  } catch (e) {
-    if (!libraryAnswerCurrent(ctx, show.title)) return { failed: true };
-    const f = libraryFailure(e, `Adding to “${show.title}”`);
-    if (!f.unknown) libraryAfterWrite(ctx);
-    libraryReport(ctx, f.text, true);
-    return { failed: true, unknown: !!f.unknown };
-  }
-  if (!libraryAnswerCurrent(ctx, show.title)) return { discarded: true };
-  if (!res || res.show_id !== show.id || res.show_created) {
-    libraryAfterWrite(ctx);
-    libraryReport(ctx, `The answer named a different show than “${show.title}”, so this isn’t reported as an addition to it. Check your list before adding again.`, true);
-    return { failed: true };
-  }
-  if ((res.inserted || []).length) showSaved();
-  libraryAfterWrite(ctx);
-  libraryReport(ctx, libraryAddText(res, show.title), !!(res.rejected || []).length && !(res.inserted || []).length);
-  return { res };
+  return await runWrite(`Adding to “${show.title}”`, async () => {
+    let res;
+    try {
+      res = await sbRpc('library_add_seasons_b45', { p_show_id: show.id, p_expected: libraryExpected(show, network), p_seasons: seasons });
+    } catch (e) {
+      const f = libraryFailure(e, `Adding to “${show.title}”`);
+      await libraryAfterWrite(ctx);
+      libraryReport(ctx, f.text, true);
+      return { failed: true, unknown: !!f.unknown };
+    }
+    if (!res || res.show_id !== show.id || res.show_created) {
+      await libraryAfterWrite(ctx);
+      libraryReport(ctx, `The answer named a different show than “${show.title}”, so this isn’t reported as an addition to it. Check your list before adding again.`, true);
+      return { failed: true };
+    }
+    if ((res.inserted || []).length) showSaved();
+    await libraryAfterWrite(ctx);
+    libraryReport(ctx, libraryAddText(res, show.title), !!(res.rejected || []).length && !(res.inserted || []).length);
+    return { res };
+  }) || { failed: true };
 }
 
 // A new show, through library_create_show: created with all its seasons, or refused
@@ -604,24 +597,24 @@ async function librarySendToShow(ctx, show, seasons, network) {
 // by then. It never joins a show.
 async function libraryNewShow(ctx, showInfo, seasons, unmapped = []) {
   if (!seasons.length) return;
-  let res;
-  try {
-    res = await sbRpc('library_create_show_b45', { p_show: showInfo, p_seasons: seasons });
-  } catch (e) {
-    if (!libraryAnswerCurrent(ctx, showInfo.title)) return;
-    const f = libraryFailure(e, `Adding “${showInfo.title}”`, 'Adding a new show');
-    if (!f.unknown) libraryAfterWrite(ctx);
-    libraryReport(ctx, f.text, true);
-    return;
-  }
-  if (!libraryAnswerCurrent(ctx, showInfo.title)) return;
-  libraryAfterWrite(ctx);
-  if (!res || !res.show_created) { // not expected from library_create_show_b45; never reported as a new show
-    libraryReport(ctx, `The answer didn’t confirm a new show “${showInfo.title}”. Check your list before adding again.`, true);
-    return;
-  }
-  if ((res.inserted || []).length) showSaved();
-  libraryReport(ctx, libraryAddText({ ...res, unmapped }, showInfo.title), false, libraryMembershipHtml(ctx, { show_id: res.show_id }, showInfo.title));
+  await runWrite(`Adding “${showInfo.title}”`, async () => {
+    let res;
+    try {
+      res = await sbRpc('library_create_show_b45', { p_show: showInfo, p_seasons: seasons });
+    } catch (e) {
+      const f = libraryFailure(e, `Adding “${showInfo.title}”`, 'Adding a new show');
+      await libraryAfterWrite(ctx);
+      libraryReport(ctx, f.text, true);
+      return;
+    }
+    await libraryAfterWrite(ctx);
+    if (!res || !res.show_created) { // not expected from library_create_show_b45; never reported as a new show
+      libraryReport(ctx, `The answer didn’t confirm a new show “${showInfo.title}”. Check your list before adding again.`, true);
+      return;
+    }
+    if ((res.inserted || []).length) showSaved();
+    libraryReport(ctx, libraryAddText({ ...res, unmapped }, showInfo.title), false, libraryMembershipHtml(ctx, { show_id: res.show_id }, showInfo.title));
+  });
 }
 
 // A film: from TMDB through library_add_films (already on the list: reported, not
@@ -629,49 +622,50 @@ async function libraryNewShow(ctx, showInfo, seasons, unmapped = []) {
 // same-named unmatched films the page showed).
 // unmapped: TMDB categories the approved lists don't take (named in the outcome, never guessed).
 async function libraryAddFilm(ctx, film, distinctFrom, unmapped = []) {
-  let saved;
-  try {
-    if (film.tmdb_id != null) {
-      const res = await sbRpc('library_add_films_b45', { p_films: [film] });
-      const out = res && res.results && res.results[0];
-      if (!libraryAnswerCurrent(ctx, film.title)) return;
-      if (out && out.outcome === 'catalog_candidate') {
-        libraryAfterWrite(ctx);
-        libraryReport(ctx, `A built-in catalog film with this name is on your list (it may be the same film), so “${film.title}” wasn’t added. Look at it again.`, true);
-        return;
+  await runWrite(`Adding “${film.title}”`, async () => {
+    let saved;
+    try {
+      if (film.tmdb_id != null) {
+        const res = await sbRpc('library_add_films_b45', { p_films: [film] });
+        const out = res && res.results && res.results[0];
+        if (out && out.outcome === 'catalog_candidate') {
+          await libraryAfterWrite(ctx);
+          libraryReport(ctx, `A built-in catalog film with this name is on your list (it may be the same film), so “${film.title}” wasn’t added. Look at it again.`, true);
+          return;
+        }
+        if (!out || out.outcome !== 'inserted') {
+          await libraryAfterWrite(ctx);
+          libraryReport(ctx, `“${film.title}” is already on your list (added somewhere else just now). Nothing was added.`, true);
+          return;
+        }
+        saved = { id: out.id };
+      } else {
+        const res = await sbRpc('library_create_film_b45', { p_film: { ...film, distinct_from: distinctFrom || [] } });
+        saved = res && res.id ? { id: res.id } : null;
       }
-      if (!out || out.outcome !== 'inserted') {
-        libraryAfterWrite(ctx);
-        libraryReport(ctx, `“${film.title}” is already on your list (added somewhere else just now). Nothing was added.`, true);
-        return;
-      }
-      saved = { id: out.id };
-    } else {
-      const res = await sbRpc('library_create_film_b45', { p_film: { ...film, distinct_from: distinctFrom || [] } });
-      if (!libraryAnswerCurrent(ctx, film.title)) return;
-      saved = res && res.id ? { id: res.id } : null;
+    } catch (e) {
+      const f = libraryFailure(e, `Adding “${film.title}”`, 'Adding a film');
+      await libraryAfterWrite(ctx);
+      libraryReport(ctx, f.text, true);
+      return;
     }
-  } catch (e) {
-    if (!libraryAnswerCurrent(ctx, film.title)) return;
-    const f = libraryFailure(e, `Adding “${film.title}”`, 'Adding a film');
-    if (!f.unknown) libraryAfterWrite(ctx);
-    libraryReport(ctx, f.text, true);
-    return;
-  }
-  showSaved();
-  libraryAfterWrite(ctx);
-  libraryReport(ctx, `Added “${film.title}”.${unmapped.length ? ` TMDB categories not used: ${unmapped.join(', ')}.` : ''}`, false,
-    saved ? libraryMembershipHtml(ctx, { item_id: saved.id }, film.title) : '');
+    showSaved();
+    await libraryAfterWrite(ctx);
+    libraryReport(ctx, `Added “${film.title}”.${unmapped.length ? ` TMDB categories not used: ${unmapped.join(', ')}.` : ''}`, false,
+      saved ? libraryMembershipHtml(ctx, { item_id: saved.id }, film.title) : '');
+  });
 }
 
-// After any answer in the same epoch: the open view and the panel's library are read again.
-function libraryAfterWrite(ctx) {
-  if (ctx.epoch !== orgEpoch) return;
-  if (activeViewId && activeViewId === ctx.viewId) reloadOpenView();
+// After any answer (a refusal or no clear answer too): the open view and the panel's
+// library are read again, while the lane is still held. An unclear answer is never resent.
+async function libraryAfterWrite(ctx) {
+  const reads = [];
+  if (activeViewId && activeViewId === ctx.viewId) reads.push(reloadOpenView());
   if (libraryLive(ctx.session)) {
     cancelTMDBPreview();
-    libraryLoad(ctx.session);
+    reads.push(libraryLoad(ctx.session));
   }
+  await Promise.allSettled(reads);
 }
 
 // ─── Collections after a creation (optional, separate) ────────────────────────
@@ -696,24 +690,25 @@ async function libraryAddMemberships() {
   (box ? box.querySelectorAll('input[type="checkbox"][data-collection-id]') : []).forEach(cb => { if (cb.checked) chosen.push(cb.dataset.collectionId); });
   if (!chosen.length) return;
   const ctx = libraryContext();
-  p.membersBusy = true;
-  const lines = [];
-  for (const id of chosen) {
-    const name = (personalCollections || []).find(c => c.id === id)?.name || 'that collection';
-    try {
-      const res = await sbRpc('org_add_membership', { p_collection_id: id, p_show_id: target.show_id || null, p_item_id: target.item_id || null });
-      lines.push(res && res.added === false ? `Already in ${name}.` : `Added to ${name}.`);
-    } catch (e) {
-      const info = orgErrorInfo(e);
-      lines.push(info.kind !== 'database'
-        ? `${name}: no clear answer came back, so it isn’t confirmed; check in Manage.`
-        : `Couldn’t add to ${name}: ${orgRefusalText(info)}`);
+  await runWrite(`“${target.title}” · collections`, async () => {
+    p.membersBusy = true;
+    const lines = [];
+    for (const id of chosen) {
+      const name = (personalCollections || []).find(c => c.id === id)?.name || 'that collection';
+      try {
+        const res = await sbRpc('org_add_membership', { p_collection_id: id, p_show_id: target.show_id || null, p_item_id: target.item_id || null });
+        lines.push(res && res.added === false ? `Already in ${name}.` : `Added to ${name}.`);
+      } catch (e) {
+        const info = orgErrorInfo(e);
+        lines.push(info.kind !== 'database'
+          ? `${name}: no clear answer came back, so it isn’t confirmed; check in Manage.`
+          : `Couldn’t add to ${name}: ${orgRefusalText(info)}`);
+      }
     }
-    if (ctx.epoch !== orgEpoch) break;
-  }
-  if (libraryPanel === p) { p.membersBusy = false; p.memberTarget = null; }
-  libraryReport(ctx, `“${target.title}” is saved. ${lines.join(' ')}`, false);
-  if (ctx.epoch === orgEpoch && activeViewId === ctx.viewId && isBrowseCollectionView(activeViewId)) reloadOpenView();
+    if (libraryPanel === p) { p.membersBusy = false; p.memberTarget = null; }
+    libraryReport(ctx, `“${target.title}” is saved. ${lines.join(' ')}`, false);
+    if (activeViewId === ctx.viewId && isBrowseCollectionView(activeViewId)) await reloadOpenView();
+  });
 }
 
 // ─── By hand ──────────────────────────────────────────────────────────────────
@@ -995,6 +990,8 @@ async function libraryApplyRefresh() {
   });
   document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-update-idx]').forEach(cb => { if (cb.checked) dates.push(updates[parseInt(cb.dataset.updateIdx, 10)]); });
   if (!picks.size && !dates.length) return;
+  const lane = beginWrite('Refresh shows');
+  if (!lane) return;
   p.busy = true;
   const lines = [];
   let stopped = false, confirmed = 0; // confirmed: answers that saved something (the only reason to say "Saved")
@@ -1004,7 +1001,6 @@ async function libraryApplyRefresh() {
     catch (e) { libraryReport(ctx, `Couldn’t read your whole list (${e.message}), so nothing was added.`, true); return; }
     if (!libraryLive(ctx.session)) return;
     for (const [i, nums] of picks) {
-      if (ctx.epoch !== orgEpoch) { stopped = true; break; } // a restore since: nothing more is sent
       const f = found[i];
       const show = lib.showsById.get(f.show.id);
       const network = (f.details.networks && f.details.networks[0]?.name) || 'Unknown';
@@ -1020,17 +1016,15 @@ async function libraryApplyRefresh() {
       } catch (e) {
         const fl = libraryFailure(e, `“${show.title}”`);
         lines.push(fl.unknown ? fl.text : `“${show.title}”: ${fl.text}`);
-        if (fl.unknown || ctx.epoch !== orgEpoch) { stopped = true; break; }
+        if (fl.unknown) { stopped = true; break; }
         continue;
       }
-      if (ctx.epoch !== orgEpoch) { stopped = true; lines.push(`“${show.title}” answered after a restore; that answer was set aside.`); break; }
       if (!res || res.show_id !== show.id || res.show_created) { lines.push(`“${show.title}”: the answer named a different show, so it isn’t reported as added. Check it.`); continue; }
       if ((res.inserted || []).length) confirmed++;
       lines.push(libraryAddText(res, show.title));
     }
     // Confirmed dates: only the two date fields, only while the row still holds the previewed value.
     for (const u of stopped ? [] : dates) {
-      if (ctx.epoch !== orgEpoch) { stopped = true; break; } // a restore since: nothing more is sent
       try {
         const changed = await libraryPatchReturning(`${TABLE}?id=eq.${encodeURIComponent(u.row.id)}&media_type=eq.tv&tmdb_id=eq.${u.row.tmdb_id}&season_number=eq.${u.row.season_number}&display_date=eq.${encodeURIComponent(u.row.display_date)}`, u.update);
         if (changed.length === 1 && changed[0].id === u.row.id && changed[0].display_date === u.update.display_date) {
@@ -1045,34 +1039,37 @@ async function libraryApplyRefresh() {
         if (fl.unknown) { stopped = true; break; }
       }
     }
+    if (stopped) lines.push('Nothing more was sent.');
+    if (confirmed) showSaved();
+    await libraryAfterWrite(ctx);
+    libraryReport(ctx, lines.join(' '), !confirmed);
   } finally {
     if (libraryPanel === p) { p.busy = false; p.refresh = null; }
+    endWrite(lane);
   }
-  if (stopped) lines.push('Nothing more was sent.');
-  if (ctx.epoch !== orgEpoch) {
-    showNotice(`Refresh shows answered after a restore. ${lines.join(' ')} The list has been read again; check these shows before adding again.`);
-    if (activeViewId) reloadOpenView();
-    return;
-  }
-  if (confirmed) showSaved();
-  libraryAfterWrite(ctx);
-  libraryReport(ctx, lines.join(' '), !confirmed);
 }
 
 // A guarded PATCH that answers with the rows it changed (PostgREST
 // return=representation), so "no row matched" is told apart from a change.
 // Errors as sbFetch reports them.
+// Sent from inside the write lane, like every change (api.js sbFetch).
 async function libraryPatchReturning(path, body) {
+  if (!writeLane) throw new Error('This change was not started through the write lane, so nothing was sent.');
   await requireWritablePhase();
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    method: 'PATCH',
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) throw new Error(`Supabase error ${res.status}: ${await res.text()}`);
-  const text = await res.text();
-  const rows = text ? JSON.parse(text) : [];
-  return Array.isArray(rows) ? rows : [];
+  writeSent();
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(`Supabase error ${res.status}: ${await res.text()}`);
+    const text = await res.text();
+    const rows = text ? JSON.parse(text) : [];
+    return Array.isArray(rows) ? rows : [];
+  } finally {
+    writeSettled();
+  }
 }
 
 // ─── Movie tools (Refresh collections, MCU, person collections, Pull rest) ────
@@ -1082,23 +1079,25 @@ function toolCollectionId() {
   return libraryPanel && libraryPanel.media === 'movie' && libraryPanel.viewId === activeViewId && libraryPanel.toolsReady ? TOOL_FILMS : null;
 }
 
-// The tool's context: still current while the same panel is open in the same view and restore epoch.
+// The tool's context: still current while the same panel is open in the same view (a
+// restore closes the panel and clears the tool's cache, backup-restore.js).
 function toolContext(collectionId) {
-  return { collectionId, session: libraryPanel ? libraryPanel.session : 0, viewId: activeViewId, epoch: orgEpoch };
+  return { collectionId, session: libraryPanel ? libraryPanel.session : 0, viewId: activeViewId };
 }
 
 function toolContextLive(t) {
-  return libraryLive(t.session) && t.epoch === orgEpoch;
+  return libraryLive(t.session);
 }
 
 // After a tool's write: the open view is read again.
 function toolFinished(t) {
-  if (t.epoch === orgEpoch && activeViewId === t.viewId) reloadOpenView();
+  if (activeViewId === t.viewId) return reloadOpenView();
+  return null;
 }
 
-// Rows a tool adds go into its cache only within the epoch they were read in.
+// Rows a tool adds go into its cache (while it is still the cache the tool read).
 function toolCachePush(t, rows) {
-  if (!rows || t.epoch !== orgEpoch) return;
+  if (!rows || !toolContextLive(t)) return;
   const td = tabData[t.collectionId];
   if (td) {
     td.rows.push(...rows); td.rows.sort((a, b) => a.date_sort.localeCompare(b.date_sort));
@@ -1136,7 +1135,7 @@ async function libraryInsertFilms(rows) {
 async function libraryPrepareMovieTools() {
   const p = libraryPanel;
   if (!p || p.media !== 'movie') return false;
-  const session = p.session, epoch = orgEpoch;
+  const session = p.session;
   p.toolsReady = false;
   delete tabData[TOOL_FILMS];
   let all;
@@ -1145,7 +1144,7 @@ async function libraryPrepareMovieTools() {
     if (libraryLive(session)) libraryReport(libraryContext(), `Couldn’t read your whole list (${e.message}), so this tool can’t run right now. Nothing was changed.`, true);
     return false;
   }
-  if (!libraryLive(session) || epoch !== orgEpoch) return false;
+  if (!libraryLive(session)) return false;
   const own = all.filter(r => isFilmRow(r) && filmThemeKindOf(r) === 'genre').sort((a, b) => String(a.date_sort).localeCompare(String(b.date_sort)));
   const elsewhere = all.filter(r => !own.includes(r) && r.media_type === 'movie' && r.tmdb_id != null);
   tabData[TOOL_FILMS] = { rows: own, loaded: true, newKeys: [], known: own.concat(elsewhere) };
@@ -1184,7 +1183,7 @@ async function libraryPullRest(rowId, collectionId, name) {
 // removes a show left empty). The row leaves the view at once and comes back if
 // the delete is refused; an unclear answer is reported as such, never as done.
 // D6 (S3): the confirmation is an in-page dialog named by its effect (askEffect). What the page
-// showed is checked again after the answer: if the view, the restore epoch, the row or its editing
+// showed is checked again after the answer: if the view, the row or its editing
 // rule changed while the question was open, nothing is sent. In a collection a confirmed delete reads
 // the collection again (its last season takes the show and its memberships with it).
 async function delRowInView(id) {
@@ -1198,10 +1197,10 @@ async function delRowInView(id) {
     return;
   }
   if (policy.deleteEffect === 'skip') { await setSeasonSkipped(id, true); return; }
-  const viewId = activeViewId, epoch = orgEpoch;
-  // After the answer: the same view and epoch, the row still listed, its rule unchanged (D6).
+  const viewId = activeViewId;
+  // After the answer: the same view, the row still listed, its rule unchanged (D6).
   const stillAsShown = () => {
-    if (activeViewId !== viewId || orgEpoch !== epoch) return null;
+    if (activeViewId !== viewId) return null;
     const now = actionRows().find(r => r.id === id);
     if (now && editPolicyOf(now).deleteEffect === policy.deleteEffect) return now;
     showNotice(`“${row.title}” changed while the question was open, so nothing was changed. The list has been read again.`);
@@ -1220,7 +1219,7 @@ async function delRowInView(id) {
   if (!await askEffect(deleteEffectText(row, show), 'Delete from library')) return;
   const current = stillAsShown();
   if (!current) return;
-  return deleteFromLibrary(current, viewId, epoch, what);
+  return deleteFromLibrary(current, viewId, what);
 }
 
 // D6 (S3): what a delete from the library does, in the dialog's words. A season is named by its
@@ -1236,44 +1235,40 @@ function deleteEffectText(row, show) {
     + (endsRange ? ` The earlier-seasons choice for “${show.title}” ends too.` : '');
 }
 
-async function deleteFromLibrary(row, viewId, epoch, what) {
-  const id = row.id;
-  const rows = actionRows();
-  const idx = rows.indexOf(row);
-  rows.splice(idx, 1);
-  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', LIBRARY_PARTITION, id, null) : null;
-  renderTable();
-  const origin = typeof placedOrigin === 'function' ? placedOrigin() : null; // this action's focus placement (S3, brief §7.2)
-  try {
-    if (isTvSeason(row)) {
-      try {
-        const res = await sbRpc('delete_tv_season', { p_row_id: id });
-        if (res && res.show_deleted && epoch === orgEpoch) tvShowsById.delete(res.show_id);
-      } catch (e) {
-        if (!String(e.message).includes('not_found:')) throw e; // already gone counts as deleted
+async function deleteFromLibrary(row, viewId, what) {
+  await runWrite(`Delete ${what}`, async () => {
+    const id = row.id;
+    const rows = actionRows();
+    const idx = rows.indexOf(row);
+    if (idx >= 0) rows.splice(idx, 1);
+    renderTable();
+    try {
+      if (isTvSeason(row)) {
+        try {
+          const res = await sbRpc('delete_tv_season', { p_row_id: id });
+          if (res && res.show_deleted) tvShowsById.delete(res.show_id);
+        } catch (e) {
+          if (!String(e.message).includes('not_found:')) throw e; // already gone counts as deleted
+        }
+      } else {
+        await sbFetch('DELETE', `${TABLE}?id=eq.${id}`, null);
       }
-    } else {
-      await sbFetch('DELETE', `${TABLE}?id=eq.${id}`, null);
+      Object.values(tabData).forEach(td => { if (td && td.rows) td.rows = td.rows.filter(r => r.id !== id); });
+      showSaved();
+      if (activeViewId === viewId) {
+        if (isBrowseCollectionView(viewId)) await reloadOpenView(); // the collection's members may have changed (S3)
+        else renderTable();
+      }
+    } catch (e) {
+      const info = orgErrorInfo(e);
+      if (info.kind === 'database' && idx >= 0 && activeViewId === viewId && actionRows() === rows) rows.splice(idx, 0, row);
+      // An unclear answer: the view is read again (that clears the error line, so it is reported after).
+      if (activeViewId === viewId) { if (info.kind === 'database') renderTable(); else await reloadOpenView(); }
+      showError(info.kind === 'database'
+        ? `Couldn’t delete ${what}: ${info.message}. Nothing was changed.`
+        : `The delete of ${what} was sent, but no clear answer came back (${info.message}). Reload and check before deleting again.`);
     }
-    if (epoch === orgEpoch) Object.values(tabData).forEach(td => { if (td && td.rows) td.rows = td.rows.filter(r => r.id !== id); });
-    showSaved();
-    if (epoch === orgEpoch && activeViewId === viewId) {
-      if (isBrowseCollectionView(viewId)) reloadOpenView({ origin }); // the collection's members may have changed (S3)
-      else renderTable();
-    }
-  } catch (e) {
-    const info = orgErrorInfo(e);
-    if (epoch === orgEpoch && activeViewId === viewId && actionRows() === rows) {
-      if (info.kind === 'database') rows.splice(idx, 0, row);
-      if (typeof matchEditRevert === 'function' && info.kind === 'database') matchEditRevert(edit, row);
-    }
-    // An unclear answer: the view is read again (that clears the error line, so it is reported after).
-    if (epoch === orgEpoch && activeViewId === viewId) { if (info.kind === 'database') renderTable(); else reloadOpenView({ origin }); }
-    showError(info.kind === 'database'
-      ? `Couldn’t delete ${what}: ${info.message}. Nothing was changed.`
-      : `The delete of ${what} was sent, but no clear answer came back (${info.message}). Reload and check before deleting again.`);
-  }
-  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
+  }, { list: true });
 }
 
 // ─── Effect-named confirmations (D6, S3) ──────────────────────────────────────

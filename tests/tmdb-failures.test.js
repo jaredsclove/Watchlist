@@ -10,7 +10,7 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const FILES = ['config.js', 'identity.js', 'ui-helpers.js', 'metadata.js', 'refresh-shows.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'library.js'];
+const FILES = ['config.js', 'identity.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'refresh-shows.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'library.js'];
 const { createApp, settle } = require('./app-harness');
 
 // A fresh sandbox per test, as All Movies' "+ Add" panel with its tools prepared
@@ -28,7 +28,7 @@ function makeEnv({ tmdb, rows = [], checkboxes = [] }) {
     document: { getElementById: el, querySelectorAll: () => checkboxes },
     tabData: { films: { rows, loaded: true, newKeys: [], known: rows.slice() } },
     // page state the tool context reads (library.js): All Movies with its prepared panel
-    activeViewId: 'allmovies', orgEpoch: 0,
+    activeViewId: 'allmovies',
     libraryPanel: { session: 1, media: 'movie', mode: 'tools', viewId: 'allmovies', epoch: 0, toolsReady: true },
     tmdbShowSpecials: false,
     tmdbFetch: async p => { log.tmdbCalls++; return tmdb(p); },

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261018-tvedit1">
+<link rel="stylesheet" href="styles.css?v=20261018-lane1">
 </head>
 <body>
 
@@ -54,6 +54,7 @@
   <div id="settingsScreen" class="settings-screen" style="display:none"></div>
   <div class="filters" id="filtersRow"></div>
   <div class="stats-row" id="statsRow"></div>
+  <div id="readStatus" class="read-status"></div>
 
   <div id="tmdbPanel" class="tmdb-panel" style="display:none"></div>
   <div id="libraryPanel" class="tmdb-panel library-panel" style="display:none"></div>
@@ -86,27 +87,28 @@
      deliberately unversioned (the catalog-refresh workflow reloads it by plain URL). -->
 <script src="config.js"></script>
 <script src="identity.js"></script>
-<script src="api.js?v=20261018-tvedit1"></script>
-<script src="ui-helpers.js?v=20261018-tvedit1"></script>
-<script src="metadata.js?v=20261018-tvedit1"></script>
-<script src="backup-restore.js?v=20261018-tvedit1"></script>
-<script src="backup-format3.js?v=20261018-tvedit1"></script>
-<script src="tabs.js?v=20261018-tvedit1"></script>
-<script src="render.js?v=20261018-tvedit1"></script>
-<script src="row-actions.js?v=20261018-tvedit1"></script>
-<script src="tmdb-search.js?v=20261018-tvedit1"></script>
-<script src="collections-pull.js?v=20261018-tvedit1"></script>
-<script src="universe-pull.js?v=20261018-tvedit1"></script>
-<script src="person-pull.js?v=20261018-tvedit1"></script>
-<script src="refresh-shows.js?v=20261018-tvedit1"></script>
-<script src="tmdb-match.js?v=20261018-tvedit1"></script>
-<script src="derived-views.js?v=20261018-tvedit1"></script>
-<script src="tv-shows.js?v=20261018-tvedit1"></script>
-<script src="organization.js?v=20261018-tvedit1"></script>
-<script src="organization-manage.js?v=20261018-tvedit1"></script>
-<script src="catalog-apply.js?v=20261018-tvedit1"></script>
-<script src="browse-views.js?v=20261018-tvedit1"></script>
-<script src="library.js?v=20261018-tvedit1"></script>
+<script src="api.js?v=20261018-lane1"></script>
+<script src="write-lane.js?v=20261018-lane1"></script>
+<script src="ui-helpers.js?v=20261018-lane1"></script>
+<script src="metadata.js?v=20261018-lane1"></script>
+<script src="backup-restore.js?v=20261018-lane1"></script>
+<script src="backup-format3.js?v=20261018-lane1"></script>
+<script src="tabs.js?v=20261018-lane1"></script>
+<script src="render.js?v=20261018-lane1"></script>
+<script src="row-actions.js?v=20261018-lane1"></script>
+<script src="tmdb-search.js?v=20261018-lane1"></script>
+<script src="collections-pull.js?v=20261018-lane1"></script>
+<script src="universe-pull.js?v=20261018-lane1"></script>
+<script src="person-pull.js?v=20261018-lane1"></script>
+<script src="refresh-shows.js?v=20261018-lane1"></script>
+<script src="tmdb-match.js?v=20261018-lane1"></script>
+<script src="derived-views.js?v=20261018-lane1"></script>
+<script src="tv-shows.js?v=20261018-lane1"></script>
+<script src="organization.js?v=20261018-lane1"></script>
+<script src="organization-manage.js?v=20261018-lane1"></script>
+<script src="catalog-apply.js?v=20261018-lane1"></script>
+<script src="browse-views.js?v=20261018-lane1"></script>
+<script src="library.js?v=20261018-lane1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -132,12 +134,11 @@ let activeMediaType = 'tv'; // 'tv' | 'movie' — controls which views are visib
 let activeArea = 'tv'; // S2: 'tv' | 'movie' | 'collections' | 'settings' — the primary area shown as current; set only by switchView (tabs.js areaOfView)
 let activeViewId = 'watching'; // the open view (derived or browse)
 let tabData = {}; // per-run caches by name: tabData.films = the movie tools' films (library.js); no storage
-let libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(), seq: 0, epoch: 0 }; // the newest catalog-governance snapshot (library.js)
+let libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(), seq: 0 }; // the newest catalog-governance snapshot (library.js)
 let stage5Phase = null; // the database's phase from stage5_capabilities(); this page writes only in 'contracted-b45' (null: not read yet, or any other phase)
 let derivedData = null; // { rows, loaded } — cross-TV rows for the derived views, kept apart from tabData
 let derivedLoadSeq = 0; // lets a late derived-view load see that it's been superseded
 let derivedSectionOpen = { uptodate: true, tba: false, alltvTba: false }; // collapsible sections in the derived views (Up to date starts open, TBA sections closed)
-let focusPlacement = null; // the page's one focus move after a redraw (derived-views.js placeFocus): { el, origin, cancelled, stop }; null when none
 let allTvPresentation = 'shows'; // All TV: 'shows' | 'seasons'; remembered on this device (derived-views.js)
 let allTvSeasonVis = 'notskipped'; // All TV Seasons: 'notskipped' (All (except Skipped), the default) | 'all' | 'towatch' | 'watched' | 'skipped'; kept across Shows/Seasons, reset when the view is entered
 let addOpen = false;
@@ -164,18 +165,16 @@ let personalCollections = null; // personal_collections rows (organization.js); 
 let watchWithChoices = null; // watch_with_choices rows; null until loaded (the configured list is offered meanwhile)
 let orgState = 'loading'; // 'loading' | 'ready' | 'unavailable' (failed: Retry) | 'absent' (database without personal collections)
 let orgLoadSeq = 0; // the latest organization load (its failure matters only if it is still the latest)
-let orgReadSeq = 0; // every read of the organization tables takes the next number when it starts
+let orgReadSeq = 0; // every read of the organization tables takes the next number when it starts (with a read stamp, write-lane.js)
 let orgCollectionsSeq = 0; // the start number of the read whose collections are shown (an older read never replaces them)
 let orgChoicesSeq = 0; // the same for the watch-with choices
-let orgEpoch = 0; // bumped by a restore: reads started before it never publish
 let watchWithState = 'loading'; // 'loading' | 'ready' | 'unavailable' (failed: Retry) | 'absent' (database without watch-with choices)
-let orgWriteBarrier = 0; // organization reads started at or before this number never publish (set after a confirmed change; organization-manage.js)
 let orgCollectionsStale = 0; // the read number of a failed refresh newer than the collections shown (0: not stale); a newer published read clears it
 let orgChoicesStale = 0; // the same for the watch-with choices
 let orgOpSeq = 0; // every organization change the Manage dialog sends takes the next number
 let manageSession = 0; // bumped each time the Manage dialog opens; replies for an earlier opening never touch it
 let manage = null; // the open Manage dialog's state (organization-manage.js); null while closed
-let detailsDialog = null; // the open Details dialog (render.js): its session, snapshot, epoch and draft; null while closed
+let detailsDialog = null; // the open Details dialog (render.js): its session, snapshot, draft and whether a restore ran since; null while closed
 let detailsSessionSeq = 0; // bumped at each opening; an answer for an earlier opening never touches a newer one
 let resumePickerFor = null; // the show whose "Watch earlier seasons" picker is open (tv-shows.js); null while none is
 let shownNewRecords = []; // the New-from-catalog records the open view shows: [{ kind, id }] (Dismiss all, tv-shows.js)
@@ -184,15 +183,8 @@ let catalogSession = 0; // bumped each time it opens; answers for an earlier ope
 let catalogChooser = null; // the open Catalog updates chooser (catalog-apply.js): { session, hints }; null while closed
 let libraryPanel = null; // the open "+ Add" panel of a view (library.js); null while closed
 let libraryPanelSeq = 0; // bumped each time the panel opens; answers for an earlier opening never touch it
-let orgWriteCapability = null; // { value: 'yes', epoch }: this database has the Stage 3b-2 functions (checked when Manage opens)
+let orgWriteCapability = null; // { value: 'yes' }: this database has the Stage 3b-2 functions (checked when Manage opens)
 let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.js)
-let matchLatestByRow = {}; // row id → the latest Match call's number for that row
-let matchRefreshSeq = 0; // the latest refresh after a Match whose result couldn't be put into the page
-let matchRefreshStamp = null; // what that refresh is for (Retry reads it again)
-let matchRefreshProgress = null; // the refresh after Matches: its outcomes and its open obligations (rows, shows) (tmdb-match.js)
-let matchReadSeq = 0; // every tracked read (row, shows) and every Match call takes the next number when it starts
-let matchReads = []; // recent tracked reads with their epoch and outcome; any of them can satisfy a refresh obligation
-let matchPublished = { epoch: 0, rows: {}, shows: {} }; // newest read that published each row and the show list (per restore epoch)
 
 
 

@@ -291,76 +291,6 @@ test('removal with no answer, then removed and added again elsewhere (new id): s
   assert.ok(app.store.collection_memberships.some(m => m.id === uuid('0d', 777)), 'replacement untouched');
 });
 
-test('Stop waiting: Close is disabled while saving, Escape does nothing; Stop waiting makes it unknown and re-enables Close (the request isn’t cancelled); the late reply resolves the note without applying its record', async () => {
-  const app = await boot();
-  await open(app);
-  const s = coll(app, 'sheridan');
-  const g = app.hold(r => r.url.includes('/rpc/org_rename_collection'));
-  app.ctx.manageStartRename('c', s.id);
-  typeInto(app, `manageRename-${s.id}`, 'Sheridan Universe');
-  app.ctx.manageSaveRename('c', s.id);
-  await g.reached; await settle();
-  assert.match(box(app), /id="manageClose" onclick="closeManage\(\)" disabled>Saving…/);
-  app.ctx.closeManage();
-  app.ctx.manageKeydown({ key: 'Escape', preventDefault() {} });
-  assert.ok(state(app), 'still open');
-  const op = Object.values(state(app).pending)[0];
-  app.ctx.manageStopWaiting(String(op.id)); await settle();
-  assert.ok(!/disabled>Saving/.test(box(app)), 'Close enabled');
-  assert.match(text(app), /Not renamed as of this check\. Your earlier request could still rename it\./, 'the request hasn’t run yet');
-  // The request was never cancelled: it now arrives and is applied; its reply resolves the note but its record isn't applied.
-  const postRead = app.hold(r => r.url.includes('/rest/v1/personal_collections?'));
-  g.release(); await settle();
-  assert.match(text(app), /Your earlier change was saved\./);
-  assert.strictEqual(state(app).data.collections.find(c => c.id === s.id).name, 'Sheridan', 'the late reply’s record is not applied');
-  assert.strictEqual(state(app).undo.length, 0);
-  postRead.release(); await settle();
-  assert.strictEqual(state(app).data.collections.find(c => c.id === s.id).name, 'Sheridan Universe', 'the post-write read shows it');
-});
-
-test('read-version guard: a delayed rename reply after a newer accepted read (no newer local action, no Stop waiting) keeps the read’s name, never the older one', async () => {
-  const app = await boot();
-  await open(app);
-  const s = coll(app, 'sheridan');
-  const original = app.rpcHandlers.org_rename_collection;
-  let releaseReply;
-  app.rpcHandlers.org_rename_collection = body => {
-    const res = original(body);                 // commits "B"
-    s.name = 'C';                               // another page renames again
-    return new Promise(r => { releaseReply = () => r(res); });
-  };
-  app.ctx.manageStartRename('c', s.id);
-  typeInto(app, `manageRename-${s.id}`, 'B');
-  app.ctx.manageSaveRename('c', s.id); await settle();
-  app.ctx.manageReadAgain(); await settle();     // an editor read, started after the rename was sent, shows C
-  assert.strictEqual(state(app).data.collections.find(c => c.id === s.id).name, 'C');
-  const postRead = app.hold(r => r.url.includes('/rest/v1/personal_collections?'));
-  releaseReply(); await settle();
-  assert.strictEqual(state(app).data.collections.find(c => c.id === s.id).name, 'C', 'never shows B, even briefly');
-  postRead.release(); await settle();
-  assert.strictEqual(state(app).data.collections.find(c => c.id === s.id).name, 'C');
-});
-
-test('read-version guard for a membership pair: a delayed added:true after a newer read showing the pair absent is reported, not re-inserted', async () => {
-  const app = await boot();
-  const d = coll(app, 'disney');
-  const sev = showByTitle(app, 'Severance');
-  await open(app, 'members', d.id);
-  const original = app.rpcHandlers.org_add_membership;
-  let releaseReply;
-  app.rpcHandlers.org_add_membership = body => {
-    const res = original(body);
-    app.store.collection_memberships = app.store.collection_memberships.filter(m => !(m.collection_id === d.id && m.show_id === sev.id));
-    return new Promise(r => { releaseReply = () => r(res); });
-  };
-  app.ctx.manageAddMember('s', sev.id); await settle();
-  app.ctx.manageReadAgain(); await settle();
-  const postRead = app.hold(r => r.url.includes('/rest/v1/collection_memberships?'));
-  releaseReply(); await settle();
-  assert.ok(!state(app).data.memberships.some(m => m.collection_id === d.id && m.show_id === sev.id), 'not re-inserted from the reply');
-  postRead.release(); await settle();
-});
-
 test('control: with no newer read, a reply updates the working copy right away (before the post-write read)', async () => {
   const app = await boot();
   await open(app);
@@ -375,7 +305,7 @@ test('control: with no newer read, a reply updates the working copy right away (
   postRead.release(); await settle();
 });
 
-test('write barrier: a read started before a change can’t publish after it; the post-write read started after the barrier does', async () => {
+test('a read started before a change can’t publish after it (write-lane.js); the post-write read does', async () => {
   const app = await boot();
   await open(app);
   const preChange = JSON.parse(JSON.stringify(app.store.personal_collections));
@@ -393,9 +323,7 @@ test('write barrier: a read started before a change can’t publish after it; th
   assert.ok(app.get('personalCollections').some(c => c.name === 'Favourites'), 'the older read didn’t replace it');
 });
 
-test('write barrier (contract): a read started before a confirmed change never publishes after its reply, even before the post-write read finishes', async () => {
-  // Replies never touch the shared lists, so a late pre-change read would show the same
-  // data they already hold; this pins the publication rule itself (defence in depth).
+test('a read started before a change never publishes, even before the post-write read finishes; it reads again once the lane is free', async () => {
   const app = await boot();
   await open(app);
   const early = app.hold(r => r.url.includes('/rest/v1/personal_collections?'));
@@ -405,31 +333,13 @@ test('write barrier (contract): a read started before a confirmed change never p
   const post = app.hold(r => r.url.includes('/rest/v1/personal_collections?'));
   typeInto(app, 'manageNewCollection', 'Favourites');
   app.ctx.manageCreate('collection');
-  await post.reached;                               // the post-write read is in flight
-  assert.ok(app.get('orgWriteBarrier') >= earlySeq, 'barrier set before the post-write read started');
+  await post.reached;                               // the post-write read is in flight, the lane still held
   early.release(); await p; await settle();
   assert.ok(app.get('orgCollectionsSeq') < earlySeq, 'the earlier read did not publish');
   post.release(); await settle();
-  assert.ok(app.get('orgCollectionsSeq') > app.get('orgWriteBarrier'), 'the post-write read (newer than the barrier) published');
-});
-
-test('write barrier (contract): a read started before a confirmed change never publishes after its reply when the post-write refresh fails; the stale flag stays', async () => {
-  const app = await boot();
-  await open(app);
-  const early = app.hold(r => r.url.includes('/rest/v1/personal_collections?'));
-  const p = app.ctx.loadOrganization();
-  await early.reached;
-  const earlySeq = app.get('orgReadSeq');
-  const seqBefore = app.get('orgCollectionsSeq');
-  app.failNext(r => r.url.includes('/rest/v1/personal_collections?'));   // the post-write collections read fails
-  typeInto(app, 'manageNewCollection', 'Favourites');
-  app.ctx.manageCreate('collection'); await settle();
-  assert.ok(app.get('orgCollectionsStale') > 0, 'collections marked possibly out of date');
-  early.release(); await p; await settle();
-  assert.strictEqual(app.get('orgCollectionsSeq'), seqBefore, 'the earlier read did not publish');
-  assert.ok(app.get('orgCollectionsSeq') < earlySeq);
-  assert.ok(app.get('orgCollectionsStale') > 0, 'still marked possibly out of date');
-  assert.match(app.run('collectionsChooserHtml()'), /Collections may be out of date/);
+  assert.ok(app.get('orgCollectionsSeq') > earlySeq, 'a newer read published');
+  assert.ok(app.get('personalCollections').some(c => c.name === 'Favourites'));
+  assert.strictEqual(app.get('writeLane'), null, 'the lane is free');
 });
 
 test('saved but refresh failed: the dialog says so with Retry; the Browse bar marks collections out of date; Retry recovers', async () => {
@@ -544,58 +454,6 @@ test('recognized database answers stay definitive: a statement timeout (57014) a
 });
 
 // ── Overlapping unresolved requests on one record (review finding 3) ──
-test('Archive → Stop waiting → Unarchive succeeds → the original Archive arrives late: each request’s uncertainty is its own', async () => {
-  const app = await boot();
-  await open(app);
-  const d = coll(app, 'disney');
-  const original = app.rpcHandlers.org_set_collection_archived;
-  let releaseFirst, calls = 0;
-  app.rpcHandlers.org_set_collection_archived = body => {
-    const res = original(body);
-    return ++calls === 1 ? new Promise(r => { releaseFirst = () => r(res); }) : res;   // the archive commits; its reply is delayed
-  };
-  app.ctx.manageSetArchived('c', d.id, true); await settle();
-  const op1 = Object.values(state(app).pending)[0];
-  app.ctx.manageStopWaiting(String(op1.id)); await settle();
-  app.ctx.manageToggleArchived(); await settle();
-  assert.match(text(app), /It is now archived\. Your earlier archive request wasn’t confirmed/);
-  app.ctx.manageSetArchived('c', d.id, false); await settle();          // a fresh action: Unarchive succeeds
-  assert.strictEqual(d.archived_at, null);
-  assert.match(text(app), /Disney\+ .*Your earlier archive request wasn’t confirmed/, 'the earlier Archive is still unconfirmed after the Unarchive succeeded');
-  releaseFirst(); await settle(); await settle();                        // the original Archive's reply arrives
-  assert.match(text(app), /Your earlier change was saved\./, 'it resolves only its own request');
-  assert.strictEqual(d.archived_at, null, 'its record was not applied over the newer state');
-  assert.strictEqual(state(app).data.collections.find(c => c.id === d.id).archived_at, null);
-});
-
-test('two unresolved requests on one record whose replies arrive out of order: each reply resolves only its own request', async () => {
-  const app = await boot();
-  await open(app);
-  const s = coll(app, 'sheridan');
-  const rename = async (to) => {
-    const g = app.hold(r => r.url.includes('/rpc/org_rename_collection') && r.body && r.body.p_name === to);
-    app.ctx.manageStartRename('c', s.id);
-    typeInto(app, `manageRename-${s.id}`, to);
-    app.ctx.manageSaveRename('c', s.id);
-    await g.reached; await settle();
-    const op = Object.values(state(app).pending).find(o => o.args.p_name === to);
-    app.ctx.manageStopWaiting(String(op.id)); await settle();
-    return g;
-  };
-  const g1 = await rename('First Name');
-  const g2 = await rename('Second Name');
-  assert.strictEqual((text(app).match(/could still rename it/g) || []).length, 2, 'two unconfirmed requests shown');
-  g2.release(); await settle(); await settle();                          // the second one's reply first
-  assert.match(text(app), /Your earlier change was saved\./);
-  assert.strictEqual((text(app).match(/could still rename it/g) || []).length, 1, 'the first is still unconfirmed');
-  g1.release(); await settle(); await settle();                          // then the first (refused by its guard)
-  assert.match(text(app), /Your earlier change was refused: Renamed elsewhere to “Second Name”; nothing changed\./);
-  assert.match(text(app), /Your earlier change was saved\./, 'the second request’s resolution is kept');
-  assert.ok(!/could still rename it/.test(text(app)));
-  assert.strictEqual(s.name, 'Second Name');
-});
-
-// ── memberships and Undo ──
 test('add a whole show from search: the button says all stored seasons; Undo removes exactly the returned membership', async () => {
   const app = await boot();
   const d = coll(app, 'disney');

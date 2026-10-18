@@ -13,30 +13,13 @@ function collectionFilmLocked(row) {
   return isBrowseCollectionView(activeViewId) && !!row && !isTvSeason(row);
 }
 
-// After a successful PATCH, copy the saved fields onto every other in-memory copy
-// of that row (the derived view's rows, the browse view's rows), without a refetch.
-// epoch: the restore epoch the request started in; an answer from before a restore
-// never reaches the restored caches (Stage 4b).
-function mirrorRowUpdate(id, fields, epoch) {
-  if (epoch !== undefined && epoch !== orgEpoch) return false;
+// After a confirmed change, copy the saved fields onto every in-memory copy of that row
+// (the derived view's rows, the browse view's rows), without a refetch.
+function mirrorRowUpdate(id, fields) {
   const lists = [];
   if (derivedData?.rows) lists.push(derivedData.rows);
   if (browseData?.rows) lists.push(browseData.rows);
   lists.forEach(rows => rows.forEach(r => { if (r.id === id) Object.assign(r, fields); }));
-  return true;
-}
-
-// An answer to a change sent before a restore arrived after it: its payload is
-// set aside (nothing restored is overwritten) and what is open is read again.
-// It doesn't say which happened last; nothing is resent. The notice says whether the
-// reread succeeded (B4/B5: no claim before the read has finished).
-async function staleAfterRestore(what) {
-  const head = `${what} was sent before the restore and answered afterwards.`;
-  const tail = 'this doesn’t show whether the change ran before or after the restore. Check it before changing it again.';
-  showNotice(`${head} The list is being read again; ${tail}`);
-  const ok = typeof reloadOpenView === 'function' ? await reloadOpenView() : null;
-  showNotice(ok === false ? `${head} The list couldn’t be read again (use Retry); ${tail}`
-    : ok === true ? `${head} The list has been read again; ${tail}` : `${head} ${tail.replace(/^t/, 'T')}`);
 }
 
 async function toggleWatch(id) {
@@ -49,41 +32,28 @@ async function toggleWatch(id) {
     return;
   }
   const newVal = !row.watched;
-  const epoch = orgEpoch;
-  row.watched = newVal;
-  // Tracked like a publication of the row (tmdb-match.js): no older read replaces it.
-  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', LIBRARY_PARTITION, id, row) : null;
-  renderTable();
-  const origin = typeof placedOrigin === 'function' ? placedOrigin() : null; // this action's focus placement (S3, brief §7.2)
-  try {
-    if (isTvSeason(row)) {
+  // A film's Watched button is a watched-only change (O4): status, priority, markers unchanged.
+  if (!isTvSeason(row)) { await sendFilmState(row, { watched: newVal }); return; }
+  await runWrite(`“${row.title}” · watched`, async () => {
+    row.watched = newVal;
+    renderTable();
+    try {
       // The database also keeps the show's compatibility values in step.
       const saved = await sbRpc('set_season_watched', { p_row_id: id, p_watched: newVal });
-      if (!mirrorRowUpdate(id, saved || { watched: newVal }, epoch)) staleAfterRestore(`“${row.title}” · watched`);
-      if (epoch === orgEpoch) showSaved();
-    } else {
-      // A film's Watched button is a watched-only change (O4): status, priority, markers unchanged.
+      mirrorRowUpdate(id, saved || { watched: newVal });
+      showSaved();
+    } catch(e) {
       row.watched = !newVal;
-      if (typeof matchEditEnd === 'function') matchEditEnd(edit);
-      await sendFilmState(row, { watched: newVal });
-      return;
-    }
-  } catch(e) {
-    if (epoch !== orgEpoch) staleAfterRestore(`“${row.title}” · watched`);
-    else if (orgErrorInfo(e).kind !== 'database') {
-      // S3-D2 B: no clear answer. It may or may not have been saved: the page claims neither, never
-      // resends it, and reads the open view again to show what is stored (tv-shows.js reportStateFailure).
-      row.watched = !newVal;
-      if (typeof matchEditEnd === 'function') matchEditEnd(edit); // ended first, so the reread can publish
-      await reportStateFailure(e, epoch, origin);
-      return;
-    } else {
-      row.watched = !newVal;
+      if (orgErrorInfo(e).kind !== 'database') {
+        // S3-D2 B: no clear answer. It may or may not have been saved: the page claims neither, never
+        // resends it, and reads the open view again to show what is stored (tv-shows.js reportStateFailure).
+        await reportStateFailure(e);
+        return;
+      }
       renderTable();
       showError(e.message);
     }
-  }
-  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
+  }, { list: true });
 }
 
 // ─── The film contract (B5 §4.2) ──────────────────────────────────────────────
@@ -132,38 +102,29 @@ async function setFilmPriority(id, priority) {
 }
 
 // One guarded film change (library_set_film_state_b45). Shown at once; put back if
-// refused; an answer from before a restore is set aside; an unconfirmed answer is never
-// resent (the list is read again instead).
+// refused; an unconfirmed answer is never resent (the list is read again instead).
 async function sendFilmState(row, changes) {
-  const expected = filmStateOf(row);
-  const before = { status: row.status, watched: row.watched, priority: row.priority, catalog_new: row.catalog_new,
-    status_review: row.status_review, legacy_status: row.legacy_status };
-  const epoch = orgEpoch;
-  if (changes.state) Object.assign(row, { status: changes.state === 'skipped' ? 'skipped' : 'confirmed', watched: changes.state === 'watched',
-    catalog_new: false, status_review: false, legacy_status: null });
-  if ('watched' in changes) row.watched = changes.watched;
-  if (changes.priority) row.priority = changes.priority;
   const what = `“${row.title}” · ${'watched' in changes ? 'watched' : changes.priority ? 'priority' : 'status'}`;
-  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', LIBRARY_PARTITION, row.id, row) : null;
-  renderTable();
-  try {
-    const res = await sbRpc('library_set_film_state_b45', { p_item_id: row.id, p_expected: expected, p_changes: changes });
-    if (!mirrorRowUpdate(row.id, (res && res.row) || {}, epoch)) staleAfterRestore(what);
-    else showSaved();
-  } catch (e) {
-    if (epoch !== orgEpoch) staleAfterRestore(what);
-    else {
+  await runWrite(what, async () => {
+    const expected = filmStateOf(row);
+    const before = { status: row.status, watched: row.watched, priority: row.priority, catalog_new: row.catalog_new,
+      status_review: row.status_review, legacy_status: row.legacy_status };
+    if (changes.state) Object.assign(row, { status: changes.state === 'skipped' ? 'skipped' : 'confirmed', watched: changes.state === 'watched',
+      catalog_new: false, status_review: false, legacy_status: null });
+    if ('watched' in changes) row.watched = changes.watched;
+    if (changes.priority) row.priority = changes.priority;
+    renderTable();
+    try {
+      const res = await sbRpc('library_set_film_state_b45', { p_item_id: row.id, p_expected: expected, p_changes: changes });
+      mirrorRowUpdate(row.id, (res && res.row) || {});
+      showSaved();
+    } catch (e) {
       Object.assign(row, before);
-      if (stateNeedsReread(e)) {
-        if (typeof matchEditEnd === 'function') matchEditEnd(edit);
-        await reportStateFailure(e, epoch);
-        return;
-      }
+      if (stateNeedsReread(e)) { await reportStateFailure(e); return; }
       showError(stateErrorText(e));
     }
-  }
-  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
-  renderTable();
+    renderTable();
+  }, { list: true });
 }
 
 // × in All TV and All Movies, Delete… in a collection (library.js decides Skip or Delete by catalog governance).
@@ -178,29 +139,26 @@ async function toggleWatchWith(rowId, tag, checked) {
   const current = new Set(row.watch_with || []);
   if (checked) current.add(tag); else current.delete(tag);
   const updated = [...current];
-  const previous = row.watch_with || [];
-  const epoch = orgEpoch;
-  row.watch_with = updated;
-  const edit = typeof matchEditStart === 'function' ? matchEditStart('rows', LIBRARY_PARTITION, rowId, row) : null;
-  try {
-    await sbFetch('PATCH', `${TABLE}?id=eq.${rowId}`, { watch_with: updated });
-    if (!mirrorRowUpdate(rowId, { watch_with: updated }, epoch)) { staleAfterRestore(`“${row.title}” · watch with`); if (typeof matchEditEnd === 'function') matchEditEnd(edit); return; }
-    showSaved();
-    renderTable();
-  } catch(e) {
-    if (epoch !== orgEpoch) { staleAfterRestore(`“${row.title}” · watch with`); if (typeof matchEditEnd === 'function') matchEditEnd(edit); return; }
-    row.watch_with = previous;
-    renderTable();
-    // An archived choice (archived since this page read the choices): say so and read them again.
-    const dbMessage = typeof orgErrorInfo === 'function' ? (orgErrorInfo(e).message || String(e.message)) : String(e.message);
-    if (/watch_with_archived/.test(dbMessage)) {
-      const label = (dbMessage.match(/watch_with_archived: "([^"]*)"/) || [])[1] || 'That choice';
-      showError(`“${label}” is archived, so it can’t be added. Nothing was changed; the watch-with choices are being read again.`);
-      if (typeof retryOrgRefresh === 'function') retryOrgRefresh();
-      if (typeof matchEditEnd === 'function') matchEditEnd(edit);
-      return;
+  await runWrite(`“${row.title}” · watch with`, async () => {
+    const previous = row.watch_with || [];
+    row.watch_with = updated;
+    try {
+      await sbFetch('PATCH', `${TABLE}?id=eq.${rowId}`, { watch_with: updated });
+      mirrorRowUpdate(rowId, { watch_with: updated });
+      showSaved();
+      renderTable();
+    } catch(e) {
+      row.watch_with = previous;
+      renderTable();
+      // An archived choice (archived since this page read the choices): say so and read them again.
+      const dbMessage = typeof orgErrorInfo === 'function' ? (orgErrorInfo(e).message || String(e.message)) : String(e.message);
+      if (/watch_with_archived/.test(dbMessage)) {
+        const label = (dbMessage.match(/watch_with_archived: "([^"]*)"/) || [])[1] || 'That choice';
+        showError(`“${label}” is archived, so it can’t be added. Nothing was changed; the watch-with choices are being read again.`);
+        if (typeof retryOrgRefresh === 'function') await retryOrgRefresh();
+        return;
+      }
+      showError(e.message);
     }
-    showError(e.message);
-  }
-  if (typeof matchEditEnd === 'function') matchEditEnd(edit);
+  }, { list: true });
 }

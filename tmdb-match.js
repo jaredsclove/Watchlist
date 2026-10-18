@@ -336,12 +336,10 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
     renderMatchStateChoice(m, row);
     return;
   }
-  // Each call's stamp: a delayed answer is checked against what the page shows now.
-  const stamp = { seq: ++matchRequestSeq, rowId: row.id, epoch: orgEpoch, rowObj: row, partition: LIBRARY_PARTITION, title: patch.title, viewId: activeViewId };
-  matchLatestByRow[row.id] = stamp.seq;
-  // Tracked like a read of the row: when the match is applied to the page it covers the row
-  // (a refresh waiting on it is satisfied); otherwise it covers nothing.
-  stamp.read = matchReadStart('match', LIBRARY_PARTITION, row.id);
+  // One change at a time (write-lane.js): the lane is held through the reread below.
+  const lane = beginWrite(`Match “${row.title}”`);
+  if (!lane) return;
+  const stamp = { seq: ++matchRequestSeq, title: patch.title };
   m.inFlight = stamp.seq;
   if (m.proposal) renderMatchProposal(m);
   const viaShowFunction = patch.media_type === 'tv';
@@ -376,7 +374,7 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
         p_expansion: expansion, p_ack: ackToken });
       if (m.inFlight === stamp.seq) m.inFlight = 0;
       // A blocked answer wrote nothing: it's shown only if the panel still shows this request.
-      const panelCurrent = window.__tmdbMatch === m && matchLatestByRow[row.id] === stamp.seq && stamp.epoch === orgEpoch;
+      const panelCurrent = window.__tmdbMatch === m;
       if (res && res.blocked && res.reason === 'state_acknowledgment') {
         if (!panelCurrent || m.target?.details?.id !== patch.tmdb_id || (m.target.seasonNumber ?? null) !== patch.season_number) return;
         const joins = typeof tvShowsById !== 'undefined' && [...tvShowsById.values()].find(sh => sh.tmdb_id === patch.tmdb_id);
@@ -408,8 +406,7 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
         p_ack: ackToken, p_choice: choice });
       if (res && res.blocked) {
         if (m.inFlight === stamp.seq) m.inFlight = 0;
-        const panelCurrent = window.__tmdbMatch === m && matchLatestByRow[row.id] === stamp.seq && stamp.epoch === orgEpoch;
-        if (!panelCurrent || m.target?.details?.id !== patch.tmdb_id) return;
+        if (window.__tmdbMatch !== m || m.target?.details?.id !== patch.tmdb_id) return;
         if (res.reason === 'state_choice') { renderMatchStateChoice(m, row); return; }
         m.ack = { rowId: row.id, tmdbId: patch.tmdb_id, seasonNumber: null, token: res.confirmation, items: res.items || [], changed: !!res.changed, choice,
           ctx: { row, where: 'a film' } };
@@ -417,40 +414,24 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
         return;
       }
       fresh = res && res.row;
-      if (res && res.former_show_deleted && stamp.epoch === orgEpoch) tvShowsById.delete(res.former_show_id);
     }
     if (m.inFlight === stamp.seq) m.inFlight = 0;
     if (!fresh || fresh.tmdb_id !== patch.tmdb_id || fresh.media_type !== patch.media_type || fresh.season_number !== patch.season_number) {
       showError('This row changed somewhere else before the match was saved, so nothing was matched. Reload the page and try again.');
       return;
     }
-    // A confirmed success is always reported; its row is put into the page only
-    // while it is still current (same restore epoch, the page's copy of the row not
-    // replaced by a newer read, no newer match of this row). Otherwise a fresh read,
-    // under the current guards, shows what is saved now.
-    const inView = !!stamp.viewId && activeViewId === stamp.viewId && actionRows().includes(stamp.rowObj);
-    const stillCurrent = stamp.epoch === orgEpoch && matchLatestByRow[row.id] === stamp.seq && inView;
-    if (!stillCurrent) {
-      if (window.__tmdbMatch === m) { window.__tmdbMatch = null; cancelTMDBPreview(); }
-      refreshAfterMatch(stamp, stamp.epoch !== orgEpoch);
-      // A view (Stage 4b) is read again under its own guards, keeping its filters.
-      if (stamp.viewId && stamp.epoch === orgEpoch && activeViewId === stamp.viewId) reloadOpenView();
-      return;
-    }
-    Object.assign(row, fresh);
-    stamp.read.applied = true; // the page now shows the row as the database returned it
-    matchNotePublished('rows', row.id, stamp.read, row);
-    // The season may have joined an existing show, or its show may now be identified.
-    if (viaShowFunction) {
-      try { await loadAllTvShows(); }
-      catch(e) { showError(`Matched, but couldn't reload the show list: ${e.message}`); }
-    }
+    // Confirmed. The page shows it by reading the open view again (the one reread path,
+    // library.js reloadOpenView), never by merging the answer, while the lane is still held.
+    if (window.__tmdbMatch === m) window.__tmdbMatch = null;
+    cancelTMDBPreview();
+    showSaved();
+    const ok = activeViewId ? await reloadOpenView() : null;
+    const text = `Matched “${patch.title}”.${ok === false ? ' The list couldn’t be read again, so it may be out of date; use Retry.' : ''}`;
+    if (libraryPanel) libraryReport(libraryContext(), text, ok === false);
+    else if (ok === false) showError(text);
   } catch(e) {
     if (m.inFlight === stamp.seq) m.inFlight = 0;
     const msg = String(e && e.message);
-    // After a restore in this page, an earlier attempt's error is labelled as such.
-    const earlier = stamp.epoch !== orgEpoch ? `An earlier match attempt for “${patch.title}”: ` : '';
-    const showError = text => window.showError(earlier + text);
     // The match was sent but no database answer came back (a network failure, not an
     // error from the database): it may or may not have been saved.
     if (stage === 'write' && !/^Supabase error \d+:/.test(msg)) {
@@ -458,7 +439,7 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
         + 'Reload the page and check this row before matching it again.');
       return;
     }
-    if (/catalog_candidate/.test(msg) && window.__tmdbMatch === m && stamp.epoch === orgEpoch) {
+    if (/catalog_candidate/.test(msg) && window.__tmdbMatch === m) {
       // A built-in catalog record has the name or key this match would give: matched only
       // once the owner has seen every such record (read now) and confirms they are
       // different works. A refusal after a confirmation names records not yet seen: all of
@@ -495,18 +476,7 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
       m.inFlight = 0;
       if (window.__tmdbMatch === m && m.proposal) renderMatchProposal(m);
     }
-    // The tracked Match ends: applied to the page (covers its row) or not (covers nothing).
-    if (stamp.read.state === 'pending') matchReadSettle(stamp.read, null, !stamp.read.applied);
-  }
-
-  // The user may have switched views while the checks and writes above were in flight.
-  if (window.__tmdbMatch === m) window.__tmdbMatch = null;
-  showSaved();
-  // The match is reported in the view's panel and the view is read again.
-  if (stamp.viewId && activeViewId === stamp.viewId) {
-    cancelTMDBPreview();
-    if (libraryPanel) libraryReport(libraryContext(), `Matched “${patch.title}”.`, false);
-    reloadOpenView();
+    endWrite(lane);
   }
 }
 
@@ -637,241 +607,3 @@ function renderMatchProposal(m) {
     </div>`;
 }
 
-// ─── Tracked reads (shared with tv-shows.js, derived-views.js, row-actions.js) ─
-// Every read of a row or the show list, every Match call and every edit made on
-// this page takes a number when it starts and records the restore epoch. The
-// whole library is one partition (LIBRARY_PARTITION, tv-shows.js). The newest
-// publication of each row and the show list is remembered (by number and
-// kind; for a row also whether it is present, and the row itself). A read publishes
-// only if it is newer than that in the current epoch; an older read that finishes
-// late, or one from before a restore, publishes nothing. An edit counts as a
-// publication from its optimistic start, so no older read replaces what the user
-// changed. While any edit of a row (or show list) is pending, no read publishes it;
-// when an edit ends its marker moves to a new number, so a read that overlapped the
-// edit stays older than its saved (or reverted) result. Edits never satisfy a
-// refresh; a read retired by an edit is void, and the refresh reads again once no
-// edit of that row (or show list) is pending.
-function matchPublishedReset() {
-  if (matchPublished.epoch !== orgEpoch) matchPublished = { epoch: orgEpoch, rows: {}, shows: {} };
-}
-
-function matchReadStart(kind, partition, rowId) {
-  matchPublishedReset();
-  const read = { id: ++matchReadSeq, kind, partition, rowId: rowId || null, epoch: orgEpoch, state: 'pending', error: null,
-    applied: false, keptRows: null }; // keptRows: rows (or, for '*', show lists) kept because of an edit
-  matchReads.push(read);
-  if (matchReads.length > 300) { // trim settled history; a pending read or edit is never dropped
-    const cut = matchReads.length - 300;
-    matchReads = matchReads.filter((r, i) => i >= cut || r.state === 'pending');
-  }
-  return read;
-}
-
-// void: the call ended without covering anything (a Match that changed nothing on the
-// page, an edit, or a read whose data an edit made stale).
-function matchReadSettle(read, error, voided) {
-  read.state = voided ? 'void' : error ? 'failed' : 'ok';
-  read.error = error ? String(error.message || error) : null;
-  matchRefreshReevaluate();
-}
-
-// row: for kind 'rows', the row as now shown (an object) or null when it is gone.
-function matchNotePublished(kind, key, read, row) {
-  matchPublishedReset();
-  const cur = matchPublished[kind][key];
-  if (read.epoch !== orgEpoch || (cur && cur.id > read.id)) return;
-  matchPublished[kind][key] = kind === 'rows'
-    ? { id: read.id, kind: read.kind, partition: read.partition, row: row === undefined ? (cur ? cur.row : null) : row }
-    : { id: read.id, kind: read.kind };
-}
-
-const matchPubId = entry => (entry ? entry.id : 0);
-
-// An edit of this row (kind 'rows', key = row id) or show list (kind 'shows', key =
-// partition) is still pending in the current epoch.
-function matchEditPending(kind, key) {
-  return matchReads.some(r => r.kind === 'edit' && r.state === 'pending' && r.epoch === orgEpoch
-    && (kind === 'rows' ? r.rowId === key : !r.rowId && r.partition === key));
-}
-
-// A read of this row / show list that an edit makes stale: one is pending, or one ended after the read started.
-function matchRowEditBlocks(read, rowId) {
-  const e = matchPublished.rows[rowId];
-  return read.epoch === orgEpoch && (matchEditPending('rows', rowId) || !!(e && e.kind === 'edit' && e.id > read.id));
-}
-
-function matchMayPublishRow(read, partition, rowId) {
-  matchPublishedReset();
-  return read.epoch === orgEpoch && read.id > matchPubId(matchPublished.rows[rowId]) && !matchEditPending('rows', rowId);
-}
-
-function matchMayPublishShows(read, partition) {
-  matchPublishedReset();
-  const newest = partition === '*' ? matchPubId(matchPublished.shows['*'])
-    : Math.max(matchPubId(matchPublished.shows[partition]), matchPubId(matchPublished.shows['*']));
-  return read.epoch === orgEpoch && read.id > newest && (partition === '*' || !matchEditPending('shows', partition));
-}
-
-// An edit made on this page (rows: key = row id, row = the row as now shown or null if
-// removed; shows: key = partition).
-function matchEditStart(kind, partition, key, row) {
-  if (typeof orgEpoch === 'undefined') return null;
-  const read = matchReadStart('edit', partition, kind === 'rows' ? key : null);
-  matchNotePublished(kind, key, read, row);
-  return read;
-}
-
-// A reverted edit puts the row back as it was (same publication number).
-function matchEditRevert(read, row) {
-  if (!read) return;
-  const e = matchPublished.rows[read.rowId];
-  if (e && e.id === read.id) e.row = row;
-}
-
-// The edit's result (saved or reverted) is published under a new number, newer than
-// every read that started while it was pending.
-function matchEditEnd(read) {
-  if (!read) return;
-  matchPublishedReset();
-  if (read.epoch === orgEpoch) {
-    const id = ++matchReadSeq;
-    if (read.rowId) {
-      const cur = matchPublished.rows[read.rowId];
-      matchPublished.rows[read.rowId] = { id, kind: 'edit', partition: read.partition, row: cur ? cur.row : null };
-    } else matchPublished.shows[read.partition] = { id, kind: 'edit' };
-  }
-  matchReadSettle(read, null, true);
-}
-
-// ─── After a match that couldn't be put into the page ─────────────────────────
-// The confirmed Match outcomes stay reported; refresh progress is reported apart
-// from them. Each such Match adds obligations — its row and the show list — to the
-// open refresh; obligations accumulate across
-// Matches until every one is satisfied, and Retry reads every unsatisfied one.
-// An obligation is satisfied by any read that covers it, started after it was
-// opened, in the current restore epoch, and succeeded (the refresh's own reads,
-// a show read for the shows, a Match of the row applied
-// to the page). While none has succeeded and one is still running it stays
-// pending ("Refreshing…"); when all of them failed, it has failed (the warning
-// with a read-only Retry). "Refreshed." only when every obligation is satisfied.
-// A restore voids everything from the old epoch: every obligation is re-opened and
-// read again. Matches are never re-sent.
-function setMatchNotice(text, withRetry) {
-  const el = document.getElementById('noticeBanner');
-  if (!el) return;
-  el.innerHTML = text ? `<div class="notice-banner" role="status">${esc(text)}${withRetry
-    ? ' <button class="btn" onclick="retryMatchRefresh()">Retry</button>' : ''}</div>` : '';
-}
-
-function matchRefreshNotice(progress) {
-  const outcomes = progress.titles.map(t => `Matched “${t}”.`).join(' ');
-  const restored = progress.restored ? ' Your data was also restored while this match was in progress.' : '';
-  if (progress.state === 'failed') {
-    const who = progress.titles.map(t => `“${t}”`).join(' and ');
-    setMatchNotice(`Matched ${who}, but the current data couldn’t be refreshed (${progress.error}).`, true);
-  } else if (progress.state === 'done') setMatchNotice(`${outcomes}${restored} Refreshed.`);
-  else setMatchNotice(`${outcomes}${restored} Refreshing to show what is saved now…`);
-}
-
-function refreshAfterMatch(stamp, restored) {
-  let progress = matchRefreshProgress;
-  if (!progress || progress.state === 'done') {
-    progress = { titles: [], restored: false, epoch: orgEpoch, units: {}, state: 'pending', error: null };
-    matchRefreshProgress = progress;
-  }
-  if (!progress.titles.includes(stamp.title)) progress.titles.push(stamp.title);
-  if (restored) progress.restored = true;
-  matchRefreshStamp = stamp;
-  // Open (or re-open) this Match's obligations: only reads started from now on count.
-  const opened = [{ key: `row:${stamp.rowId}`, kind: 'row', partition: LIBRARY_PARTITION, rowId: stamp.rowId },
-    { key: `shows:${LIBRARY_PARTITION}`, kind: 'shows', partition: LIBRARY_PARTITION }];
-  const units = opened.map(u => (progress.units[u.key] = { ...u, since: matchReadSeq, state: 'pending', error: null }));
-  progress.state = 'pending';
-  matchRefreshNotice(progress);
-  return matchRefreshRead(units);
-}
-
-// Reads the given obligations (read only) and the collections (best effort).
-function matchRefreshRead(units) {
-  const reads = units.map(u => (u.kind === 'row' ? matchReadRow(u) : loadAllTvShows().catch(() => {})));
-  if (orgState !== 'absent') {
-    const read = orgReadStart();
-    reads.push(readPersonalCollections().then(c => { if (publishCollections(c, read)) buildBrowseBar(); },
-      () => markOrgStale('collections', read)));
-  }
-  return Promise.allSettled(reads).then(() => matchRefreshReevaluate());
-}
-
-function matchReadRow(unit) {
-  const read = matchReadStart('row', unit.partition, unit.rowId);
-  return sbFetch('GET', `${TABLE}?id=eq.${unit.rowId}&select=*`, null).then(rows => {
-    const now = (rows || [])[0] || null;
-    if (!matchMayPublishRow(read, unit.partition, unit.rowId)) {
-      // Retired. An edit made it stale: it covers nothing (a current read follows).
-      matchReadSettle(read, null, matchRowEditBlocks(read, unit.rowId));
-      return;
-    }
-    matchNotePublished('rows', unit.rowId, read, now);
-    matchReadSettle(read, null);
-  }, e => matchReadSettle(read, e));
-}
-
-function matchReadCovers(read, unit) {
-  if (unit.kind === 'shows') return read.kind === 'shows' && (read.partition === unit.partition
-    || (read.partition === '*' && !(read.keptRows && read.keptRows.has(unit.partition))));
-  if (read.kind === 'row') return read.rowId === unit.rowId;
-  return read.kind === 'match' && read.rowId === unit.rowId && read.applied;
-}
-
-function matchRefreshReevaluate() {
-  if (matchRefreshProgress) matchRefreshEvaluate(matchRefreshProgress);
-}
-
-function matchRefreshEvaluate(progress) {
-  if (progress !== matchRefreshProgress || progress.state === 'done') return;
-  // A restore since: nothing from the old epoch counts; every obligation is read again.
-  if (progress.epoch !== orgEpoch) {
-    progress.epoch = orgEpoch;
-    progress.restored = true;
-    const all = Object.values(progress.units);
-    all.forEach(u => { u.since = matchReadSeq; u.state = 'pending'; u.error = null; });
-    progress.state = 'pending';
-    matchRefreshNotice(progress);
-    matchRefreshRead(all);
-    return;
-  }
-  let failed = null;
-  const rereads = [];
-  for (const u of Object.values(progress.units)) {
-    const covering = matchReads.filter(r => r.id > u.since && r.epoch === orgEpoch && r.state !== 'void' && matchReadCovers(r, u));
-    if (covering.some(r => r.state === 'ok')) u.state = 'ok';
-    else if (covering.some(r => r.state === 'pending')) u.state = 'pending';
-    else if (!covering.length) {
-      // Nothing covers it (its read was retired by an edit): read again once no edit of it is pending.
-      u.state = 'pending';
-      const editing = matchReads.some(r => r.kind === 'edit' && r.state === 'pending' && r.epoch === orgEpoch
-        && (u.kind === 'row' ? r.rowId === u.rowId : r.partition === u.partition && !r.rowId));
-      if (!editing) { u.since = matchReadSeq; rereads.push(u); }
-    }
-    else { u.state = 'failed'; u.error = covering[covering.length - 1].error; failed = failed || u; }
-  }
-  const units = Object.values(progress.units);
-  const before = progress.state;
-  progress.state = failed ? 'failed' : units.every(u => u.state === 'ok') ? 'done' : 'pending';
-  progress.error = failed ? failed.error : null;
-  matchRefreshNotice(progress);
-  // The refreshed data is shown now in the open view, which draws from the same row and show caches.
-  if (progress.state === 'done' && before !== 'done' && activeViewId) { renderFilters(); renderTable(); }
-  if (rereads.length) matchRefreshRead(rereads);
-}
-
-// Retry: reads every obligation that isn't satisfied (read only; nothing is re-sent).
-function retryMatchRefresh() {
-  const progress = matchRefreshProgress;
-  if (!progress) return;
-  const open = Object.values(progress.units).filter(u => u.state !== 'ok');
-  open.forEach(u => { u.since = matchReadSeq; u.state = 'pending'; u.error = null; });
-  progress.state = 'pending';
-  matchRefreshNotice(progress);
-  return matchRefreshRead(open);
-}

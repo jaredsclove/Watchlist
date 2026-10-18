@@ -47,7 +47,11 @@ async function openPullCollection(rowId, collectionId, collectionName) {
   }
 }
 
-async function addPulledCollectionMovies() {
+// One change at a time (write-lane.js): held through the lookups, writes and the reread.
+function addPulledCollectionMovies() {
+  return runWrite('Adding films', () => addPulledCollectionMoviesNow());
+}
+async function addPulledCollectionMoviesNow() {
   const data = window.__pullCollectionData;
   if (!data) return;
   // The tab this preview belongs to, captured before any await: the TMDB lookups
@@ -117,7 +121,7 @@ async function addPulledCollectionMovies() {
     toolCachePush(tool, inserted);
     showSaved();
     if (toolContextLive(tool)) resetTMDBSearchUI();
-    toolFinished(tool);
+    await toolFinished(tool);
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {
@@ -203,7 +207,11 @@ async function refreshCollections() {
   }
 }
 
-async function addRefreshedCollectionMovies() {
+// One change at a time (write-lane.js): held through the lookups, writes and the reread.
+function addRefreshedCollectionMovies() {
+  return runWrite('Adding films', () => addRefreshedCollectionMoviesNow());
+}
+async function addRefreshedCollectionMoviesNow() {
   const data = window.__refreshCollectionsData || [];
   // The tab this preview belongs to, captured before any await: the TMDB lookups
   // below take a while, and the user may switch tabs or views meanwhile.
@@ -264,7 +272,7 @@ async function addRefreshedCollectionMovies() {
     toolCachePush(tool, inserted);
     showSaved();
     if (toolContextLive(tool)) resetTMDBSearchUI();
-    toolFinished(tool);
+    await toolFinished(tool);
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {

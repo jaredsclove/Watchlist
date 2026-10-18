@@ -390,19 +390,6 @@ test('Start / Stop earlier seasons: a stale range or record is refused and the l
   assert.strictEqual(calls(app2, 'library_set_resume_b45').length, 1);
 });
 
-test('an answer that arrives after a restore: the notice says the list was read again only once it was (and says so when that read fails)', async () => {
-  const s = show({ title: 'S' }, [{ num: 1 }]);
-  const app = await open('alltv', all(s));
-  const g = app.hold(r => r.url.endsWith('/rpc/library_set_show_state_b45'));
-  const p = app.ctx.setShowStateById(s.show.id, { priority: 'high' });
-  await g.reached;
-  app.run('orgEpoch++');
-  app.failNext(r => r.method === 'GET' && r.url.includes('/tv_shows?'));
-  g.release(); await p; await settle(); await settle();
-  assert.match(app.el('banner').innerHTML, /“S” · priority was sent before the restore and answered afterwards\. The list couldn’t be read again \(use Retry\); this doesn’t show/);
-});
-
-// ─── F5 (owner amendment 2026-10-13): display only ────────────────────────────
 test('F5: a show labelled “Caught up · Ended” or “All seasons skipped” shows no “Up to date” pill (All TV rows and cards, Browse collections); the calculation, the stats count and Currently Watching are unchanged', async () => {
   const e = show({ title: 'Ended', status: 'watching', ended: true, collection: 'truecrime' }, [{ num: 1, w: true }]);
   const k = show({ title: 'Skipped', status: 'watching' }, [{ num: 1, s: true }]);

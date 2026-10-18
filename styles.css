@@ -794,6 +794,9 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .season-delete-link { color: var(--red); font-size: 12px; white-space: nowrap; }
 .effect-text { margin: 0; line-height: 1.5; }
 .reread-status { margin: 0; font-size: 13px; color: var(--text2); }
+/* Batch A: while a change is saved (write-lane.js) the list's controls look unavailable; they keep
+   focus (no disabled attribute) and a second change is refused with a message. */
+body.saving #tbody :is(button:not([data-primary], [data-section]), select, input), body.saving #cardList :is(button:not([data-primary], [data-section]), select, input) { opacity: 0.55; cursor: progress; }
 @media (max-width: 700px) {
   .season-delete-link, #effectModalBox .modal-actions .btn, #effectModalBox .modal-actions .btn-danger, .reread-status .btn { min-height: 44px; }
 }

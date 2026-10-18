@@ -717,9 +717,9 @@ test('movie tools: a TMDB film titled like a catalog film is not added (catalog_
   app.ctx.switchMediaType('movie'); await settle();
   app.ctx.openLibraryPanel('movie', 'tools'); await settle();
   await app.ctx.libraryPrepareMovieTools(); await settle();
-  const ins = await app.ctx.libraryInsertFilms([
+  const ins = await app.ctx.runWrite('test', () => app.ctx.libraryInsertFilms([ // the tools call it inside the write lane
     { item_key: 'twin film|film', title: 'Twin Film', season: 'Film', theme: 'Drama', date_sort: '2020-01-01', tmdb_id: 4001, media_type: 'movie' },
-    { item_key: 'other film|film', title: 'Other Film', season: 'Film', theme: 'Drama', date_sort: '2020-01-01', tmdb_id: 4002, media_type: 'movie' }]);
+    { item_key: 'other film|film', title: 'Other Film', season: 'Film', theme: 'Drama', date_sort: '2020-01-01', tmdb_id: 4002, media_type: 'movie' }]));
   assert.deepStrictEqual(Array.from(ins, r => r.tmdb_id), [4002]);
   assert.match(app.el('banner').innerHTML, /Not added: Twin Film — a built-in catalog film with the same name/);
 });

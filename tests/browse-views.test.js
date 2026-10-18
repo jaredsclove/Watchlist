@@ -781,7 +781,6 @@ for (const [name, mangle, why] of [
 ]) {
   test(`strict read: ${name} → Retry and nothing shown, never a partial or empty list`, async () => {
     const app = await boot();
-    await openCol(app, B['disney']);
     let first = null;
     intercept(app, async (url, opts, pass) => {
       const table = isRead(url, 'watchlist_items') ? 'watchlist_items' : isRead(url, 'tv_shows') ? 'tv_shows' : null;
@@ -795,7 +794,7 @@ for (const [name, mangle, why] of [
       const out = mangle({ table, from, body, first: table === 'watchlist_items' ? first : body, cr, total: Number(cr.split('/')[1]) });
       return out || res(real.status, body, { 'content-range': cr });
     });
-    app.ctx.loadBrowseView(); await settle(200);
+    await openCol(app, B['disney']); await settle(200); // a first read (a shown list is read again in place)
     assert.ok(html(app).includes('Failed to load') && html(app).includes('onclick="loadBrowseView()">Retry'), html(app).slice(0, 200));
     assert.ok(!/browse-show-row|browse-film-row|No films|No TV/.test(html(app) + cards(app)));
     assert.strictEqual(app.el('statsRow').innerHTML, '');

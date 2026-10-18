@@ -1,4 +1,8 @@
-async function pullUniverse(universeKey) {
+// One change at a time (write-lane.js): held through the lookups, writes and the reread.
+function pullUniverse(universeKey) {
+  return runWrite('Pulling a universe', () => pullUniverseNow(universeKey));
+}
+async function pullUniverseNow(universeKey) {
   const universe = UNIVERSE_LISTS[universeKey];
   if (!universe) return;
   cancelTMDBPreview();
@@ -142,7 +146,11 @@ async function pullUniverse(universeKey) {
   if (backfilled > 0) { showSaved(); renderTable(); }
 }
 
-async function addPulledUniverseMovies() {
+// One change at a time (write-lane.js): held through the lookups, writes and the reread.
+function addPulledUniverseMovies() {
+  return runWrite('Adding films', () => addPulledUniverseMoviesNow());
+}
+async function addPulledUniverseMoviesNow() {
   const universeKey = window.__universePullKey;
   const universe = UNIVERSE_LISTS[universeKey];
   // The tab this preview belongs to, captured before any await: the TMDB lookups
@@ -203,7 +211,7 @@ async function addPulledUniverseMovies() {
     toolCachePush(tool, inserted);
     showSaved();
     if (toolContextLive(tool)) resetTMDBSearchUI();
-    toolFinished(tool);
+    await toolFinished(tool);
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (isDuplicateKeyError(e)) {

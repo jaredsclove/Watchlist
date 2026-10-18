@@ -323,11 +323,11 @@ test('C7 Edit collection opens Manage at this collection’s members; after a si
   const g = holdOwnRead(app);
   const i = app.requests.length;
   app.ctx.closeManage();
-  assert.strictEqual(opener.isConnected, false, 'the reread redrew the heading: the opener is gone');
-  const interim = model.current();
-  assert.strictEqual(app.ctx.document.activeElement, interim, 'focus on the redrawn button at once');
+  // Batch A: the shown collection is read again in place, so the heading (and the opener) stays until the read is in.
+  assert.strictEqual(opener.isConnected, true, 'the heading stays while the collection is read again');
+  assert.strictEqual(app.ctx.document.activeElement, opener, 'focus back on the opener at once');
   await g.reached; g.release(); await settle();
-  assert.strictEqual(interim.isConnected, false, 'the loaded view drew the heading again');
+  assert.strictEqual(opener.isConnected, false, 'the loaded view drew the heading again');
   const final = model.current();
   assert.ok(final.isConnected && app.ctx.document.activeElement === final, `focus on the final Edit collection: ${model.focused}`);
   assert.ok(app.requests.slice(i).some(r => r.method === 'GET' && r.url.includes('/rest/v1/collection_memberships?')), 'the collection read again');

@@ -33,7 +33,7 @@ database; collaborative editing of a shared database is not a goal.
 
 | Area | Files |
 |---|---|
-| Boot, config, API | `watchlist.html`, `config.js`, `api.js`, `ui-helpers.js`, `identity.js` |
+| Boot, config, API | `watchlist.html`, `config.js`, `api.js`, `write-lane.js` (one change at a time; read freshness), `ui-helpers.js`, `identity.js` |
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views), `metadata.js` (Details) |
 | Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog) |
@@ -43,7 +43,7 @@ database; collaborative editing of a shared database is not a goal.
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261018-tvedit1`).
+Every release bumps the `?v=` cache token in `watchlist.html` (current on `main`: `20261018-tvedit1`; Batch A branch: `20261018-lane1`).
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
 ## Where things stand (2026-10-18)
@@ -56,7 +56,7 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 - **B3 / B1 / B7 plan:** S1–S3 released. Not started: **S4** (film controls and membership removal
   in collections, with Undo), **S5** (add existing items to a collection), **S6** (browser history
   and routes). D10 is deferred.
-- **Simplification Batch A** is approved and runs before S4 (below). Batch B comes after S6.
+- **Simplification Batch A** is approved and runs before S4 (below). A1 landed (`e5cee7b`); A2–A5 are implemented on branch `simplify-batch-a` (PR open, awaiting the one independent review; not merged or deployed). Batch B comes after S6.
 
 ## How we work
 
@@ -146,8 +146,8 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
   If they match the scripts, anyone holding the public key can read and change the data. Moving
   configuration or adding sign-in does not by itself close anonymous access; the policies are the
   boundary. The read-only policy check needs its own authorization.
-- **Carried limitations (expected to go with Batch A):** focus lost when an action's reread starts
-  while focus is in a filter; typing during a quiet reread overwrites its status line.
+- **Carried limitations:** both (focus lost when a reread starts while focus is in a filter; typing during
+  a quiet reread overwrites its status line) are fixed on the Batch A branch; drop this line once it merges.
 - **Optional, not in Batch A:** phone controls under 44 px (status select, Show ended, Skip).
 - The rest of the backlog (accessibility, contrast and layout items; deferred features) is in
   history §14. Bring an item back only by owner request.
@@ -158,7 +158,8 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 for f in tests/*.test.js tests/*.test.mjs; do perl -e 'alarm shift; exec @ARGV' 120 node --max-old-space-size=1024 "$f" || echo "FAIL $f"; done
 ```
 
-At `5907029`: 39 suites, 1,318 cases, all passing (recorded, not rerun since). Syntax check:
+At `5907029`: 39 suites, 1,318 cases. On the Batch A branch: 40 suites, 1,097 cases, all passing (the
+removed focus matrices and publication-number tests account for the drop; `tests/write-lane.test.js` is new). Syntax check:
 `node --check` on each `*.js`, `tests/*.js`, `tools/*.mjs`. Database rehearsals run locally on PGlite
 (`tools/db-rehearsal-*.mjs`; see `db/README.md`). The identity audit (`tools/identity-audit.mjs`)
 reads production, so it needs approval.

@@ -515,7 +515,6 @@ test('G3 F14 the earlier-seasons sentence is kept; not the last season: no last-
 });
 for (const [label, act] of [
   ['the view changed', app => app.ctx.switchView('alltv')],
-  ['a restore happened', app => app.run('orgEpoch++')],
   ['the row is gone', (app, L) => app.run(`browseData.rows = browseData.rows.filter(r => r.id !== ${JSON.stringify(L.gap.rows[0].id)})`)],
   ['its rule changed (unknown governance)', app => app.run('libraryGovernance = { ...libraryGovernance, knownShows: new Set(), knownItems: new Set() }')]
 ]) {
@@ -617,28 +616,29 @@ test('G5 catalog-season skip has no dialog; the other confirm() questions are un
 });
 
 // ═══ G3 error paths per flow from a collection (review finding 3; requirements map §C) ════════
-// §8.6 covers Watched / Skip (F4 / F5) only. These are the other flows' R / U / X / N cases the plan
+// §8.6 covers Watched / Skip (F4 / F5) only. These are the other flows' R / U / N cases the plan
 // lists, run from a collection: R a stale refusal (nothing stored changed; the page shows what is
 // stored; the collection read again), U a lost answer before / after commit (not confirmed, read
-// again, never resent), X an answer after a restore (staleAfterRestore's words), N another tab first.
+// again, never resent), N another tab first. (An answer after a restore can't happen since Batch A:
+// the restore waits for the write lane.)
 const TARGET_CHANGED = 'target_changed: This changed since the page showed it, so nothing was changed. Look at it again.';
 const memGets = (app, mark) => app.requests.slice(mark).filter(r => r.method === 'GET' && r.url.includes('/collection_memberships')).length;
 const showIn = (app, id) => app.get(`(tvShowsById.get(${JSON.stringify(id)}) || null)`);
 const storeShow = (app, id) => app.store.tv_shows.find(s => s.id === id);
 const SHOW_FLOWS = [
-  ['F1', 'status', 'library_set_show_state_b45', L => L.bravo.show.id, 'status', (app, L) => app.ctx.setShowStateById(L.bravo.show.id, { status: 'watching' }), ['R', 'Ub', 'Ua', 'X', 'N']],
-  ['F2', 'priority', 'library_set_show_state_b45', L => L.alpha.show.id, 'priority', (app, L) => app.ctx.setShowStateById(L.alpha.show.id, { priority: 'high' }), ['R', 'Ub', 'Ua', 'X']],
+  ['F1', 'status', 'library_set_show_state_b45', L => L.bravo.show.id, 'status', (app, L) => app.ctx.setShowStateById(L.bravo.show.id, { status: 'watching' }), ['R', 'Ub', 'Ua', 'N']],
+  ['F2', 'priority', 'library_set_show_state_b45', L => L.alpha.show.id, 'priority', (app, L) => app.ctx.setShowStateById(L.alpha.show.id, { priority: 'high' }), ['R', 'Ub', 'Ua']],
   ['F3', 'Show ended', 'library_set_show_state_b45', L => L.alpha.show.id, 'ended', (app, L) => app.ctx.setShowStateById(L.alpha.show.id, { ended: true }), ['R', 'Ub', 'Ua']],
-  ['F6', 'Dismiss “New”', 'library_dismiss_catalog_new_b45', L => L.bravo.show.id, 'catalog_new', (app, L) => app.ctx.dismissCatalogNew([{ kind: 'show', id: L.bravo.show.id }]), ['R', 'Ub', 'Ua', 'X']],
-  ['F7', 'Keep current status', 'library_dismiss_review_b45', L => L.charlie.show.id, 'status_review', (app, L) => app.ctx.keepCurrentStatus('show', L.charlie.show.id), ['R', 'X']],
-  ['F8', 'earlier seasons', 'library_set_resume_b45', L => L.gap.show.id, 'resume_start_season_id', (app, L) => app.ctx.startResume(L.gap.show.id, L.gap.rows[0].id), ['R', 'X']]
+  ['F6', 'Dismiss “New”', 'library_dismiss_catalog_new_b45', L => L.bravo.show.id, 'catalog_new', (app, L) => app.ctx.dismissCatalogNew([{ kind: 'show', id: L.bravo.show.id }]), ['R', 'Ub', 'Ua']],
+  ['F7', 'Keep current status', 'library_dismiss_review_b45', L => L.charlie.show.id, 'status_review', (app, L) => app.ctx.keepCurrentStatus('show', L.charlie.show.id), ['R']],
+  ['F8', 'earlier seasons', 'library_set_resume_b45', L => L.gap.show.id, 'resume_start_season_id', (app, L) => app.ctx.startResume(L.gap.show.id, L.gap.rows[0].id), ['R']]
 ];
 for (const [F, what, endpoint, idOf, field, act, outcomes] of SHOW_FLOWS) {
   const pred = r => r.method !== 'GET' && r.url.endsWith(`/rpc/${endpoint}`);
   for (const o of outcomes) {
     const title = { R: 'R (refused as stale): nothing stored changes; the page shows what is stored; the collection is read again; not resent',
       Ub: 'U lost before commit: not confirmed, read again, never resent; nothing stored', Ua: 'U lost after commit: not confirmed, read again, never resent; the page shows the stored change',
-      X: 'X answered after a restore: staleAfterRestore’s words; nothing resent', N: 'N another tab, then the lost answer: one request; the new view is read; nothing resent' }[o];
+      N: 'N another tab, then the lost answer: one request; the new view is read; nothing resent' }[o];
     test(`G3 ${F} ${what} ${title}`, async () => {
       const L = lib();
       const app = await boot(L);
@@ -648,21 +648,15 @@ for (const [F, what, endpoint, idOf, field, act, outcomes] of SHOW_FLOWS) {
       let mark = app.requests.length;
       if (o === 'R') app.refuseNext(pred, 'P0001', F === 'F8' ? 'invalid_range: The earlier-seasons range no longer applies, so nothing was changed.' : TARGET_CHANGED);
       if (o === 'Ub' || o === 'Ua') app.loseNext(pred, o === 'Ub' ? 'before' : 'after');
-      if (o === 'X' || o === 'N') {
+      if (o === 'N') {
         const g = app.hold(pred);
         const p = act(app, L);
         await g.reached;
-        if (o === 'X') { app.run('orgEpoch++'); g.release(); }
-        else { app.ctx.selectCollectionTab(app.browseId('disney').split(':')[1]); await settle(); mark = app.requests.length; g.lose('before'); }
+        app.ctx.selectCollectionTab(app.browseId('disney').split(':')[1]); await settle(); mark = app.requests.length; g.lose('before');
         await p; await settle(); await settle();
       } else { await act(app, L); await settle(); await settle(); }
       assert.strictEqual(rpc(app, endpoint).length, 1, 'one request, never resent');
       assert.ok(!saved(app), 'no Saved');
-      if (o === 'X') {
-        assert.match(notice(app), /was sent before the restore and answered afterwards/);
-        assert.ok(!/wasn’t confirmed/.test(banner(app)));
-        return;
-      }
       if (o === 'N') {
         assert.match(banner(app), /This change wasn’t confirmed/);
         assert.ok(app.requests.slice(mark).some(r => r.method === 'GET'), 'the open view (another collection) is read again');
@@ -706,7 +700,7 @@ test('G3 F9 Details: invalid values, a closed dialog and a restore send nothing'
   assert.match(app.get('detailsDialog.error'), /^Not saved: Franchise \/ universe: .* is longer than 80 characters\./);
   app.ctx.closeDetails(); await app.ctx.saveDetails(); await settle();
   app.ctx.openDetails('show', L.gap.show.id, null);
-  app.run("detailsDialog.draft.genres = ['Drama']; orgEpoch++");
+  app.run("detailsDialog.draft.genres = ['Drama']; detailsDialog.restored = true"); // a restore ran since it opened
   await app.ctx.saveDetails(); await settle();
   assert.deepStrictEqual(writes(app), [], 'nothing sent');
 });
@@ -829,21 +823,6 @@ test('G3 F5 Skip R from a collection: a database refusal puts it back with the e
   assert.match(banner(app), /Supabase error 400/);
   assert.strictEqual(memGets(app, mark), 0, 'no reread');
 });
-for (const mode of ['before', 'after']) {
-  test(`G3 F5 Skip X from a collection, lost ${mode} after a restore: staleAfterRestore's words; nothing resent`, async () => {
-    const L = lib();
-    const app = await boot(L);
-    await VIEWS.colSeasons(app);
-    const g = app.hold(r => r.url.endsWith('/rpc/set_season_skipped'));
-    const p = app.ctx.setSeasonSkipped(L.alpha.rows[1].id, true);
-    await g.reached;
-    app.run('orgEpoch++');
-    g.lose(mode); await p; await settle(); await settle();
-    assert.strictEqual(rpc(app, 'set_season_skipped').length, 1);
-    assert.match(notice(app), /was sent before the restore and answered afterwards/);
-    assert.ok(!/This change wasn’t confirmed/.test(banner(app)));
-  });
-}
 // F15: the D6 dialogs confirmed, then refused (R) or the answer lost (U): All TV's season ×
 // (D6-a), All Movies' film × (D6-c), a catalog film's Skip (D6-d). G5 covers Cancel and the words.
 async function d6App() {
@@ -1097,7 +1076,7 @@ for (const [e, view, what, kind] of ENTRIES) {
 // first read is held), for each handler, in a TV view and a collection, in both loss modes.
 for (const [e, view, kind] of [['E8', 'alltvSeasons', 'watch'], ['E9', 'alltvSeasons', 'skip'], ['E13', 'colSeasons', 'watch'], ['E14', 'colSeasons', 'skip']]) {
   for (const mode of ['before', 'after']) {
-    test(`§8.6 ${e} ${view} ${kind}: lost ${mode} commit → the tracked edit ended before the reread started; the reread publishes`, async () => {
+    test(`§8.6 ${e} ${view} ${kind}: lost ${mode} commit → the reread (inside the write lane) publishes what is stored`, async () => {
       const L = await withCatalog();
       const app = await boot(L);
       await VIEWS[view](app);
@@ -1107,7 +1086,6 @@ for (const [e, view, kind] of [['E8', 'alltvSeasons', 'watch'], ['E9', 'alltvSea
         && (view.startsWith('col') ? r.url.includes('/collection_memberships') : r.url.includes('is_film=eq.false')));
       const pr = entryAct(app, L, kind, view);
       await g.reached;
-      assert.ok(app.get(`!matchEditPending('rows', ${JSON.stringify(id)})`), 'no edit of the row pending when the reread starts');
       g.release(); await pr; await settle(); await settle();
       const field = kind === 'watch' ? 'watched' : 'skipped';
       const shown = pageRow(app, id);
@@ -1149,7 +1127,7 @@ for (const view of ['alltv', 'colShows']) {
       app.failNext(r => r.method === 'GET' && r.url.includes('/tv_shows'));
       await entryAct(app, L, 'watch', view); await settle(); await settle();
       assert.strictEqual(banner(app).includes(UNCONFIRMED + REREAD_FAIL) || banner(app).includes('Couldn'), true, banner(app));
-      assert.ok(/>Retry</.test(html(app) + app.el('statsRow').innerHTML), 'Retry offered');
+      assert.ok(/>Retry</.test(html(app) + app.el('readStatus').innerHTML), 'Retry offered');
       if (view === 'alltv') await app.ctx.loadDerivedView(); else await app.ctx.loadBrowseView();
       await settle();
       assert.strictEqual(rpc(app, 'set_season_watched').length, 1, 'Retry only reads');
@@ -1183,24 +1161,6 @@ for (const [from, go, to] of [
     });
   }
 }
-for (const view of ['alltv', 'colShows']) {
-  for (const mode of ['before', 'after']) {
-    test(`§8.6 X ${view} lost ${mode} after a restore: staleAfterRestore's words, no handler reread, nothing resent`, async () => {
-      const L = lib();
-      const app = await boot(L);
-      await VIEWS[view](app);
-      const g = app.hold(r => r.url.endsWith('/rpc/set_season_watched'));
-      expandAll(app, [L.alpha.show.id]);
-      const p = app.ctx.toggleWatch(L.alpha.rows[1].id);
-      await g.reached;
-      app.run('orgEpoch++');
-      g.lose(mode); await p; await settle(); await settle();
-      assert.strictEqual(rpc(app, 'set_season_watched').length, 1);
-      assert.match(notice(app), /was sent before the restore and answered afterwards/);
-      assert.ok(!/This change wasn’t confirmed/.test(banner(app)), 'not the unknown-outcome path');
-    });
-  }
-}
 for (const mode of ['before', 'after']) {
   test(`§8.6 C0 All Movies film Watched, lost ${mode}: the existing sendFilmState path and words, unchanged`, async () => {
     const L = lib();
@@ -1215,389 +1175,13 @@ for (const mode of ['before', 'after']) {
   });
 }
 
-// ═══ §8.7: operation rereads and focus (S3-D6 A, brief §7.2 R1–R8) ═══════════
-// Views and their controls: the acting control (focused before the action), and "another control"
-// in the list (C2). The list is the table (cards hidden) unless a case swaps them.
-const FOCUS = {
-  cw: { view: 'cw', expand: true },
-  alltv: { view: 'alltv', expand: true },
-  alltvSeasons: { view: 'alltvSeasons' },
-  comingsoon: { view: 'comingsoon' },
-  colShows: { view: 'colShows', expand: true },
-  colSeasons: { view: 'colSeasons' }
-};
-// trigger: T1 (F1 refused, stale), T2 (F1 unknown), T3 (Watched / Skip unknown), T4 (delete unknown).
-function acting(L, view, trigger) {
-  if (trigger === 'T1' || trigger === 'T2') {
-    const sel = view === 'cw' ? `[data-show-of="${L.alpha.show.id}"] [data-action="status"] select` : `[data-item="${L.alpha.show.id}"] [data-action="status"] select`;
-    return { sel, act: app => app.ctx.setShowStateById(L.alpha.show.id, { status: 'confirmed' }), endpoint: 'library_set_show_state_b45' };
-  }
-  if (trigger === 'T4') {
-    const id = L.gap.rows[0].id;
-    return { sel: `[data-season-row="${id}"] [data-action="season-delete"] button`, act: app => app.ctx.delRow(id), endpoint: 'delete_tv_season', expand: L.gap.show.id };
-  }
-  const skip = view === 'comingsoon';
-  const id = skip ? L.alpha.rows[2].id : L.alpha.rows[1].id;
-  const hook = skip ? 'season-control' : 'season-watch';
-  const sel = ['alltvSeasons', 'comingsoon', 'colSeasons'].includes(view) ? `[data-item="${id}"] [data-action="${hook}"] button` : `[data-season-row="${id}"] [data-action="${hook}"] button`;
-  return { sel, act: app => (skip ? app.ctx.setSeasonSkipped(id, true) : app.ctx.toggleWatch(id)), endpoint: skip ? 'set_season_skipped' : 'set_season_watched' };
-}
-// Another entry the view lists (Currently Watching lists Watching shows only; Coming Soon future seasons).
-const otherSel = (L, view) => (view === 'comingsoon' ? `[data-item="${L.lone.rows[0].id}"] [data-primary]`
-  : ['alltvSeasons', 'colSeasons'].includes(view) ? `[data-item="${L.lone.rows[0].id}"] [data-primary]`
-  : view === 'cw' ? `[data-item="${L.tba.show.id}"] [data-primary]` : `[data-item="${L.lone.show.id}"] [data-primary]`);
 const desc = n => (n ? `${n.tag}${Object.entries(n.attrs || {}).filter(([k]) => k.startsWith('data-') || k === 'class').map(([k, v]) => `[${k}=${v}]`).join('')}` : 'null');
-// What a focused element is, the same across redraws whatever its state classes: its tag, its own focus
-// hooks, and the hooks of the control, season and item it belongs to.
 const ident = node => {
   if (!node || typeof node.closest !== 'function') return String(node && node.attrs ? desc(node) : node);
   const own = Object.entries(node.attrs).filter(([k]) => k.startsWith('data-')).map(([k, v]) => `${k}=${v}`).join(',');
   const up = sel => { const x = node.closest(sel); return x ? Object.entries(x.attrs).filter(([k]) => k.startsWith('data-')).map(([k, v]) => `${k}=${v}`).join(',') : ''; };
   return `${node.tag}{${own}}<${up('[data-action]')}><${up('[data-season-row]')}><${up('[data-item], [data-show-of]')}>`;
 };
-const inList = node => !!node && typeof node.closest === 'function' && !!node.closest('[data-item], [data-show-of], [data-section], [data-empty]');
-async function focusCase({ view, trigger, cond, mode, failReread = false }) {
-  const L = lib();
-  // Coming Soon's "another control": Gap Season 3 isn't coming soon; use Alpha Season 3's neighbour by adding a future season.
-  // Coming Soon lists future seasons: Alpha S3 (acted on), then Gap S3 (where Skip's redraw puts focus), then Lone S1.
-  if (view === 'comingsoon') {
-    Object.assign(L.gap.rows[2], { date_sort: day(120), display_date: disp(day(120)) });
-    Object.assign(L.lone.rows[0], { date_sort: day(150), display_date: disp(day(150)) });
-  }
-  const app = await boot(L);
-  await VIEWS[FOCUS[view].view](app);
-  const dom = makeMiniDom(app);
-  dom.hide('cardList');
-  const a = acting(L, view, trigger);
-  if (FOCUS[view].expand) expandAll(app, [L.alpha.show.id, ...(a.expand ? [a.expand] : [])]);
-  else if (a.expand) expandAll(app, [a.expand]);
-  const control = dom.focus('tbody', a.sel);
-  const g = app.hold(r => r.method !== 'GET' && r.url.endsWith(`/rpc/${a.endpoint}`));
-  const reread = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
-  const p = a.act(app);
-  await g.reached;
-  let other = null, outside = null;
-  if (cond === 'C2') other = dom.focus('tbody', otherSel(L, view));
-  if (cond === 'C3') dom.active().dispatch('keydown');
-  if (cond === 'C4') dom.docEvent('pointerdown', null);
-  if (cond === 'C5') outside = dom.outside();
-  if (cond === 'C6') dom.winEvent('blur');
-  if (cond === 'C6b') { app.ctx.document.visibilityState = 'hidden'; dom.docEvent('visibilitychange', null); app.ctx.document.visibilityState = 'visible'; }
-  // C7: the owner clicks another tab (focus goes to it, outside the list), then the view changes.
-  if (cond === 'C7') { outside = dom.outside(); if (view.startsWith('col')) app.ctx.selectCollectionTab(app.browseId('disney').split(':')[1]); else app.ctx.switchView(view === 'alltv' ? 'watching' : 'alltv'); await settle(); }
-  if (cond === 'C8') app.run('orgEpoch++');
-  const afterCond = dom.active();
-  if (trigger === 'T1') g.refuseWith('P0001', 'target_changed: This changed since the page showed it, so nothing was changed. Look at it again.');
-  else g.lose(mode);
-  await settle();
-  const during = { active: dom.active(), loading: !!dom.in('tbody', '[data-loading]'), status: app.el('statsRow').innerHTML };
-  if (failReread) reread.fail(); else reread.release();
-  await p; await settle(); await settle();
-  if (cond === 'C6') dom.winEvent('focus');
-  return { app, dom, L, control, other, outside, afterCond, during, end: dom.active(), sent: rpc(app, a.endpoint).length, a };
-}
-const isLoading = n => !!n && n.attrs && 'data-loading' in n.attrs;
-// C1 / C2 / C9 (owned and quiet) in every view, both loss modes, for T2 / T3 / T4.
-const PLAN = [
-  ['T2', ['cw', 'alltv', 'colShows']],
-  ['T3', ['cw', 'alltv', 'alltvSeasons', 'comingsoon', 'colShows', 'colSeasons']],
-  ['T4', ['alltv', 'colShows']]
-];
-for (const [trigger, views] of PLAN) {
-  for (const view of views) {
-    for (const mode of ['before', 'after']) {
-      test(`§8.7 ${trigger} ${view} lost ${mode} C1 (owned): the loading message during the reread, then the same control (F-1)`, async () => {
-        const r = await focusCase({ view, trigger, cond: 'C1', mode });
-        assert.ok(isLoading(r.during.active), `loading message focused while reading: ${desc(r.during.active)}`);
-        // The chain from the operation's record: the same control (F-1) while it is listed; when the
-        // stored outcome took the entry out of the view (lost after commit), the chain's next step.
-        const same = r.dom.in('tbody', r.a.sel);
-        if (same) assert.strictEqual(ident(r.end), ident(same), 'F-1: the same control');
-        else assert.ok(inList(r.end) && !isLoading(r.end), `the chain's next step: ${desc(r.end)}`);
-        assert.strictEqual(r.sent, 1);
-      });
-      test(`§8.7 ${trigger} ${view} lost ${mode} C2 (another control in the list): quiet reread; never the loading message; the owner's control after`, async () => {
-        const r = await focusCase({ view, trigger, cond: 'C2', mode });
-        assert.ok(!r.during.loading && /Reading the list again…/.test(r.during.status), 'quiet: the list stays, with the status line');
-        assert.ok(r.during.active === r.other, 'focus stays on the owner’s control while reading');
-        assert.strictEqual(ident(r.end), ident(r.other), 'the owner’s control (its redrawn equivalent), not the operation’s');
-        assert.strictEqual(r.app.get('focusPlacement') && r.app.get('focusPlacement').origin.key === r.L.alpha.show.id, false);
-      });
-      test(`§8.7 ${trigger} ${view} lost ${mode} C9 owned + the reread fails: Retry`, async () => {
-        const r = await focusCase({ view, trigger, cond: 'C1', mode, failReread: true });
-        assert.ok(r.end && 'data-retry' in r.end.attrs, `Retry focused: ${desc(r.end)}`);
-      });
-      test(`§8.7 ${trigger} ${view} lost ${mode} C9 quiet + the reread fails: the list kept, status line and Retry outside it; focus unchanged`, async () => {
-        const r = await focusCase({ view, trigger, cond: 'C2', mode, failReread: true });
-        assert.ok(!r.dom.in('tbody', '[data-loading]') && !/Failed to load/.test(r.app.el('tbody').innerHTML), 'the last complete list is kept');
-        assert.match(r.app.el('statsRow').innerHTML, /The list couldn’t be read again, so what is shown may be out of date\. <button class="btn" onclick="load(Derived|Browse)View\(\)">Retry<\/button>/);
-        assert.ok(r.end === r.other, 'focus unchanged');
-      });
-    }
-  }
-}
-// C3–C8 on Currently Watching, a collection and Coming Soon (T3), both loss modes.
-for (const view of ['cw', 'colShows', 'comingsoon']) {
-  for (const mode of ['before', 'after']) {
-    for (const cond of ['C3', 'C4']) {
-      test(`§8.7 T3 ${view} lost ${mode} ${cond} (${cond === 'C3' ? 'a key on the placed control' : 'a pointer press'}): the placement ends; quiet reread; focus stays on that control (never the loading message)`, async () => {
-        const r = await focusCase({ view, trigger: 'T3', cond, mode });
-        assert.ok(!r.during.loading && !isLoading(r.during.active));
-        // The owner's element: the one focused when the key or pointer ended the placement (Coming Soon's Skip
-        // had already moved focus to the next entry).
-        assert.strictEqual(ident(r.end), ident(r.afterCond), 'the owner’s own element');
-        assert.strictEqual(r.sent, 1);
-      });
-    }
-    test(`§8.7 T3 ${view} lost ${mode} C5 (focus outside the list): the existing loading presentation; focus stays outside`, async () => {
-      const r = await focusCase({ view, trigger: 'T3', cond: 'C5', mode });
-      assert.ok(r.during.active === r.outside && r.end === r.outside, 'focus stays outside the list');
-    });
-    for (const cond of ['C6', 'C6b']) {
-      test(`§8.7 T3 ${view} lost ${mode} ${cond} (${cond === 'C6' ? 'the window lost focus' : 'the page was hidden'}): the placement ends for good; no focus move by the reread`, async () => {
-        const r = await focusCase({ view, trigger: 'T3', cond, mode });
-        assert.ok(!isLoading(r.end) && !isLoading(r.during.active) && !r.during.loading === (cond === 'C6b'), 'never the loading message (C6b: quiet, focus still in the list)');
-        // C6: the page has no focus, so nothing is placed at all. C6b: focus is still on the owner's control,
-        // which the ordinary redraw keeps (its own position), never moved by the operation.
-        if (cond === 'C6') assert.ok(r.app.get('focusPlacement === null'), 'no placement');
-        else assert.strictEqual(ident(r.end), ident(r.afterCond), 'the owner’s control');
-      });
-    }
-    test(`§8.7 T3 ${view} lost ${mode} C7 (navigation): nothing focused in the new view on the operation's behalf`, async () => {
-      const r = await focusCase({ view, trigger: 'T3', cond: 'C7', mode });
-      // The operation's record is never placed in the new view (switchView ended it; R6).
-      assert.ok(r.app.get(`!focusPlacement || ![${JSON.stringify(r.L.alpha.show.id)}, ${JSON.stringify(r.L.alpha.rows[1].id)}, ${JSON.stringify(r.L.alpha.rows[2].id)}].includes(focusPlacement.origin.key)`), 'no placement for the operation');
-      assert.ok(!isLoading(r.end));
-      assert.strictEqual(r.sent, 1);
-    });
-    test(`§8.7 T3 ${view} lost ${mode} C8 (a restore meanwhile): no handler reread; no focus move`, async () => {
-      const r = await focusCase({ view, trigger: 'T3', cond: 'C8', mode });
-      assert.match(r.app.el('banner').innerHTML, /answered afterwards/);
-      assert.ok(!isLoading(r.end));
-    });
-  }
-}
-// T1 (a stale refusal's reread) under C1 / C2 in CW, All TV and a collection.
-for (const view of ['cw', 'alltv', 'colShows']) {
-  test(`§8.7 T1 ${view} C1: owned → the loading message, then the same control`, async () => {
-    const r = await focusCase({ view, trigger: 'T1', cond: 'C1', mode: 'before' });
-    assert.ok(isLoading(r.during.active));
-    assert.strictEqual(ident(r.end), ident(r.dom.in('tbody', r.a.sel)));
-  });
-  test(`§8.7 T1 ${view} C2: not owned → quiet; the owner's control`, async () => {
-    const r = await focusCase({ view, trigger: 'T1', cond: 'C2', mode: 'before' });
-    assert.ok(!r.during.loading);
-    assert.strictEqual(ident(r.end), ident(r.other));
-  });
-}
-// C10 (R7) and C11 (R8) in All TV and a collection.
-for (const view of ['alltv', 'colShows']) {
-  test(`§8.7 C10 ${view}: owned, then a key on the loading message → after the read, the F-7 fallback (never the body)`, async () => {
-    const L = lib();
-    const app = await boot(L);
-    await VIEWS[view](app);
-    const dom = makeMiniDom(app);
-    dom.hide('cardList');
-    expandAll(app, [L.alpha.show.id]);
-    dom.focus('tbody', `[data-season-row="${L.alpha.rows[1].id}"] [data-action="season-watch"] button`);
-    const g = app.hold(r => r.url.endsWith('/rpc/set_season_watched'));
-    const reread = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
-    const p = app.ctx.toggleWatch(L.alpha.rows[1].id);
-    await g.reached; g.lose('before'); await settle();
-    assert.ok(isLoading(dom.active()));
-    dom.active().dispatch('keydown');
-    reread.release(); await p; await settle(); await settle();
-    const end = dom.active();
-    assert.ok(end && !isLoading(end), `focus repaired: ${desc(end)}`);
-    assert.ok('data-section' in end.attrs || 'data-primary' in end.attrs || 'data-empty' in end.attrs, `the F-7 fallback: ${desc(end)}`);
-  });
-  for (const held of [true, false]) {
-    test(`§8.7 C11 ${view}: a resize while the write is pending ${held ? 'and owned → the same control in the layout now shown' : 'after the owner pressed a key → no relocation'}`, async () => {
-      const L = lib();
-      const app = await boot(L);
-      await VIEWS[view](app);
-      const dom = makeMiniDom(app);
-      dom.hide('cardList');
-      expandAll(app, [L.alpha.show.id]);
-      const sel = `[data-item="${L.alpha.show.id}"] [data-action="status"] select`;
-      dom.focus('tbody', sel);
-      const g = app.hold(r => r.url.endsWith('/rpc/library_set_show_state_b45'));
-      const p = app.ctx.setShowStateById(L.alpha.show.id, { priority: 'high' });
-      await g.reached;
-      if (!held) dom.active().dispatch('keydown');
-      dom.hide('tbody'); dom.hide('cardList', false); dom.blurToBody();
-      dom.winEvent('resize');
-      const moved = dom.active();
-      g.release(); await p; await settle();
-      if (held) assert.ok(moved && moved === dom.in('cardList', sel), `relocated: ${desc(moved)}`);
-      else assert.ok(moved === null, `not relocated: ${desc(moved)}`);
-    });
-  }
-}
-// T5: Add season's answer while focus is in the panel (outside the list).
-for (const view of ['alltv', 'colShows']) {
-  test(`§8.7 T5 ${view} C5: Add season's reread with focus in the panel moves nothing`, async () => {
-    const L = lib();
-    const app = await boot(L);
-    await VIEWS[view](app);
-    const dom = makeMiniDom(app);
-    dom.hide('cardList');
-    app.ctx.openAddSeason(L.promote.show.id); await settle(); await settle();
-    const outside = dom.outside();
-    for (const [k, v] of Object.entries({ nSeason: 'Season 2', nDate: 'TBA 2027', nTheme: 'Net' })) app.el(k).value = v;
-    await app.ctx.librarySubmitSeason(); await settle(); await settle();
-    assert.ok(dom.active() === outside, 'focus stays in the panel');
-    assert.ok(app.get('focusPlacement === null'), 'no placement');
-  });
-}
-
-// C7b (R6): the view changes with no focus event at all. Focus is on the body only because the
-// layout switch removed the owner's element (the placement survives that, PV2-F2), so neither the
-// new view's capture nor any listener ends it; only switchView itself does.
-test('§8.7 T3 colShows C7b: a view change with no focus event ends the placement; nothing placed in the new view', async () => {
-  const L = lib();
-  const app = await boot(L);
-  await VIEWS.colShows(app);
-  const dom = makeMiniDom(app);
-  dom.hide('cardList');
-  dom.focus('tbody', `[data-item="${L.alpha.show.id}"] [data-action="status"] select`);
-  const g = app.hold(r => r.url.endsWith('/rpc/library_set_show_state_b45'));
-  const p = app.ctx.setShowStateById(L.alpha.show.id, { priority: 'high' });
-  await g.reached;
-  dom.hide('tbody'); dom.hide('cardList', false); dom.blurToBody();
-  assert.ok(app.get('focusPlacement !== null'), 'the placement survives the layout switch');
-  app.ctx.switchView('alltv'); await settle();
-  assert.ok(app.get('focusPlacement === null'), 'switchView ended it');
-  g.release(); await p; await settle(); await settle();
-  const a = dom.active();
-  assert.ok(a === null, `nothing focused on the operation's behalf in the new view: ${desc(a)}`);
-});
-
-// ═══ Review findings 1–2: the quiet reread's end and its busy state (both loaders) ═══════════
-// The harness's filter controls get focus, a caret and filter-row membership (as a browser's have),
-// and the list boxes record aria-busy, so both are observable.
-function filterControls(app, dom) {
-  const doc = app.ctx.document, orig = doc.getElementById;
-  doc.getElementById = id => {
-    const el = orig(id);
-    if (el && /^f[A-Z]/.test(id) && !el.focus) {
-      el.focus = () => { doc.activeElement = el; dom.docEvent('focusin', el); };
-      el.setSelectionRange = (s, e, d) => { el.selectionStart = s; el.selectionEnd = e; el.selectionDirection = d; };
-    }
-    return el;
-  };
-  const row = app.el('filtersRow');
-  row.contains = n => !!n && !!n.id && orig(n.id) === n && row.innerHTML.includes(`id="${n.id}"`);
-  const busy = {};
-  for (const id of ['tbody', 'cardList']) {
-    const el = app.el(id);
-    el.setAttribute = (k, v) => { if (k === 'aria-busy') busy[id] = v; };
-    el.removeAttribute = k => { if (k === 'aria-busy') delete busy[id]; };
-  }
-  return { busy: () => Object.keys(busy).length > 0, el: id => doc.getElementById(id) };
-}
-const RF = { alltv: { other: L => `[data-item="${L.lone.show.id}"] [data-primary]`, away: app => app.ctx.switchView('watching'), retry: app => app.ctx.loadDerivedView() },
-  colShows: { other: L => `[data-item="${L.lone.show.id}"] [data-primary]`, away: app => app.ctx.selectCollectionTab(app.browseId('disney').split(':')[1]), retry: app => app.ctx.loadBrowseView() } };
-const statusLine = app => /Reading the list again…/.test(app.el('statsRow').innerHTML);
-async function quietStart(view) {
-  const L = lib();
-  const app = await boot(L);
-  await VIEWS[view](app);
-  const dom = makeMiniDom(app);
-  dom.hide('cardList');
-  const f = filterControls(app, dom);
-  dom.focus('tbody', RF[view].other(L));
-  return { L, app, dom, f };
-}
-// The owner moves into a filter control while the reread is pending, changes it, and the read ends.
-async function moveIntoFilter(app, f, ctl) {
-  const el = f.el(ctl);
-  el.focus();
-  if (ctl === 'fSearch') { el.value = 'Lo'; el.setSelectionRange(1, 2, 'forward'); } else el.value = 'watching';
-  app.ctx.renderTable();
-  return el;
-}
-function assertFilterKept(app, f, ctl, before) {
-  const now = f.el(ctl);
-  assert.ok(now !== before, 'the filter row was redrawn');
-  assert.ok(app.ctx.document.activeElement === now, `focus is on the redrawn ${ctl}`);
-  assert.strictEqual(now.value, ctl === 'fSearch' ? 'Lo' : 'watching', 'the value typed or chosen is kept');
-  if (ctl === 'fSearch') assert.deepStrictEqual([now.selectionStart, now.selectionEnd, now.selectionDirection], [1, 2, 'forward'], 'the caret / selection is kept');
-}
-for (const view of ['alltv', 'colShows']) {
-  for (const ctl of ['fSearch', 'fStatus']) {
-    test(`Finding 1 ${view} ${ctl}: the owner moves into ${ctl} while a quiet reread is pending; its end keeps that control focused, its value${ctl === 'fSearch' ? ' and caret' : ''}`, async () => {
-      const { app, f } = await quietStart(view);
-      const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
-      const p = app.ctx.reloadOpenView({}); await g.reached;
-      assert.ok(statusLine(app) && f.busy(), 'a quiet reread');
-      const el = await moveIntoFilter(app, f, ctl);
-      g.release(); await p; await settle();
-      assertFilterKept(app, f, ctl, el);
-      assert.ok(!f.busy() && !statusLine(app), 'not busy after');
-    });
-  }
-  test(`Finding 1 ${view}: an operation's quiet reread (a lost status write; the owner went to another entry, then to Search) keeps Search, its text and caret`, async () => {
-    const { L, app, dom, f } = await quietStart(view);
-    dom.focus('tbody', `[data-item="${L.alpha.show.id}"] [data-action="status"] select`);
-    const g = app.hold(r => r.url.endsWith('/rpc/library_set_show_state_b45'));
-    const reread = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
-    const p = app.ctx.setShowStateById(L.alpha.show.id, { status: 'confirmed' });
-    await g.reached;
-    dom.focus('tbody', RF[view].other(L));
-    g.lose('before'); await reread.reached;
-    assert.ok(statusLine(app) && f.busy(), 'the operation reads quietly');
-    const el = await moveIntoFilter(app, f, 'fSearch');
-    reread.release(); await p; await settle();
-    assertFilterKept(app, f, 'fSearch', el);
-    assert.match(banner(app), /This change wasn’t confirmed/);
-  });
-  test(`Finding 2 ${view}: another view while a quiet reread is pending ends its busy state; the old read changes nothing when it ends`, async () => {
-    const { app, f } = await quietStart(view);
-    const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
-    const p = app.ctx.reloadOpenView({}); await g.reached;
-    assert.ok(f.busy() && statusLine(app));
-    await RF[view].away(app); await settle(); await settle();
-    assert.ok(!f.busy() && !statusLine(app), 'the new view is not busy');
-    const stats = app.el('statsRow').innerHTML, list = app.el('tbody').innerHTML;
-    g.release(); await p; await settle();
-    assert.ok(!f.busy(), 'still not busy');
-    assert.strictEqual(app.el('statsRow').innerHTML, stats, 'the old read leaves the new view’s status alone');
-    assert.strictEqual(app.el('tbody').innerHTML, list, 'and its list');
-  });
-  test(`Finding 2 ${view}: Settings (no list read) while a quiet reread is pending: no busy state or status line is left; the old read changes nothing`, async () => {
-    const { app, f } = await quietStart(view);
-    const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
-    const p = app.ctx.reloadOpenView({}); await g.reached;
-    assert.ok(f.busy() && statusLine(app));
-    app.ctx.openSettings(null); await settle();
-    assert.ok(!f.busy() && !statusLine(app), 'Settings shows no busy list');
-    g.release(); assert.strictEqual(await p, null, 'the old read is superseded'); await settle();
-    assert.ok(!f.busy() && !statusLine(app));
-  });
-  test(`Finding 2 ${view}: a newer read that isn't quiet (the owner's Retry) takes over; the old quiet read's end leaves no busy state`, async () => {
-    const { app, f } = await quietStart(view);
-    const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
-    const p = app.ctx.reloadOpenView({}); await g.reached;
-    assert.ok(f.busy());
-    const r2 = RF[view].retry(app);
-    assert.ok(!f.busy() && !statusLine(app), 'the newer read took the list over');
-    await r2; await settle();
-    g.release(); await p; await settle();
-    assert.ok(!f.busy() && !statusLine(app), 'no busy state left behind');
-  });
-  test(`Finding 2 ${view}: a newer quiet reread is pending when the older one ends — the older never clears the newer's busy state`, async () => {
-    const { app, f } = await quietStart(view);
-    const g1 = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
-    const p1 = app.ctx.reloadOpenView({}); await g1.reached;
-    const g2 = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
-    const p2 = app.ctx.reloadOpenView({}); await g2.reached;
-    g1.release(); assert.strictEqual(await p1, null, 'the older read is superseded'); await settle();
-    assert.ok(f.busy() && statusLine(app), 'the newer read is still marked busy');
-    g2.release(); assert.strictEqual(await p2, true); await settle();
-    assert.ok(!f.busy() && !statusLine(app), 'cleared by the newer read itself');
-  });
-}
 
 // ═══ G6 (V3.7): the B6 chain in collections ══════════════════════════════════
 test('G6 F-5 / F-4: Skip hides a season entry under All (except Skipped) → the next entry; the last one → the empty message', async () => {
@@ -1665,7 +1249,7 @@ test('G6 F-6 / F-7: the last entry of a section gone → its heading; filter red
   app.ctx.setBrowsePresentation('seasons'); app.ctx.setBrowseGrouping('combined');
   assert.ok(dom.active() === outside, 'filter redraws and toggles keep focus where it is');
 });
-test('G6: the owner’s own Retry keeps B6: the loading message, then the chain; a failed one focuses Retry', async () => {
+test('G6 (Batch A): reading a shown collection again keeps the list and the focused control; a failed reread keeps them and offers Retry', async () => {
   const L = lib();
   const app = await boot(L);
   await openTC(app);
@@ -1675,14 +1259,16 @@ test('G6: the owner’s own Retry keeps B6: the loading message, then the chain;
   dom.focus('tbody', sel);
   const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
   const p = app.ctx.loadBrowseView(); await g.reached;
-  assert.ok(isLoading(dom.active()));
+  assert.strictEqual(desc(dom.active()), desc(dom.in('tbody', sel)), 'the list stays while it is read');
+  assert.match(app.el('readStatus').innerHTML, /Reading the list again/);
   g.release(); await p; await settle();
-  assert.strictEqual(desc(dom.active()), desc(dom.in('tbody', sel)));
-  dom.focus('tbody', sel);
+  assert.strictEqual(desc(dom.active()), desc(dom.in('tbody', sel)), 'the same control after the redraw');
+  assert.strictEqual(app.el('readStatus').innerHTML, '');
   const g2 = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows'));
   const p2 = app.ctx.loadBrowseView(); await g2.reached;
   g2.fail(); await p2; await settle();
-  assert.ok(dom.active() && 'data-retry' in dom.active().attrs);
+  assert.strictEqual(desc(dom.active()), desc(dom.in('tbody', sel)), 'a failure keeps the list and focus');
+  assert.match(app.el('readStatus').innerHTML, /couldn’t be read again.*<button class="btn" onclick="loadBrowseView\(\)">Retry<\/button>/);
 });
 
 T.run();

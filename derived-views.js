@@ -281,122 +281,99 @@ function tvRowsFilter() {
 
 // Paginated, exact-count-checked reads of every TV season, every show and the
 // catalog governance. GET only: no seeding, no TBA refresh. Refetched each time a
-// view is entered.
+// view is entered, after a change (library.js reloadOpenView) and on Retry.
 // Returns true once the view shows a complete read, false when the read failed (Retry is
-// shown), null when a newer read or another view took over.
-// opts.operation (S3, brief §7.2): the reread an operation's answer asked for (reloadOpenView); it
-// may move focus only while that operation's own placement (opts.origin) is still held. Without
-// it, it never moves focus, and when the owner's focus is in the list it reads quietly, keeping the
-// list on screen. The owner's own reload (Retry; no opts) keeps the B6 rules below.
-async function loadDerivedView(opts = {}) {
+// shown), null when a newer read or another view took over (or a change overlapped it:
+// it reads again once the lane is free, write-lane.js).
+// A view that already shows a complete list is read in place (beginListReread): the list
+// and its filters stay on screen and are redrawn when the read is in; a failure keeps
+// them, marked out of date, with Retry. Only a first read shows "Loading…".
+async function loadDerivedView() {
   const viewId = activeViewId;
   if (!viewId) return null;
   const seq = ++derivedLoadSeq;
-  // B6: focus in the list is recorded now and moved to the loading message; after the read
-  // the focus rules run against the new data (a failed read focuses Retry; a superseded
-  // read moves nothing). A loading message already focused carries the earlier record's place.
-  // After the read, focus moves only if it is still on that loading message: the owner may
-  // have gone to a header control, a filter or a dialog meanwhile, and that focus is theirs.
-  const op = !!(opts && opts.operation);
-  const focusRec = op ? operationFocusOrigin(opts.origin) : captureListFocus();
-  const quiet = op && !focusRec && !!derivedData && derivedData.loaded && listHasOwnerFocus();
-  const quietToken = quiet ? beginQuietReread() : null;
-  if (!quiet) {
-    dropQuietReread();
+  const stamp = readStamp();
+  const inPlace = !!derivedData && derivedData.loaded;
+  if (inPlace) { beginListReread(); showError(''); } // a reread clears the error line, as a first read does
+  else {
+    const hadFocus = listHasFocus();
     document.getElementById('statsRow').innerHTML = '';
     holdViewFilters(viewId); // a reload or Retry keeps this visit's filters (browse-views.js)
     document.getElementById('filtersRow').innerHTML = '';
     showError('');
     paintDerivedMessage('Loading…', false);
-    if (focusRec) placeListFocus('[data-loading]', focusRec);
+    if (hadFocus) focusListMessage('[data-loading]');
   }
-  const showsRead = typeof matchReadStart === 'function' ? matchReadStart('shows', '*') : null; // tracked (tmdb-match.js)
+  const showsRead = startShowsRead();
   try {
     const [rows, shows, gov] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows'), readGovernance()]);
     requireB45Shape(shows, 'priority');
     requireB45Shape(rows, 'priority');
     publishAllTvShows(showsRead, shows);
-    if (showsRead) matchReadSettle(showsRead, null);
     if (seq !== derivedLoadSeq || activeViewId !== viewId) return null;
+    if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === derivedLoadSeq && activeViewId === viewId) loadDerivedView(); }); return null; }
     publishGovernance(governanceCovers(gov, rows, shows));
     derivedData = { rows: rows.filter(isTvViewRow), loaded: true };
-    const repair = lostFocusRepairDue(focusRec);
-    if (quiet) endQuietReread(quietToken, false);
-    const filterFocus = captureFilterFocus();
+    endListReread(true);
     renderFilters();
-    const listing = renderDerivedTable(focusRec && focusIsPlaced(focusRec) ? focusRec : null);
-    restoreFilterFocus(filterFocus);
-    if (repair) repairLostFocus(focusRec.container, listing);
+    renderDerivedTable();
     return true;
   } catch(e) {
     console.error(e);
-    if (showsRead && showsRead.state === 'pending') matchReadSettle(showsRead, e);
     if (seq !== derivedLoadSeq || activeViewId !== viewId) return null;
-    if (quiet) { endQuietReread(quietToken, true, 'loadDerivedView'); return false; }
-    const owned = !!focusRec && focusIsPlaced(focusRec);
-    const repair = lostFocusRepairDue(focusRec);
+    if (inPlace) { endListReread(false, 'loadDerivedView', e); return false; }
+    const hadFocus = listHasFocus();
     showError(`Couldn't load every TV row, so nothing is shown rather than an incomplete list. ${e.message}`);
     paintDerivedMessage('Failed to load.', true);
-    if (owned) placeListFocus('[data-retry]', focusRec);
-    else if (repair) placeListFocus('[data-retry]', blankFocusRecord(focusRec.container));
+    if (hadFocus) focusListMessage('[data-retry]');
     return false;
   }
 }
 
-// ─── Operation rereads and focus (S3, brief §7.2) ─────────────────────────────
-// An operation's reread (reloadOpenView) may use the operation's own placement only while it is
-// still held (R2, R3): a placement the owner ended (a key, pointer or touch press, focus anywhere
-// else — another control in the list too —, leaving the window, hiding the page, another view)
-// is never revived by its reread, the chain or Retry (R4).
-function operationFocusOrigin(origin) {
-  return origin && focusIsPlaced(origin) ? origin : null;
+// ─── Reading a shown list again (simplification Batch A) ──────────────────────
+// The list stays as drawn, marked busy, with a status line outside it (readStatus, apart
+// from the counts in statsRow). The newest read owns that state: a newer read starts it
+// again, and another view clears it (tabs.js switchView). A failed reread keeps the last
+// complete list, says it may be out of date, offers Retry and pauses changes from the list
+// until a read succeeds (write-lane.js listStale).
+function beginListReread() {
+  listRereading = true;
+  updateListBusy();
+  document.getElementById('readStatus').innerHTML = '<p class="reread-status" role="status">Reading the list again…</p>';
 }
-// The owner's focus is on something in the list (not this page's loading message or Retry).
-function listHasOwnerFocus() {
+function endListReread(ok, retryFn, error) {
+  listRereading = false;
+  listStale = !ok;
+  updateListBusy();
+  const why = error ? ` (${esc(String(error.message || error))})` : '';
+  document.getElementById('readStatus').innerHTML = ok ? ''
+    : `<p class="reread-status" role="status">The list couldn’t be read again${why}, so what is shown may be out of date and changes from it are paused. <button class="btn" onclick="${retryFn}()">Retry</button></p>`;
+}
+function clearListReread() {
+  listRereading = false;
+  listStale = false;
+  updateListBusy();
+  const el = document.getElementById('readStatus');
+  if (el) el.innerHTML = '';
+}
+
+// Focus is on something in the list (#tbody / #cardList).
+function listHasFocus() {
   if (!documentHasFocus()) return false;
   const a = document.activeElement;
-  return !!a && typeof a.closest === 'function' && !!a.closest('#tbody, #cardList') && !a.closest('[data-loading], [data-retry]');
+  return !!a && typeof a.closest === 'function' && !!a.closest('#tbody, #cardList');
 }
-// R5, the quiet reread: the list stays as drawn (so the owner's control survives), marked busy, with
-// a status line outside it. A failure keeps the last complete list and offers Retry beside the line.
-function setListBusy(busy) {
-  ['tbody', 'cardList'].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (busy && typeof el.setAttribute === 'function') el.setAttribute('aria-busy', 'true');
-    else if (!busy && typeof el.removeAttribute === 'function') el.removeAttribute('aria-busy');
-  });
+// The list was replaced by a message (Loading…, Retry) while focus was in it: the message
+// takes focus, so it isn't lost to the page.
+function focusListMessage(selector) {
+  for (const id of ['tbody', 'cardList']) {
+    const box = document.getElementById(id);
+    const el = box && isRendered(box) ? box.querySelector(selector) : null;
+    if (el && isRendered(el) && typeof el.focus === 'function') { el.focus(); return; }
+  }
 }
-// The busy state belongs to the newest quiet reread only (review finding 2): a newer read, quiet or not,
-// or another view takes it over, and an older read that ends later never clears or rewrites it.
-let quietReread = null;
-function beginQuietReread() {
-  const token = {};
-  quietReread = token;
-  setListBusy(true);
-  document.getElementById('statsRow').innerHTML = '<p class="reread-status" role="status">Reading the list again…</p>';
-  return token;
-}
-function endQuietReread(token, failed, retryFn) {
-  if (!token || token !== quietReread) return;
-  quietReread = null;
-  setListBusy(false);
-  document.getElementById('statsRow').innerHTML = failed
-    ? `<p class="reread-status" role="status">The list couldn’t be read again, so what is shown may be out of date. <button class="btn" onclick="${retryFn}()">Retry</button></p>`
-    : '';
-}
-// A newer read that isn't quiet, or another view (switchView): the pending quiet reread's busy mark and
-// status line go; its own end then changes nothing.
-function dropQuietReread() {
-  if (!quietReread) return;
-  quietReread = null;
-  setListBusy(false);
-  const stats = document.getElementById('statsRow');
-  if (stats && /class="reread-status"/.test(stats.innerHTML)) stats.innerHTML = '';
-}
-// Review finding 1: a quiet reread's end redraws the filter row (its values are kept, viewFilterStart),
-// which would drop the owner's focus there (Search included, entered while the read was pending) and
-// the caret. The focused filter control is noted before the redraw and focused again after it.
+// The focused filter control, noted before the filter row is redrawn and focused again
+// after it with its caret (render.js renderFilters).
 function captureFilterFocus() {
   if (!documentHasFocus()) return null;
   const a = document.activeElement, row = document.getElementById('filtersRow');
@@ -411,31 +388,9 @@ function restoreFilterFocus(rec) {
   el.focus();
   if (rec.sel && typeof el.setSelectionRange === 'function') el.setSelectionRange(rec.sel[0], rec.sel[1], rec.sel[2]);
 }
-// R7: the element that has focus is this reread's own loading message (or Retry), focused for an
-// operation whose placement has ended since: the redraw removes it, so focus is repaired.
-function lostFocusRepairDue(rec) {
-  if (!rec || focusIsPlaced(rec) || !documentHasFocus()) return false;
-  const a = document.activeElement;
-  return !!a && typeof a.closest === 'function' && !!a.closest('[data-loading], [data-retry]');
-}
-function blankFocusRecord(container) {
-  return { container, key: null, section: null, hook: null, next: [], prev: [] };
-}
-// Only while focus is lost (on the page, or on an element the redraw removed): the view's first
-// heading or toggle, else its first entry, else its empty message (F-7) — never the operation's target.
-function repairLostFocus(container, listing) {
-  if (!documentHasFocus()) return;
-  const a = document.activeElement;
-  // This reread's own message or Retry that the redraw removed counts as lost (it is no longer listed).
-  const box = visibleListBox(container);
-  const removedMessage = !!a && typeof a.closest === 'function' && !!a.closest('[data-loading], [data-retry]')
-    && !(box && [...box.querySelectorAll('[data-loading], [data-retry]')].includes(a));
-  const lost = !a || a === document.body || a === document.documentElement || a.isConnected === false || removedMessage;
-  if (lost) applyListFocus(blankFocusRecord(container), listing || null);
-}
 
 // The loading and failure messages (B6): the loading text can take focus from the page
-// (tabindex -1) while a reload runs; Retry is the focus after a failed one.
+// (tabindex -1) while a first read runs; Retry is the focus after a failed one.
 function paintDerivedMessage(text, withRetry) {
   const retry = withRetry ? ` <button class="btn" data-retry="1" onclick="loadDerivedView()">Retry</button>` : '';
   const hook = withRetry ? '' : ' tabindex="-1" data-loading="1"';
@@ -536,11 +491,10 @@ function renderDerivedFilters() {
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
-// carried: the focus a reload recorded before its read (loadDerivedView); otherwise the
-// focus is recorded here, just before the redraw (B6).
-function renderDerivedTable(carried) {
+// The focus rule (B6): focus in the list is recorded just before the redraw and put back after it.
+function renderDerivedTable() {
   if (!derivedData || !derivedData.loaded) return;
-  const rec = carried || captureListFocus();
+  const rec = captureListFocus();
   const today = localTodayStr();
   const val = id => document.getElementById(id)?.value || ''; // a control that isn't shown doesn't filter
   const fSearch = val('fSearch').trim().toLowerCase();
@@ -1200,26 +1154,21 @@ function toggleDerivedShow(key, ev) {
   renderTable();
 }
 
-// ─── Focus after a redraw (B6) ────────────────────────────────────────────────
-// A redraw replaces the list's markup, so the focused control is gone. After an action
-// redraw (expanding, a section toggle, a write, a reload) focus goes to the first of
-// these that applies (the proposal's F-1 … F-7):
+// ─── Focus after a redraw (B6; the one focus rule since Batch A) ──────────────
+// A redraw moves focus only when focus was in the list (#tbody / #cardList) just before it.
+// It then goes to the first of these that applies (the proposal's F-1 … F-7):
 //   F-1 the same control; F-2 the show's new shortcut, else its item's main control; F-3 the
 //   toggle of the collapsed section it moved into; F-4 the empty-state message when the
 //   view lists nothing; F-5 the next (else previous) item still listed in its section;
 //   F-6 its section's toggle or heading; F-7 the first section heading, else the first item.
-// Only when focus was in the list (#tbody / #cardList) before the redraw. Filter redraws
-// (Search, the filter controls, Back) keep focus where it is, and a filter pill keeps its
-// own rule (render.js toggleFilterPill), even when the list becomes empty.
+// Focus anywhere else (a filter, the header, a dialog, another window) is never moved, a filter
+// pill keeps its own rule (render.js toggleFilterPill), and a filter-row redraw keeps the focused
+// filter control (render.js renderFilters). Every redraw records afresh: nothing is carried
+// from one redraw to the next.
 //
 // Items (data-item): a show (Currently Watching, All TV Shows), whose main control is its
 // expand button, or a season (Coming Soon, All TV Seasons), whose title takes focus from the
 // page. Controls are found by identity (the item or season and data-action), never by position.
-//
-// The original action keeps its target across the redraws it causes (an optimistic redraw,
-// then the answer or the rollback, or a reload): the page's one placement (focusPlacement in
-// watchlist.html) remembers the record focus was moved for, until the owner does anything
-// (placeFocus). A cancelled placement is final: nothing revives it.
 const FOCUS_HOOKS = [['shortcut', 'data-shortcut-show'], ['action', 'data-action'], ['item', 'data-primary'],
   ['section', 'data-section'], ['empty', 'data-empty'], ['loading', 'data-loading']];
 
@@ -1230,15 +1179,12 @@ function seasonItemAttrs(r, section) {
 
 function captureListFocus() {
   if (!documentHasFocus()) return null; // the owner is outside the app: nothing to carry back
-  const owned = placedOrigin();
-  if (owned) return owned; // still the page's placement: the original action's record
   const active = document.activeElement;
   if (!active || typeof active.closest !== 'function') return null;
   const container = ['tbody', 'cardList'].find(id => active.closest(`#${id}`));
   if (!container || active.closest('.filter-pill')) return null;
-  // A loading message holds focus only for the page's own placement; once that placement is
-  // cancelled, focus left on it is no new action to carry.
-  if (active.closest('[data-loading]')) return null;
+  // The loading message (a first read): focus goes to the view's first heading or item (F-7).
+  if (active.closest('[data-loading]')) return { container, key: null, section: null, hook: null, next: [], prev: [] };
   const box = document.getElementById(container);
   const { key, hook } = focusHookOf(active);
   // The item's section and its neighbours in that section, in listed order.
@@ -1345,83 +1291,6 @@ function documentHasFocus() {
   return typeof document.hasFocus !== 'function' || document.hasFocus();
 }
 
-// Moves focus to el for the action recorded in origin, and makes that the page's placement
-// (focusPlacement, watchlist.html; the previous one ends). The placement is cancelled, for
-// good, by anything that isn't the page's own doing: focus arriving anywhere else, a key,
-// pointer or touch press anywhere (on el too: that starts a new action of the owner's own),
-// or the window losing focus (the owner went outside the app). S3: also the page being hidden
-// (as the S2 chooser's focus return), and a view change (tabs.js switchView ends it).
-const PLACEMENT_ACTIONS = ['keydown', 'pointerdown', 'mousedown', 'touchstart'];
-function placeFocus(el, origin) {
-  if (!el || typeof el.focus !== 'function') return;
-  endFocusPlacement();
-  el.focus();
-  if (document.activeElement !== el) return;
-  const doc = el.ownerDocument || document;
-  const win = doc.defaultView || null;
-  const p = { el, origin, cancelled: false };
-  const cancel = () => { p.cancelled = true; p.stop(); if (focusPlacement === p) focusPlacement = null; };
-  const onFocusIn = e => { if (e.target !== el) cancel(); };
-  const onHidden = () => { if (doc.visibilityState === 'hidden') cancel(); };
-  p.stop = () => {
-    if (typeof doc.removeEventListener === 'function') {
-      doc.removeEventListener('focusin', onFocusIn, true);
-      doc.removeEventListener('visibilitychange', onHidden, true);
-      PLACEMENT_ACTIONS.forEach(t => doc.removeEventListener(t, cancel, true));
-    }
-    if (win && typeof win.removeEventListener === 'function') { win.removeEventListener('blur', cancel); win.removeEventListener('resize', relocatePlacedFocus); }
-  };
-  if (typeof doc.addEventListener === 'function') {
-    doc.addEventListener('focusin', onFocusIn, true);
-    doc.addEventListener('visibilitychange', onHidden, true);
-    PLACEMENT_ACTIONS.forEach(t => doc.addEventListener(t, cancel, true));
-  }
-  if (win && typeof win.addEventListener === 'function') { win.addEventListener('blur', cancel); win.addEventListener('resize', relocatePlacedFocus); }
-  focusPlacement = p;
-}
-
-// The window was resized while the page's placement is held: if the placed element is no
-// longer shown (the phone / desktop layouts swapped), move focus to the same control in the
-// layout now shown, for the same action. A write whose answer comes without a redraw, or a
-// reload still reading, then ends with focus where its action left it (correction batch 3).
-function relocatePlacedFocus() {
-  const p = focusPlacement;
-  if (!p || p.cancelled || !documentHasFocus() || isRendered(p.el)) return;
-  const active = document.activeElement;
-  if (active && active !== p.el && active !== document.body && active !== document.documentElement) return;
-  const { hook } = typeof p.el.closest === 'function' ? focusHookOf(p.el) : { hook: null };
-  const box = visibleListBox(p.origin.container);
-  const el = box && hook ? focusTargetElement(box, hook) : null;
-  if (el) placeFocus(el, p.origin);
-}
-function endFocusPlacement() {
-  if (focusPlacement) { focusPlacement.cancelled = true; focusPlacement.stop(); }
-  focusPlacement = null;
-}
-
-// The record the page's placement still holds, or null. Held while focus is on the placed
-// element, or (PV2-F2, and the same for a pending write) on the page body only because the
-// browser took it off an element that left the layout (hidden by the phone / desktop switch,
-// or removed). Any cancellation is final; focus on the body for any other reason never counts.
-function placedOrigin() {
-  const p = focusPlacement;
-  if (!p || p.cancelled || !documentHasFocus()) return null;
-  const active = document.activeElement;
-  if (active === p.el) return p.origin;
-  const onBody = !active || active === document.body || active === document.documentElement;
-  return onBody && (!p.el.isConnected || !isRendered(p.el)) ? p.origin : null;
-}
-function focusIsPlaced(origin) {
-  return !!origin && placedOrigin() === origin;
-}
-// One element of the visible list container (the loading message, Retry).
-function placeListFocus(selector, origin) {
-  if (!documentHasFocus()) return;
-  const box = visibleListBox(origin.container);
-  const el = box ? box.querySelector(selector) : null;
-  if (isRendered(el)) placeFocus(el, origin);
-}
-
 function applyListFocus(rec, listing) {
   if (!rec || !documentHasFocus()) return; // never pull focus back from outside the app
   const box = visibleListBox(rec.container);
@@ -1431,7 +1300,7 @@ function applyListFocus(rec, listing) {
   // (Section toggles are buttons; headings, item titles and messages take focus from the page.)
   const el = focusTargetElement(box, t)
     || [...box.querySelectorAll('[data-section], [data-primary], [data-empty]')].find(isRendered);
-  if (el) placeFocus(el, rec);
+  if (el && typeof el.focus === 'function') el.focus();
 }
 
 function toggleDerivedSection(name) {

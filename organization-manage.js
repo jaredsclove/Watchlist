@@ -16,21 +16,17 @@
 // collection this read didn't include is reported (Read again), never shown as
 // absent and never repaired.
 //
-// Replies and reads: a reply updates at most the dialog's copy of that one record,
-// and only if (1) the restore epoch and dialog session are unchanged, (2) no newer
-// action on that record was started, (3) the request wasn't given up on (Stop
-// waiting / no answer), and (4) no complete read started after it was sent has
-// already replaced that record. It is never published as a snapshot. After every
-// confirmed change the page sets the write barrier and then re-reads
-// (organization.js publishes only reads newer than the barrier); if that read
-// fails it says "Saved. Couldn't refresh" and marks the data possibly out of date.
+// Replies and reads: each change holds the page's write lane (write-lane.js) from
+// sending until the re-read after it has finished, so one change runs at a time and no
+// read that overlapped it publishes. A reply updates at most the dialog's copy of that
+// one record (never published as a snapshot), only in the same dialog session and with
+// no restore since. If the re-read fails it says "Saved. Couldn't refresh" and marks
+// the data possibly out of date.
 //
 // No answer: the page never sends a change again by itself. It re-reads and says
 // what is saved now, keeping "wasn't confirmed" (a matching state doesn't prove
-// the request finished; only a reply to it does). Stop waiting ends the wait, not
-// the request.
+// the request finished; only a reply to it does).
 
-const ORG_STOP_WAITING_MS = 15000;
 const ORG_LATE_NOTE = 'Your earlier attempt might still arrive. Depending on what changes before then, it may have no effect, or it may still make its change.';
 const ORG_INCONSISTENT_TAIL = 'Something may have changed while reading. This does not mean anything was deleted; this read changed nothing.';
 
@@ -66,11 +62,11 @@ function orgRefusalText(info) {
 
 // ── Capability (read-only) ──
 async function checkOrgCapability() {
-  if (orgWriteCapability && orgWriteCapability.epoch === orgEpoch && orgWriteCapability.value === 'yes') return 'yes';
+  if (orgWriteCapability && orgWriteCapability.value === 'yes') return 'yes';
   try {
     const r = await sbFetch('GET', 'rpc/org_capabilities', null);
     const value = r && r.org_write === 1 ? 'yes' : 'unknown';
-    if (value === 'yes') orgWriteCapability = { value, epoch: orgEpoch };
+    if (value === 'yes') orgWriteCapability = { value };
     return value;
   } catch (e) {
     const info = orgErrorInfo(e);
@@ -91,9 +87,9 @@ function openManage(view, collectionId, openerEl) {
   const openerSelector = opener && typeof opener.matches === 'function'
     ? ['.settings-manage-collections', '.settings-manage-choices', '.browse-edit-members', '.ww-filter .btn-link'].find(sel => opener.matches(sel)) || null : null;
   manage = {
-    session: ++manageSession, epoch: orgEpoch, opener, openerSelector, view: view === 'choices' ? 'choices' : view === 'members' ? 'members' : 'collections',
+    session: ++manageSession, restored: false, opener, openerSelector, view: view === 'choices' ? 'choices' : view === 'members' ? 'members' : 'collections',
     collectionId: collectionId || null, phase: 'checking', error: '', data: null, readSeq: 0, refreshing: false, refreshFor: null,
-    pending: {}, latestOp: {}, notes: {}, unconfirmed: {}, saved: {}, drafts: {}, undo: [], status: null, confirm: null,
+    pending: {}, notes: {}, unconfirmed: {}, saved: {}, drafts: {}, undo: [], status: null, confirm: null,
     renaming: null, showArchived: false, wrote: false, reconcile: []
   };
   document.getElementById('manageModalOverlay').style.display = 'flex';
@@ -106,7 +102,7 @@ function openManage(view, collectionId, openerEl) {
     if (value !== 'yes') { manage.phase = value; renderManage(); return; }
     manage.phase = 'loading';
     renderManage();
-    startOrgRefresh({ barrier: false, reason: 'open' });
+    startOrgRefresh({ reason: 'open' });
   });
 }
 
@@ -145,7 +141,7 @@ function closeManage() {
 function manageInvalidate() {
   orgWriteCapability = null;
   if (!manage) return;
-  manage.epoch = -1;
+  manage.restored = true;
   manage.phase = 'restored';
   manage.undo = [];
   manage.unconfirmed = {};
@@ -167,13 +163,12 @@ function manageKeydown(event) {
 }
 
 // ── Reads ──
-// barrier: a confirmed change (or an unconfirmed one being reconciled) came first.
-// The barrier is set BEFORE the read starts, so this read is newer than it and can
-// publish; any organization read started earlier can't.
-function startOrgRefresh({ barrier = true, reason = 'write', reconcile = null } = {}) {
-  if (barrier) orgWriteBarrier = orgReadSeq;
+// The dialog's data publishes under the same rule as the page's reads (organization.js):
+// the newest read, and only if no change overlapped it; a read refused for that reason
+// reads again once the lane is free.
+function startOrgRefresh({ reason = 'write', reconcile = null } = {}) {
   const read = orgReadStart();
-  const open = !!manage && manage.epoch === orgEpoch;
+  const open = !!manage && !manage.restored;
   const session = open ? manage.session : null;
   if (open) {
     manage.readSeq = read.seq;
@@ -182,7 +177,7 @@ function startOrgRefresh({ barrier = true, reason = 'write', reconcile = null } 
     if (reconcile) manage.reconcile.push(reconcile);
   }
   // Collections and choices publish (or are marked possibly out of date) on their
-  // own, as each read finishes, under the usual sequence, barrier and epoch rules;
+  // own, as each read finishes, under the usual rules;
   // a failure of one never discards the other. The editor still needs every read.
   const collectionsRead = readPersonalCollections().then(rows => {
     if (publishCollections(rows, read)) buildBrowseBar();
@@ -200,7 +195,11 @@ function startOrgRefresh({ barrier = true, reason = 'write', reconcile = null } 
     if (failed) throw failed.reason;
     return results.map(r => r.value);
   }).then(([collections, memberships, choices, shows, rows]) => {
-    if (!manage || manage.session !== session || manage.epoch !== orgEpoch || read.seq !== manage.readSeq) return;
+    if (!manage || manage.session !== session || manage.restored || read.seq !== manage.readSeq) return;
+    if (!readFresh(read.stamp)) {
+      readAgainWhenFree(() => { if (manage && manage.session === session && read.seq === manage.readSeq) startOrgRefresh({ reason }); });
+      return;
+    }
     manage.data = { collections, memberships, choices, shows, rows, readSeq: read.seq, readAt: new Date() };
     manage.refreshing = false;
     manage.saved = {};
@@ -212,7 +211,7 @@ function startOrgRefresh({ barrier = true, reason = 'write', reconcile = null } 
     renderManage();
   }, e => {
     console.error(e);
-    if (!manage || manage.session !== session || manage.epoch !== orgEpoch || read.seq !== manage.readSeq) return;
+    if (!manage || manage.session !== session || manage.restored || read.seq !== manage.readSeq) return;
     manage.refreshing = false;
     const msg = String(e && e.message || e);
     if (reason === 'open' || (reason === 'read' && !manage.data)) { manage.phase = 'failed'; manage.error = msg; }
@@ -229,13 +228,13 @@ function startOrgRefresh({ barrier = true, reason = 'write', reconcile = null } 
 function manageReadAgain() {
   if (!manage) return;
   if (manage.phase === 'failed') { manage.phase = 'loading'; renderManage(); }
-  startOrgRefresh({ barrier: !!manage.reconcile.length || manage.phase === 'unverified', reason: manage.data ? 'read' : 'open' });
+  return startOrgRefresh({ reason: manage.data ? 'read' : 'open' });
 }
 
 // Retry from the Browse bar or a watch-with control after a failed refresh.
 function retryOrgRefresh() {
-  if (manage) { manageReadAgain(); return; }
-  startOrgRefresh({ barrier: false, reason: 'retry' });
+  if (manage) return manageReadAgain();
+  return startOrgRefresh({ reason: 'retry' });
 }
 
 // ── Derived data for the editor ──
@@ -273,30 +272,22 @@ function membershipByPair(collectionId, showId, itemId) {
 const plainStatus = s => (s ? plainStatusLabel(s) : '');
 
 // ── Writes ──
+// One change at a time for the whole page (write-lane.js), held until the re-read after
+// it has finished.
 function runOrgOp(op) {
+  const lane = beginWrite(op.label || 'Your collections');
+  if (!lane) return Promise.resolve();
   op.id = ++orgOpSeq;
   op.session = manage.session;
-  op.epoch = orgEpoch;
-  op.sentReadSeq = orgReadSeq;
   op.state = 'pending';
-  manage.latestOp[op.key] = op.id;
   manage.pending[op.key] = op;
   manage.status = null;
   renderManage();
-  op.timer = setTimeout(() => {
-    if (op.state === 'pending' && manage && manage.session === op.session) { op.slow = true; renderManage(); }
-  }, ORG_STOP_WAITING_MS);
-  return sbRpc(op.fn, op.args).then(res => finishOrgOp(op, res, null), e => finishOrgOp(op, null, e));
+  return sbRpc(op.fn, op.args).then(res => finishOrgOp(op, res, null), e => finishOrgOp(op, null, e))
+    .finally(() => endWrite(lane));
 }
 
-// Stop waiting: the outcome is unknown from here; the request itself isn't cancelled.
-function manageStopWaiting(opId) {
-  if (!manage) return;
-  const op = Object.values(manage.pending).find(o => o && o.id === Number(opId));
-  if (!op || op.state !== 'pending') return;
-  becomeUnknown(op);
-}
-
+// No clear answer: the outcome is unknown; it is never resent, and what is saved now is read.
 function becomeUnknown(op) {
   op.state = 'unknown';
   if (manage && manage.session === op.session) {
@@ -305,20 +296,15 @@ function becomeUnknown(op) {
     manage.unconfirmed[op.id] = { op, text: 'Your change wasn’t confirmed. Checking what is saved now…' };
     renderManage();
   }
-  startOrgRefresh({ barrier: true, reason: 'reconcile', reconcile: op });
+  return startOrgRefresh({ reason: 'reconcile', reconcile: op });
 }
 
 function finishOrgOp(op, res, err) {
-  if (typeof clearTimeout === 'function') clearTimeout(op.timer);
   const info = err ? orgErrorInfo(err) : null;
-  const wasUnknown = op.state === 'unknown';
   // No answer, or an answer that doesn't show whether it committed: unknown.
-  if (info && info.kind !== 'database') {
-    if (!wasUnknown) becomeUnknown(op);
-    return;
-  }
+  if (info && info.kind !== 'database') return becomeUnknown(op);
   op.state = 'done';
-  const here = !!manage && manage.session === op.session && op.epoch === orgEpoch && manage.epoch === orgEpoch;
+  const here = !!manage && manage.session === op.session && !manage.restored;
   if (here && manage.pending[op.key] === op) delete manage.pending[op.key];
   if (info && orgMissingFunction(info)) {
     orgWriteCapability = null;
@@ -327,30 +313,23 @@ function finishOrgOp(op, res, err) {
   }
   const outcome = describeOutcome(op, res, info);
   op.ok = !!outcome.ok;
-  if (manage && manage.session === op.session) (manage.lastOutcome = manage.lastOutcome || {})[op.key] = op.ok && !wasUnknown;
+  if (manage && manage.session === op.session) (manage.lastOutcome = manage.lastOutcome || {})[op.key] = op.ok;
   if (here) {
-    if (wasUnknown) {
-      // A late, definitive reply resolves that request's uncertainty; its record is
-      // not applied (a reconciliation read may already show newer data).
-      // Only this request's uncertainty is resolved; other requests on the record keep theirs.
-      manage.unconfirmed[op.id] = { op, text: res ? 'Your earlier change was saved.' : `Your earlier change was refused: ${outcome.text}`, resolved: true };
-    } else {
-      const canApply = res && manage.latestOp[op.key] === op.id && manage.data && manage.data.readSeq <= op.sentReadSeq;
-      if (canApply) applyOrgReply(op, res);
-      if (res) manage.saved[op.key] = true;
-      const isCreate = op.kind === 'createCollection' || op.kind === 'createChoice';
-      // Creates have no listed record yet, and an archive or unarchive can move the
-      // record into the collapsed Archived group: their outcome is shown at the top.
-      if (isCreate) { delete manage.notes[op.key]; manage.status = { kind: 'note', text: outcome.text, unarchive: outcome.unarchive || null }; }
-      else if (op.kind === 'archive') { manage.status = { kind: 'note', text: outcome.text }; if (outcome.note) manage.notes[op.key] = outcome.note; else delete manage.notes[op.key]; }
-      else if (outcome.note) manage.notes[op.key] = outcome.note; else delete manage.notes[op.key];
-      if (res && !op.undoOf) addUndo(op, res);
-    }
+    if (res && manage.data) applyOrgReply(op, res);
+    if (res) manage.saved[op.key] = true;
+    const isCreate = op.kind === 'createCollection' || op.kind === 'createChoice';
+    // Creates have no listed record yet, and an archive or unarchive can move the
+    // record into the collapsed Archived group: their outcome is shown at the top.
+    if (isCreate) { delete manage.notes[op.key]; manage.status = { kind: 'note', text: outcome.text, unarchive: outcome.unarchive || null }; }
+    else if (op.kind === 'archive') { manage.status = { kind: 'note', text: outcome.text }; if (outcome.note) manage.notes[op.key] = outcome.note; else delete manage.notes[op.key]; }
+    else if (outcome.note) manage.notes[op.key] = outcome.note; else delete manage.notes[op.key];
+    if (res && !op.undoOf) addUndo(op, res);
     if (res) manage.wrote = true;
   }
   if (here && !res && !info.code) manage.status = { kind: 'note', text: outcome.text };
-  if (res || (info && info.code)) startOrgRefresh({ barrier: !!res, reason: res ? 'write' : 'read' });
+  const reread = res || (info && info.code) ? startOrgRefresh({ reason: res ? 'write' : 'read' }) : null;
   if (here) renderManage();
+  return reread;
 }
 
 // What a definitive answer means, in words (no plan references).
@@ -540,10 +519,7 @@ function manageCreate(kind) {
     args: kind === 'choice' ? { p_id: id, p_label: name } : { p_id: id, p_name: name } }).then(() => {
     if (!manage) return;
     // The form keeps the text unless the create is confirmed.
-    if (!unconfirmedFor(key).some(u => !u.resolved) && manage.latestOp[key] && Object.values(manage.pending).every(o => o.key !== key)) {
-      const done = manage.lastOutcome && manage.lastOutcome[key];
-      if (done) manage.drafts[inputId] = '';
-    }
+    if (!unconfirmedFor(key).some(u => !u.resolved) && manage.lastOutcome && manage.lastOutcome[key]) manage.drafts[inputId] = '';
     if (prior && prior.id === id && !unconfirmedFor(key).some(u => !u.resolved)) manage.unconfirmedCreate = null;
     renderManage();
   });
@@ -682,7 +658,7 @@ function manageRecheck() {
     if (value !== 'yes') { manage.phase = value; renderManage(); return; }
     manage.phase = 'loading';
     renderManage();
-    startOrgRefresh({ barrier: false, reason: 'open' });
+    startOrgRefresh({ reason: 'open' });
   });
 }
 
@@ -692,7 +668,7 @@ function manageNotesHtml(key) {
   unconfirmedFor(key).forEach(u => out.push(`<div class="manage-note">${esc(u.text)}${u.resolved ? '' : ` ${esc(ORG_LATE_NOTE)}`}</div>`));
   if (manage.notes[key]) out.push(`<div class="manage-note">${esc(manage.notes[key])}</div>`);
   const op = manage.pending[key];
-  if (op) out.push(`<div class="manage-note">Saving…${op.slow ? ` <button class="btn" onclick="manageStopWaiting('${op.id}')">Stop waiting</button>` : ''}</div>`);
+  if (op) out.push('<div class="manage-note">Saving…</div>');
   else if (manage.saved[key] && manage.refreshing) out.push(`<div class="manage-note">Saved · refreshing</div>`);
   return out.join('');
 }

@@ -239,7 +239,7 @@ test('stop until reload: a read without the B4/B5 columns while the capability r
   };
   await app.run('loadDerivedView()'); await settle();
   app.ctx.fetch = realFetch;
-  assert.match(app.el('errorBanner').innerHTML + app.el('tbody').innerHTML, /This page and the database don’t match/);
+  assert.match(app.el('errorBanner').innerHTML + app.el('readStatus').innerHTML, /This page and the database don’t match/);
   await stoppedChecks(app, lib, 'missing column');
 });
 

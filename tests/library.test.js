@@ -155,7 +155,7 @@ test('editing rules and add kinds follow catalog governance (Stage 5): catalog e
   assert.strictEqual(app.ctx.showAddKind(showOf(app, 'Andor')), 'label', 'no TMDB identity');
   assert.strictEqual(app.get(`showCatalogOf(tvShowsById.get(${JSON.stringify(showOf(app, 'Andor').id)}))`), 'disney');
   app.run(`libraryGovernance = { shows: new Map([['gx', 'disney']]), films: new Map([['gf', 'disney']]), kinds: new Map(),
-    knownShows: new Set(['gx', 'ungoverned']), knownItems: new Set(['gf']), seq: 1e9, epoch: orgEpoch }`);
+    knownShows: new Set(['gx', 'ungoverned']), knownItems: new Set(['gf']), seq: 1e9 }`);
   const P = r => app.ctx.editPolicyOf(r);
   const base = { media_type: null, tmdb_id: null, season_number: null };
   assert.strictEqual(P({ ...base, id: 'r1', show_id: 'gx', item_key: defSeason.k, season: defSeason.s }).deleteEffect, 'skip');
@@ -495,23 +495,6 @@ test('Refresh shows: an unclear answer stops sending; earlier results stay repor
 });
 
 // ─── Restore and navigation while a request is out ────────────────────────────
-test('an answer that arrives after a restore is set aside: the view is read again and the report doesn’t say which ran last; no retry', async () => {
-  const app = await boot();
-  await allTv(app); await openPanel(app);
-  await choose(app, 95396, 'Severance');
-  tick(app, [3]);
-  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons_b45'));
-  const done = app.ctx.addSelectedTMDBSeasons();
-  await reached(gate);
-  app.ctx.invalidateOrganization(); app.ctx.finishRestoreAndReload(); await settle(); // what a completed restore does (the epoch moves on)
-  assert.strictEqual(app.get('libraryPanel'), null, 'the panel closed with the restore');
-  const gets = app.requests.length;
-  gate.release(); await done; await settle();
-  assert.match(banners(app), /answered afterwards\. The list has been read again\. This doesn’t show whether the addition ran before or after the restore/);
-  assert.ok(app.requests.slice(gets).some(r => r.method === 'GET' && r.url.includes('/watchlist_items?')), 'read again');
-  assert.strictEqual(rpc(app, 'library_add_seasons_b45').length, 1);
-});
-
 test('leaving the view while a request is out: the panel closes, nothing is painted into the next view, the result is still reported', async () => {
   const app = await boot();
   await allTv(app); await openPanel(app);
@@ -520,12 +503,13 @@ test('leaving the view while a request is out: the panel closes, nothing is pain
   const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons_b45'));
   const done = app.ctx.addSelectedTMDBSeasons();
   await reached(gate);
-  app.ctx.switchView('comingsoon'); await settle();
-  const comingSoon = app.html();
+  app.ctx.switchView('comingsoon'); await settle(); // its read overlaps the change: it reads again once the lane is free
   gate.release(); await done; await settle();
   assert.strictEqual(app.get('libraryPanel'), null);
   assert.strictEqual(app.get('activeViewId'), 'comingsoon');
-  assert.strictEqual(app.html(), comingSoon, 'Coming Soon untouched');
+  const comingSoon = app.html();
+  await app.ctx.loadDerivedView(); await settle();
+  assert.strictEqual(app.html(), comingSoon, 'Coming Soon shows its own fresh read, nothing from the panel');
   assert.match(banners(app), /Added “Season 3” to “Severance”/);
 });
 
@@ -788,73 +772,6 @@ test('Refresh shows: a date that still matched is confirmed from the rows the up
   assert.strictEqual(app.store.watchlist_items.find(r => r.title === 'Severance' && r.season_number === 2).date_sort, '2025-01-17');
   assert.strictEqual(saved, 1);
   assert.match(outcome(app), /Severance · Season 2: date set to Jan 17, 2025\./);
-});
-
-test('restore while Refresh shows is sending: no further call or date update is sent after it', async () => {
-  const data = all(
-    show({ title: 'Severance', tmdb_id: 95396 }, [{ num: 1 }, { num: 2, display: 'TBA', date: '2099-01-01' }]),
-    show({ title: 'The Bear', tmdb_id: 136315 }, [{ num: 1 }, { num: 2, display: 'TBA', date: '2099-01-01' }]));
-  TMDB['/tv/136315'].seasons[1] = { season_number: 2, air_date: '2023-06-22', episode_count: 10 };
-  const app = await boot(data);
-  await allTv(app); await openPanel(app, 'tv', 'refresh');
-  await app.ctx.libraryRefreshShows(); await settle();
-  assert.strictEqual(app.get('libraryPanel.refresh.updates.length'), 2);
-  app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = [];
-  app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [{ checked: true, dataset: { updateIdx: '0' } }, { checked: true, dataset: { updateIdx: '1' } }];
-  const gate = app.hold(r => r.method === 'PATCH');
-  const done = app.ctx.libraryApplyRefresh();
-  await reached(gate);
-  app.ctx.invalidateOrganization(); app.ctx.finishRestoreAndReload(); await settle(); // a restore completes
-  gate.release(); await done; await settle();
-  assert.strictEqual(app.writes().filter(r => r.method === 'PATCH').length, 1, 'the second date update was not sent');
-  assert.match(banners(app), /Refresh shows answered after a restore[\s\S]*Nothing more was sent/);
-  TMDB['/tv/136315'].seasons[1] = { season_number: 9, air_date: null, episode_count: 0 };
-});
-
-test('a Watched answer that arrives after a restore never overwrites the restored cache; the view is read again', async () => {
-  const app = await boot();
-  app.ctx.switchMediaType('movie'); await settle();
-  app.el('fWatch').value = ''; app.ctx.renderTable();
-  const before = JSON.parse(JSON.stringify(app.store.watchlist_items));
-  const gate = app.hold(r => r.url.endsWith('/rpc/library_set_film_state_b45') && r.body.p_item_id === 'f-dune');
-  const done = app.ctx.toggleWatch('f-dune');
-  await reached(gate);
-  // The restore completes (the database is the restored data; the view reads it again).
-  app.ctx.invalidateOrganization(); app.ctx.finishRestoreAndReload(); await settle();
-  const restoredRow = app.get("browseData.rows.find(r => r.id === 'f-dune')");
-  assert.strictEqual(restoredRow.watched, false);
-  // The change ran on the pre-restore data; only its answer arrives now.
-  gate.releaseWith({ watchlist_items: before }); await done; await settle();
-  assert.strictEqual(app.get("browseData.rows.find(r => r.id === 'f-dune').watched"), false, 'the stale answer was not copied into the restored cache');
-  assert.match(banners(app), /watched was sent before the restore and answered afterwards\. The list has been read again/);
-});
-
-test('status and watch-with answers after a restore are set aside the same way; a show status answer too', async () => {
-  const app = await boot();
-  app.ctx.switchMediaType('movie'); await settle();
-  app.el('fWatch').value = ''; app.ctx.renderTable();
-  for (const [label, run] of [['status', () => app.ctx.setStatus('f-dune', 'skipped')], ['priority', () => app.ctx.setFilmPriority('f-dune', 'high')],
-    ['watch with', () => app.ctx.toggleWatchWith('f-dune', 'Rina', true)]]) {
-    const before = JSON.parse(JSON.stringify(app.store.watchlist_items));
-    const gate = app.hold(r => (r.method === 'PATCH' && r.url.includes('id=eq.f-dune')) || (r.url.endsWith('/rpc/library_set_film_state_b45') && r.body.p_item_id === 'f-dune'));
-    const done = run();
-    await reached(gate);
-    app.ctx.invalidateOrganization(); app.ctx.finishRestoreAndReload(); await settle();
-    gate.releaseWith({ watchlist_items: before }); await done; await settle();
-    const row = app.get("browseData.rows.find(r => r.id === 'f-dune')");
-    assert.ok(row.status === 'confirmed' && row.priority === 'normal' && !(row.watch_with || []).includes('Rina'), label);
-    assert.match(banners(app), new RegExp(`${label} was sent before the restore`));
-  }
-  app.ctx.switchMediaType('tv'); app.ctx.switchView('alltv'); await settle();
-  const sev = showOf(app, 'Severance');
-  const shows = JSON.parse(JSON.stringify(app.store.tv_shows));
-  const gate = app.hold(r => r.url.endsWith('/rpc/library_set_show_state_b45'));
-  const done = app.ctx.setShowStateById(sev.id, { status: 'confirmed' });
-  await reached(gate);
-  app.ctx.invalidateOrganization(); app.ctx.finishRestoreAndReload(); await settle();
-  gate.releaseWith({ tv_shows: shows }); await done; await settle();
-  assert.strictEqual(app.get(`tvShowsById.get('${sev.id}').status`), 'watching', 'the restored show status stays');
-  assert.match(banners(app), /show status was sent before the restore/);
 });
 
 test('Movie tools in All Movies check identities across the whole library: a franchise film stored under Disney+ is "Already added" and not imported again', async () => {

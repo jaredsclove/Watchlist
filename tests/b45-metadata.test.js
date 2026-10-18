@@ -70,8 +70,8 @@ test('the movie tools name what TMDB sourcing left out in their outcome (plan §
   const details = { genres: [{ name: 'Action' }, { name: 'Weird Genre' }], production_companies: [{ name: 'z'.repeat(90) }] };
   const fields = out(app.ctx.creationMetadata('movie', details, 'Tool Film'));
   assert.deepStrictEqual([fields.genres, fields.companies, 'unmapped' in fields, 'omitted' in fields], [['Action'], [], false, false], 'the request carries only stored fields');
-  await app.ctx.libraryInsertFilms([{ item_key: 'tool film|film', title: 'Tool Film', season: 'Film', theme: 'Action', display_date: 'Jan 1, 2020', date_sort: '2020-01-01',
-    watched: false, status: 'confirmed', ...fields, media_type: 'movie', tmdb_id: 4242, season_number: null }]); await settle();
+  await app.ctx.runWrite('test', () => app.ctx.libraryInsertFilms([{ item_key: 'tool film|film', title: 'Tool Film', season: 'Film', theme: 'Action', display_date: 'Jan 1, 2020', date_sort: '2020-01-01',
+    watched: false, status: 'confirmed', ...fields, media_type: 'movie', tmdb_id: 4242, season_number: null }])); await settle(); // the tools call it inside the write lane
   assert.match(app.el('banner').innerHTML, /TMDB categories not used: Tool Film: Weird Genre, “z{40}…” \(company: longer than 80 characters\)\./);
   assert.strictEqual(app.ctx.takeSourcingNote(['Tool Film']), '', 'reported once');
 });
@@ -213,22 +213,15 @@ test('Details lifecycle: a refresh while editing never makes the draft adopt new
   assert.deepStrictEqual(Array.from(dlg(app).snapshot.companies), ['Other Page Co']);
 });
 
-test('Details lifecycle: after a restore the dialog sends nothing and says so; an answer that arrives after a restore changes nothing restored and closes only its own dialog', async () => {
+test('Details lifecycle: after a restore the dialog sends nothing and says so; Start again opens from the current values', async () => {
   const s = showRec({ title: 'S' });
   const app = await detailsApp(s, 'show');
-  app.run('orgEpoch++'); // a restore completed in this page
+  app.run('detailsDialog.restored = true'); // a restore completed in this page (backup-restore.js sendRestore marks the open dialog)
   await app.ctx.saveDetails(); await settle();
   assert.deepStrictEqual(body(app, 'library_set_metadata_b45'), []);
   assert.match(boxText(app), /A restore happened since this dialog opened, so it can’t save\./);
   app.ctx.detailsRestart(); await settle();
-  app.ctx.detailsAddValue('franchises'); app.ctx.detailsSetValue('franchises', 0, 'Before Restore');
-  const g = app.hold(r => r.url.endsWith('/rpc/library_set_metadata_b45'));
-  const p = app.ctx.saveDetails();
-  await g.reached;
-  app.run('orgEpoch++');
-  g.releaseWith({ tv_shows: JSON.parse(JSON.stringify(app.store.tv_shows)) }); await p; await settle(); await settle();
-  assert.match(app.el('banner').innerHTML, /“S” · details was sent before the restore and answered afterwards\./);
-  assert.strictEqual(app.el('detailsModalOverlay').style.display, 'none');
+  assert.strictEqual(app.get('detailsDialog.restored'), false);
 });
 
 test('Details lifecycle: a delayed answer for an earlier opening never closes or changes a newer dialog (success or refusal); its data still lands', async () => {

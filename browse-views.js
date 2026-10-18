@@ -431,7 +431,7 @@ function buildBrowseBar(opts = {}) {
     if (target && typeof target.focus === 'function') { dropChooserFocusIntent(); target.focus(); }
     // Retry redraws the row as "Loading collections…", which has nothing to focus: keep the intent
     // for the answer to this load (S2V2-2).
-    else if (orgState === 'loading') armChooserFocusIntent({ seq: orgLoadSeq, epoch: orgEpoch });
+    else if (orgState === 'loading') armChooserFocusIntent({ seq: orgLoadSeq });
   } else if (chooserFocusIntent) settleChooserFocusIntent();
   if (opts.resolve !== false && isCollectionsStateView()) resolveCollectionsDefault();
 }
@@ -440,12 +440,12 @@ function buildBrowseBar(opts = {}) {
 // that load answers — its collections published (the selected tab, or Create when there are none),
 // or it failed (Retry) — focus returns to the redrawn chooser, but only if it is still lost: not
 // after it moved elsewhere, after the page lost focus, after leaving Collections (cleared above),
-// or once a newer load or a restore superseded this one.
+// or once a newer load (a restore starts one) superseded this one.
 // Abandoning it is final: while it is held, focus arriving on any element (a deliberate move;
 // the Retry button's own removal moves focus to no element, so it fires nothing), the page losing
 // focus or the page being hidden cancels it, even if focus or the page comes back before the
 // answer. The listeners exist only while an intent is held.
-let chooserFocusIntent = null; // { seq, epoch }: the load (orgLoadSeq) and restore epoch it waits for
+let chooserFocusIntent = null; // { seq }: the load (orgLoadSeq) it waits for
 const CHOOSER_INTENT_CANCELS = [['document', 'focusin'], ['window', 'blur'], ['document', 'visibilitychange']];
 function chooserIntentTarget(where) {
   const t = where === 'window' ? window : document;
@@ -467,7 +467,7 @@ function dropChooserFocusIntent() {
 }
 function settleChooserFocusIntent() {
   const intent = chooserFocusIntent;
-  if (intent.epoch !== orgEpoch || intent.seq !== orgLoadSeq) { dropChooserFocusIntent(); return; }
+  if (intent.seq !== orgLoadSeq) { dropChooserFocusIntent(); return; }
   const answered = (orgState === 'ready' && orgCollectionsSeq >= intent.seq) || orgState === 'unavailable';
   if (!answered) return;
   dropChooserFocusIntent();
@@ -584,7 +584,7 @@ function setBrowseMedia(media) {
   const container = focusedContainerOf(['filtersRow']);
   browseMedia = media;
   renderFilters();
-  renderBrowseTable(null, false);
+  renderBrowseTable(false);
   refocus(container, `[data-media="${media}"]`);
 }
 
@@ -626,7 +626,7 @@ function setBrowsePresentation(mode) {
   browsePresentation = mode;
   saveBrowseLayout();
   renderFilters();
-  renderBrowseTable(null, false);
+  renderBrowseTable(false);
   refocus(container, `[data-presentation="${mode}"]`);
 }
 
@@ -636,7 +636,7 @@ function setBrowseGrouping(grouping) {
   browseGrouping = grouping;
   saveBrowseLayout();
   renderFilters();
-  renderBrowseTable(null, false);
+  renderBrowseTable(false);
   refocus(container, `[data-grouping="${grouping}"]`);
 }
 
@@ -652,7 +652,7 @@ function toggleBrowseSection(name) {
   if (!isBrowseCollectionView(activeViewId) || !(name in BROWSE_SECTION_DEFAULTS)) return;
   const container = focusedContainerOf(['tbody', 'cardList']);
   browseSectionOpen[name] = !browseSectionOpen[name];
-  renderBrowseTable(null, false);
+  renderBrowseTable(false);
   refocus(container, `[data-section="${name}"]`);
 }
 
@@ -661,7 +661,7 @@ function toggleBrowseShow(key) {
   const container = focusedContainerOf(['tbody', 'cardList']);
   if (expandedShows.has(key)) expandedShows.delete(key);
   else expandedShows.add(key);
-  renderBrowseTable(null, false);
+  renderBrowseTable(false);
   refocus(container, `[data-show-key=${JSON.stringify(String(key))}]`);
 }
 
@@ -672,25 +672,22 @@ function toggleBrowseShow(key) {
 // the loaded snapshot. A response for an earlier entry is dropped. The reads are
 // concurrent, not one transaction: a membership whose show or film wasn't read
 // is reported (Read again), never repaired.
-// Returns true once the view shows a complete read, false when it failed, null when superseded.
-// S3: the show list is read through the tracked path (tmdb-match.js), as in the TV views, and the
-// collection draws from the page's one show list (tvShowsById), so an edit made here or in All TV is
-// the same object everywhere and a late read never replaces it.
-// Focus in a collection (S3, brief §7.2): the owner's own reload (Retry, Read again) keeps B6's rules.
-// An operation's reread (opts.operation, from reloadOpenView) may move focus only while that
-// operation's own placement is still held (opts.origin); otherwise it never moves focus, and when
-// the owner's focus is in the list it reads quietly, keeping the list on screen (derived-views.js).
-async function loadBrowseView(opts = {}) {
+// Returns true once the view shows a complete read, false when it failed, null when superseded
+// (or a change overlapped it: it reads again once the lane is free, write-lane.js).
+// S3: the collection draws from the page's one show list (tvShowsById), so an edit made here or in
+// All TV is the same object everywhere and a late read never replaces it.
+// A view that already shows a complete list is read in place, as the TV views (derived-views.js
+// beginListReread); only a first read shows "Loading…". Focus follows the one focus rule.
+async function loadBrowseView() {
   const viewId = activeViewId;
   if (!isBrowseView(viewId)) return null;
   const seq = ++browseLoadSeq;
+  const stamp = readStamp();
   const isCollection = isBrowseCollectionView(viewId);
-  const op = !!(opts && opts.operation);
-  const focusRec = !isCollection ? null : op ? operationFocusOrigin(opts.origin) : captureListFocus();
-  const quiet = isCollection && op && !focusRec && !!browseData && browseData.loaded && listHasOwnerFocus();
-  const quietToken = quiet ? beginQuietReread() : null;
-  if (!quiet) {
-    dropQuietReread();
+  const inPlace = !!browseData && browseData.loaded;
+  if (inPlace) { beginListReread(); showError(''); } // a reread clears the error line, as a first read does
+  else {
+    const hadFocus = isCollection && listHasFocus();
     browseData = null;
     document.getElementById('statsRow').innerHTML = '';
     // The filter row's view tag stays: Retry (or a refresh) puts this visit's filters back
@@ -700,9 +697,9 @@ async function loadBrowseView(opts = {}) {
     document.getElementById('viewHead').innerHTML = browseHeadHtml();
     showError('');
     paintBrowseMessage('Loading…', false);
-    if (focusRec) placeListFocus('[data-loading]', focusRec);
+    if (hadFocus) focusListMessage('[data-loading]');
   }
-  const showsRead = typeof matchReadStart === 'function' ? matchReadStart('shows', '*') : null; // tracked (tmdb-match.js)
+  const showsRead = startShowsRead();
   try {
     const orgRead = orgReadStart();
     const [rows, shows, gov, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
@@ -710,8 +707,8 @@ async function loadBrowseView(opts = {}) {
     requireB45Shape(shows, 'priority');
     requireB45Shape(rows, 'priority');
     publishAllTvShows(showsRead, shows);
-    if (showsRead) matchReadSettle(showsRead, null);
     if (seq !== browseLoadSeq || activeViewId !== viewId) return null;
+    if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === browseLoadSeq && activeViewId === viewId) loadBrowseView(); }); return null; }
     publishGovernance(governanceCovers(gov, rows, shows));
     let dest = null, members = null;
     if (isCollection) {
@@ -719,7 +716,7 @@ async function loadBrowseView(opts = {}) {
       const published = publishCollections(collections, orgRead);
       const c = collections.find(x => BROWSE_VIEW_PREFIX + x.id === viewId);
       if (!c || c.archived_at) {
-        if (quiet) endQuietReread(quietToken, false);
+        endListReread(true);
         showUnavailableCollection(viewId, hadFocus);
         return true;
       }
@@ -727,26 +724,19 @@ async function loadBrowseView(opts = {}) {
       dest = browseDestFromCollection(c);
       members = membersOf(memberships, c.id);
     }
-    const repair = lostFocusRepairDue(focusRec);
-    if (quiet) endQuietReread(quietToken, false);
+    endListReread(true);
     browseData = { rows, dest, members, loaded: true };
-    const filterFocus = captureFilterFocus();
     renderFilters();
-    const listing = isCollection ? renderBrowseTable(focusRec && focusIsPlaced(focusRec) ? focusRec : null) : renderTable();
-    restoreFilterFocus(filterFocus);
-    if (repair) repairLostFocus(focusRec.container, listing);
+    renderTable();
     return true;
   } catch(e) {
     console.error(e);
-    if (showsRead && showsRead.state === 'pending') matchReadSettle(showsRead, e);
     if (seq !== browseLoadSeq || activeViewId !== viewId) return null;
-    if (quiet) { endQuietReread(quietToken, true, 'loadBrowseView'); return false; }
-    const owned = !!focusRec && focusIsPlaced(focusRec);
-    const repair = lostFocusRepairDue(focusRec);
+    if (inPlace) { endListReread(false, 'loadBrowseView', e); return false; }
+    const hadFocus = isCollection && listHasFocus();
     showError(`Couldn't read everything that's saved, so nothing is shown rather than an incomplete list. ${e.message}`);
     paintBrowseMessage('Failed to load.', true);
-    if (owned) placeListFocus('[data-retry]', focusRec);
-    else if (repair) placeListFocus('[data-retry]', blankFocusRecord(focusRec.container));
+    if (hadFocus) focusListMessage('[data-retry]');
     return false;
   }
 }
@@ -907,14 +897,14 @@ function renderBrowseFilters() {
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
-// carried: in a collection, the focus a reload recorded before its read (loadBrowseView); otherwise
-// the focus is recorded here, just before the redraw, and put back by the B6 chain (S3). All Movies
-// has no focus chain (unchanged). Returns a collection's focus listing (null otherwise).
+// In a collection the focus is recorded just before the redraw and put back by the B6 chain (the
+// one focus rule, derived-views.js). All Movies has no focus chain (unchanged). Returns a
+// collection's focus listing (null otherwise).
 // chain: false for the layout and expansion toggles, which keep their own focus rule (refocus).
-function renderBrowseTable(carried, chain = true) {
+function renderBrowseTable(chain = true) {
   if (!browseData || !browseData.loaded) return null;
   const collection = isBrowseCollectionView(activeViewId);
-  const rec = collection && chain ? (carried || captureListFocus()) : null;
+  const rec = collection && chain ? captureListFocus() : null;
   const thead = document.getElementById('tableHead');
   if (thead) thead.innerHTML = collection
     ? `<tr><th>Title</th><th>Categories</th><th>Next / Release</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`

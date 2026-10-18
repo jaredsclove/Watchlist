@@ -137,7 +137,7 @@ test('All Movies: a changed filter survives a direct reload (no redraw first) an
   setFilter(app, 'fWatch', '');
   app.failNext(r => r.method === 'GET' && r.url.includes('/watchlist_items'));
   app.ctx.loadBrowseView(); await settle();
-  assert.ok(html(app).includes('Failed to load') && app.el('fWatch') === null, 'the read failed: no controls');
+  assert.ok(app.el('readStatus').innerHTML.includes('Retry') && app.el('fWatch').value === '', 'the reread failed: the shown list and its controls stay (Batch A)');
   app.ctx.loadBrowseView(); await settle(); // Retry
   assert.deepStrictEqual([app.el('fWatch').value, app.el('fTheme').value], ['', 'Action'], 'Retry after a failed read');
   assert.deepStrictEqual(titles(app), ['Alpha', 'Delta']);
@@ -156,7 +156,7 @@ test('All TV: progress and theme survive a direct reload and a failed read then 
   setFilter(app, 'fTheme', 'Netflix');
   app.failNext(r => r.method === 'GET' && r.url.includes('/tv_shows'));
   app.ctx.loadDerivedView(); await settle();
-  assert.ok(html(app).includes('Failed to load') && app.el('fProgress') === null, 'the read failed: no controls');
+  assert.ok(app.el('readStatus').innerHTML.includes('Retry') && app.el('fProgress').value === 'allwatched', 'the reread failed: the shown list and its controls stay (Batch A)');
   app.ctx.loadDerivedView(); await settle(); // Retry
   assert.deepStrictEqual([app.el('fTheme').value, app.el('fProgress').value], ['Netflix', 'allwatched'], 'Retry after a failed read');
   assert.deepStrictEqual(titles(app), ['Done Skipped Show']);

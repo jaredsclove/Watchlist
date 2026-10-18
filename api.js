@@ -45,8 +45,22 @@ function requireB45Shape(rows, field) {
   return rows;
 }
 
-async function sbFetch(method, path, body) {
+// Every request that changes data is sent from inside the write lane (write-lane.js) and
+// moves dataVersion on when it is sent and when it settles, so no read that overlapped it
+// publishes. opts.read: a POST that changes nothing (a catalog preview).
+async function sbFetch(method, path, body, opts = {}) {
+  const write = method !== 'GET' && !opts.read;
+  if (write && !writeLane) throw new Error('This change was not started through the write lane, so nothing was sent.');
   if (method !== 'GET') await requireWritablePhase();
+  if (write) writeSent();
+  try {
+    return await sbRequest(method, path, body);
+  } finally {
+    if (write) writeSettled();
+  }
+}
+
+async function sbRequest(method, path, body) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method,
     headers: {
@@ -195,6 +209,10 @@ function catalogShowKey(catalogId, itemKey) {
 
 function sbRpc(fn, args) {
   return sbFetch('POST', `rpc/${fn}`, args);
+}
+// A database function call that changes nothing (a preview).
+function sbRpcRead(fn, args) {
+  return sbFetch('POST', `rpc/${fn}`, args, { read: true });
 }
 
 async function tmdbFetch(path) {

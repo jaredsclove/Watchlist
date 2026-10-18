@@ -1,9 +1,14 @@
 // ─── Filters and table: each view draws its own (derived-views.js, browse-views.js) ──
+// The focus rule for the filter row: a redraw (new options after a reread, a mode switch)
+// keeps the focused filter control focused, with its value (viewFilterStart keeps the
+// values) and its text selection.
 function renderFilters() {
   if (typeof isSettingsView === 'function' && isSettingsView()) return; // Settings (S1) has no list filters
   if (typeof isCollectionsStateView === 'function' && isCollectionsStateView()) return; // nor has the Collections state (S2)
-  if (isBrowseView(activeViewId)) { renderBrowseFilters(); return; }
-  if (activeViewId) renderDerivedFilters();
+  const focus = captureFilterFocus();
+  if (isBrowseView(activeViewId)) renderBrowseFilters();
+  else if (activeViewId) renderDerivedFilters();
+  restoreFilterFocus(focus);
 }
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
@@ -394,8 +399,8 @@ function filterEmptyClearHtml() {
 // Opened from an expanded show (All TV, Currently Watching) or a film's ⋯ (All Movies).
 // Saving records the owner's choice (also with every field left empty) through one guarded
 // call; nothing automatic changes it afterwards. The original labels are shown read-only.
-// Each opening is a session bound to the metadata it displayed (its snapshot), the restore
-// epoch and its own id: Save sends that snapshot as the expected values, so a draft never
+// Each opening is a session bound to the metadata it displayed (its snapshot) and its own id
+// (a restore since it opened locks it): Save sends that snapshot as the expected values, so a draft never
 // overwrites values that changed meanwhile (a refresh or another page), never runs after a
 // restore, and an answer for an earlier opening never closes or changes a newer one. Values
 // are kept exactly as typed (commas included; surrounding spaces trimmed); anything the
@@ -420,7 +425,7 @@ function openDetails(kind, id, opener) {
   const labels = kind === 'show'
     ? [...new Set(actionRows().filter(r => r.show_id === rec.id).map(r => r.theme).filter(Boolean))]
     : [rec.theme].filter(Boolean);
-  detailsDialog = { session: ++detailsSessionSeq, kind, id, title: rec.title, epoch: orgEpoch, snapshot, labels, opener: opener || null,
+  detailsDialog = { session: ++detailsSessionSeq, kind, id, title: rec.title, restored: false, snapshot, labels, opener: opener || null,
     draft: { genres: snapshot.genres.slice(), forms: snapshot.forms.slice(), franchises: snapshot.franchises.slice(),
       companies: snapshot.companies.slice(), resolve: {}, network: kind === 'show' ? (snapshot.network || '') : '' },
     error: '', notice: '', saving: false, stale: null, picker: false };
@@ -535,7 +540,7 @@ function renderDetails() {
   const dlg = detailsDialog, rec = detailsRecord();
   if (!rec && !dlg.saving) { box.innerHTML = `<div class="modal-title" id="detailsTitle">Details</div><div class="modal-error">This entry isn’t on the page any more. Nothing was changed.</div><div class="modal-actions"><button class="btn" onclick="closeDetails()">Close</button></div>`; return; }
   const kind = dlg.kind, m = dlg.snapshot, d = dlg.draft;
-  const restored = dlg.epoch !== orgEpoch;
+  const restored = !!dlg.restored; // a restore ran since it opened (backup-restore.js)
   const locked = !!dlg.stale || restored;
   const checks = (field, listName, list) => `<div class="details-checks">${list.map((v, i) =>
     `<label class="details-check"><input type="checkbox" name="${listName}" value="${esc(v)}"${d[field].includes(v) ? ' checked' : ''} onchange="detailsToggle('${field}', ${i}, this.checked)"> ${esc(v)}</label>`).join('')}</div>`;
@@ -581,25 +586,25 @@ async function saveDetails() {
   // S3: a collection saves a show's details; its films stay read-only (S4).
   if (dlg && dlg.kind !== 'show' && isBrowseCollectionView(activeViewId)) return;
   if (!dlg || dlg.saving || dlg.stale) return;
-  if (dlg.epoch !== orgEpoch) { renderDetails(); return; } // a restore happened: nothing is sent (the dialog says so)
+  if (dlg.restored) { renderDetails(); return; } // a restore happened: nothing is sent (the dialog says so)
   const { metadata, problems } = detailsValidate(dlg);
   if (problems.length) { dlg.error = `Not saved: ${problems.join(' ')} Correct these and save again.`; renderDetails(); return; }
-  const { session, kind, id, title, epoch } = dlg;
+  const { session, kind, id, title } = dlg;
+  const lane = beginWrite(`“${title}” · details`);
+  if (!lane) return;
   dlg.saving = true;
   dlg.error = '';
   renderDetails();
   const current = () => detailsDialog && detailsDialog.session === session ? detailsDialog : null; // this opening, still open
   try {
     const res = await sbRpc('library_set_metadata_b45', { p_kind: kind, p_id: id, p_expected: dlg.snapshot, p_metadata: metadata });
-    if (epoch !== orgEpoch) { if (current()) closeDetails(); staleAfterRestore(`“${title}” · details`); return; }
     if (kind === 'show' && res && res.show) { const rec = tvShowsById.get(id); if (rec) Object.assign(rec, res.show); }
-    else if (res && res.row) mirrorRowUpdate(id, res.row, epoch);
+    else if (res && res.row) mirrorRowUpdate(id, res.row);
     showSaved();
     if (current()) closeDetails();
     renderFilters();
     renderTable();
   } catch (e) {
-    if (epoch !== orgEpoch) { if (current()) closeDetails(); staleAfterRestore(`“${title}” · details`); return; }
     const mine = current();
     if (mine) {
       mine.saving = false;
@@ -607,11 +612,13 @@ async function saveDetails() {
       if (stateNeedsReread(e)) mine.stale = stateUnconfirmed(e) ? 'unknown' : 'changed';
       renderDetails();
     }
-    // Stale or unknown: the open view is read again (same epoch); the dialog keeps this draft
-    // and says whether that read succeeded. An earlier opening's answer touches no dialog.
-    const ok = await reportStateFailure(e, epoch);
+    // Stale or unknown: the open view is read again; the dialog keeps this draft and says
+    // whether that read succeeded. An earlier opening's answer touches no dialog.
+    const ok = await reportStateFailure(e);
     const still = current();
     if (still && still.stale) { still.notice = rereadText(ok).trim(); renderDetails(); }
+  } finally {
+    endWrite(lane);
   }
 }
 

@@ -34,22 +34,18 @@ function isMissingTableError(e) {
   return /: 404 /.test(msg) && msg.includes('PGRST205');
 }
 
-// Every read of these tables (startup, Retry, a collection view, after a restore)
-// takes a token when it starts. Only a read that started after the data now shown
-// may replace it, and nothing read before a restore is published after it
-// (invalidateOrganization), so an older read that finishes last can't bring back
-// stale collections or labels.
+// Every read of these tables (startup, Retry, a collection view, after a change)
+// takes a number and a read stamp when it starts. Only a read that started after the
+// data now shown may replace it, and only if no change overlapped it (write-lane.js
+// readFresh), so an older read that finishes last can't bring back stale collections
+// or labels. A published read clears that kind's "may be out of date" flag if it is
+// newer than the failed read that set it.
 function orgReadStart() {
-  return { seq: ++orgReadSeq, epoch: orgEpoch };
+  return { seq: ++orgReadSeq, stamp: readStamp() };
 }
 
-// Stage 3b-2: a read that started before a confirmed organization change (the
-// write barrier, organization-manage.js) never publishes either, so a pre-write
-// read that finishes late can't bring back what the change replaced. A published
-// read clears that kind's "may be out of date" flag if it is newer than the
-// failed read that set it.
 function publishCollections(rows, read) {
-  if (read.epoch !== orgEpoch || read.seq < orgCollectionsSeq || read.seq <= orgWriteBarrier) return false;
+  if (!readFresh(read.stamp) || read.seq < orgCollectionsSeq) return false;
   orgCollectionsSeq = read.seq;
   personalCollections = rows;
   orgState = 'ready';
@@ -60,7 +56,7 @@ function publishCollections(rows, read) {
 // New watch-with labels redraw the open tab or browse view if they change what it
 // shows (filter options, tags, pickers); otherwise nothing is redrawn.
 function publishChoices(rows, read) {
-  if (read.epoch !== orgEpoch || read.seq < orgChoicesSeq || read.seq <= orgWriteBarrier) return false;
+  if (!readFresh(read.stamp) || read.seq < orgChoicesSeq) return false;
   setWatchWith(() => {
     orgChoicesSeq = read.seq; watchWithChoices = rows; watchWithState = 'ready';
     if (orgChoicesStale && read.seq > orgChoicesStale) orgChoicesStale = 0;
@@ -73,7 +69,6 @@ function publishChoices(rows, read) {
 // than the last published one of that kind can mark it, so an older failure never
 // marks newer data stale.
 function markOrgStale(kind, read) {
-  if (read.epoch !== orgEpoch) return;
   if (kind === 'collections' && read.seq > orgCollectionsSeq && read.seq > orgCollectionsStale) { orgCollectionsStale = read.seq; buildBrowseBar(); }
   if (kind === 'choices' && read.seq > orgChoicesSeq && read.seq > orgChoicesStale) setWatchWith(() => { orgChoicesStale = read.seq; });
 }
@@ -117,17 +112,14 @@ function redrawRowsKeepingPicker() {
   }
 }
 
-// After a restore: everything read before it is stale. The selector says it is
-// loading until the post-restore read arrives.
+// After a restore: everything read before it is stale (no read that overlapped the
+// restore publishes, write-lane.js). The selector says it is loading until the
+// post-restore read arrives.
 function invalidateOrganization() {
-  orgEpoch++;
   if (typeof resetGovernance === 'function') resetGovernance(); // governance read before the restore speaks for nothing now
-  orgCollectionsSeq = 0;
-  orgChoicesSeq = 0;
   orgCollectionsStale = 0;
   orgChoicesStale = 0;
   if (typeof manageInvalidate === 'function') manageInvalidate();
-  if (typeof matchRefreshReevaluate === 'function') matchRefreshReevaluate(); // old-epoch refresh work is void: read again
   personalCollections = null;
   orgState = 'loading';
   setWatchWith(() => { watchWithChoices = null; watchWithState = 'loading'; });
@@ -141,9 +133,11 @@ async function loadOrganization() {
   if (watchWithState !== 'ready') setWatchWith(() => { watchWithState = 'loading'; });
   // Each kind is published as soon as it arrives (the selector never waits for the
   // watch-with choices) and fails on its own: a failure matters only for the latest
-  // load, in the same restore epoch, when nothing of that kind was read since (so a
-  // collection view's newer collections read never hides a failed choices read).
-  const current = () => read.seq === orgLoadSeq && read.epoch === orgEpoch;
+  // load, when nothing of that kind was read since (so a collection view's newer
+  // collections read never hides a failed choices read). A load refused because a
+  // change overlapped it reads again once the lane is free.
+  const current = () => read.seq === orgLoadSeq;
+  const again = () => readAgainWhenFree(() => { if (orgLoadSeq === read.seq) loadOrganization(); });
   const schemaAbsent = () => {
     orgState = 'absent';
     setWatchWith(() => { watchWithState = 'absent'; });
@@ -151,6 +145,7 @@ async function loadOrganization() {
   };
   const collections = readPersonalCollections().then(rows => {
     if (publishCollections(rows, read)) buildBrowseBar();
+    else if (current() && !readFresh(read.stamp) && orgCollectionsSeq < read.seq) again();
   }, e => {
     if (!current()) return;
     if (isMissingTableError(e)) { schemaAbsent(); return; }
@@ -159,15 +154,17 @@ async function loadOrganization() {
     console.error(e);
     buildBrowseBar();
   });
-  const choices = fetchAllRowsStrict('watch_with_choices').then(rows => { publishChoices(rows, read); }, e => {
+  const choices = fetchAllRowsStrict('watch_with_choices').then(rows => {
+    if (!publishChoices(rows, read) && current() && !readFresh(read.stamp) && orgChoicesSeq < read.seq) again();
+  }, e => {
     if (!current()) return;
     if (isMissingTableError(e)) { schemaAbsent(); return; }
-    if (orgChoicesSeq === 0) {
-      // Nothing read in this epoch: say so, never fall back to the configured list.
+    if (!watchWithChoices) {
+      // Nothing read (since startup or a restore): say so, never fall back to the configured list.
       setWatchWith(() => { watchWithState = 'unavailable'; });
       console.error(e);
     } else if (watchWithState === 'loading') {
-      setWatchWith(() => { watchWithState = 'ready'; }); // keep this epoch's earlier successful read
+      setWatchWith(() => { watchWithState = 'ready'; }); // keep the earlier successful read
     }
   });
   await Promise.all([collections, choices]);

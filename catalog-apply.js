@@ -225,7 +225,7 @@ async function catalogReview() {
   d.phase = 'previewing';
   renderCatalogDialog();
   try {
-    const res = await sbRpc('library_catalog_apply_b45', { p_catalog: d.catalogId, p_defaults: d.defaults });
+    const res = await sbRpcRead('library_catalog_apply_b45', { p_catalog: d.catalogId, p_defaults: d.defaults }); // a preview: changes nothing
     if (!catalogLive(session)) return;
     d.preview = res;
     d.phase = 'preview';
@@ -255,31 +255,34 @@ async function catalogApply() {
   const d = catalogDialog;
   if (!d || d.phase !== 'preview' || !d.preview || !catalogEffectCount(d.preview.document)) return;
   const session = d.session;
-  d.approved = { hash: d.preview.hash, document: d.preview.document, defaults: d.defaults };
-  d.phase = 'applying';
-  renderCatalogDialog();
-  let res;
-  try {
-    res = await sbRpc('library_catalog_apply_b45', { p_catalog: d.catalogId, p_defaults: d.approved.defaults, p_approved: d.approved.hash });
-  } catch (e) {
+  // One change at a time (write-lane.js), held through the read-back and the reread.
+  await runWrite(`Catalog updates · ${d.catalogId}`, async () => {
+    d.approved = { hash: d.preview.hash, document: d.preview.document, defaults: d.defaults };
+    d.phase = 'applying';
+    renderCatalogDialog();
+    let res;
+    try {
+      res = await sbRpc('library_catalog_apply_b45', { p_catalog: d.catalogId, p_defaults: d.approved.defaults, p_approved: d.approved.hash });
+    } catch (e) {
+      if (!catalogLive(session)) return;
+      catalogFailed(d, e, true);
+      renderCatalogDialog();
+      return;
+    }
     if (!catalogLive(session)) return;
-    catalogFailed(d, e, true);
+    if (!res || res.mode !== 'applied' || res.hash !== d.approved.hash) {
+      d.phase = 'unknown'; d.error = 'The answer was not the expected confirmation.';
+      renderCatalogDialog();
+      return;
+    }
+    d.result = res;
+    d.phase = 'applied';
+    d.readBack = { state: 'reading' };
     renderCatalogDialog();
-    return;
-  }
-  if (!catalogLive(session)) return;
-  if (!res || res.mode !== 'applied' || res.hash !== d.approved.hash) {
-    d.phase = 'unknown'; d.error = 'The answer was not the expected confirmation.';
-    renderCatalogDialog();
-    return;
-  }
-  d.result = res;
-  d.phase = 'applied';
-  d.readBack = { state: 'reading' };
-  renderCatalogDialog();
-  await catalogVerify(session);
-  // The open view shows the new state (read again; nothing is written).
-  if (activeViewId) reloadOpenView();
+    await catalogVerify(session);
+    // The open view shows the new state (read again; nothing is written).
+    if (activeViewId) await reloadOpenView();
+  });
 }
 
 // Titles for the rows a preview dates (a read, best effort: the entry's key otherwise).
@@ -503,7 +506,7 @@ async function catalogCheckState() {
   try {
     [cmp, res] = await Promise.all([
       catalogCompareOutcomes(d.catalogId, d.approved.document, null),
-      sbRpc('library_catalog_apply_b45', { p_catalog: d.catalogId, p_defaults: d.approved.defaults })]);
+      sbRpcRead('library_catalog_apply_b45', { p_catalog: d.catalogId, p_defaults: d.approved.defaults })]); // a fresh preview
   } catch (e) {
     if (!catalogLive(session)) return;
     d.phase = 'unknown';

@@ -97,7 +97,11 @@ async function confirmPersonRole() {
   await pullPersonFilmography(pending.personId, pending.personName, /*isNewCollection*/ true, role, pending.credits);
 }
 
-async function pullPersonFilmography(personId, personName, isNewCollection, role, preloadedCredits) {
+// One change at a time (write-lane.js): held through the lookups, writes and the reread.
+function pullPersonFilmography(personId, personName, isNewCollection, role, preloadedCredits) {
+  return runWrite('Person collection', () => pullPersonFilmographyNow(personId, personName, isNewCollection, role, preloadedCredits));
+}
+async function pullPersonFilmographyNow(personId, personName, isNewCollection, role, preloadedCredits) {
   // The tab this pull runs for, captured before any await (the user may switch
   // tabs or views while TMDB and the tag backfills are in flight).
   const collectionId = toolCollectionId(); // All Movies' panel (library.js)
@@ -230,7 +234,11 @@ async function pullPersonFilmography(personId, personName, isNewCollection, role
   }
 }
 
-async function addPulledPersonMovies() {
+// One change at a time (write-lane.js): held through the lookups, writes and the reread.
+function addPulledPersonMovies() {
+  return runWrite('Adding films', () => addPulledPersonMoviesNow());
+}
+async function addPulledPersonMoviesNow() {
   const personName = window.__personPullName;
   if (!personName) return;
   // The tab this preview belongs to, captured before any await: the TMDB lookups
@@ -297,7 +305,7 @@ async function addPulledPersonMovies() {
     toolCachePush(tool, inserted);
     showSaved();
     if (toolContextLive(tool)) resetTMDBSearchUI();
-    toolFinished(tool);
+    await toolFinished(tool);
     if (failureNote) showError(failureNote);
   } catch(e) {
     if (e.message.includes('23505') || e.message.includes('duplicate key')) {

@@ -592,18 +592,22 @@ for (const outcome of ['success', 'failure']) {
     assert.ok(reads.every(t => ['personal_collections', 'library_collection_catalogs', 'library_collection_presentation', 'watch_with_choices'].includes(t)));
   });
 }
-test('N17b a stale watch-with read never changes Settings: a read started before a restore (an older epoch) publishes nothing', async () => {
+test('N17b a stale watch-with read never changes Settings: a read that overlapped a restore publishes nothing; a fresh read follows', async () => {
   const app = await boot();
   app.ctx.openSettings(null);
   const shown = app.el('settingsChoicesText').textContent || screen(app).match(/id="settingsChoicesText">([^<]*)</)[1];
   const g = app.hold(r => r.url.includes('/watch_with_choices?'));
   const old = app.ctx.loadOrganization();
   await g.reached;
+  const oldSeq = app.get('orgReadSeq');
+  app.run('writeSent(); writeSettled()'); // the restore request was sent and answered (api.js sbFetch)
   app.ctx.invalidateOrganization(); // a restore: everything read before it is stale
   assert.strictEqual(app.el('settingsChoicesText').textContent, 'Loading…', 'the restore\'s reset is shown');
   app.store.watch_with_choices.push({ id: '0e000000-0000-4000-8000-000000000099', token: 'Zed', label: 'Zed', sort_order: 99, archived_at: null });
-  g.release(); await old; await settle();
+  g.release(); await old;
   assert.strictEqual(app.el('settingsChoicesText').textContent, 'Loading…', 'the pre-restore read did not publish');
+  await settle();
+  assert.ok(app.get('orgChoicesSeq') > oldSeq, 'what Settings shows comes from a read started after the restore');
   assert.ok(shown);
 });
 

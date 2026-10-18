@@ -52,10 +52,9 @@ function switchMediaType(type) {
 
 // Opens a derived view, or a read-only browse view (browse-views.js).
 function switchView(id) {
-  // S3: another view ends the page's focus placement (an operation's answer never moves focus in
-  // the new view) and answers an open effect dialog Cancel (nothing is sent).
-  if (typeof endFocusPlacement === 'function') endFocusPlacement();
-  if (typeof dropQuietReread === 'function') dropQuietReread(); // a pending quiet reread's busy mark goes with the view
+  // S3: another view answers an open effect dialog Cancel (nothing is sent). A reread of the
+  // list being left (its busy mark and status line, an out-of-date mark) goes with it.
+  if (typeof clearListReread === 'function') clearListReread();
   if (typeof cancelEffectDialog === 'function') cancelEffectDialog();
   activeViewId = id;
   activeArea = areaOfView(id);
