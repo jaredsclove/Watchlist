@@ -117,6 +117,11 @@ button.backup-age:focus-visible, .gear-btn:focus-visible { outline: 2px solid va
 .media-switch-btn { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 18px; font-size: 14px; font-weight: 500; color: var(--text2); cursor: pointer; transition: all 0.15s; }
 .media-switch-btn:hover { color: var(--text); }
 .media-switch-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+/* S2: the Collections chooser (a tab list in the Collections area) and its status line. */
+.collection-tabs { display: flex; flex: 1 1 100%; min-width: 0; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.collection-tab { background: none; border: 0; border-bottom: 2px solid transparent; font-family: inherit; }
+.collection-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.collections-state { margin: 0; font-size: 13px; color: var(--text2); }
 
 .tabs { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 0; overflow-x: auto; }
 .tabs[hidden] { display: none; } /* B9: an area with one view has no secondary row (display: flex would override [hidden]) */
@@ -595,11 +600,19 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .filter-clear { font-size: 13px; }
 .empty-clear { margin-left: 8px; }
 
+@media (max-width: 359px) {
+  .media-switch-icon { display: none; } /* S2: the primary buttons keep their words only */
+}
+
 @media (max-width: 700px) {
   .main { padding: 12px; }
   .tabs { padding: 0 12px; }
   .media-switch { padding: 8px 12px 0; }
-  .media-switch-btn { flex: 1; text-align: center; }
+  /* S2V2-1: three equal shares (flex-basis 0, no min-content floor), each label on one line; the narrower
+     side padding lets "🗂 Collections" fit from 360 px and "Collections" at 300 px. */
+  .media-switch-btn { flex: 1 1 0; min-width: 0; padding: 8px 6px; white-space: nowrap; text-align: center; min-height: 44px; }
+  .collection-tab { min-height: 44px; }
+  .collections-retry, .collections-create { min-height: 44px; }
 
   #desktopTable { display: none; }
   .card-list { display: flex; }

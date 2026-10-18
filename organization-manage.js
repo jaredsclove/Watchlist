@@ -121,10 +121,24 @@ function closeManage() {
   document.getElementById('manageModalOverlay').style.display = 'none';
   document.getElementById('manageModalBox').innerHTML = '';
   buildBrowseBar();
-  if (wrote && isBrowseCollectionView(activeViewId)) loadBrowseView();
+  const reread = wrote && isBrowseCollectionView(activeViewId) ? loadBrowseView() : null;
   // Focus goes back to the control that opened the dialog (or its redrawn equivalent).
   const back = opener && opener.isConnected ? opener : (openerSelector && document.querySelector(openerSelector)) || null;
   if (back && typeof back.focus === 'function') back.focus();
+  // S2: the reread draws the collection's heading again when its read is in, which removes that
+  // control. Focus still lost with it goes to the redrawn one — never after another load or
+  // navigation, while a dialog is open, or once focus has moved elsewhere.
+  if (reread && openerSelector) {
+    const viewId = activeViewId, seq = browseLoadSeq;
+    Promise.resolve(reread).then(() => {
+      if (manage || activeViewId !== viewId || browseLoadSeq !== seq) return;
+      if (typeof documentHasFocus === 'function' && !documentHasFocus()) return;
+      const active = document.activeElement;
+      const lost = !active || active === document.body || (active === back && active.isConnected === false);
+      const again = lost ? document.querySelector(openerSelector) : null;
+      if (again && again !== active && typeof again.focus === 'function') again.focus();
+    }, () => {});
+  }
 }
 
 // A restore made in this page (organization.js): everything the dialog holds is stale.
@@ -726,7 +740,7 @@ function manageCollectionsHtml(ix) {
       <button class="btn" onclick="manageEditMembers('${esc(c.id)}')">Members</button>`;
     else if (confirming) {
       const note = c.catalog ? ' Catalog updates won’t add new shows or films to it while it’s archived.' : '';
-      actions = `<div class="manage-confirm">Hides ${esc(c.name)} from Browse collections. Its shows and films stay saved, in every other view and in this collection. You can unarchive it at any time.${esc(note)}
+      actions = `<div class="manage-confirm">Hides ${esc(c.name)} from Collections. Its shows and films stay saved, in every other view and in this collection. You can unarchive it at any time.${esc(note)}
         <button class="btn btn-danger" onclick="manageSetArchived('c', '${esc(c.id)}', true)"${busy ? ' disabled' : ''}>Archive</button>
         <button class="btn" onclick="manageAskArchive(null, null)">Cancel</button></div>`;
     } else actions = renaming ? '' : `<button class="btn" onclick="manageStartRename('c', '${esc(c.id)}')"${busy ? ' disabled' : ''}>Rename</button>
@@ -783,7 +797,7 @@ function manageMembersHtml(ix) {
       const key = orgKeyMember(c.id, kind === 's' ? t.id : null, kind === 'i' ? t.id : null), busy = !!manage.pending[key];
       const label = kind === 's' ? `Add show (all ${n} stored season${n === 1 ? '' : 's'}, and any added later)` : 'Add film';
       return `<li class="manage-item"><div class="manage-line"><span class="manage-name">${esc(t.title)}</span>
-        <span class="manage-meta">${kind === 's' ? 'TV show' : 'Film'} · ${esc(plainStatus(t.status))}${t.status === 'skipped' ? ' (Browse hides Skipped by default)' : ''}</span></div>
+        <span class="manage-meta">${kind === 's' ? 'TV show' : 'Film'} · ${esc(plainStatus(t.status))}${t.status === 'skipped' ? ' (Collections hide Skipped by default)' : ''}</span></div>
         <div class="manage-actions">${inIt ? '<span class="manage-in">In this collection</span>'
           : `<button class="btn" onclick="manageAddMember('${kind}', '${esc(t.id)}')"${busy ? ' disabled' : ''}>${esc(label)}</button>`}</div>${inIt ? '' : manageNotesHtml(key)}</li>`;
     }).join('') || '<li class="manage-empty">Nothing saved matches.</li>'}</ul>

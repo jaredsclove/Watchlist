@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261016-settings1">
+<link rel="stylesheet" href="styles.css?v=20261016-collections1">
 </head>
 <body>
 
@@ -42,7 +42,7 @@
 
 <div class="browse-bar" id="browseBar"></div>
 
-<div class="main">
+<div class="main" id="mainContent">
   <div id="phaseBanner"></div>
   <div id="noticeBanner"></div>
   <div id="banner"></div>
@@ -83,27 +83,27 @@
      deliberately unversioned (the catalog-refresh workflow reloads it by plain URL). -->
 <script src="config.js"></script>
 <script src="identity.js"></script>
-<script src="api.js?v=20261016-settings1"></script>
-<script src="ui-helpers.js?v=20261016-settings1"></script>
-<script src="metadata.js?v=20261016-settings1"></script>
-<script src="backup-restore.js?v=20261016-settings1"></script>
-<script src="backup-format3.js?v=20261016-settings1"></script>
-<script src="tabs.js?v=20261016-settings1"></script>
-<script src="render.js?v=20261016-settings1"></script>
-<script src="row-actions.js?v=20261016-settings1"></script>
-<script src="tmdb-search.js?v=20261016-settings1"></script>
-<script src="collections-pull.js?v=20261016-settings1"></script>
-<script src="universe-pull.js?v=20261016-settings1"></script>
-<script src="person-pull.js?v=20261016-settings1"></script>
-<script src="refresh-shows.js?v=20261016-settings1"></script>
-<script src="tmdb-match.js?v=20261016-settings1"></script>
-<script src="derived-views.js?v=20261016-settings1"></script>
-<script src="tv-shows.js?v=20261016-settings1"></script>
-<script src="organization.js?v=20261016-settings1"></script>
-<script src="organization-manage.js?v=20261016-settings1"></script>
-<script src="catalog-apply.js?v=20261016-settings1"></script>
-<script src="browse-views.js?v=20261016-settings1"></script>
-<script src="library.js?v=20261016-settings1"></script>
+<script src="api.js?v=20261016-collections1"></script>
+<script src="ui-helpers.js?v=20261016-collections1"></script>
+<script src="metadata.js?v=20261016-collections1"></script>
+<script src="backup-restore.js?v=20261016-collections1"></script>
+<script src="backup-format3.js?v=20261016-collections1"></script>
+<script src="tabs.js?v=20261016-collections1"></script>
+<script src="render.js?v=20261016-collections1"></script>
+<script src="row-actions.js?v=20261016-collections1"></script>
+<script src="tmdb-search.js?v=20261016-collections1"></script>
+<script src="collections-pull.js?v=20261016-collections1"></script>
+<script src="universe-pull.js?v=20261016-collections1"></script>
+<script src="person-pull.js?v=20261016-collections1"></script>
+<script src="refresh-shows.js?v=20261016-collections1"></script>
+<script src="tmdb-match.js?v=20261016-collections1"></script>
+<script src="derived-views.js?v=20261016-collections1"></script>
+<script src="tv-shows.js?v=20261016-collections1"></script>
+<script src="organization.js?v=20261016-collections1"></script>
+<script src="organization-manage.js?v=20261016-collections1"></script>
+<script src="catalog-apply.js?v=20261016-collections1"></script>
+<script src="browse-views.js?v=20261016-collections1"></script>
+<script src="library.js?v=20261016-collections1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -125,7 +125,8 @@
 
 
 // ─── State ────────────────────────────────────────────────────────────────────
-let activeMediaType = 'tv'; // 'tv' | 'movie' — controls which views are visible
+let activeMediaType = 'tv'; // 'tv' | 'movie' — controls which views are visible (the last TV / Movies area, also while Collections or Settings is open)
+let activeArea = 'tv'; // S2: 'tv' | 'movie' | 'collections' | 'settings' — the primary area shown as current; set only by switchView (tabs.js areaOfView)
 let activeViewId = 'watching'; // the open view (derived or browse)
 let tabData = {}; // per-run caches by name: tabData.films = the movie tools' films (library.js); no storage
 let libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(), seq: 0, epoch: 0 }; // the newest catalog-governance snapshot (library.js)
@@ -148,7 +149,10 @@ let browsePresentation = 'shows'; // a collection's TV presentation: 'shows' | '
 let browseGrouping = 'separate'; // a collection's grouping: 'separate' | 'combined'; remembered per collection on this device
 let browseSeasonVis = 'notskipped'; // TV seasons (Seasons only): 'notskipped' (All (except Skipped)) | 'all' | 'towatch' | 'watched' | 'skipped'; All (except Skipped) on every entry, never stored
 let browseSectionOpen = {}; // a collection's TBA / Date needs review sections (BROWSE_SECTION_DEFAULTS on every entry)
-let browseOrigin = null; // where Back returns from a collection: { mediaType, viewId, filters }
+let browseOrigin = null; // where Back returns from a collection: { mediaType, viewId, filters }; kept while the Collections area is open
+let collectionEntry = null; // S2: how the open collection was entered: { viewId, kind: 'remembered' | 'default' | 'fallback' | 'tab' | 'return' } (browse-views.js); a reread keeps it
+let nextCollectionEntryKind = null; // the kind the next collection entry takes (set just before it; 'tab' when none)
+let lastCollectionVisit = { known: false, id: null, diverged: false }; // S2 (O2): this visit's memory of the remembered collection; diverged = a save or removal failed, so it wins over storage (browse-views.js)
 let backNavFilters = null; // { view, values }: filters Back puts back on the view it returns to
 let settingsOrigin = null; // where Settings' "Back to library" returns: { mediaType, viewId, filters, browseOrigin } (tabs.js); null when none
 let filterPanelOpen = false; // B10: the More filters panel of the open view's visit is open (render.js filterPanelStart; never stored)

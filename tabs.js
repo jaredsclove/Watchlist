@@ -5,8 +5,9 @@ function buildTabs() {
   // storage tabs (Stage 4b), and since Stage 5 no record has a storage at all.
   // An area with a single view (Movies: All Movies) has no secondary row at all; its
   // content heading names the view (B9).
-  // Settings (S1) has no view tabs.
-  const views = isSettingsView() ? [] : tabViewsFor(activeMediaType);
+  // Settings (S1) has no view tabs, and nor has the Collections area (S2): its chooser is drawn
+  // by buildBrowseBar.
+  const views = isSettingsView() || activeArea === 'collections' ? [] : tabViewsFor(activeMediaType);
   bar.hidden = views.length <= 1;
   bar.innerHTML = views.length <= 1 ? '' : views.map(v =>
     `<div class="tab${v.id===activeViewId?' active':''}" onclick="switchView('${v.id}')">
@@ -17,23 +18,31 @@ function buildTabs() {
   updateRestoreVisibility();
 }
 
-// The primary buttons and the header's Settings entry (S1): on Settings no area is
-// active and the gear is the current page.
+// The primary buttons (S2: TV · Movies · Collections) and the header's Settings entry (S1):
+// exactly one of them is the current page — the open area's button, or the gear on Settings.
 function buildMediaSwitch() {
   const el = document.getElementById('mediaSwitch');
   const onSettings = isSettingsView();
+  // S2: a redraw (also a later one, when Collections resolves or falls back after a read) keeps
+  // keyboard focus on the Collections button if it is still there; TV and Movies are unchanged.
+  const active = document.activeElement;
+  const keepCollections = !!el && !!active && active.id === 'areaBtn-collections'
+    && (typeof documentHasFocus !== 'function' || documentHasFocus());
+  const cls = area => (activeArea === area ? ' active' : '');
+  const cur = area => (activeArea === area ? ' aria-current="page"' : '');
   if (el) {
-    el.innerHTML = `
-    <button class="media-switch-btn${!onSettings && activeMediaType==='tv'?' active':''}" onclick="switchMediaType('tv')">📺 TV</button>
-    <button class="media-switch-btn${!onSettings && activeMediaType==='movie'?' active':''}" onclick="switchMediaType('movie')">🎬 Movies</button>
-  `;
+    el.innerHTML = `<button class="media-switch-btn${cls('tv')}" id="areaBtn-tv"${cur('tv')} onclick="switchMediaType('tv')"><span class="media-switch-icon" aria-hidden="true">📺</span> TV</button>`
+      + `<button class="media-switch-btn${cls('movie')}" id="areaBtn-movie"${cur('movie')} onclick="switchMediaType('movie')"><span class="media-switch-icon" aria-hidden="true">🎬</span> Movies</button>`
+      + `<button class="media-switch-btn${cls('collections')}" id="areaBtn-collections"${cur('collections')} onclick="openCollections(this)"><span class="media-switch-icon" aria-hidden="true">🗂</span> Collections</button>`;
+    const again = keepCollections ? document.getElementById('areaBtn-collections') : null;
+    if (again && again !== active && typeof again.focus === 'function') again.focus();
   }
   const entry = document.getElementById('settingsEntry');
   if (entry) entry.innerHTML = `<button class="btn gear-btn" id="settingsBtn" aria-label="Settings &amp; Management"${onSettings ? ' aria-current="page"' : ''} onclick="openSettings(this)">⚙ Settings</button>`;
 }
 
 function switchMediaType(type) {
-  if (type === activeMediaType && !isBrowseCollectionView(activeViewId) && !isSettingsView()) return;
+  if (type === activeArea) return; // already there (TV on a TV view stays put); from Collections or Settings it lands
   activeMediaType = type;
   // Each area lands on its first view: TV → Currently Watching, Movies → All Movies.
   const firstView = landingViewFor(type);
@@ -44,10 +53,13 @@ function switchMediaType(type) {
 // Opens a derived view, or a read-only browse view (browse-views.js).
 function switchView(id) {
   activeViewId = id;
-  // Back from a collection keeps its origin only while collections are open,
+  activeArea = areaOfView(id);
+  // Back from a collection keeps its origin only while the Collections area is open,
   // and its saved filters only for the view it returns to.
-  if (!isBrowseCollectionView(id)) browseOrigin = null;
-  else enterBrowseCollection(id);
+  if (!isCollectionsAreaView(id)) browseOrigin = null;
+  if (isBrowseCollectionView(id)) enterBrowseCollection(id);
+  collectionEntry = isBrowseCollectionView(id) ? { viewId: id, kind: nextCollectionEntryKind || 'tab' } : null;
+  nextCollectionEntryKind = null;
   if (!isSettingsView(id)) settingsOrigin = null; // Settings' Back applies only while Settings is open
   if (backNavFilters && backNavFilters.view !== id) backNavFilters = null;
   viewFilterMemory = { tag: null, values: {} }; // a fresh entry starts from the defaults (Back puts its filters back itself)
@@ -67,8 +79,13 @@ function switchView(id) {
   const tmdbPanel = document.getElementById('tmdbPanel');
   tmdbPanel.style.display = 'none';
   tmdbPanel.innerHTML = '';
+  buildMediaSwitch();
   buildTabs();
+  // The Collections state may have resolved its default inside buildTabs (buildBrowseBar):
+  // that opened a collection, so this entry is over.
+  if (activeViewId !== id) return;
   if (isSettingsView(id)) { renderSettings(); return; }
+  if (isCollectionsStateView(id)) { renderCollectionsState(); return; }
   showListContainers();
   if (isBrowseView(id)) loadBrowseView();
   else loadDerivedView();
@@ -84,6 +101,48 @@ const SETTINGS_LIST_CONTAINERS = ['desktopTable', 'cardList'];
 
 function isSettingsView(id = activeViewId) {
   return id === SETTINGS_VIEW_ID;
+}
+
+// ─── Areas (S2) ───────────────────────────────────────────────────────────────
+// The Collections area is a collection view (browse:<id>) or, while no collection is open
+// yet, the Collections state (loading, unavailable, none…; browse-views.js).
+const COLLECTIONS_VIEW_ID = 'collections';
+
+function isCollectionsStateView(id = activeViewId) {
+  return id === COLLECTIONS_VIEW_ID;
+}
+
+function isCollectionsAreaView(id = activeViewId) {
+  return isCollectionsStateView(id) || isBrowseCollectionView(id);
+}
+
+function areaOfView(id) {
+  if (isSettingsView(id)) return 'settings';
+  if (isCollectionsAreaView(id)) return 'collections';
+  return activeMediaType;
+}
+
+// Where a collection's Back returns when the Collections area is entered from here: a TV /
+// Movies view with its filters; from Settings, Settings' own origin (D3). Null: no Back link.
+function collectionsOriginFromHere() {
+  if (isSettingsView()) {
+    const o = settingsOrigin;
+    if (!o || !o.viewId) return null;
+    if (isCollectionsAreaView(o.viewId)) return o.browseOrigin || null;
+    return { mediaType: o.mediaType, viewId: o.viewId, filters: o.filters || {} };
+  }
+  const viewId = activeViewId;
+  if (!viewId || isCollectionsAreaView(viewId)) return null;
+  return { mediaType: activeMediaType, viewId, filters: currentViewFilters(`view:${viewId}`) };
+}
+
+// The Collections button: the remembered collection (O2), else the first (browse-views.js
+// resolveCollectionsDefault). Pressing it inside the area does nothing. The redrawn button
+// keeps keyboard focus (buildMediaSwitch).
+function openCollections(opener) {
+  if (activeArea === 'collections') return;
+  browseOrigin = collectionsOriginFromHere();
+  switchView(COLLECTIONS_VIEW_ID);
 }
 
 // opener: the control pressed; section 'backup' puts focus on the Backup & Restore card.
@@ -117,7 +176,8 @@ function settingsBack() {
   }
   activeMediaType = origin.mediaType;
   backNavFilters = { view: origin.viewId, values: origin.filters || {} };
-  browseOrigin = isBrowseCollectionView(origin.viewId) ? origin.browseOrigin || null : null;
+  browseOrigin = isCollectionsAreaView(origin.viewId) ? origin.browseOrigin || null : null;
+  if (isBrowseCollectionView(origin.viewId)) nextCollectionEntryKind = 'return';
   switchView(origin.viewId);
   // switchView reset the visit state as for a fresh entry; the round trip puts the origin's back
   // before its list is drawn (the loader draws after its read).
@@ -137,7 +197,7 @@ function showListContainers() {
 
 function settingsCollectionsText() {
   if (orgState === 'absent') return 'Collections aren’t available on this database.';
-  if (orgState !== 'ready') return orgState === 'loading' ? 'Loading…' : 'Couldn’t be read. Return to the library and use Retry beside Browse collections.';
+  if (orgState !== 'ready') return orgState === 'loading' ? 'Loading…' : 'Couldn’t be read. Open Collections and use Retry.';
   const all = personalCollections || [];
   const archived = all.filter(c => c.archived_at).length;
   return `${all.length - archived} active · ${archived} archived`;

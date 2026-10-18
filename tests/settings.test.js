@@ -153,7 +153,7 @@ test('N5 Back to library returns to the origin view with that visit\'s filters (
   app.ctx.settingsBack(); await settle();
   assert.strictEqual(app.get('activeViewId'), col);
   assert.strictEqual(app.get('browseOrigin.viewId'), 'alltv');
-  assert.ok(app.el('viewHead').innerHTML.includes('← Back to TV'));
+  assert.ok(app.el('viewHead').innerHTML.includes('← Back to All TV'));
   app.ctx.browseBack(); await settle();
   assert.strictEqual(app.get('activeViewId'), 'alltv');
   assert.strictEqual(app.el('fStatus').value, 'all', 'the collection\'s Back still puts All TV\'s filters back');
@@ -414,11 +414,13 @@ test('N14 Restore is offered only on Settings: no Restore control in the header,
   assert.ok(screen(app).includes('handleRestoreClick()'), 'on Settings');
 });
 
-test('N15 the Browse row keeps the selector, Retry and "may be out of date", without Manage or Catalog updates; the header keeps Backup and the status link', async () => {
+test('N15 (S2) no Browse row in the library; the Collections chooser keeps Retry and "may be out of date", without Manage or Catalog updates; the header keeps Backup and the status link', async () => {
   const app = await boot();
   const bar = () => app.el('browseBar').innerHTML;
-  assert.ok(bar().includes('id="browseSelect"'));
-  assert.ok(!/openManage\(|openCatalogChooser\(/.test(bar()), 'no Manage or Catalog updates in the Browse row');
+  assert.strictEqual(bar(), '', 'S2: no Browse row in the library');
+  app.ctx.openCollections(null); await settle();
+  assert.ok(bar().includes('role="tablist"') && !bar().includes('browseSelect'), 'the chooser, not a select');
+  assert.ok(!/openManage\(|openCatalogChooser\(/.test(bar()), 'no Manage or Catalog updates in the chooser');
   app.run('orgCollectionsStale = 99; buildBrowseBar()');
   assert.ok(/Collections may be out of date[\s\S]*retryOrgRefresh\(\)/.test(bar()));
   app.run("orgState = 'unavailable'; buildBrowseBar()");

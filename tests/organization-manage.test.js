@@ -149,7 +149,7 @@ test('create: trimmed name sent with a page-chosen id; Created; a post-write rea
   assert.strictEqual(call.body.p_name, 'Favourites');
   assert.match(call.body.p_id, /^[0-9a-f-]{36}$/);
   assert.match(text(app), /Created\./);
-  assert.ok(app.el('browseBar').innerHTML.includes('>Favourites</option>'), 'selector updated from a read');
+  assert.ok(app.run('collectionsChooserHtml()').includes('>Favourites</button>'), 'the Collections chooser updated from a read (S2)');
   assert.ok(writesSince(app, i).every(r => r.url.includes('/rpc/org_')), 'only organization functions written');
 });
 
@@ -189,7 +189,7 @@ test('archive: the confirmation explains what happens (no plan references) and, 
   await open(app);
   app.ctx.manageAskArchive('c', coll(app, 'disney').id); await settle();
   const t = text(app);
-  assert.match(t, /Hides Disney\+ from Browse collections\. Its shows and films stay saved, in every other view and in this collection\. You can unarchive it at any time\./);
+  assert.match(t, /Hides Disney\+ from Collections\. Its shows and films stay saved, in every other view and in this collection\. You can unarchive it at any time\./);
   assert.match(t, /Catalog updates won’t add new shows or films to it while it’s archived\./);
   assert.ok(!/\(C4\)|§|Stage 3b/.test(t), 'no plan references in UI text');
 });
@@ -429,7 +429,7 @@ test('write barrier (contract): a read started before a confirmed change never p
   assert.strictEqual(app.get('orgCollectionsSeq'), seqBefore, 'the earlier read did not publish');
   assert.ok(app.get('orgCollectionsSeq') < earlySeq);
   assert.ok(app.get('orgCollectionsStale') > 0, 'still marked possibly out of date');
-  assert.match(app.el('browseBar').innerHTML, /Collections may be out of date/);
+  assert.match(app.run('collectionsChooserHtml()'), /Collections may be out of date/);
 });
 
 test('saved but refresh failed: the dialog says so with Retry; the Browse bar marks collections out of date; Retry recovers', async () => {
@@ -439,10 +439,10 @@ test('saved but refresh failed: the dialog says so with Retry; the Browse bar ma
   typeInto(app, 'manageNewCollection', 'Favourites');
   app.ctx.manageCreate('collection'); await settle();
   assert.match(text(app), /Saved\. Couldn’t refresh your collections/);
-  assert.match(app.el('browseBar').innerHTML, /Collections may be out of date/);
+  assert.match(app.run('collectionsChooserHtml()'), /Collections may be out of date/);
   assert.ok(!/nothing (was )?changed/i.test(text(app)));
   app.ctx.manageReadAgain(); await settle();
-  assert.ok(!/may be out of date/.test(app.el('browseBar').innerHTML));
+  assert.ok(!/may be out of date/.test(app.run('collectionsChooserHtml()')));
 });
 
 test('per-kind stale flags: a choices-only failure marks only choices stale; the collections read still publishes; a collections-only read doesn’t clear choices; an older failed refresh doesn’t mark newer data stale', async () => {
@@ -474,7 +474,7 @@ test('per-kind stale flags: a collections-only failure marks only collections st
   assert.ok(app.get('orgCollectionsStale') > 0, 'collections stale');
   assert.strictEqual(app.get('orgChoicesStale'), 0, 'choices not stale');
   assert.ok(app.get('watchWithChoices').some(c => c.label === 'Suzanne R.'), 'the successful choices read published');
-  assert.match(app.el('browseBar').innerHTML, /Collections may be out of date/);
+  assert.match(app.run('collectionsChooserHtml()'), /Collections may be out of date/);
   app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
   assert.strictEqual(app.get('orgCollectionsStale'), 0, 'cleared by a newer successful collections read');
 });
@@ -685,7 +685,7 @@ test('search: unclassified rows are explained, not offered; a skipped film notes
   typeInto(app, 'manageMemberSearch', 'sever'); await settle();
   assert.match(text(app), /1 matching saved row is neither a TV season nor a film, so it can’t be added\. All Movies lists such rows\./);
   typeInto(app, 'manageMemberSearch', 'skipped'); await settle();
-  assert.match(text(app), /Browse hides Skipped by default/);
+  assert.match(text(app), /Collections hide Skipped by default/);
   d.archived_at = TS;
   app.ctx.manageReadAgain(); await settle();
   assert.match(text(app), /This collection is archived\. Unarchive it to change its members\./);
@@ -737,10 +737,10 @@ test('hostile names render as text everywhere and never reach a handler (ids onl
   app.ctx.manageCreate('collection'); await settle();
   const created = app.store.personal_collections.find(c => c.name === evil.trim());
   assert.ok(created);
-  const handlers = [...(box(app) + app.el('browseBar').innerHTML).matchAll(/on(?:click|change|input|keydown)="([^"]*)"/g)].map(m => m[1]);
+  const handlers = [...(box(app) + app.run('collectionsChooserHtml()')).matchAll(/on(?:click|change|input|keydown)="([^"]*)"/g)].map(m => m[1]);
   assert.ok(handlers.every(h => !h.includes('<script>') && !h.includes('שלום')), 'no names in handlers');
   assert.ok(!box(app).includes('<script>x()'), 'escaped in the dialog');
-  assert.ok(!app.el('browseBar').innerHTML.includes('<script>x()'), 'escaped in the selector');
+  assert.ok(!app.run('collectionsChooserHtml()').includes('<script>x()'), 'escaped in the Collections chooser');
   app.ctx.closeManage();
   app.ctx.openBrowseCollection(`browse:${created.id}`); await settle();
   assert.ok(!app.el('viewHead').innerHTML.includes('<script>x()'), 'escaped in the Browse heading');

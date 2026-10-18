@@ -621,7 +621,7 @@ function renderMatchProposal(m) {
   if (!body || !p) return;
   const res = p.reply;
   const checking = !p.archived && !p.checkFailed;
-  const names = (res.collections || []).map(c => `<strong>${esc(c.name)}</strong>${p.archived && p.archived.has(c.id) ? ' (archived: not shown in Browse)' : ''}`).join(', ');
+  const names = (res.collections || []).map(c => `<strong>${esc(c.name)}</strong>${p.archived && p.archived.has(c.id) ? ' (archived: not shown in Collections)' : ''}`).join(', ');
   const busy = !!m.inFlight;
   body.innerHTML = `<div class="tmdb-refresh-summary" style="margin-top:12px"><strong>Matching also adds a show to collections.</strong></div>
     ${res.changed ? '<div class="tmdb-refresh-summary">This changed since you looked. Check and confirm again.</div>' : ''}

@@ -1096,6 +1096,8 @@ function finishRestoreAndReload() {
     Promise.resolve(organization).then(() => { if (isSettingsView()) updateSettingsCounts(); }, () => {});
     const head = document.getElementById('settingsTitle');
     if (head && typeof head.focus === 'function') head.focus();
+  } else if (typeof isCollectionsStateView === 'function' && isCollectionsStateView()) {
+    renderCollectionsState(); // the Collections state (S2): the reloaded collections resolve it when they are published
   } else if (isBrowseView(activeViewId)) loadBrowseView();
   else if (activeViewId) loadDerivedView();
 }

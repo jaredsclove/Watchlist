@@ -64,7 +64,7 @@ test('B9: Movies has no secondary row (hidden, empty); TV keeps its three views'
   assert.strictEqual(app.el('tabBar').hidden, true);
   assert.strictEqual(app.el('tabBar').innerHTML, '');
   assert.ok(app.el('viewHead').innerHTML.includes('🎞️ All Movies</h2>'), 'the content heading stays');
-  assert.ok(app.el('browseBar').innerHTML.includes('id="browseSelect"'), 'the Browse bar stays');
+  assert.strictEqual(app.el('browseBar').innerHTML, '', 'S2: no Browse row in Movies');
   assert.ok(!app.el('browseBar').innerHTML.includes('openCatalogChooser('), 'S1: Catalog updates is on Settings, not in the Browse bar');
   assert.deepStrictEqual(app.writes(), []);
 });
@@ -97,7 +97,7 @@ test('B9: from a collection opened in Movies, Back and the Movies button both re
   app.el('fWatch').value = 'watched'; app.ctx.renderTable();
   app.ctx.openBrowseCollection(app.browseId('sheridan')); await settle();
   assert.strictEqual(app.el('tabBar').hidden, true, 'still no secondary row in a collection opened from Movies');
-  assert.ok(app.el('viewHead').innerHTML.includes('← Back to Movies'));
+  assert.ok(app.el('viewHead').innerHTML.includes('← Back to All Movies'));
   app.ctx.browseBack(); await settle();
   assert.strictEqual(app.get('activeViewId'), 'allmovies');
   assert.strictEqual(app.el('fWatch').value, 'watched', 'Back puts the filters back');

@@ -283,16 +283,111 @@ function applyViewFilters(tag, values) {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 // Opens a collection. Back returns to where it was opened from: the same view
-// with its filters, or the area's first view when that was a legacy tab (whose
-// loader can write). Opening one collection from another keeps the first origin.
+// with its filters (D3); moving within the Collections area keeps the first origin.
+// It never records the remembered collection (selectCollectionTab does, S2).
 function openBrowseCollection(id) {
-  if (!browseCollectionOf(id)) return;
-  if (!isBrowseCollectionView(activeViewId)) {
-    const safeView = activeViewId && !isBrowseCollectionView(activeViewId) ? activeViewId : null;
-    const filters = safeView ? currentViewFilters(`view:${safeView}`) : {};
-    browseOrigin = { mediaType: activeMediaType, viewId: safeView, filters };
-  }
+  if (!browseCollectionOf(id)) { nextCollectionEntryKind = null; return; }
+  if (!isCollectionsAreaView(activeViewId)) browseOrigin = collectionsOriginFromHere();
   switchView(id);
+}
+
+// Opens a collection as an entry of the given kind (collectionEntry, watchlist.html).
+function openCollectionAs(viewId, kind) {
+  nextCollectionEntryKind = kind;
+  openBrowseCollection(viewId);
+}
+
+// A chooser tab (an explicit choice): remembered on this device (O2), then opened.
+// The open collection's own tab does nothing.
+function selectCollectionTab(collectionId) {
+  const viewId = BROWSE_VIEW_PREFIX + collectionId;
+  if (activeViewId === viewId) return;
+  if (!activeBrowseCollections().some(d => d.collectionId === collectionId)) return;
+  recordLastCollection(collectionId);
+  openCollectionAs(viewId, 'tab');
+}
+
+// ─── The remembered collection (O2, S2) ───────────────────────────────────────
+// One device key holds the id of the collection you last chose. Every storage access is
+// guarded (a throwing localStorage getter included). This visit's memory wins over storage
+// once a save or removal has failed (diverged), and stands in for it when it can't be read.
+// Only a tab choice and the resolution to the remembered collection record it; no fallback does.
+const LAST_COLLECTION_KEY = 'watchlist_last_collection';
+
+function readLastCollection() {
+  const visit = lastCollectionVisit;
+  if (visit.diverged) return visit.id;
+  try {
+    const v = localStorage.getItem(LAST_COLLECTION_KEY);
+    return typeof v === 'string' && v ? v : null;
+  } catch (e) {
+    return visit.known ? visit.id : null;
+  }
+}
+
+function recordLastCollection(collectionId) {
+  let saved = false;
+  try { localStorage.setItem(LAST_COLLECTION_KEY, collectionId); saved = true; } catch (e) { /* this visit only */ }
+  lastCollectionVisit = { known: true, id: collectionId, diverged: !saved };
+}
+
+function forgetLastCollection() {
+  let removed = false;
+  try {
+    const store = localStorage;
+    if (store && typeof store.removeItem === 'function') { store.removeItem(LAST_COLLECTION_KEY); removed = true; }
+  } catch (e) { /* this visit only */ }
+  lastCollectionVisit = { known: true, id: null, diverged: !removed };
+}
+
+// A list that can confirm a collection (or every collection) is gone: read completely, with no
+// newer failed refresh (organization.js orgCollectionsStale).
+function listApplicable() {
+  return orgState === 'ready' && !orgCollectionsStale;
+}
+
+// The Collections state: which collection opens when nothing is chosen yet. Runs only while
+// that state is open, so a late read never navigates away from another area or collection.
+function resolveCollectionsDefault() {
+  if (!isCollectionsStateView() || orgState !== 'ready') return;
+  const list = activeBrowseCollections();
+  const applicable = listApplicable();
+  if (!list.length) {
+    if (applicable) forgetLastCollection(); // "No collections yet." (a stale empty list keeps it)
+    return;
+  }
+  const remembered = readLastCollection();
+  if (remembered && list.some(d => d.collectionId === remembered)) {
+    recordLastCollection(remembered);
+    openCollectionAs(BROWSE_VIEW_PREFIX + remembered, 'remembered');
+    return;
+  }
+  if (remembered) {
+    if (!applicable) return; // stale: can't confirm it is gone; the key is kept (Retry or a tab)
+    openRememberedFallback(list[0]);
+    return;
+  }
+  openCollectionAs(list[0].id, 'default');
+}
+
+// D16: the remembered collection is gone. The first active collection opens (not recorded),
+// the key is removed, and a notice says so.
+function openRememberedFallback(dest) {
+  forgetLastCollection();
+  openCollectionAs(dest.id, 'fallback');
+  const banner = document.getElementById('banner');
+  if (banner) banner.innerHTML = `<div class="banner" role="status">${esc(`Your last collection isn’t available any more; showing ${dest.label}.`)}</div>`;
+}
+
+// The Collections state screen: no list, no list loader; the chooser row says what is happening.
+function renderCollectionsState() {
+  const screen = document.getElementById('settingsScreen');
+  if (screen) { screen.style.display = 'none'; screen.innerHTML = ''; }
+  ['viewHead', 'filtersRow', 'statsRow', 'tbody', 'cardList'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
+  SETTINGS_LIST_CONTAINERS.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  const filtersRow = document.getElementById('filtersRow');
+  if (filtersRow) filtersRow.dataset.tab = '';
+  updateCollectionPanel();
 }
 
 function browseBack() {
@@ -312,32 +407,154 @@ function takeBackNavFilters(viewId) {
   return values;
 }
 
-// The selector: your collections once loaded; while loading, or after a failed
-// load, it says so (with Retry) rather than showing an empty list. Manage and Catalog
-// updates are on Settings since S1 (tabs.js); Settings has no Browse row and only
-// refreshes its counts here.
-function buildBrowseBar() {
+// The Collections chooser (S2; it replaced the Browse row and keeps its container and this
+// name, which every collections publish calls). Drawn only in the Collections area: your
+// active collections as tabs (a complete tabs pattern with manual activation), or a status
+// line while they load, can't be read, are absent or there are none. Settings refreshes its
+// counts here. On the Collections state a published list resolves the default.
+// opts: { hadFocus } focus was in the chooser before the caller changed it; { resolve: false }.
+function buildBrowseBar(opts = {}) {
   const bar = document.getElementById('browseBar');
   if (!bar) return;
-  if (typeof isSettingsView === 'function' && isSettingsView()) { bar.innerHTML = ''; updateSettingsCounts(); return; }
-  const label = `<label class="browse-bar-label" for="browseSelect">Browse collections</label>`;
-  if (orgState !== 'ready') {
-    const text = orgState === 'loading' ? 'Loading collections…' : 'Collections unavailable';
-    const retry = orgState === 'loading' ? '' : ` <button class="btn" onclick="loadOrganization()">Retry</button>`;
-    bar.innerHTML = `${label}
-    <select id="browseSelect" disabled><option value="" selected>${text}</option></select>${retry}`;
-    return;
-  }
+  if (typeof isSettingsView === 'function' && isSettingsView()) { dropChooserFocusIntent(); bar.innerHTML = ''; updateCollectionPanel(); updateSettingsCounts(); return; }
+  if (activeArea !== 'collections') { dropChooserFocusIntent(); bar.innerHTML = ''; updateCollectionPanel(); return; }
+  const hadFocus = !!opts.hadFocus || chooserHasFocus();
+  const focusedId = hadFocus && document.activeElement ? document.activeElement.id : null;
+  bar.innerHTML = collectionsChooserHtml();
+  updateCollectionPanel();
+  const selected = openCollectionTab();
+  if (selected && typeof selected.scrollIntoView === 'function') selected.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (hadFocus) {
+    const target = chooserFocusTarget(focusedId);
+    if (target && typeof target.focus === 'function') { dropChooserFocusIntent(); target.focus(); }
+    // Retry redraws the row as "Loading collections…", which has nothing to focus: keep the intent
+    // for the answer to this load (S2V2-2).
+    else if (orgState === 'loading') armChooserFocusIntent({ seq: orgLoadSeq, epoch: orgEpoch });
+  } else if (chooserFocusIntent) settleChooserFocusIntent();
+  if (opts.resolve !== false && isCollectionsStateView()) resolveCollectionsDefault();
+}
+
+// Focus that was in the chooser when a Retry's load began, held while nothing could take it. When
+// that load answers — its collections published (the selected tab, or Create when there are none),
+// or it failed (Retry) — focus returns to the redrawn chooser, but only if it is still lost: not
+// after it moved elsewhere, after the page lost focus, after leaving Collections (cleared above),
+// or once a newer load or a restore superseded this one.
+// Abandoning it is final: while it is held, focus arriving on any element (a deliberate move;
+// the Retry button's own removal moves focus to no element, so it fires nothing), the page losing
+// focus or the page being hidden cancels it, even if focus or the page comes back before the
+// answer. The listeners exist only while an intent is held.
+let chooserFocusIntent = null; // { seq, epoch }: the load (orgLoadSeq) and restore epoch it waits for
+const CHOOSER_INTENT_CANCELS = [['document', 'focusin'], ['window', 'blur'], ['document', 'visibilitychange']];
+function chooserIntentTarget(where) {
+  const t = where === 'window' ? window : document;
+  return t && typeof t.addEventListener === 'function' && typeof t.removeEventListener === 'function' ? t : null;
+}
+function cancelChooserFocusIntent(event) {
+  if (event && event.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
+  dropChooserFocusIntent();
+}
+function armChooserFocusIntent(intent) {
+  dropChooserFocusIntent();
+  chooserFocusIntent = intent;
+  CHOOSER_INTENT_CANCELS.forEach(([where, type]) => { const t = chooserIntentTarget(where); if (t) t.addEventListener(type, cancelChooserFocusIntent, true); });
+}
+function dropChooserFocusIntent() {
+  if (!chooserFocusIntent) return;
+  chooserFocusIntent = null;
+  CHOOSER_INTENT_CANCELS.forEach(([where, type]) => { const t = chooserIntentTarget(where); if (t) t.removeEventListener(type, cancelChooserFocusIntent, true); });
+}
+function settleChooserFocusIntent() {
+  const intent = chooserFocusIntent;
+  if (intent.epoch !== orgEpoch || intent.seq !== orgLoadSeq) { dropChooserFocusIntent(); return; }
+  const answered = (orgState === 'ready' && orgCollectionsSeq >= intent.seq) || orgState === 'unavailable';
+  if (!answered) return;
+  dropChooserFocusIntent();
+  const active = document.activeElement;
+  const lost = !active || active === document.body || active.isConnected === false;
+  if (!lost || (typeof documentHasFocus === 'function' && !documentHasFocus())) return;
+  const target = chooserFocusTarget(null);
+  if (target && typeof target.focus === 'function') target.focus();
+}
+
+function collectionsChooserHtml() {
+  const status = (text, button = '') => `<p class="collections-state" role="status">${esc(text)}</p>${button}`;
+  const retry = handler => ` <button class="btn collections-retry" id="collectionsRetry" onclick="${handler}()">Retry</button>`;
+  if (orgState === 'loading') return status('Loading collections…');
+  if (orgState === 'absent') return status('Collections aren’t available on this database.');
+  if (orgState !== 'ready') return status('Collections unavailable', retry('loadOrganization'));
   const list = activeBrowseCollections();
-  const activeId = isBrowseCollectionView(activeViewId) ? activeViewId : null;
-  // Stage 3b-2: Manage opens the organization editor (organization-manage.js); after a
-  // failed refresh the list is kept and marked as possibly out of date.
-  const stale = orgCollectionsStale ? ` <span class="browse-stale">Collections may be out of date · <button class="btn" onclick="retryOrgRefresh()">Retry</button></span>` : '';
-  bar.innerHTML = `${label}
-    <select id="browseSelect" onchange="openBrowseCollection(this.value)"${list.length ? '' : ' disabled'}>
-      <option value=""${activeId ? '' : ' selected'}>${list.length ? 'Choose a collection…' : 'No collections yet'}</option>${list.map(c =>
-        `<option value="${esc(c.id)}"${activeId === c.id ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}
-    </select>${stale}`;
+  if (!list.length) {
+    return listApplicable()
+      ? status('No collections yet.', ` <button class="btn btn-link collections-create" id="collectionsCreate" onclick="openSettings(this)">Create one in Settings &amp; Management</button>`)
+      : status('Your collections couldn’t be refreshed, so this may be out of date.', retry('retryOrgRefresh'));
+  }
+  const openId = list.some(d => d.id === activeViewId) ? activeViewId : null;
+  const tabs = list.map((d, i) => {
+    const selected = d.id === openId;
+    const focusable = selected || (!openId && i === 0);
+    return `<button type="button" role="tab" class="tab collection-tab${selected ? ' active' : ''}" id="ctab-${esc(d.collectionId)}" aria-controls="mainContent" aria-selected="${selected}" tabindex="${focusable ? 0 : -1}" onclick="selectCollectionTab('${esc(d.collectionId)}')">${esc(d.label)}</button>`;
+  }).join('');
+  let after = '';
+  if (orgCollectionsStale) {
+    const remembered = isCollectionsStateView() ? readLastCollection() : null;
+    after = remembered && !list.some(d => d.collectionId === remembered)
+      ? status('Your last collection couldn’t be checked because your collections may be out of date. Retry, or choose a collection above.', retry('retryOrgRefresh'))
+      : ` <span class="browse-stale">Collections may be out of date · <button class="btn" id="collectionsRetry" onclick="retryOrgRefresh()">Retry</button></span>`;
+  }
+  return `<div role="tablist" aria-label="Collections" class="collection-tabs" onkeydown="collectionTabsKeydown(event)">${tabs}</div>${after}`;
+}
+
+// The open collection's tab, when it has one (an unavailable collection has none).
+function openCollectionTab() {
+  return isBrowseCollectionView(activeViewId) && orgState === 'ready' && activeBrowseCollections().some(d => d.id === activeViewId)
+    ? document.getElementById(`ctab-${activeViewId.slice(BROWSE_VIEW_PREFIX.length)}`) : null;
+}
+
+function chooserHasFocus() {
+  return focusedContainerOf(['browseBar']) === 'browseBar' && documentHasFocus();
+}
+
+// After a redraw, focus that was in the chooser goes to: Retry again if it was on Retry and Retry is
+// drawn again (a repeated failure); the selected tab; the tab with the same id; the first tab (also
+// when the focused tab was removed); the chooser's Retry / Create; the visible unavailable message;
+// else nowhere.
+function chooserFocusTarget(focusedId) {
+  const firstTab = (() => { const d = orgState === 'ready' ? activeBrowseCollections()[0] : null; return d ? document.getElementById(`ctab-${d.collectionId}`) : null; })();
+  const unavailable = ['collectionUnavailableRow', 'collectionUnavailableCard'].map(id => document.getElementById(id)).find(el => el && isRendered(el)) || null;
+  // A Retry that failed again is drawn again: focus stays on it (S2V2-2).
+  const retryAgain = focusedId === 'collectionsRetry' ? document.getElementById('collectionsRetry') : null;
+  return retryAgain || openCollectionTab() || (focusedId && focusedId.startsWith('ctab-') ? document.getElementById(focusedId) : null) || firstTab
+    || document.getElementById('collectionsRetry') || document.getElementById('collectionsCreate') || unavailable;
+}
+
+// The tab panel (#mainContent) is labelled by the open collection's tab while it has one;
+// otherwise it has no role, so it never names a missing tab.
+function updateCollectionPanel() {
+  const panel = document.getElementById('mainContent');
+  if (!panel) return;
+  const tab = openCollectionTab() ? `ctab-${activeViewId.slice(BROWSE_VIEW_PREFIX.length)}` : null;
+  if (tab) {
+    if (typeof panel.setAttribute === 'function') { panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', tab); }
+  } else if (typeof panel.removeAttribute === 'function') {
+    panel.removeAttribute('role');
+    panel.removeAttribute('aria-labelledby');
+  }
+}
+
+// Arrow keys, Home and End move focus among the tabs (roving tabindex); they never open one
+// (Enter / Space do, as on any button).
+function collectionTabsKeydown(event) {
+  if (!event || !['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+  const tabs = (orgState === 'ready' ? activeBrowseCollections() : []).map(d => document.getElementById(`ctab-${d.collectionId}`)).filter(Boolean);
+  if (!tabs.length) return;
+  const at = tabs.findIndex(t => t === event.target || t === document.activeElement);
+  const step = event.key === 'ArrowRight' ? 1 : -1;
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : at < 0 ? 0 : (at + step + tabs.length) % tabs.length;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  tabs.forEach((t, i) => { t.tabIndex = i === next ? 0 : -1; });
+  if (typeof tabs[next].focus === 'function') tabs[next].focus();
+  // The focused tab is scrolled fully into view within the row (focus() leaves a partly visible one as it is; O-1).
+  if (typeof tabs[next].scrollIntoView === 'function') tabs[next].scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 // The view heading is shown only in a browse view. (Restore has no header button since
@@ -478,13 +695,14 @@ async function loadBrowseView() {
     publishGovernance(governanceCovers(gov, rows, shows));
     let dest = null, members = null;
     if (isCollection) {
-      if (publishCollections(collections, orgRead)) buildBrowseBar();
+      const hadFocus = chooserHasFocus();
+      const published = publishCollections(collections, orgRead);
       const c = collections.find(x => BROWSE_VIEW_PREFIX + x.id === viewId);
       if (!c || c.archived_at) {
-        document.getElementById('viewHead').innerHTML = `<div class="browse-head"><button class="btn browse-back" onclick="browseBack()">← Back</button></div>`;
-        paintBrowseMessage('This collection isn’t available any more.', false);
+        showUnavailableCollection(viewId, hadFocus);
         return true;
       }
+      if (published) buildBrowseBar({ hadFocus });
       dest = browseDestFromCollection(c);
       members = membersOf(memberships, c.id);
     }
@@ -499,6 +717,30 @@ async function loadBrowseView() {
     paintBrowseMessage('Failed to load.', true);
     return false;
   }
+}
+
+// The open collection's own (current) read found it missing or archived (S2). Confirmed gone
+// (an applicable list no longer has it active): an automatic remembered entry gets D16; other
+// entries stay with the message (no redirect) and forget the key only if it names this one.
+function showUnavailableCollection(viewId, hadFocus) {
+  const collectionId = viewId.slice(BROWSE_VIEW_PREFIX.length);
+  const kind = collectionEntry && collectionEntry.viewId === viewId ? collectionEntry.kind : 'tab';
+  const list = orgState === 'ready' ? activeBrowseCollections() : [];
+  const confirmed = listApplicable() && !list.some(d => d.id === viewId);
+  if (kind === 'remembered' && confirmed) {
+    if (list.length) openRememberedFallback(list[0]);
+    else { forgetLastCollection(); switchView(COLLECTIONS_VIEW_ID); }
+    return;
+  }
+  if (confirmed && (kind === 'tab' || kind === 'return') && readLastCollection() === collectionId) forgetLastCollection();
+  const others = list.some(d => d.id !== viewId);
+  const text = `This collection isn’t available any more.${others ? ' Choose another collection above.' : ''}`;
+  const readAgain = kind === 'remembered' ? ` <button class="btn" onclick="loadBrowseView()">Read again</button>` : '';
+  const back = browseBackHtml();
+  document.getElementById('viewHead').innerHTML = back ? `<div class="browse-head">${back}</div>` : '';
+  document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading collection-unavailable" id="collectionUnavailableRow" tabindex="-1" data-unavailable="1">${esc(text)}${readAgain}</td></tr>`;
+  document.getElementById('cardList').innerHTML = `<div class="loading collection-unavailable" id="collectionUnavailableCard" tabindex="-1" data-unavailable="1">${esc(text)}${readAgain}</div>`;
+  buildBrowseBar({ hadFocus, resolve: false });
 }
 
 function paintBrowseMessage(text, withRetry) {
@@ -518,16 +760,22 @@ function browseHeadHtml() {
       <p class="browse-note">Every saved film. Change a film’s status, priority, watched state or watch-with here; ⋯ has its details and more.</p>
     </div>`;
   }
-  const backTo = (browseOrigin ? browseOrigin.mediaType : activeMediaType) === 'movie' ? 'Movies' : 'TV';
-  if (!dest) return `<div class="browse-head"><button class="btn browse-back" onclick="browseBack()">← Back to ${backTo}</button></div>`;
-  const icon = dest.catalog ? COLLECTIONS.find(c => c.id === dest.catalog)?.icon || '' : '';
+  const back = browseBackHtml();
+  if (!dest) return back ? `<div class="browse-head">${back}</div>` : '';
   const notes = [dest.note, `Read-only: the shows and films in your ${dest.label} collection. Change shows in All TV and films in All Movies.`].filter(Boolean);
   return `<div class="browse-head">
-      <button class="btn browse-back" onclick="browseBack()">← Back to ${backTo}</button>
-      <button class="btn btn-link browse-edit-members" onclick="openManage('members', '${esc(dest.collectionId)}', this)">Edit members</button>
-      <h2 class="browse-title">${icon} ${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
+      <h2 class="browse-title">🗂 ${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
+      ${back}
+      <button class="btn btn-link browse-edit-members" onclick="openManage('members', '${esc(dest.collectionId)}', this)">Edit collection</button>
       ${notes.map(n => `<p class="browse-note">${esc(n)}</p>`).join('')}
     </div>`;
+}
+
+// D3: "← Back to <the view the area was entered from>"; no origin, no link.
+function browseBackHtml() {
+  const viewId = browseOrigin && browseOrigin.viewId;
+  const view = viewId ? [...DERIVED_VIEWS, ALL_MOVIES_VIEW].find(v => v.id === viewId) : null;
+  return view ? `<button class="btn browse-back" onclick="browseBack()">← Back to ${esc(view.label)}</button>` : '';
 }
 
 // What a browse view's filter choices are drawn from: every loaded show and film

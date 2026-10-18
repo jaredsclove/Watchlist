@@ -46,7 +46,9 @@ const boot = (data = library(), opts = {}) => createApp({ rows: data.rows, tvSho
 const open = async (app, id) => { app.ctx.openBrowseCollection(id); await settle(); };
 const html = app => app.el('tbody').innerHTML;
 const titles = app => [...html(app).matchAll(/<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
-const options = app => [...app.el('browseBar').innerHTML.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)</g)].map(m => [m[1], m[2]]);
+// S2: the Collections chooser (tabs, valued by collection id), as browse-views.js draws it in the Collections area.
+const chooser = app => app.run('collectionsChooserHtml()');
+const options = app => [...chooser(app).matchAll(/<button type="button" role="tab"[^>]*id="ctab-([^"]+)"[^>]*>([^<]*)</g)].map(m => [`browse:${m[1]}`, m[2]]);
 const writes = app => app.requests.filter(r => r.method !== 'GET');
 const coll = (app, source) => app.store.personal_collections.find(c => c.legacy_source === source);
 
@@ -70,7 +72,7 @@ test('startup: the TV landing view comes first; the selector then lists your col
   const urls = app.requests.map(r => new URL(r.url).pathname.split('/').pop());
   assert.ok(urls.indexOf('watchlist_items') < urls.indexOf('personal_collections'), 'the first view’s read is sent before the organization read');
   assert.strictEqual(app.get('orgState'), 'ready');
-  assert.deepStrictEqual(options(app), [['', 'Choose a collection…'], [B.disney, 'Disney+'], [B.sheridan, 'Sheridan'], [B['90day'], '90 Day'], [B.truecrime, 'True Crime / Docs']]);
+  assert.deepStrictEqual(options(app), [[B.disney, 'Disney+'], [B.sheridan, 'Sheridan'], [B['90day'], '90 Day'], [B.truecrime, 'True Crime / Docs']]);
   assert.strictEqual(writes(app).length, 0);
 });
 
@@ -80,18 +82,18 @@ test('while collections load the selector says so; the current view keeps workin
   const g = app.hold(r => r.url.includes('/personal_collections?'));
   const loading = app.ctx.loadOrganization();
   await g.reached;
-  assert.match(app.el('browseBar').innerHTML, /<select id="browseSelect" disabled><option value="" selected>Loading collections…<\/option>/);
+  assert.match(chooser(app), /<p class="collections-state" role="status">Loading collections…<\/p>/);
   app.ctx.switchView('alltv'); await settle();
   assert.ok(app.el('tbody').innerHTML.includes('Andor'), 'All TV renders while collections are loading');
   g.release(); await loading; await settle();
-  assert.strictEqual(options(app).length, 5);
+  assert.strictEqual(options(app).length, 4);
   app.failNext(r => r.url.includes('/personal_collections?'));
   await app.ctx.loadOrganization(); await settle();
   assert.strictEqual(app.get('orgState'), 'unavailable');
-  assert.match(app.el('browseBar').innerHTML, /Collections unavailable<\/option><\/select> <button class="btn" onclick="loadOrganization\(\)">Retry<\/button>/);
+  assert.match(chooser(app), /Collections unavailable<\/p> <button class="btn collections-retry" id="collectionsRetry" onclick="loadOrganization\(\)">Retry<\/button>/);
   assert.ok(!options(app).some(([v]) => v.startsWith('browse:')));
   await app.ctx.loadOrganization(); await settle();
-  assert.strictEqual(options(app).length, 5);
+  assert.strictEqual(options(app).length, 4);
 });
 
 test('archived collections are hidden; a renamed collection shows its new name and keeps its device layout key; a new one uses its id', async () => {
@@ -102,7 +104,7 @@ test('archived collections are hidden; a renamed collection shows its new name a
   pcs[2].archived_at = TS;
   pcs.push({ id: uuid('0c', 9), name: 'Anime', legacy_source: null, sort_order: 0, archived_at: null, created_at: TS });
   const app = await boot(data, { personalCollections: pcs });
-  assert.deepStrictEqual(options(app).map(o => o[1]), ['Choose a collection…', 'Anime', 'Mouse House', 'Sheridan', 'True Crime / Docs']);
+  assert.deepStrictEqual(options(app).map(o => o[1]), ['Anime', 'Mouse House', 'Sheridan', 'True Crime / Docs']);
   const store = { data: { watchlist_browse_layout_disney: '{"presentation":"seasons","grouping":"combined"}' }, writes: [] };
   app.ctx.localStorage = { getItem: k => store.data[k] ?? null, setItem: (k, v) => { store.writes.push(k); store.data[k] = v; } };
   await open(app, B.disney);
@@ -285,7 +287,7 @@ test('without personal collections: the selector is unavailable (never the stora
   const data = library();
   const app = await boot(data, { org: false });
   assert.strictEqual(app.get('orgState'), 'absent');
-  assert.match(app.el('browseBar').innerHTML, /Collections unavailable/);
+  assert.match(chooser(app), /Collections aren’t available on this database\./); // S2 (I-1)
   app.ctx.openBrowseCollection(B.disney); await settle();
   assert.strictEqual(app.get('activeViewId'), 'watching', 'nothing to open');
   const res = await app.run('buildBackupObject()').then(() => 'made', e => e.message); // not contracted: no file (G8)
@@ -336,7 +338,7 @@ test('a restored-away collection that is still open (or chosen from a stale sele
   app.run(`activeViewId = 'browse:${oldId}'`);
   app.ctx.finishRestoreAndReload(); await settle();
   assert.ok(html(app).includes('This collection isn’t available any more.'));
-  assert.ok(app.el('viewHead').innerHTML.includes('browseBack()'));
+  assert.ok(!app.el('viewHead').innerHTML.includes('browseBack()'), 'S2 (D3): no origin, so no Back link');
   assert.strictEqual(writes(app).filter(r => !r.url.includes('restore_backup')).length, 0);
 });
 
@@ -414,7 +416,7 @@ test('a pre-restore read that finishes before the post-restore read publishes no
   g.release(); await pending; await settle();
   app.store.personal_collections = restored;
   assert.ok(!options(app).some(([v]) => v === `browse:${oldId}`), 'the pre-restore read did not publish: ' + JSON.stringify(options(app)));
-  assert.match(app.el('browseBar').innerHTML, /Loading collections…/);
+  assert.match(chooser(app), /Loading collections…/);
   g2.release(); await settle();
   assert.ok(options(app).some(([v]) => v === `browse:${freshId}`));
 });

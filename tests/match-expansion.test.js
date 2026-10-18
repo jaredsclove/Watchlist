@@ -72,7 +72,7 @@ test('archive markers come only from the fresh read, never from the page’s old
   disney.archived_at = TS;
   select(app, f.legacy.id);
   await app.ctx.confirmTmdbMatch(); await settle();
-  assert.match(panel(app), /<strong>Disney\+<\/strong> \(archived: not shown in Browse\)/);
+  assert.match(panel(app), /<strong>Disney\+<\/strong> \(archived: not shown in Collections\)/);
 });
 
 test('if the fresh read fails, the panel says it couldn’t check archive state and shows no markers (even if the older list had one)', async () => {

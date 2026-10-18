@@ -106,6 +106,8 @@ const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"
   .filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
 const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'renderTable', 'browseBack', 'openBrowseCollection',
   'loadBrowseView', 'switchView', 'switchTab', 'switchMediaType', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
+  // S2: the Collections chooser's tabs and their arrow keys only navigate and move focus (tests/collections-nav.test.js)
+  'selectCollectionTab', 'collectionTabsKeydown',
   // Stage 3b-2: opens the Manage collections dialog (organization only; it never changes tracking — tests/organization-manage.test.js)
   'openManage',
   // a filter pill: sets or clears a filter control and redraws (tests/filter-pills.test.js)
@@ -124,14 +126,16 @@ function assertReadOnlyDom(app) {
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
-test('the app still opens on Currently Watching; Browse collections is offered in TV and in Movies, in the approved order', async () => {
+test('the app still opens on Currently Watching; no Browse row in TV or Movies (S2); the Collections chooser lists them in the approved order', async () => {
   const app = await boot();
   assert.strictEqual(app.get('activeViewId'), 'watching');
   assert.ok(!app.requests.some(r => !r.url.includes('is_film=eq.false') && r.url.includes('/watchlist_items?')), 'boot reads only the TV rows, as before');
-  const opts = () => [...app.el('browseBar').innerHTML.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)</g)].map(m => m[2]);
-  assert.deepStrictEqual(opts(), ['Choose a collection…', 'Disney+', 'Sheridan', '90 Day', 'True Crime / Docs']);
+  const tabs = () => [...app.el('browseBar').innerHTML.matchAll(/role="tab"[^>]*>([^<]*)</g)].map(m => m[1]);
+  assert.strictEqual(app.el('browseBar').innerHTML, '', 'no Browse row in TV');
   app.ctx.switchMediaType('movie'); await settle();
-  assert.deepStrictEqual(opts().slice(1), ['Disney+', 'Sheridan', '90 Day', 'True Crime / Docs']);
+  assert.strictEqual(app.el('browseBar').innerHTML, '', 'no Browse row in Movies');
+  app.ctx.openCollections(null); await settle();
+  assert.deepStrictEqual(tabs(), ['Disney+', 'Sheridan', '90 Day', 'True Crime / Docs']);
 });
 
 test('Movies opens on All Movies; no storage tab is offered or kept (Stage 5); TV still lands on Currently Watching', async () => {
@@ -161,9 +165,9 @@ for (const [id, label, from] of [[B['disney'], 'Disney+', 'tv'], [B['sheridan'],
     assert.strictEqual(app.get('typeof activeTabId'), 'undefined', 'no storage tab state (Stage 5)');
     assert.strictEqual(app.get('browseMedia'), 'all');
     assert.ok(app.el('viewHead').innerHTML.includes(`${label.replace('&', '&amp;')} — All media`));
-    assert.ok(app.el('viewHead').innerHTML.includes(`Back to ${from === 'tv' ? 'TV' : 'Movies'}`));
+    assert.ok(app.el('viewHead').innerHTML.includes(`Back to ${from === 'tv' ? 'Currently Watching' : 'All Movies'}`));
     assert.ok(!/class="tab active"[^>]*switchTab/.test(app.el('tabBar').innerHTML), 'the legacy tab is not marked active');
-    assert.ok(app.el('browseBar').innerHTML.includes(`value="${id}" selected`));
+    assert.ok(new RegExp(`id="ctab-${id.slice('browse:'.length)}" aria-controls="mainContent" aria-selected="true"`).test(app.el('browseBar').innerHTML), 'its tab is selected');
     const reqs = app.requests.slice(before);
     assert.ok(reqs.length >= 2 && reqs.every(r => r.method === 'GET' && r.headers.Range && r.headers.Prefer === 'count=exact'));
     // Stage 3b-1: members come from the stored collections and memberships, read with everything else.
@@ -201,7 +205,7 @@ test('Back returns to the view it came from with its filters', async () => {
   const allTvHtml = html(app);
   await openCol(app, B['sheridan']);
   await openCol(app, B['90day']); // collection to collection keeps the first origin
-  assert.ok(app.el('viewHead').innerHTML.includes('Back to TV'));
+  assert.ok(app.el('viewHead').innerHTML.includes('Back to All TV'));
   app.ctx.browseBack(); await settle();
   assert.strictEqual(app.get('activeViewId'), 'alltv');
   assert.deepStrictEqual(['fSearch', 'fStatus'].map(f => app.el(f).value), ['bear', 'all']);
@@ -711,7 +715,7 @@ test('at phone width the title, Back and media choice stay outside the filters; 
   const f = app.el('filtersRow');
   assert.ok(!f.classList.contains('collapsed'), 'B10 (D10): no collapsed filter panel on phones');
   const inner = f.innerHTML.indexOf('class="filter-line"');
-  assert.ok(app.el('viewHead').innerHTML.includes('browse-title') && app.el('viewHead').innerHTML.includes('Back to TV'));
+  assert.ok(app.el('viewHead').innerHTML.includes('browse-title') && app.el('viewHead').innerHTML.includes('Back to Currently Watching'));
   assert.ok(f.innerHTML.indexOf("setBrowseMedia('tv')") < inner);
   assert.ok(f.innerHTML.indexOf('id="fSearch"') > inner && f.innerHTML.indexOf('id="fSearch"') < f.innerHTML.indexOf('id="filterMore"'));
   assert.deepStrictEqual(cardTitles(app), titles(app));
