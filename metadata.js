@@ -5,9 +5,6 @@
 // converted with (db/b45_expand.sql maps the live database itself, with the owner's
 // recorded choices). Pure; nothing here sends a request.
 
-// The database phase this page writes to (stage5_capabilities().phase).
-const B45_PHASE = 'contracted-b45';
-
 // ── Categories (B4) ──
 const GENRES = ['Action', 'Adventure', 'Comedy', 'Crime', 'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Kids', 'Music',
   'Musical', 'Mystery', 'Politics', 'Romance', 'Science Fiction', 'Thriller', 'War', 'Western'];

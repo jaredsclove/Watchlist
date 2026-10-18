@@ -159,7 +159,7 @@ test('M2 native format 4: converted by the converter column of §7.1 (every old 
 
 test('format 3 → 4 → 5: the conversion record (source format 3, the file’s hash, converter 5.1+b45.1) and the recovery section are preserved verbatim while the archive is active; none once it is retired (RL11)', async () => {
   const lib = oldLibrary();
-  const co = await createApp({ rows: lib.rows, tvShows: lib.shows, stage5: 'coexistence' });
+  const co = await createApp({ rows: lib.rows, tvShows: lib.shows, stage5: null });
   const f3 = await legacyBackupFixture(co, 3);
   for (const archive of ['active', 'retired']) {
     const app = await createApp({ recoveryArchive: archive });
@@ -182,7 +182,7 @@ test('format 3 → 4 → 5: the conversion record (source format 3, the file’s
 
 test('a format-4 file carrying a conversion record and recovery section (made by hand): accepted only when both are what the page writes and the archive is active; otherwise refused in the preview, nothing sent', async () => {
   const lib = oldLibrary();
-  const co = await createApp({ rows: lib.rows, tvShows: lib.shows, stage5: 'coexistence' });
+  const co = await createApp({ rows: lib.rows, tvShows: lib.shows, stage5: null });
   const f3 = await legacyBackupFixture(co, 3);
   const helper = await createApp();
   const sha = 'b'.repeat(64);
@@ -220,7 +220,7 @@ test('a format-4 file carrying a conversion record and recovery section (made by
 // format-4 file (converted 4 → 5) and for a format-5 file carrying the sections.
 test('recovery section: malformed entries and entries not corresponding to the backup are refused in the preview, nothing sent (format 4 and format 5 carrying the sections)', async () => {
   const lib = oldLibrary();
-  const co = await createApp({ rows: lib.rows, tvShows: lib.shows, stage5: 'coexistence' });
+  const co = await createApp({ rows: lib.rows, tvShows: lib.shows, stage5: null });
   const f3 = await legacyBackupFixture(co, 3);
   const helper = await createApp();
   const good = out(helper.ctx.convertFormat3To4(f3, { includeRecovery: true, sourceSha256: 'b'.repeat(64) }).doc);

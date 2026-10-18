@@ -59,12 +59,12 @@ async function stage5Capabilities() {
 }
 
 // Which backup format this page makes and restores: 5, and only on a database in the
-// B4/B5 phase. Any other phase (contracted 5c, coexistence, none, unknown) is refused,
+// B4/B5 phase. Any other phase (an older one, none, unknown) is refused,
 // never guessed: this page makes no format 4 (it would leave out every B4/B5 value).
 async function detectBackupFormat() {
   const cap = await stage5Capabilities();
   if (b45Stopped) throw new Error(STATE_MISMATCH_TEXT + ' No file was made.');
-  if (cap && cap.phase === B45_PHASE) return 5;
+  if (pageMayWrite(cap)) return 5;
   throw new Error('This page makes backups only of a database in its own state (format 5), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
 }
 
@@ -83,7 +83,7 @@ async function loadStage5Capabilities() {
 // format's exact columns (never user_id: a backup is list content, not ownership),
 // and assembles the backup JSON object. Does not write anything.
 // The phase is read before and again after the reads: a database whose phase
-// changed in between (for example a rollback to coexistence) gives no file at all,
+// changed in between (for example a rollback) gives no file at all,
 // never a mix.
 async function buildBackupObject() {
   const formatVersion = await detectBackupFormat();
@@ -103,7 +103,7 @@ async function buildBackupObject() {
     rowCounts[table] = rows.length;
   }
   const after = await stage5Capabilities();
-  if (!after || after.phase !== B45_PHASE || b45Stopped) throw updated;
+  if (!pageMayWrite(after)) throw updated;
   return {
     format: BACKUP_FORMAT,
     formatVersion,
@@ -760,7 +760,7 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
     // converted here first. Never a fallback to another format.
     const phaseCap = await stage5Capabilities();
     if (!restoreSessionLive(session)) return;
-    if (!phaseCap || phaseCap.phase !== B45_PHASE || b45Stopped) {
+    if (!pageMayWrite(phaseCap)) {
       showRestoreModal(`<div class="modal-title">Restore isn't available</div>
         <div class="modal-error">${b45Stopped ? esc(STATE_MISMATCH_TEXT) : phaseCap
           ? 'This page restores only into a database in its own state (format 5), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
@@ -1017,7 +1017,7 @@ async function sendRestore(preRestoreFilename) {
   let sendCap = null;
   try { sendCap = await stage5Capabilities(); } catch (e) { sendCap = null; }
   if (!restoreSessionLive(session) || pendingRestoreData !== backup) return;
-  if (!pageMayWrite(sendCap) || sendCap.phase !== B45_PHASE || backup.formatVersion !== 5 || !pendingRestoreData) {
+  if (!pageMayWrite(sendCap) || backup.formatVersion !== 5 || !pendingRestoreData) {
     showRestoreModal(`<div class="modal-title">Restore not sent</div>
       <div class="modal-error">The database’s update state ${sendCap ? 'changed after this restore was prepared' : 'couldn’t be confirmed'}, so nothing was sent and nothing was changed. Choose the file again to see what restoring it would do now.</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);

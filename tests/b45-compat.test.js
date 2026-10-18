@@ -1,36 +1,24 @@
-// Offline tests for page compatibility around B4/B5 (plan §10.4, C1 / C2), in the whole-page
-// harness:
-//   * C1 forward: the real earlier pages — G8 (aeb9f73) and 5b (f58bed7), exported from this
-//     repository's history into a temporary directory — against the B4/B5 database: a fresh
-//     load writes nothing; an already open page (it cached the 5c phase) is refused by the
-//     stubs and the guards with nothing changed, and its deliberately supported paths
-//     (season watched / skip, delete — the earlier-seasons range cleaned up — watch-with,
-//     org_*) keep working; no backup file; no restore sent;
-//   * C2 reverse: this page after a B4/B5 rollback: a fresh load writes nothing and shows the
-//     state-changed notice instead of lists without the B4/B5 columns; an open page's _b45
-//     call is reported ("doesn’t match"), stops further writes, and is never replaced by an
-//     older name; the unchanged names send exactly the arguments G8 sends; no backup file;
-//     a code scan that this page calls no old name.
-// The server side (request shapes generated from that code; full-table snapshots):
-// db/test/t_b45.sql (C1, RL1/RL2) and tools/db-rehearsal-b45.mjs.
-// Run from the repo root: node tests/b45-compat.test.js (needs git and this repository's history)
+// Offline tests for this page against a database that isn't (or is no longer) B4/B5 (plan
+// §10.4, C2), in the whole-page harness:
+//   * after a B4/B5 rollback: a fresh load writes nothing and shows the state-changed notice
+//     instead of lists without the B4/B5 columns; an open page's _b45 call is reported
+//     ("doesn’t match"), stops further writes, and is never replaced by an older name; the
+//     unchanged names send exactly the arguments the 5c database takes (those of G8,
+//     aeb9f73); no backup file; a code scan that this page calls no old name;
+//   * stop until reload: once a B4/B5 function is missing or a read lacks the B4/B5 columns,
+//     nothing is written, backed up or restored until the page is reloaded, even though the
+//     capability still reads B4/B5.
+// (Batch B retired C1, the earlier releases' own behaviour on the B4/B5 database.)
+// The server side: db/test/t_b45.sql (RL1/RL2) and tools/db-rehearsal-b45.mjs.
+// Run from the repo root: node tests/b45-compat.test.js
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const { execSync } = require('child_process');
 const assert = require('assert');
 const { createApp, runner, settle } = require('./app-harness');
 
 const T = runner('b45-compat');
 const test = T.test;
 const ROOT = path.join(__dirname, '..');
-const OLD = {};
-for (const c of ['aeb9f73', 'f58bed7']) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `watchlist-${c}-`));
-  execSync(`git -C "${ROOT}" archive ${c} | tar -x -C "${dir}"`, { stdio: ['ignore', 'ignore', 'inherit'] });
-  OLD[c] = dir;
-}
-process.on('exit', () => { for (const d of Object.values(OLD)) fs.rmSync(d, { recursive: true, force: true }); });
 
 const TS = '2026-10-01T00:00:00+00:00';
 let n = 0;
@@ -49,80 +37,6 @@ function library() {
 const writes = app => app.writes().map(r => `${r.method} ${r.url.split('/rest/v1/')[1].split('?')[0]}`);
 const state = app => JSON.stringify([app.store.watchlist_items, app.store.tv_shows, app.store.collection_memberships, app.store.watch_with_choices, app.store.personal_collections]);
 const banners = app => ['phaseBanner', 'banner', 'errorBanner', 'noticeBanner'].map(id => (app.el(id) || {}).innerHTML || '').join(' ').replace(/<[^>]+>/g, ' ');
-const lastAnswer = async app => { const r = app.requests.at(-1); return r; };
-
-// ─── C1: earlier pages on the B4/B5 database ──────────────────────────────────
-for (const [c, label] of [['aeb9f73', 'G8'], ['f58bed7', '5b']]) {
-  test(`C1 (${label} ${c}) fresh load on B4/B5: the phase isn’t one it writes to, so it refuses every write before sending; no backup file`, async () => {
-    const lib = library();
-    const app = await createApp({ rows: lib.rows, tvShows: lib.shows, source: OLD[c] }); // the B4/B5 database (default)
-    assert.strictEqual(app.get('stage5Phase'), null);
-    app.ctx.switchView('alltv'); await settle();
-    const before = state(app);
-    await app.ctx.setShowStatusById(lib.sev.id, 'complete'); await settle();
-    await app.ctx.toggleWatch(lib.s1.id); await settle();
-    await app.ctx.setSeasonSkipped(lib.s3.id, true); await settle();
-    const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
-    assert.notStrictEqual(res, 'made', 'no backup file');
-    assert.deepStrictEqual(writes(app), [], 'nothing sent');
-    assert.strictEqual(state(app), before);
-  });
-
-  test(`C1 (${label} ${c}) already open when B4/B5 is installed: the stubs and guards refuse with nothing changed; season watched / skip, delete (range cleaned up), watch-with and org_* keep working`, async () => {
-    const lib = library();
-    const app = await createApp({ rows: lib.rows, tvShows: lib.shows, source: OLD[c], stage5: 'contracted' });
-    app.ctx.switchView('alltv'); await settle();
-    assert.strictEqual(app.get('stage5Phase'), 'contracted', 'the page cached the 5c phase');
-    app.migrateB45();
-    // The owner set an earlier-seasons range on the B4/B5 page meanwhile (S1, boundary S2).
-    Object.assign(app.store.tv_shows[0], { resume_start_season_id: lib.s1.id, resume_end_season_id: lib.s2.id });
-    // Refused: set_show_status (stub), a film's status and watched (guard).
-    for (const [what, run, re] of [
-      ['set_show_status', () => app.ctx.setShowStatusById(lib.sev.id, 'complete'), /client_outdated|out of date/i],
-      ['film status PATCH', async () => { app.ctx.switchMediaType('movie'); await settle(); return app.ctx.setStatus(lib.film.id, 'watching', null); }, /library_write_required|library functions/i],
-      ['film watched PATCH', () => app.ctx.toggleWatch(lib.film.id), /library_write_required|library functions/i]
-    ]) {
-      const before = state(app);
-      const sent = app.requests.length;
-      await run(); await settle();
-      const answers = app.requests.slice(sent).filter(r => r.method !== 'GET');
-      assert.strictEqual(answers.length, 1, `${what}: one request`);
-      assert.strictEqual(state(app), before, `${what}: nothing changed`);
-      assert.match(banners(app) + (app.el('tbody').innerHTML || ''), re, what);
-    }
-    // The old library functions are stubs (as an open old page would call them).
-    for (const fn of ['library_add_seasons', 'library_create_show', 'library_add_films', 'library_create_film', 'library_match_season', 'library_match_film', 'library_catalog_apply']) {
-      const before = state(app);
-      const r = await (await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/rpc/${fn}`, { method: 'POST', headers: {}, body: '{}' })).json();
-      assert.match(r.message, /^client_outdated:/, fn);
-      assert.strictEqual(state(app), before, fn);
-    }
-    // Supported: season watched and skip, watch-with, a membership; then deleting the range's start.
-    app.ctx.switchMediaType('tv'); await settle(); app.ctx.switchView('alltv'); await settle();
-    await app.ctx.toggleWatch(lib.s3.id); await settle();
-    assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s3.id).watched, true, 'set_season_watched');
-    await app.ctx.setSeasonSkipped(lib.s3.id, true); await settle();
-    assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s3.id).skipped, true, 'set_season_skipped');
-    app.ctx.switchMediaType('movie'); await settle();
-    await app.ctx.toggleWatchWith(lib.film.id, 'Rina', true); await settle();
-    assert.deepStrictEqual(app.store.watchlist_items.find(r => r.id === lib.film.id).watch_with, ['Rina'], 'watch-with PATCH');
-    const col = app.store.personal_collections[0];
-    const m = await (await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/rpc/org_add_membership`, { method: 'POST', headers: {}, body: JSON.stringify({ p_collection_id: col.id, p_show_id: lib.sev.id, p_item_id: null }) })).json();
-    assert.ok(m && !m.code, 'org_* works');
-    const showBefore = { ...app.store.tv_shows[0] };
-    app.ctx.switchMediaType('tv'); await settle(); app.ctx.switchView('alltv'); await settle();
-    app.ctx.confirm = () => true;
-    await app.ctx.delRowInView(lib.s1.id); await settle();
-    assert.ok(!app.store.watchlist_items.some(r => r.id === lib.s1.id), 'delete_tv_season works');
-    const after = app.store.tv_shows[0];
-    assert.deepStrictEqual([after.resume_start_season_id, after.resume_end_season_id], [null, null], 'the range naming it is cleared');
-    for (const k of Object.keys(showBefore)) if (!k.startsWith('resume_')) assert.deepStrictEqual(after[k], showBefore[k], `show ${k} unchanged`);
-    // No backup file once the database is B4/B5; a restore isn’t sent.
-    const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
-    assert.notStrictEqual(res, 'made');
-    assert.ok(!app.requests.some(r => r.url.endsWith('/rpc/restore_backup')));
-  });
-}
 
 // ─── C2: this page after a B4/B5 rollback ─────────────────────────────────────
 test('C2 fresh load on the rolled-back (5c) database: no list without the B4/B5 columns (the state-changed notice instead), no edit offered, every write refused before sending', async () => {
@@ -156,32 +70,33 @@ test('C2 open page when B4/B5 is rolled back: a _b45 call answers 404 → “Thi
   assert.match(app.el('tbody').innerHTML + banners(app), /This page and the database don’t match/);
 });
 
-test('C2 unchanged names on 5c: an open B page sends exactly the arguments G8 sends (set_season_watched, set_season_skipped, delete_tv_season, watch-with PATCH), and they succeed', async () => {
+test('C2 unchanged names on 5c: an open page sends exactly the arguments the 5c database takes (set_season_watched, set_season_skipped, delete_tv_season, watch-with PATCH; as G8 sends them), and they succeed', async () => {
   // Each view was loaded before the rollback committed (a view read afterwards shows the notice instead).
-  const run = async (who, mediaType, ops) => {
-    n = 0; // identical ids in both libraries
+  const run = async (mediaType, ops) => {
     const lib = library();
-    const app = await createApp({ rows: lib.rows, tvShows: lib.shows, ...(who === 'g8' ? { source: OLD.aeb9f73, stage5: 'contracted' } : {}) });
+    const app = await createApp({ rows: lib.rows, tvShows: lib.shows });
     if (mediaType === 'movie') { app.ctx.switchMediaType('movie'); await settle(); } else { app.ctx.switchView('alltv'); await settle(); }
-    if (who === 'b45') app.rollbackB45();
+    app.rollbackB45();
     app.ctx.confirm = () => true;
     await ops(app, lib);
-    assert.ok(!/does not exist|schema cache|client_outdated|library_write_required/.test(banners(app)), `${who}: ${banners(app)}`);
-    return { shapes: app.writes().map(r => [r.method, r.url.split('/rest/v1/')[1], JSON.stringify(r.body)]), store: app.store };
+    assert.ok(!/does not exist|schema cache|client_outdated|library_write_required/.test(banners(app)), banners(app));
+    return { lib, shapes: app.writes().map(r => [r.method, r.url.split('/rest/v1/')[1], r.body]), store: app.store };
   };
-  const tvOps = async (app, lib) => {
+  const tv = await run('tv', async (app, lib) => {
     await app.ctx.toggleWatch(lib.s1.id); await settle();
     await app.ctx.setSeasonSkipped(lib.s3.id, true); await settle();
     await app.ctx.delRowInView(lib.s2.id); await settle();
-  };
-  const filmOps = async (app, lib) => { await app.ctx.toggleWatchWith(lib.film.id, 'Rina', true); await settle(); };
-  const [bTv, gTv, bFilm, gFilm] = [await run('b45', 'tv', tvOps), await run('g8', 'tv', tvOps), await run('b45', 'movie', filmOps), await run('g8', 'movie', filmOps)];
-  assert.deepStrictEqual(bTv.shapes, gTv.shapes);
-  assert.deepStrictEqual(bFilm.shapes, gFilm.shapes);
-  assert.deepStrictEqual(bTv.shapes.concat(bFilm.shapes).map(x => x[1].split('?')[0]), ['rpc/set_season_watched', 'rpc/set_season_skipped', 'rpc/delete_tv_season', 'watchlist_items']);
-  const s1 = bTv.store.watchlist_items.find(r => r.season === 'Season 1'), s3 = bTv.store.watchlist_items.find(r => r.season === 'Season 3');
-  assert.deepStrictEqual([s1.watched, s3.skipped, bTv.store.watchlist_items.some(r => r.season === 'Season 2')], [true, true, false], 'they succeeded');
-  assert.deepStrictEqual(bFilm.store.watchlist_items.find(r => r.title === 'Dune').watch_with, ['Rina']);
+  });
+  assert.deepStrictEqual(tv.shapes, [
+    ['POST', 'rpc/set_season_watched', { p_row_id: tv.lib.s1.id, p_watched: true }],
+    ['POST', 'rpc/set_season_skipped', { p_row_id: tv.lib.s3.id, p_skipped: true }],
+    ['POST', 'rpc/delete_tv_season', { p_row_id: tv.lib.s2.id }]
+  ]);
+  const film = await run('movie', async (app, lib) => { await app.ctx.toggleWatchWith(lib.film.id, 'Rina', true); await settle(); });
+  assert.deepStrictEqual(film.shapes, [['PATCH', `watchlist_items?id=eq.${film.lib.film.id}`, { watch_with: ['Rina'] }]]);
+  const s1 = tv.store.watchlist_items.find(r => r.season === 'Season 1'), s3 = tv.store.watchlist_items.find(r => r.season === 'Season 3');
+  assert.deepStrictEqual([s1.watched, s3.skipped, tv.store.watchlist_items.some(r => r.season === 'Season 2')], [true, true, false], 'they succeeded');
+  assert.deepStrictEqual(film.store.watchlist_items.find(r => r.title === 'Dune').watch_with, ['Rina']);
 });
 
 // ─── GA-1 review 4: stop until reload ─────────────────────────────────────────

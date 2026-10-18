@@ -690,13 +690,7 @@ test('a show by hand named like an unmatched show: pointed out first, nothing se
     await app.ctx.libraryManualShow(); await settle(); // the explicit choice
     const [call] = rpc(app, 'library_create_show_b45');
     assert.deepStrictEqual(Array.from(call.body.p_show.distinct_from), [local.id], `${phase}: the unmatched record the page showed`);
-    if (phase === 'coexistence') {
-      // Until contraction the database still keeps one unmatched show per name where new shows are stored (a 5a limitation).
-      assert.match(outcome(app), /already on your list, so nothing was added/);
-      assert.strictEqual(app.store.tv_shows.filter(s => s.title === 'Local Show').length, 1);
-    } else {
-      assert.strictEqual(app.store.tv_shows.filter(s => s.title === 'Local Show').length, 2, 'a separate show, on request');
-    }
+    assert.strictEqual(app.store.tv_shows.filter(s => s.title === 'Local Show').length, 2, 'a separate show, on request');
   }
   const app = await boot();
   await allTv(app);

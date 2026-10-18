@@ -1,9 +1,9 @@
 // The page writes only to a database whose phase it has read (stage5_capabilities):
-// the B4/B5 phase (contracted-b45). Any other phase authorizes nothing; an unknown one
-// is read again (GET) once before a write. The refusal is raised before anything is
+// the B4/B5 phase, B45_PHASE. Any other phase (an older one, an unknown one, none)
+// authorizes nothing; a phase not read yet is read again (GET) once before a write. The refusal is raised before anything is
 // sent and is formatted as a database refusal (code update_required), so every caller
 // reports that nothing was changed.
-const STAGE5_WRITABLE_PHASES = ['contracted-b45'];
+const B45_PHASE = 'contracted-b45';
 const STATE_MISMATCH_TEXT = 'This page and the database don’t match (the database may have been updated or rolled back), so nothing was changed. Reload the page.';
 // Once a B4/B5 function is missing or a read lacks the B4/B5 columns, this page stops writing
 // (and makes no backup or restore) until it is reloaded. A later capability read that still
@@ -18,14 +18,14 @@ function stopB45Writes() {
 }
 // Whether this page may write to a database whose capability reads cap.
 function pageMayWrite(cap) {
-  return !b45Stopped && !!cap && STAGE5_WRITABLE_PHASES.includes(cap.phase);
+  return !b45Stopped && !!cap && cap.phase === B45_PHASE;
 }
 function stage5Refusal(text) {
   return new Error(`Supabase error 412: ${JSON.stringify({ code: 'P0001', details: null, hint: null, message: `update_required: ${text}` })}`);
 }
 async function requireWritablePhase() {
   if (b45Stopped) throw stage5Refusal(STATE_MISMATCH_TEXT);
-  if (STAGE5_WRITABLE_PHASES.includes(stage5Phase)) return stage5Phase;
+  if (stage5Phase === B45_PHASE) return stage5Phase;
   let cap;
   try { cap = await stage5Capabilities(); }
   catch (e) { throw stage5Refusal('The database’s update state couldn’t be read, so nothing was changed. Try again.'); }
