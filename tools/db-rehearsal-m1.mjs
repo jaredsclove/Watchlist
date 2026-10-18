@@ -10,6 +10,9 @@
 //   iso   a second member (B, with the same library under new ids) and a non-member (C):
 //         reads, inserts, updates, deletes, forged owners, cross-owner links and functions
 //         against the other library's ids; restore isolation both ways; B4/B5 self-checks as A;
+//   adm   the admin restore runbook (tools/admin-restore.mjs): the SQL export as a member validates;
+//         check refuses an invalid file and an identity-stripping file (no override); the restore
+//         SQL refuses a wrong destination; a restore as A leaves B unchanged and verifies;
 //   rev   test-environment reverse (db/test/m1_reverse.sql) gives back the exact pre-M1 state.
 // Nothing here touches Supabase. PGlite is one session: lock waits, two concurrent runs and the
 // run label in pg_stat_activity need real connections (tools/db-rehearsal-m1-pg.sh).
@@ -20,6 +23,8 @@ import path from 'path';
 import vm from 'vm';
 import crypto from 'crypto';
 import { createRequire } from 'module';
+import os from 'os';
+import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -307,6 +312,51 @@ const tb45 = await attempt(() => db.transaction(async tx => {
   return tx.exec(sql('db/test/_prelude.sql') + sql('db/test/t_b45.sql'));
 }));
 ok(tb45.ok, 'db/test/t_b45.sql (as postgres with A’s claims): its checks pass', tb45.message);
+
+section('adm: the admin restore runbook');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm1adm-'));
+  const tool = (...args) => { try { return { ok: true, out: execFileSync(process.execPath, [path.join(ROOT, 'tools/admin-restore.mjs'), ...args], { encoding: 'utf8' }) }; }
+    catch (e) { return { ok: false, out: String(e.stdout || '') + String(e.stderr || '') }; } };
+  const runSql = async text => { const r = await tryExec(db, text); return r; };
+  const exportAs = async owner => {
+    const r = await runSql(tool('export-sql', '--owner', owner).out);
+    const row = r.ok && r.out.map(x => x.rows && x.rows[0] && x.rows[0].backup).find(Boolean);
+    return row || null;
+  };
+  try {
+    const safetyText = await exportAs(A);
+    ok(!!safetyText, 'the export SQL runs read-only as A', '');
+    fs.writeFileSync(path.join(dir, 'safety.json'), safetyText);
+    const safety = JSON.parse(safetyText);
+    ok(validate(safety).length === 0 && safety.tables.watchlist_items.length === counts0.watchlist_items, 'A’s exported safety backup validates with the page’s rules and holds A’s rows only', validate(safety).join('\n'));
+    const bExport = JSON.parse(await exportAs(B));
+    ok(bExport.tables.watchlist_items.every(r => !safety.tables.watchlist_items.some(x => x.id === r.id)), 'B’s export holds none of A’s rows');
+    fs.writeFileSync(path.join(dir, 'file.json'), JSON.stringify(doc));
+    const good = tool('check', '--file', path.join(dir, 'file.json'), '--safety', path.join(dir, 'safety.json'));
+    ok(good.ok && /OK/.test(good.out), 'check: the backup file passes against the fresh safety backup', good.out);
+    // A valid file whose TV seasons have lost their TMDB identity (the legacy shape: all three empty).
+    const stripped = JSON.parse(JSON.stringify(doc));
+    stripped.tables.watchlist_items.forEach(r => { if (r.media_type === 'tv') { r.media_type = null; r.tmdb_id = null; r.season_number = null; } });
+    fs.writeFileSync(path.join(dir, 'stripped.json'), JSON.stringify(stripped));
+    const loss = tool('check', '--file', path.join(dir, 'stripped.json'), '--safety', path.join(dir, 'safety.json'));
+    ok(!loss.ok && /REFUSED[\s\S]*discard TMDB identity/.test(loss.out), 'check refuses a file that would strip identities (no override)', loss.out.slice(-600));
+    fs.writeFileSync(path.join(dir, 'invalid.json'), JSON.stringify({ format: 'watchlist-tracker-backup', formatVersion: 5 }));
+    const inv = tool('check', '--file', path.join(dir, 'invalid.json'), '--safety', path.join(dir, 'safety.json'));
+    ok(!inv.ok && /REFUSED|doesn’t validate/.test(inv.out), 'check refuses an invalid file', inv.out.slice(0, 300));
+    const sB = await rowsFor(db, B), sA = await rowsFor(db, A);
+    const wrong = await runSql(tool('restore-sql', '--file', path.join(dir, 'file.json'), '--owner', A, '--email', 'b@test.invalid', '--run', 'adm-run-1').out);
+    ok(!wrong.ok && /is not the account/.test(wrong.message) && same(sA, await rowsFor(db, A)), 'the restore SQL refuses a wrong destination; nothing changed', wrong.message);
+    const right = await runSql(tool('restore-sql', '--file', path.join(dir, 'file.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'adm-run-2').out);
+    ok(right.ok, 'the restore SQL restores as A', right.message);
+    ok(same(sB, await rowsFor(db, B)), 'B’s library is unchanged by the admin restore');
+    fs.writeFileSync(path.join(dir, 'after.json'), await exportAs(A));
+    const ver = tool('verify', '--file', path.join(dir, 'file.json'), '--after', path.join(dir, 'after.json'));
+    ok(ver.ok && /VERIFIED/.test(ver.out), 'verify: the export after the restore equals the file, field by field', ver.out);
+    const badVer = tool('verify', '--file', path.join(dir, 'stripped.json'), '--after', path.join(dir, 'after.json'));
+    ok(!badVer.ok && /DIFFERENT/.test(badVer.out), 'verify reports a difference');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
 
 section('rev: test-environment reverse');
 if (fs.existsSync(path.join(ROOT, 'db/test/m1_reverse.sql'))) {
