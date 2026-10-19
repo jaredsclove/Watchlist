@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M1 isolation test</title>
+<!--
+  M1 hosted pass (plan §8, §12 Phase B2): two members and an anonymous caller against the TEMPORARY test
+  project, after db/m1_access.sql. Synthetic data only. The person running it types both test users' passwords
+  here; nothing is pre-filled or stored; tokens stay in memory and are never shown.
+  * Locked to one project ref (from the untracked tools/m1-isolation-test.local.js, template
+    m1-isolation-test.local.example.js); refuses production's ref and key (../config.js) and every request
+    outside the test project.
+  * Serve it from 127.0.0.1 only, from the repo root (so ../config.js and ../vendor/ resolve); the synthetic
+    libraries (tools/m1-synthetic-library.mjs, seeds 1 and 2) are read from the paths in the local config.
+  * Output: pass/fail, counts and sanitized error text; never record contents or tokens.
+-->
+<script src="../vendor/supabase-js-2.117.2.umd.js"></script>
+<script src="../config.js"></script>
+<script src="m1-isolation-test.local.js"></script>
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --ok: #1a7f37; --bad: #c62828; --line: #e5e5ea; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161618; --fg: #f2f2f7; --muted: #a1a1a6; --ok: #4cc26b; --bad: #ff6b6b; --line: #2c2c2e; } }
+  :root[data-theme="dark"] { --bg: #161618; --fg: #f2f2f7; --muted: #a1a1a6; --ok: #4cc26b; --bad: #ff6b6b; --line: #2c2c2e; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.45 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; }
+  main { max-width: 900px; margin: 0 auto; } h1 { font-size: 18px; margin: 0 0 6px; } p { color: var(--muted); }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 10px; padding: 10px; }
+  label { display: block; margin: 4px 0; } input { width: 100%; max-width: 360px; padding: 6px; box-sizing: border-box; }
+  button { padding: 8px 14px; font-size: 14px; margin: 4px 6px 4px 0; }
+  .row { padding: 3px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .info { color: var(--muted); } #summary { font-weight: 600; margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+<h1>M1 isolation test — temporary test project</h1>
+<div id="config" class="row"></div>
+<p>Test project only. Enter both test users’ credentials; nothing is saved. Tokens stay in this page’s memory and are never shown.</p>
+<form id="f" autocomplete="off">
+  <fieldset><legend>Member A (owns the migrated synthetic library)</legend>
+    <label>Email <input id="ae" type="email" autocomplete="off" required></label>
+    <label>Password <input id="ap" type="password" autocomplete="new-password" required></label>
+  </fieldset>
+  <fieldset><legend>Member B</legend>
+    <label>Email <input id="be" type="email" autocomplete="off" required></label>
+    <label>Password <input id="bp" type="password" autocomplete="new-password" required></label>
+  </fieldset>
+  <button id="run" type="submit">Sign in both and run</button>
+  <button id="rerunB" type="button" disabled>Recheck B (after its membership is removed)</button>
+</form>
+<div id="summary"></div>
+<div id="log"></div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const CFG = window.M1_ISOLATION_TEST_CONFIG || null;
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  function configProblem() {
+    if (!CFG) return 'Missing tools/m1-isolation-test.local.js (copy the .example file and fill it in).';
+    if (typeof SUPABASE_URL !== 'string' || typeof SUPABASE_KEY !== 'string') return 'Could not load ../config.js, so production can’t be ruled out.';
+    if (!/^[a-z0-9]{20}$/.test(CFG.projectRef || '')) return 'projectRef must be the 20-character test project ref.';
+    if (!/^sb_publishable_[A-Za-z0-9_-]+$/.test(CFG.publishableKey || '')) return 'publishableKey must be the test project’s sb_publishable_ key.';
+    if (!UUID.test(CFG.userA || '') || !UUID.test(CFG.userB || '') || CFG.userA === CFG.userB) return 'userA and userB must be two different user ids.';
+    if (SUPABASE_URL.includes(CFG.projectRef) || CFG.publishableKey === SUPABASE_KEY) return 'These are PRODUCTION values. Refusing to run.';
+    if (!CFG.syntheticA || !CFG.syntheticB) return 'syntheticA and syntheticB (paths of the two synthetic libraries) are required.';
+    if (!['127.0.0.1', 'localhost'].includes(location.hostname)) return 'Serve this page from 127.0.0.1 only.';
+    return null;
+  }
+  const PROBLEM = configProblem();
+  const configEl = document.getElementById('config');
+  if (PROBLEM) { configEl.className = 'row bad'; configEl.textContent = 'Not configured: ' + PROBLEM; document.getElementById('run').disabled = true; return; }
+  const TEST_URL = 'https://' + CFG.projectRef + '.supabase.co', KEY = CFG.publishableKey, A = CFG.userA, B = CFG.userB;
+  const mask = v => '…' + String(v).slice(-4);
+  configEl.className = 'row info';
+  configEl.textContent = `Configured: test project ${mask(CFG.projectRef)} (not production), members A ${mask(A)} and B ${mask(B)}.`;
+
+  const TABLES = ['watchlist_items', 'tv_shows', 'custom_collections', 'personal_collections', 'collection_memberships', 'watch_with_choices', 'catalog_show_links', 'catalog_film_links'];
+  const VIEWS = ['library_catalog_shows', 'library_catalog_films', 'library_collection_catalogs', 'library_collection_presentation', 'library_film_theme_kinds'];
+  const logEl = document.getElementById('log'), sumEl = document.getElementById('summary');
+  let passed = 0, failed = 0;
+  const scrub = s => String(s || '').replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[token]').replace(/Bearer\s+\S+/gi, 'Bearer [token]').slice(0, 300);
+  const line = (cls, text) => { const d = document.createElement('div'); d.className = 'row ' + cls; d.textContent = text; logEl.appendChild(d); };
+  async function test(name, fn) {
+    try { await fn(); passed++; line('ok', 'PASS  ' + name); } catch (e) { failed++; line('bad', 'FAIL  ' + name + ' — ' + scrub(e && e.message)); }
+    sumEl.textContent = `${passed} passed, ${failed} failed`;
+  }
+  const assert = (c, m) => { if (!c) throw new Error(m); };
+
+  // Every request goes to the test project, or is refused.
+  async function api(token, method, path, body, extra = {}) {
+    const url = `${TEST_URL}/${path}`;
+    if (!url.startsWith(TEST_URL + '/')) throw new Error('refused request outside the test project');
+    const res = await fetch(url, { method, headers: { apikey: KEY, Authorization: `Bearer ${token || KEY}`, 'Content-Type': 'application/json', Prefer: 'return=representation', ...extra },
+      body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await res.text();
+    let json = null; try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
+    return { status: res.status, ok: res.ok, json, text };
+  }
+  const rest = (t, m, p, b, x) => api(t, m, `rest/v1/${p}`, b, x);
+  const rpc = (t, fn, args) => rest(t, 'POST', `rpc/${fn}`, args);
+  const denied = r => !r.ok && (r.status === 401 || r.status === 403 || /42501|permission denied|PGRST30\d/.test(r.text));
+  async function rows(token, table) {
+    const r = await rest(token, 'GET', `${table}?select=*&order=id.asc`);
+    if (!r.ok) throw new Error(`${table}: ${r.status} ${r.text}`);
+    return r.json;
+  }
+  async function fingerprint(token) {
+    const parts = [];
+    for (const t of TABLES) parts.push(t + ':' + JSON.stringify((await rows(token, t)).map(r => JSON.stringify(r)).sort()));
+    const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(parts.join('|')));
+    return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+  function client() {
+    return supabase.createClient(TEST_URL, KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'm1-isolation-unused' } });
+  }
+
+  let tokB = null;
+  async function run(ev) {
+    ev.preventDefault();
+    logEl.textContent = ''; passed = failed = 0;
+    const [ea, pa, eb, pb] = ['ae', 'ap', 'be', 'bp'].map(id => document.getElementById(id).value);
+    document.getElementById('ap').value = ''; document.getElementById('bp').value = '';
+    const ca = client(), cb = client();
+    const sa = await ca.auth.signInWithPassword({ email: ea, password: pa });
+    const sb = await cb.auth.signInWithPassword({ email: eb, password: pb });
+    if (sa.error || sb.error) { line('bad', 'Sign-in failed: ' + scrub((sa.error || sb.error).message)); return; }
+    const tokA = sa.data.session.access_token; tokB = sb.data.session.access_token;
+    await test('the two sessions are members A and B', async () => assert(sa.data.user.id === A && sb.data.user.id === B, 'unexpected user ids'));
+    const [fileA, fileB] = await Promise.all([CFG.syntheticA, CFG.syntheticB].map(p => fetch(p).then(r => r.json())));
+
+    // Anonymous caller (the publishable key alone)
+    for (const t of TABLES.concat(VIEWS)) await test(`anon: read ${t} is refused`, async () => { const r = await rest(null, 'GET', `${t}?select=*&limit=1`); assert(denied(r), `${r.status} ${r.text}`); });
+    await test('anon: insert is refused', async () => { const r = await rest(null, 'POST', 'custom_collections', [{ name: 'zz anon' }]); assert(denied(r), `${r.status} ${r.text}`); });
+    await test('anon: delete is refused', async () => { const r = await rest(null, 'DELETE', 'watchlist_items?id=not.is.null'); assert(denied(r), `${r.status} ${r.text}`); });
+    for (const fn of ['stage5_capabilities', 'org_capabilities']) await test(`anon: rpc ${fn} is refused`, async () => { const r = await rest(null, 'GET', `rpc/${fn}`); assert(denied(r) || r.status === 404, `${r.status} ${r.text}`); });
+    await test('anon: rpc restore_backup is refused', async () => { const r = await rpc(null, 'restore_backup', { p_backup: fileA, p_allow_v1_reset: false }); assert(denied(r) || r.status === 404, `${r.status} ${r.text}`); });
+    await test('anon: GraphQL sees no app table', async () => {
+      const r = await api(null, 'POST', 'graphql/v1', { query: '{ watchlist_itemsCollection(first: 1) { edges { node { id } } } }' });
+      assert(!JSON.stringify(r.json || {}).includes('"node"'), `${r.status} ${r.text.slice(0, 200)}`);
+    });
+    await test('the private schema (recovery archive) isn’t reachable through the API, even for a member', async () => {
+      const r = await rest(tokA, 'GET', 'stage5_recovery_records?select=*&limit=1', undefined, { 'Accept-Profile': 'private' });
+      assert(!r.ok, `${r.status} ${r.text}`);
+    });
+
+    // Set-up: B's own synthetic library (restored by B, as the page would)
+    if ((await rows(tokB, 'tv_shows')).length === 0) {
+      await test('B restores B’s synthetic library', async () => { const r = await rpc(tokB, 'restore_backup', { p_backup: fileB, p_allow_v1_reset: false }); assert(r.ok, `${r.status} ${r.text}`); });
+    }
+    const capA = (await rest(tokA, 'GET', 'rpc/stage5_capabilities')).json;
+    await test('members see the signed-in capability (access = members)', async () => assert(capA && capA.access === 'members', JSON.stringify(capA)));
+
+    // Reads: each member sees only their own rows
+    for (const t of TABLES) await test(`${t}: A sees only A’s rows, B only B’s`, async () => {
+      const ra = await rows(tokA, t), rb = await rows(tokB, t);
+      assert(ra.every(r => r.user_id === undefined || r.user_id === A) && rb.every(r => r.user_id === undefined || r.user_id === B), 'a row of the other member is visible');
+      const ids = new Set(ra.map(r => r.id)); assert(!rb.some(r => ids.has(r.id)), 'shared ids');
+      if (['watchlist_items', 'tv_shows'].includes(t)) assert(ra.length > 0 && rb.length > 0, `counts A ${ra.length}, B ${rb.length}`);
+    });
+    const aItems = await rows(tokA, 'watchlist_items'), aShows = await rows(tokA, 'tv_shows'), aColls = await rows(tokA, 'personal_collections'), bColls = await rows(tokB, 'personal_collections');
+    const aFilm = aItems.find(r => r.is_film), aSeason = aItems.find(r => !r.is_film);
+    for (const v of VIEWS) await test(`view ${v}: B sees none of A’s ids`, async () => {
+      const r = await rest(tokB, 'GET', `${v}?select=id&id=in.(${[aFilm.id, aShows[0].id, aColls[0].id].join(',')})`);
+      assert(r.ok && r.json.length === 0, `${r.status} ${r.text}`);
+    });
+
+    // Cross-member writes by B against A's known ids
+    const fpA0 = await fingerprint(tokA), fpB0 = await fingerprint(tokB);
+    await test('B: update of A’s show changes nothing', async () => { const r = await rest(tokB, 'PATCH', `tv_shows?id=eq.${aShows[0].id}`, { title: 'zz' }); assert(!r.ok || r.json.length === 0, `${r.status} ${r.text}`); });
+    await test('B: delete of A’s film changes nothing', async () => { const r = await rest(tokB, 'DELETE', `watchlist_items?id=eq.${aFilm.id}`); assert(!r.ok || r.json.length === 0, `${r.status} ${r.text}`); });
+    await test('B: an insert naming A as owner is refused', async () => { const r = await rest(tokB, 'POST', 'custom_collections', [{ name: 'zz forged', user_id: A }]); assert(!r.ok, `${r.status} ${r.text}`); });
+    await test('B: adding A’s show to B’s collection is refused', async () => { const r = await rpc(tokB, 'org_add_membership', { p_collection_id: bColls[0].id, p_show_id: aShows[0].id, p_item_id: null }); assert(!r.ok || /"ok":\s*false|refus|not found/i.test(r.text), `${r.status} ${r.text}`); });
+    await test('B: renaming A’s collection is refused', async () => { const r = await rpc(tokB, 'org_rename_collection', { p_id: aColls[0].id, p_expected_name: aColls[0].name, p_name: 'zz' }); assert(!r.ok || /"ok":\s*false|refus|not found/i.test(r.text), `${r.status} ${r.text}`); });
+    await test('B: setting A’s film state is refused', async () => { const r = await rpc(tokB, 'library_set_film_state_b45', { p_item_id: aFilm.id, p_expected: {}, p_changes: { priority: 'high' } }); assert(!r.ok || /"ok":\s*false|refus|not found/i.test(r.text), `${r.status} ${r.text}`); });
+    await test('B: deleting A’s season is refused', async () => { const r = await rpc(tokB, 'delete_tv_season', { p_row_id: aSeason.id }); assert(!r.ok || /"ok":\s*false|refus|not found|false/i.test(r.text), `${r.status} ${r.text}`); });
+    await test('both libraries are unchanged by B’s attempts', async () => assert(fpA0 === await fingerprint(tokA) && fpB0 === await fingerprint(tokB), 'a library changed'));
+
+    // Restore isolation
+    await test('B restoring A’s file is refused, nothing changed', async () => {
+      const r = await rpc(tokB, 'restore_backup', { p_backup: fileA, p_allow_v1_reset: false });
+      assert(!r.ok, `${r.status} ${r.text}`);
+      assert(fpA0 === await fingerprint(tokA) && fpB0 === await fingerprint(tokB), 'a library changed');
+    });
+    await test('A restores A’s file; B’s library is unchanged', async () => {
+      const r = await rpc(tokA, 'restore_backup', { p_backup: fileA, p_allow_v1_reset: false });
+      assert(r.ok, `${r.status} ${r.text}`);
+      assert(fpB0 === await fingerprint(tokB), 'B changed');
+    });
+    document.getElementById('rerunB').disabled = false;
+    line('info', 'Done. For the membership-removal check: remove B from private.library_members in the SQL Editor, then press “Recheck B” (B’s token is still valid).');
+  }
+  async function recheckB() {
+    await test('B, no longer a member, with a still-valid token: reads empty, writes refused', async () => {
+      const t = await rows(tokB, 'tv_shows');
+      const w = await rpc(tokB, 'org_create_collection', { p_id: crypto.randomUUID(), p_name: 'zz after removal' });
+      assert(t.length === 0 && !w.ok && /not_a_member/.test(w.text), `rows ${t.length}; write ${w.status} ${w.text}`);
+    });
+  }
+  document.getElementById('f').addEventListener('submit', e => { run(e).catch(err => line('bad', 'Stopped: ' + scrub(err && err.message))); });
+  document.getElementById('rerunB').addEventListener('click', () => recheckB().catch(err => line('bad', 'Stopped: ' + scrub(err && err.message))));
+})();
+</script>
+</body>
+</html>
