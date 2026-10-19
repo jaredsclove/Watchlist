@@ -1206,6 +1206,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   // a separate client (the page's current-password check) gets its own session, never the page's.
   app.password = 'harness password 1';
   app.accountEmail = app.session ? app.session.user.email : 'owner@test.invalid';
+  app.requireCurrent = true; // the project setting "Require current password when updating" (A1)
   const fakeSupabase = { createClient: (url, key, opts = {}) => {
     const probe = opts.auth && opts.auth.storageKey === 'watchlist-password-check';
     let own = null;
@@ -1222,6 +1223,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       },
       updateUser: async a => {
         app.authCalls.push(['updateUser', { password: a.password ? '(new)' : null, current_password: a.current_password === app.password ? '(right)' : '(wrong)' }]);
+        if (app.requireCurrent && !a.current_password) return { data: {}, error: { message: 'Current password required when setting new password.', code: 'current_password_required' } };
         if (app.requireCurrent && a.current_password !== app.password) return { data: {}, error: { message: 'Current password required when setting new password.', code: 'current_password_mismatch' } };
         app.password = a.password;
         return { data: { user: app.session && app.session.user }, error: null };
