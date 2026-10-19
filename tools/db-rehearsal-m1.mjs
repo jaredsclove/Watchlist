@@ -360,7 +360,7 @@ section('adm: the admin restore runbook');
     ok((await capOf(A)).member === true && (await capOf(B)).member === true && (await capOf(C)).member === false, 'the capability reports membership (A, B members; C not)');
     const cExport = await runSql(tool('export-sql', '--owner', C).out);
     ok(!cExport.ok && /is not a member now/.test(cExport.message), 'the member export refuses a non-member (no empty backup)', cExport.message || 'exported');
-    // Removing member B: owner export filtered to B, then the guarded removal.
+    // Removing member B: the owner export, filtered to B (deleting the library is deferred from M1).
     const ownerExport = async who => { const r = await runSql(tool('export-owner-sql', '--user', who).out); return r.ok ? r.out.map(x => x.rows && x.rows[0] && x.rows[0].backup).find(Boolean) : null; };
     const bText = await ownerExport(B);
     ok(!!bText, 'the owner export runs read-only as postgres');
@@ -371,27 +371,6 @@ section('adm: the admin restore runbook');
     for (const t of Object.keys(bDoc.tables)) bCounts[t] = Number(await val(db, `select count(*) from public.${t} where user_id = $1`, [B]));
     ok(validate(bDoc).length === 0 && Object.values(bDoc.tables).flat().every(r => !aIdsAll.has(r.id)) && same(bCounts, bDoc.rowCounts) && bDoc.tables.watchlist_items.length > 0,
       'the owner export holds exactly B’s rows (none of A’s), with B’s counts', validate(bDoc).join('; '));
-    const stillMember = await runSql(tool('remove-sql', '--user', B, '--file', path.join(dir, 'b-owner.json')).out);
-    ok(!stillMember.ok && /still a member/.test(stillMember.message), 'removal refuses while B is a member', stillMember.message || 'removed');
-    await db.exec(`delete from private.library_members where user_id = '${B}'`);
-    const stale = JSON.parse(bText); stale.tables.custom_collections = stale.tables.custom_collections.slice(1); stale.rowCounts.custom_collections = stale.tables.custom_collections.length;
-    fs.writeFileSync(path.join(dir, 'b-stale.json'), JSON.stringify(stale));
-    const staleRun = await runSql(tool('remove-sql', '--user', B, '--file', path.join(dir, 'b-stale.json')).out);
-    ok(!staleRun.ok && /no longer matches the export/.test(staleRun.message), 'removal refuses when the library no longer matches the export', staleRun.message || 'removed');
-    await db.exec(`begin; select set_config('watchlist.library_write', 'on', true);
-      insert into private.stage5_recovery_meta (user_id, origin, counts, hashes) values ('${B}', 'contraction', '{}'::jsonb, '{}'::jsonb); commit;`);
-    const bBefore = await rowsFor(db, B);
-    const archived = await runSql(tool('remove-sql', '--user', B, '--file', path.join(dir, 'b-owner.json')).out);
-    ok(!archived.ok && /recovery-archive rows/.test(archived.message) && same(bBefore, await rowsFor(db, B))
-      && Number(await val(db, `select count(*) from private.stage5_recovery_meta where user_id = $1`, [B])) === 1,
-      'removal refuses, changing nothing, while B has recovery-archive rows (not in any export)', archived.message || 'removed');
-    await db.exec(`begin; select set_config('watchlist.library_write', 'on', true);
-      delete from private.stage5_recovery_meta where user_id = '${B}'; commit;`);
-    const aBefore = await rowsFor(db, A);
-    const removed = await runSql(tool('remove-sql', '--user', B, '--file', path.join(dir, 'b-owner.json')).out);
-    let bLeft = 0; for (const [sc, t] of OWNED) bLeft += Number(await val(db, `select count(*) from ${sc}.${t} where user_id = $1`, [B]));
-    ok(removed.ok && bLeft === 0 && same(aBefore, await rowsFor(db, A)), 'removal deletes only B’s rows; A unchanged', removed.message);
-    await db.exec(`insert into private.library_members (user_id, note) values ('${B}', 'rehearsal B')`);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 

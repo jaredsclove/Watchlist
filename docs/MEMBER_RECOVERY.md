@@ -49,24 +49,18 @@ The order matters. Membership is restored only once no access token issued befor
 
 ## Removing a member
 
-The library is exported as the database owner (it needs no membership, so access is never reopened for the
-account), and is deleted only if it still matches that export exactly.
+Disabling the membership is what removes access. Deleting the library itself is **deferred** (not part of M1): its
+rows stay in place, and no account can read or change them.
 
 1. **Disable membership** (step 1 above) and **end their sessions** (steps 2–3 above).
 2. **Export their library as the owner:** `node tools/admin-restore.mjs export-owner-sql --user <id>` prints a
-   read-only query that reads only that account's rows, all in one snapshot. Run it and save the value as a
-   `.json` file.
+   read-only query that reads only that account's rows, all in one snapshot. It needs no membership, so access is
+   never reopened for the account. Run it and save the value as a `.json` file.
    - Never use the member export for this: it refuses a non-member, because a non-member reads no rows.
-3. **Check the file:** `node tools/admin-restore.mjs check --file <export> --safety <export>` must print OK.
-   - Its row counts are the account's counts in that snapshot.
-   - Keep the file (give it to the person if they want it).
-4. **Delete the library:** `node tools/admin-restore.mjs remove-sql --user <id> --file <export>` prints one
-   transaction, which refuses (changing nothing) while the account is a member, or unless every table still holds
-   exactly the export's counts for that account. It then deletes only that account's rows. Run it.
-   - It also refuses if the account has rows in the recovery archive (`private.stage5_recovery_*`). Those are not
-     in any backup or export, so deleting them is a separate decision for the owner; stop there.
-5. **Delete the Auth user** in the dashboard. That works only once their rows are gone: deleting a login never
-   deletes a library.
+3. **Check the file:** `node tools/admin-restore.mjs check --file <export> --safety <export>` must print OK. Keep the
+   file (give it to the person if they want it).
+4. **Leave the Auth user in place**, with its sessions ended. Deleting a login never deletes a library, and the user
+   can't be deleted while their rows remain.
 
 ## The owner
 
