@@ -49,8 +49,9 @@ The order matters. Membership is restored only once no access token issued befor
 
 ## Removing a member
 
-Disabling the membership is what removes access. Deleting the library itself is **deferred** (not part of M1): its
-rows stay in place, and no account can read or change them.
+Disabling the membership is what removes access. Deleting the library itself is **deferred** (not part of M1). The
+rows remain inaccessible through the application while membership is disabled, and remain available for authorized
+administrative access.
 
 1. **Disable membership** (step 1 above) and **end their sessions** (steps 2–3 above).
 2. **Export their library as the owner:** `node tools/admin-restore.mjs export-owner-sql --user <id>` prints a
