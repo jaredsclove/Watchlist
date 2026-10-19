@@ -27,42 +27,82 @@ const createCollection = (app, name = 'ZZ New') => app.run(`runWrite('Create col
 const notes = (storage, user = HARNESS_USER) => JSON.parse(storage.getItem(userKeyOf('watchlist_pending_writes', user)) || '{}');
 
 // ─── Boot and sign-in ─────────────────────────────────────────────────────────
-test('no saved session: the sign-in screen, no request at all; the library is hidden', async () => {
+test('no saved session: the sign-in screen (email and password, the ask-the-owner line), no request at all', async () => {
   const app = await createApp({ ...lib(1), session: null });
   assert.deepStrictEqual(app.requests, [], 'nothing is read before sign-in');
-  assert.match(app.el('authScreen').innerHTML, /Sign in to Watchlist[\s\S]*Send code/);
+  const html = app.el('authScreen').innerHTML;
+  assert.match(html, /Sign in to Watchlist[\s\S]*type="email" autocomplete="email"[\s\S]*type="password" autocomplete="current-password"[\s\S]*Forgot your password\? Ask the library owner to reset it\./);
+  assert.doesNotMatch(html, /code|Send code/i, 'no emailed code');
   assert.strictEqual(app.get('pageUser'), null);
 });
 
-test('sign-in: the email gets a code (never creating an account), the code signs in, then the library is read with the session’s token', async () => {
+test('sign-in with email and password; the field is cleared; the library is read with the session’s token', async () => {
   const app = await createApp({ ...lib(1), session: null });
   app.el('authEmail').value = 'owner@test.invalid';
-  await app.ctx.submitSignInEmail(); await settle();
-  assert.strictEqual(JSON.stringify(app.authCalls[0]), JSON.stringify(['otp', { email: 'owner@test.invalid', options: { shouldCreateUser: false } }]));
-  assert.match(app.el('authScreen').innerHTML, /Enter your sign-in code/);
-  app.session = session();
-  app.el('authCode').value = '123456';
-  await app.ctx.submitSignInCode(); await settle(50);
-  assert.strictEqual(JSON.stringify(app.authCalls[1]), JSON.stringify(['verify', { email: 'owner@test.invalid', token: '123456', type: 'email' }]));
+  app.el('authPassword').value = 'harness password 1';
+  await app.ctx.submitSignIn(); await settle(50);
+  assert.strictEqual(JSON.stringify(app.authCalls[0]), JSON.stringify(['signin', { email: 'owner@test.invalid', password: '(right)' }]));
+  assert.strictEqual(app.el('authPassword') ? app.el('authPassword').value : '', '', 'the password field is emptied');
   assert.strictEqual(JSON.parse(app.get('JSON.stringify(pageUser)')).id, HARNESS_USER);
   assert.ok(app.requests.length > 1, 'the library is read');
-  assert.ok(app.requests.every(r => r.headers.Authorization === 'Bearer harness-token'), 'every request carries the session token, never the publishable key');
+  assert.ok(app.requests.every(r => r.headers.Authorization === 'Bearer harness-token'), 'every request carries the session token');
   assert.strictEqual(app.el('authScreen').innerHTML, '');
 });
 
-test('a wrong code or a rate limit: a sentence, still signed out, nothing read', async () => {
+test('a wrong password or an unknown email: one generic sentence (never which); a rate limit: its own sentence; nothing read', async () => {
   const app = await createApp({ ...lib(1), session: null });
-  app.el('authEmail').value = 'owner@test.invalid';
-  await app.ctx.submitSignInEmail(); await settle();
-  app.verifyResult = { data: {}, error: { message: 'Token has expired or is invalid' } };
-  app.el('authCode').value = '000000';
-  await app.ctx.submitSignInCode(); await settle();
-  assert.match(app.el('authScreen').innerHTML, /didn’t work or has expired/);
-  app.otpResult = { data: {}, error: { message: 'For security purposes, you can only request this after 51 seconds.' } };
-  app.ctx.signInBack(); app.el('authEmail').value = 'owner@test.invalid';
-  await app.ctx.submitSignInEmail(); await settle();
-  assert.match(app.el('authScreen').innerHTML, /Too many requests for a code/);
+  for (const [email, pw] of [['owner@test.invalid', 'wrong'], ['nobody@test.invalid', 'harness password 1']]) {
+    app.el('authEmail').value = email; app.el('authPassword').value = pw;
+    await app.ctx.submitSignIn(); await settle();
+    assert.match(app.el('authScreen').innerHTML, /That email and password didn’t match an account\./);
+  }
+  app.signInError = { message: 'Request rate limit reached', code: 'over_request_rate_limit' };
+  app.el('authEmail').value = 'owner@test.invalid'; app.el('authPassword').value = 'harness password 1';
+  await app.ctx.submitSignIn(); await settle();
+  assert.match(app.el('authScreen').innerHTML, /Too many sign-in attempts just now/);
   assert.deepStrictEqual(app.requests, []);
+});
+
+test('nothing typed is kept: no password in storage, page state or the sign-in screen', async () => {
+  const storage = memStorage();
+  const app = await createApp({ ...lib(1), session: null, storage });
+  app.el('authEmail').value = 'owner@test.invalid'; app.el('authPassword').value = 'harness password 1';
+  await app.ctx.submitSignIn(); await settle(50);
+  assert.ok(![...storage.m.values()].some(v => v.includes('harness password 1')), 'not in storage');
+  assert.ok(!JSON.stringify(app.get('signInState')).includes('harness password 1'), 'not in page state');
+});
+
+test('Change password: the current password is checked (a separate, unsaved sign-in, signed out at once) and sent; a wrong one changes nothing', async () => {
+  const app = await createApp({ ...lib(1) });
+  app.requireCurrent = true;
+  app.ctx.openSettings(null);
+  const fill = (cur, a, b) => { app.el('accountCurrentPassword').value = cur; app.el('accountNewPassword').value = a; app.el('accountNewPassword2').value = b; };
+  fill('wrong current', 'a brand new password', 'a brand new password');
+  await app.ctx.changePassword(); await settle();
+  assert.match(app.el('settingsAccountNote').textContent, /current password isn’t right\. Nothing was changed\./);
+  assert.ok(!app.authCalls.some(c => c[0] === 'updateUser'), 'not sent');
+  fill('harness password 1', 'too short', 'too short');
+  await app.ctx.changePassword(); await settle();
+  assert.match(app.el('settingsAccountNote').textContent, /at least 12 characters/);
+  fill('harness password 1', 'a brand new password', 'a different one entirely');
+  await app.ctx.changePassword(); await settle();
+  assert.match(app.el('settingsAccountNote').textContent, /don’t match/);
+  fill('harness password 1', 'a brand new password', 'a brand new password');
+  await app.ctx.changePassword(); await settle();
+  assert.match(app.el('settingsAccountNote').textContent, /Your password has been changed/);
+  assert.strictEqual(JSON.stringify(app.authCalls.filter(c => c[0] === 'updateUser').pop()), JSON.stringify(['updateUser', { password: '(new)', current_password: '(right)' }]));
+  assert.ok(app.authCalls.some(c => c[0] === 'probe-signOut'), 'the check sign-in is signed out at once');
+  assert.ok(app.session, 'the page stays signed in');
+  ['accountCurrentPassword', 'accountNewPassword', 'accountNewPassword2'].forEach(id => assert.strictEqual(app.el(id).value, '', `${id} emptied`));
+});
+
+test('Sign out other devices: scope others; this page stays signed in', async () => {
+  const app = await createApp({ ...lib(1) });
+  app.ctx.openSettings(null);
+  await app.ctx.signOutOtherDevices(); await settle();
+  assert.strictEqual(JSON.stringify(app.authCalls.find(c => c[0] === 'signOut')), JSON.stringify(['signOut', { scope: 'others' }]));
+  assert.ok(app.session && !app.get('authStopped'));
+  assert.match(app.el('settingsAccountNote').textContent, /Every other device and browser/);
 });
 
 test('a database not in the signed-in state (no access = members): its notice; only the capability is read', async () => {
@@ -201,10 +241,10 @@ test('sign out: this device only (scope local), refused while a change is out', 
   assert.strictEqual(app.reloadCount, 1);
 });
 
-test('Settings shows the account and Sign out', async () => {
+test('Settings shows the account, Sign out, Sign out other devices and Change password', async () => {
   const app = await createApp({ ...lib(1) });
   app.ctx.openSettings(null);
-  assert.match(app.el('settingsScreen').innerHTML, /Signed in as <strong>owner@test\.invalid<\/strong>[\s\S]*Sign out on this device/);
+  assert.match(app.el('settingsScreen').innerHTML, /Signed in as <strong>owner@test\.invalid<\/strong>[\s\S]*Sign out on this device[\s\S]*Sign out other devices[\s\S]*Change password/);
 });
 
 // ─── Restore with no answer ───────────────────────────────────────────────────
