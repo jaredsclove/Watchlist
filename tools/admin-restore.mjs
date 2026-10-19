@@ -11,10 +11,6 @@
 //       For removing a member (docs/MEMBER_RECOVERY.md): the same document, read by the database owner
 //       (postgres) and filtered to that account on every table, in one repeatable-read snapshot. It needs no
 //       membership, so it never reopens access to the account. Its rowCounts are that snapshot's counts.
-//   node tools/admin-restore.mjs remove-sql --user <id> --file <the owner export>
-//       Prints the removal transaction: it refuses while the account is a member or unless every table still
-//       holds exactly the export's row counts for that account, or while it has recovery-archive rows (not in any
-//       export), then deletes that account's library rows (only).
 //   node tools/admin-restore.mjs check --file <backup.json> --safety <safety.json> [--out <converted.json>]
 //       The page's checks, refusing as the page refuses: the file and the safety backup
 //       validate; a format-3 or -4 file is converted exactly as the page converts it (written
@@ -86,7 +82,7 @@ rollback;`);
   const user = opt('--user');
   if (!UUID.test(user || '')) die('--user <auth user id>');
   const where = ` where user_id = '${user}'`;
-  console.log(`-- Removing a member, step 3: export that account's library as the database owner, filtered to it on every
+  console.log(`-- Removing a member, step 2: export that account's library as the database owner, filtered to it on every
 -- table. Read-only, one snapshot; needs no membership. Save the value as a .json file, check it, keep it.
 begin isolation level repeatable read read only;
 do $$ begin
@@ -95,51 +91,6 @@ do $$ begin
 end $$;
 ${DOC(where)}
 rollback;`);
-} else if (cmd === 'remove-sql') {
-  const user = opt('--user'), f = readDoc(opt('--file'));
-  if (!UUID.test(user || '')) die('--user <auth user id> --file <the owner export>');
-  const errs = arr(P('validateBackupObject')(f.doc));
-  if (f.doc.formatVersion !== 5 || errs.length) die(`the export doesn’t validate: ${errs.join('; ')}`, 1);
-  const checks = spec5.tables.map(t => `    or (select count(*) from public.${t} where user_id = '${user}') <> ${Number(f.doc.rowCounts[t])}`).join('\n');
-  console.log(`-- Removing a member, step 5: delete that account's library (only). Run only after its export (sha256 ${f.sha256}) was
--- saved and checked, with the membership disabled and the sessions ended. Refuses, changing nothing, otherwise.
-begin;
-set local lock_timeout = '10s';
-lock table public.tv_shows, public.watchlist_items, public.personal_collections, public.collection_memberships,
-  public.watch_with_choices, public.custom_collections, public.catalog_show_links, public.catalog_film_links,
-  private.stage5_recovery_records, private.stage5_recovery_collections, private.stage5_recovery_othertv,
-  private.stage5_recovery_meta, private.library_members in exclusive mode;
-do $$ begin
-  if exists (select 1 from private.library_members where user_id = '${user}') then raise exception 'remove: ${user} is still a member; nothing was changed'; end if;
-  if false
-${checks} then
-    raise exception 'remove: the library no longer matches the export''s row counts; export again; nothing was changed';
-  end if;
-  -- The recovery archive isn't part of a backup or this export, so it is never deleted here.
-  if exists (select 1 from private.stage5_recovery_records where user_id = '${user}')
-     or exists (select 1 from private.stage5_recovery_collections where user_id = '${user}')
-     or exists (select 1 from private.stage5_recovery_othertv where user_id = '${user}')
-     or exists (select 1 from private.stage5_recovery_meta where user_id = '${user}') then
-    raise exception 'remove: ${user} has recovery-archive rows, which the export does not hold; nothing was changed';
-  end if;
-end $$;
-select set_config('watchlist.library_write', 'on', true);
-delete from public.collection_memberships where user_id = '${user}';
-update public.tv_shows set resume_start_season_id = null, resume_end_season_id = null where user_id = '${user}' and resume_start_season_id is not null;
-delete from public.watchlist_items where user_id = '${user}';
-delete from public.tv_shows where user_id = '${user}';
-delete from public.personal_collections where user_id = '${user}';
-delete from public.watch_with_choices where user_id = '${user}';
-delete from public.custom_collections where user_id = '${user}';
-do $$ begin
-  if exists (select 1 from public.watchlist_items where user_id = '${user}') or exists (select 1 from public.tv_shows where user_id = '${user}')
-     or exists (select 1 from public.personal_collections where user_id = '${user}') or exists (select 1 from public.custom_collections where user_id = '${user}')
-     or exists (select 1 from public.watch_with_choices where user_id = '${user}') or exists (select 1 from public.collection_memberships where user_id = '${user}') then
-    raise exception 'remove: rows remain; nothing was changed';
-  end if;
-end $$;
-select 'REMOVED|${user}' as result;
-commit;`);
 } else if (cmd === 'check') {
   const f = readDoc(opt('--file')), s = readDoc(opt('--safety'));
   const problems = [];
@@ -226,5 +177,5 @@ commit;`);
   if (errors.length) { console.log(`DIFFERENT:\n  - ${errors.join('\n  - ')}`); process.exit(1); }
   console.log(`VERIFIED — every table and field equals the file (sha256 ${f.sha256})`);
 } else {
-  die('usage: node tools/admin-restore.mjs export-sql | check | restore-sql | verify (see the header)');
+  die('usage: node tools/admin-restore.mjs export-sql | export-owner-sql | check | restore-sql | verify (see the header)');
 }
