@@ -27,7 +27,7 @@ let authStopped = false; // an account change or sign-out: nothing more is sent 
 let authAckPending = false; // the account changed while an outcome was unknown: waiting for "I understand"
 let pageNotes = new Set(); // ids of the pending notes this page wrote and hasn't seen answered
 let pageNoteSeq = 0;
-let signInState = { step: 'email', email: '', busy: false, message: '' };
+let signInState = { email: '', busy: false, message: '' };
 
 function authClient() {
   if (!authClientInstance) {
@@ -164,7 +164,7 @@ function sessionLost() {
   if (el) el.innerHTML = `<div class="error-banner">⚠️ Your sign-in has ended, so changes are refused until you sign in again. Nothing was sent. <button class="btn" onclick="openSignInAgain()">Sign in again</button></div>`;
 }
 function openSignInAgain() {
-  signInState = { step: 'email', email: pageUser ? pageUser.email || '' : '', busy: false, message: '', again: true };
+  signInState = { email: pageUser ? pageUser.email || '' : '', busy: false, message: '', again: true };
   showAuthOverlay(signInHtml());
 }
 
@@ -175,33 +175,28 @@ function onAuthEvent(event, session) {
   if (session && session.user && session.user.id === pageUser.id && !authStopped) {
     const el = document.getElementById('phaseBanner');
     if (el && /Sign in again/.test(el.textContent || '')) el.innerHTML = '';
-    if (signInState.again) { signInState = { step: 'email', email: '', busy: false, message: '' }; hideAuthOverlay(); }
+    if (signInState.again) { signInState = { email: '', busy: false, message: '' }; hideAuthOverlay(); }
   }
 }
 
 function reloadPage() { if (typeof location !== 'undefined' && typeof location.reload === 'function') location.reload(); }
 
-// ── Sign-in screen (email, then the code from the email) ──
+// ── Sign-in screen (email and password; amendment A1) ──
+// Accounts are created by the library owner (no public sign-up). A forgotten password is reset by the owner
+// (docs/MEMBER_RECOVERY.md); no email is involved. Nothing typed here is stored or logged.
 function signInHtml() {
   const s = signInState;
   const msg = s.message ? `<p class="auth-message" role="alert">${esc(s.message)}</p>` : '';
-  if (s.step === 'code') {
-    return `<div class="modal-title" id="authTitle">Enter your sign-in code</div>
-      <p class="settings-text">We emailed a code to ${esc(s.email)}. It stays valid for a while; a new request replaces it.</p>${msg}
-      <form onsubmit="event.preventDefault(); submitSignInCode()">
-        <label class="auth-label" for="authCode">Code</label>
-        <input id="authCode" class="auth-input" inputmode="numeric" autocomplete="one-time-code" maxlength="10" ${s.busy ? 'disabled' : ''}>
-        <div class="modal-actions"><button class="btn" type="button" onclick="signInBack()" ${s.busy ? 'disabled' : ''}>Use another email</button>
-        <button class="btn btn-accent" type="submit" ${s.busy ? 'disabled' : ''}>${s.busy ? 'Checking…' : 'Sign in'}</button></div>
-      </form>`;
-  }
   return `<div class="modal-title" id="authTitle">${s.again ? 'Sign in again' : 'Sign in to Watchlist'}</div>
-    <p class="settings-text">Enter your email and we’ll send you a sign-in code. Only invited accounts can sign in.</p>${msg}
-    <form onsubmit="event.preventDefault(); submitSignInEmail()">
+    <p class="settings-text">Only accounts the library owner created can sign in.</p>${msg}
+    <form onsubmit="event.preventDefault(); submitSignIn()">
       <label class="auth-label" for="authEmail">Email</label>
       <input id="authEmail" class="auth-input" type="email" autocomplete="email" value="${esc(s.email)}" ${s.busy ? 'disabled' : ''}>
-      <div class="modal-actions"><button class="btn btn-accent" type="submit" ${s.busy ? 'disabled' : ''}>${s.busy ? 'Sending…' : 'Send code'}</button></div>
-    </form>`;
+      <label class="auth-label" for="authPassword">Password</label>
+      <input id="authPassword" class="auth-input" type="password" autocomplete="current-password" ${s.busy ? 'disabled' : ''}>
+      <div class="modal-actions"><button class="btn btn-accent" type="submit" ${s.busy ? 'disabled' : ''}>${s.busy ? 'Signing in…' : 'Sign in'}</button></div>
+    </form>
+    <p class="settings-text auth-help">Forgot your password? Ask the library owner to reset it.</p>`;
 }
 function renderSignIn() {
   if (signInState.again || pageUser) { showAuthOverlay(signInHtml()); return; }
@@ -209,41 +204,31 @@ function renderSignIn() {
   if (el) { el.innerHTML = `<div class="auth-box" role="dialog" aria-labelledby="authTitle">${signInHtml()}</div>`; focusFirstAuthInput(); }
 }
 function focusFirstAuthInput() {
-  const el = document.getElementById(signInState.step === 'code' ? 'authCode' : 'authEmail');
+  const el = document.getElementById(signInState.email ? 'authPassword' : 'authEmail');
   if (el && typeof el.focus === 'function') el.focus();
 }
-async function submitSignInEmail() {
-  const input = document.getElementById('authEmail');
-  const email = String(input ? input.value : '').trim();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { signInState.message = 'Enter a valid email address.'; renderSignIn(); return; }
+async function submitSignIn() {
+  const emailEl = document.getElementById('authEmail'), pwEl = document.getElementById('authPassword');
+  const email = String(emailEl ? emailEl.value : '').trim();
+  const password = String(pwEl ? pwEl.value : '');
+  if (pwEl) pwEl.value = '';
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !password) { signInState.email = email; signInState.message = 'Enter your email and password.'; renderSignIn(); return; }
   signInState = { ...signInState, email, busy: true, message: '' }; renderSignIn();
-  let error = null;
-  try { ({ error } = await authClient().auth.signInWithOtp({ email, options: { shouldCreateUser: false } })); } catch (e) { error = e; }
-  signInState.busy = false;
-  if (error) { signInState.message = signInErrorText(error); renderSignIn(); return; }
-  signInState.step = 'code'; signInState.message = ''; renderSignIn();
-}
-async function submitSignInCode() {
-  const input = document.getElementById('authCode');
-  const token = String(input ? input.value : '').replace(/\s+/g, '');
-  if (!/^\d{6,10}$/.test(token)) { signInState.message = 'Enter the code from the email.'; renderSignIn(); return; }
-  signInState.busy = true; signInState.message = ''; renderSignIn();
   let res = null;
-  try { res = await authClient().auth.verifyOtp({ email: signInState.email, token, type: 'email' }); } catch (e) { res = { error: e }; }
+  try { res = await authClient().auth.signInWithPassword({ email, password }); } catch (e) { res = { error: e }; }
   signInState.busy = false;
-  if (!res || res.error || !res.data || !res.data.session) { signInState.message = res && res.error ? signInErrorText(res.error) : 'That code didn’t work. Check it, or request a new one.'; renderSignIn(); return; }
+  if (!res || res.error || !res.data || !res.data.session) { signInState.message = signInErrorText(res && res.error); renderSignIn(); return; }
   if (pageUser && res.data.session.user.id !== pageUser.id) { accountChanged(); return; }
   if (pageUser) { onAuthEvent('SIGNED_IN', res.data.session); return; }
+  signInState = { email: '', busy: false, message: '' };
   startSignedIn(res.data.session.user);
 }
-function signInBack() { signInState = { ...signInState, step: 'email', message: '' }; renderSignIn(); }
+// One message for a wrong email or a wrong password (never which).
 function signInErrorText(error) {
-  const m = String(error && (error.message || error) || '');
-  if (/rate|security purposes|after \d+ seconds/i.test(m)) return 'Too many requests for a code just now. Wait a minute, then try again.';
-  if (/signups? not allowed|not found|user not/i.test(m)) return 'That email can’t sign in here. Only invited accounts can sign in.';
-  if (/expired|invalid/i.test(m)) return 'That code didn’t work or has expired. Check it, or request a new one.';
-  if (/fetch|network/i.test(m)) return 'The sign-in service couldn’t be reached. Check your connection and try again.';
-  return `Sign-in failed: ${m}`;
+  const m = String(error && (error.message || error.code || error) || '');
+  if (/rate|too many|security purposes|after \d+ seconds/i.test(m)) return 'Too many sign-in attempts just now. Wait a few minutes, then try again.';
+  if (/fetch|network|failed to/i.test(m)) return 'The sign-in service couldn’t be reached. Check your connection and try again.';
+  return 'That email and password didn’t match an account. Check them and try again, or ask the library owner to reset your password.';
 }
 function showAuthOverlay(html) {
   const o = document.getElementById('authModalOverlay'), b = document.getElementById('authModalBox');
@@ -263,11 +248,67 @@ async function signOutHere() {
   if (typeof resetRouteAfterSignOut === 'function') resetRouteAfterSignOut();
   reloadPage();
 }
+// Ends every other session of this account (other devices and browsers); this one stays signed in.
+async function signOutOtherDevices() {
+  let error = null;
+  try { ({ error } = await authClient().auth.signOut({ scope: 'others' })); } catch (e) { error = e; }
+  setAccountNote(error ? `Other devices couldn’t be signed out (${String(error.message || error)}). Try again.`
+    : 'Every other device and browser signed in to this account has been signed out. Each can keep working only until its current access token expires (up to about an hour).');
+}
+
+// ── Change password (Settings) ──
+// The current password is checked twice: by Supabase Auth when its "require current password" setting is on
+// (always sent), and here, by a separate sign-in that is never saved and is signed out at once.
+let accountNote = '';
+function setAccountNote(text) { accountNote = text; const el = document.getElementById('settingsAccountNote'); if (el) el.textContent = text; }
+async function changePassword() {
+  const get = id => { const el = document.getElementById(id); const v = el ? String(el.value) : ''; if (el) el.value = ''; return v; };
+  const current = get('accountCurrentPassword'), next = get('accountNewPassword'), again = get('accountNewPassword2');
+  if (!current || !next) { setAccountNote('Enter your current password and a new one.'); return; }
+  if (next !== again) { setAccountNote('The two new passwords don’t match. Nothing was changed.'); return; }
+  if (next.length < PASSWORD_MIN_LENGTH) { setAccountNote(`Use at least ${PASSWORD_MIN_LENGTH} characters. Nothing was changed.`); return; }
+  if (!pageUser || authStopped) { setAccountNote(AUTH_NOT_SENT_TEXT); return; }
+  setAccountNote('Checking…');
+  if (!(await currentPasswordIsRight(current))) { setAccountNote('Your current password isn’t right. Nothing was changed.'); return; }
+  let error = null;
+  try { ({ error } = await authClient().auth.updateUser({ password: next, current_password: current })); } catch (e) { error = e; }
+  if (error) {
+    const m = String(error.message || error.code || error);
+    setAccountNote(/current password/i.test(m) ? 'Your current password isn’t right. Nothing was changed.'
+      : /weak|short|characters/i.test(m) ? `That password isn’t accepted (${m}). Nothing was changed.`
+      : `The password wasn’t changed (${m}).`);
+    return;
+  }
+  setAccountNote('Your password has been changed. Other devices stay signed in until you use “Sign out other devices”.');
+}
+async function currentPasswordIsRight(current) {
+  try {
+    const probe = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'watchlist-password-check' } });
+    const { data, error } = await probe.auth.signInWithPassword({ email: pageUser.email, password: current });
+    const ok = !error && data && data.session && data.session.user && data.session.user.id === pageUser.id;
+    if (data && data.session) { try { await probe.auth.signOut({ scope: 'local' }); } catch (e) { /* that check session ends at its expiry anyway */ } }
+    return !!ok;
+  } catch (e) { return false; }
+}
+const PASSWORD_MIN_LENGTH = 12;
+
 function accountSectionHtml() {
   return `<section class="settings-card" aria-labelledby="settingsAccountTitle">
     <h3 id="settingsAccountTitle">Account</h3>
     <p class="settings-text">Signed in as <strong>${esc(pageUser ? pageUser.email || pageUser.id : '')}</strong>. This browser stays signed in until you sign out.</p>
-    <div class="settings-actions"><button class="btn settings-signout" onclick="signOutHere()">Sign out on this device</button></div>
+    <div class="settings-actions"><button class="btn settings-signout" onclick="signOutHere()">Sign out on this device</button>
+      <button class="btn settings-signout-others" onclick="signOutOtherDevices()">Sign out other devices</button></div>
+    <div class="settings-sub">Change password</div>
+    <form class="account-password" onsubmit="event.preventDefault(); changePassword()">
+      <label class="auth-label" for="accountCurrentPassword">Current password</label>
+      <input id="accountCurrentPassword" class="auth-input" type="password" autocomplete="current-password">
+      <label class="auth-label" for="accountNewPassword">New password (at least ${PASSWORD_MIN_LENGTH} characters)</label>
+      <input id="accountNewPassword" class="auth-input" type="password" autocomplete="new-password">
+      <label class="auth-label" for="accountNewPassword2">New password again</label>
+      <input id="accountNewPassword2" class="auth-input" type="password" autocomplete="new-password">
+      <div class="settings-actions"><button class="btn" type="submit">Change password</button></div>
+    </form>
+    <p class="settings-text" id="settingsAccountNote" role="status">${esc(accountNote)}</p>
   </section>`;
 }
 

@@ -828,3 +828,5 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .auth-message { color: var(--red); }
 .unknown-banner ul { margin: 6px 0; padding-left: 20px; }
 .unknown-when { opacity: 0.75; }
+.auth-help { margin-top: 10px; }
+.account-password { max-width: 420px; }

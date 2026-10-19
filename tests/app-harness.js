@@ -1202,13 +1202,38 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   app.session = session === undefined ? { access_token: 'harness-token', user: { id: HARNESS_USER, email: 'owner@test.invalid' } } : session;
   app.authListeners = [];
   app.authCalls = [];
-  const fakeSupabase = { createClient: () => ({ auth: {
-    getSession: async () => ({ data: { session: app.session }, error: null }),
-    onAuthStateChange: fn => { app.authListeners.push(fn); return { data: { subscription: { unsubscribe() {} } } }; },
-    signInWithOtp: async a => { app.authCalls.push(['otp', a]); return app.otpResult || { data: {}, error: null }; },
-    verifyOtp: async a => { app.authCalls.push(['verify', a]); return app.verifyResult || { data: { session: app.session }, error: null }; },
-    signOut: async a => { app.authCalls.push(['signOut', a]); app.session = null; return { error: null }; }
-  } }) };
+  // A1: email and password. app.password is the account's password (never asserted on by value in output);
+  // a separate client (the page's current-password check) gets its own session, never the page's.
+  app.password = 'harness password 1';
+  app.accountEmail = app.session ? app.session.user.email : 'owner@test.invalid';
+  const fakeSupabase = { createClient: (url, key, opts = {}) => {
+    const probe = opts.auth && opts.auth.storageKey === 'watchlist-password-check';
+    let own = null;
+    return { auth: {
+      getSession: async () => ({ data: { session: probe ? own : app.session }, error: null }),
+      onAuthStateChange: fn => { app.authListeners.push(fn); return { data: { subscription: { unsubscribe() {} } } }; },
+      signInWithPassword: async a => {
+        app.authCalls.push([probe ? 'probe-signin' : 'signin', { email: a.email, password: a.password === app.password ? '(right)' : '(wrong)' }]);
+        if (app.signInError) return { data: {}, error: app.signInError };
+        if (a.email !== app.accountEmail || a.password !== app.password) return { data: {}, error: { message: 'Invalid login credentials', code: 'invalid_credentials' } };
+        const sess = app.nextSession || { access_token: 'harness-token', user: { id: HARNESS_USER, email: app.accountEmail } };
+        if (probe) own = sess; else app.session = sess;
+        return { data: { session: sess, user: sess.user }, error: null };
+      },
+      updateUser: async a => {
+        app.authCalls.push(['updateUser', { password: a.password ? '(new)' : null, current_password: a.current_password === app.password ? '(right)' : '(wrong)' }]);
+        if (app.requireCurrent && a.current_password !== app.password) return { data: {}, error: { message: 'Current password required when setting new password.', code: 'current_password_mismatch' } };
+        app.password = a.password;
+        return { data: { user: app.session && app.session.user }, error: null };
+      },
+      signOut: async a => {
+        app.authCalls.push([probe ? 'probe-signOut' : 'signOut', a]);
+        if (probe) { own = null; return { error: null }; }
+        if (!a || a.scope !== 'others') app.session = null;
+        return { error: null };
+      }
+    } };
+  } };
   app.authEvent = (event, s) => { app.session = s; vm.runInContext('onAuthEvent', ctx)(event, s); };
   const ctx = {
     supabase: fakeSupabase,
