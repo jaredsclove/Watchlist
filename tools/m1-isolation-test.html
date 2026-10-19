@@ -48,6 +48,14 @@
   <button id="run" type="submit">Sign in both and run</button>
   <button id="rerunB" type="button" disabled>Check B’s original session (recovery rehearsal)</button>
 </form>
+<form id="pwf" autocomplete="off">
+  <fieldset><legend>Password-change checks for B (after the run above)</legend>
+    <label>B’s current password <input id="pc" type="password" autocomplete="new-password"></label>
+    <label>B’s new password (at least 12 characters) <input id="pn" type="password" autocomplete="new-password"></label>
+    <label>B’s new password again <input id="pn2" type="password" autocomplete="new-password"></label>
+  </fieldset>
+  <button id="runPw" type="submit" disabled>Run password-change checks</button>
+</form>
 <div id="summary"></div>
 <div id="log"></div>
 </main>
@@ -188,6 +196,7 @@
       assert(fpB0 === await fingerprint(tokB), 'B changed');
     });
     document.getElementById('rerunB').disabled = false;
+    document.getElementById('runPw').disabled = false;
     line('info', 'Done. Recovery rehearsal (docs/MEMBER_RECOVERY.md): B’s original session is kept in this page as the “lost device”. Press “Check B’s original session” after each step.');
   }
   // The "lost device": B's session from the run above. Reports, without deciding the step, what it can do now.
@@ -199,6 +208,26 @@
     if (refreshed) tokB = ref.data.session.access_token;
     line('info', `B’s original session at ${new Date().toLocaleTimeString()}: read ${reads.status}${reads.ok ? ` (${reads.json.length} rows)` : ''}; write ${write.status}${/not_a_member/.test(write.text) ? ' not_a_member' : ''}; refresh ${refreshed ? 'WORKS' : 'refused'}.`);
   }
+  // Direct requests to Auth with B's session: the server must refuse a missing or wrong current password and
+  // accept the right one; the test project has no custom SMTP, so success shows no email is needed.
+  async function passwordChecks(ev) {
+    ev.preventDefault();
+    const cur = document.getElementById('pc').value, nw = document.getElementById('pn').value, nw2 = document.getElementById('pn2').value;
+    ['pc', 'pn', 'pn2'].forEach(id => { document.getElementById(id).value = ''; });
+    if (!cur || nw.length < 12 || nw !== nw2) { line('bad', 'Enter B’s current password and the same new password (12+ characters) twice.'); return; }
+    const put = body => api(tokB, 'PUT', 'auth/v1/user', body);
+    await test('Auth refuses a password change with no current password', async () => { const r = await put({ password: nw }); assert(!r.ok && /current_password/.test(r.text), `${r.status} ${scrub(r.text)}`); });
+    await test('Auth refuses a password change with a wrong current password', async () => { const r = await put({ password: nw, current_password: cur + '-wrong' }); assert(!r.ok && /current_password/.test(r.text), `${r.status} ${scrub(r.text)}`); });
+    await test('Auth accepts the right current password (no custom SMTP on this project: no email needed)', async () => { const r = await put({ password: nw, current_password: cur }); assert(r.ok, `${r.status} ${scrub(r.text)}`); });
+    await test('the new password signs in; the old one doesn’t', async () => {
+      const c1 = client(), c2 = client(), email = document.getElementById('be').value;
+      const good = await c1.auth.signInWithPassword({ email, password: nw }); const bad = await c2.auth.signInWithPassword({ email, password: cur });
+      assert(!good.error && bad.error, 'unexpected sign-in results');
+      await c1.auth.signOut({ scope: 'local' });
+    });
+    line('info', 'B’s password is now the new one you entered.');
+  }
+  document.getElementById('pwf').addEventListener('submit', e => { passwordChecks(e).catch(err => line('bad', 'Stopped: ' + scrub(err && err.message))); });
   document.getElementById('f').addEventListener('submit', e => { run(e).catch(err => line('bad', 'Stopped: ' + scrub(err && err.message))); });
   document.getElementById('rerunB').addEventListener('click', () => recheckB().catch(err => line('bad', 'Stopped: ' + scrub(err && err.message))));
 })();
