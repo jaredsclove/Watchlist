@@ -147,10 +147,10 @@ await test('Change password with the right current password succeeds; the new on
   assert(!old.ok, 'the old password still works');
   pw.a = next;
 });
-await test('Change password with a wrong current password: recorded (Auth checks it only when its setting is on; the page checks it itself)', async () => {
+await test('Change password with a wrong current password: recorded only (Auth refuses it only when "Require current password when updating" is on; the local CLI doesn’t expose that setting, so this is verified on the hosted test project)', async () => {
   const fresh = await signIn(EA, pw.a);
   const r = await call(fresh.access_token, 'PUT', 'auth/v1/user', { password: newPassword(), current_password: 'Wrong-current-123' });
-  console.log(`       local Auth answered ${r.status}${r.ok ? ' (accepted: the setting is off here; the page’s own check refuses first)' : ` (${(r.json || {}).error_code || ''})`}`);
+  console.log(`       local Auth answered ${r.status}${r.ok ? ' (accepted: the setting is off here)' : ` (${(r.json || {}).error_code || ''})`}`);
   if (r.ok) { const back = await call(fresh.access_token, 'PUT', 'auth/v1/user', { password: pw.a }); assert(back.ok || back.status === 422, 'restore'); }
 });
 await test('no email was sent by sign-in, sign-up refusal or password change', async () => assert(await mailCount() === mail0, `${(await mailCount()) - mail0} new message(s)`));
