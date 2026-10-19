@@ -3,8 +3,17 @@
 // to anything. Every check uses the page's code (backup-restore.js, backup-format3.js).
 //
 //   node tools/admin-restore.mjs export-sql --owner <auth user id>
-//       Prints the read-only SQL that exports that member's library as a format-5 backup
-//       (the safety backup), acting as that member (role authenticated + their JWT claims).
+//       Prints the read-only SQL that exports that member's library as a format-5 backup (the safety
+//       backup), acting as that member (role authenticated + their JWT claims), in one repeatable-read
+//       snapshot whose first statement refuses unless that account is a member (a non-member reads no rows,
+//       which must never become an "empty" backup).
+//   node tools/admin-restore.mjs export-owner-sql --user <auth user id>
+//       For removing a member (docs/MEMBER_RECOVERY.md): the same document, read by the database owner
+//       (postgres) and filtered to that account on every table, in one repeatable-read snapshot. It needs no
+//       membership, so it never reopens access to the account. Its rowCounts are that snapshot's counts.
+//   node tools/admin-restore.mjs remove-sql --user <id> --file <the owner export>
+//       Prints the removal transaction: it refuses while the account is a member or unless every table still
+//       holds exactly the export's row counts for that account, then deletes that account's rows (only).
 //   node tools/admin-restore.mjs check --file <backup.json> --safety <safety.json> [--out <converted.json>]
 //       The page's checks, refusing as the page refuses: the file and the safety backup
 //       validate; a format-3 or -4 file is converted exactly as the page converts it (written
@@ -50,23 +59,83 @@ function readDoc(file) {
   return { text, doc, sha256: sha(text) };
 }
 
+const SELECTS = (where = '') => spec5.tables.map(t => {
+  const cols = Object.keys(spec5.columns[t]).map(c => `"${c}"`).join(', ');
+  return `'${t}', (select coalesce(json_agg(row_to_json(x) order by x.id), '[]'::json) from (select ${cols} from public.${t}${where}) x)`;
+});
+const COUNTS = (where = '') => spec5.tables.map(t => `'${t}', (select count(*) from public.${t}${where})`).join(', ');
+const DOC = (where = '') => `select json_build_object('format', 'watchlist-tracker-backup', 'formatVersion', 5,
+  'exportedAt', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+  'rowCounts', json_build_object(${COUNTS(where)}),
+  'tables', json_build_object(${SELECTS(where).join(',\n    ')}))::text as backup;`;
 if (cmd === 'export-sql') {
   const owner = opt('--owner');
   if (!UUID.test(owner || '')) die('--owner <auth user id>');
-  const parts = spec5.tables.map(t => {
-    const cols = Object.keys(spec5.columns[t]).map(c => `"${c}"`).join(', ');
-    return `'${t}', (select coalesce(json_agg(row_to_json(x) order by x.id), '[]'::json) from (select ${cols} from public.${t}) x)`;
-  });
-  console.log(`-- Admin restore runbook, step 3: export the member's library (the safety backup). Read-only.
+  console.log(`-- Admin restore runbook, step 3: export the member's library (the safety backup). Read-only, one snapshot.
 -- Save the single value it returns as a .json file, then: node tools/admin-restore.mjs check …
-begin read only;
+begin isolation level repeatable read read only;
 select set_config('request.jwt.claims', json_build_object('sub', '${owner}', 'role', 'authenticated')::text, true);
 set local role authenticated;
-select json_build_object('format', 'watchlist-tracker-backup', 'formatVersion', 5,
-  'exportedAt', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-  'rowCounts', json_build_object(${spec5.tables.map(t => `'${t}', (select count(*) from public.${t})`).join(', ')}),
-  'tables', json_build_object(${parts.join(',\n    ')}))::text as backup;
+do $$ begin
+  if not private.is_member() then raise exception 'export: ${owner} is not a member now; a non-member reads no rows, so no backup was made'; end if;
+end $$;
+${DOC()}
 rollback;`);
+} else if (cmd === 'export-owner-sql') {
+  const user = opt('--user');
+  if (!UUID.test(user || '')) die('--user <auth user id>');
+  const where = ` where user_id = '${user}'`;
+  console.log(`-- Removing a member, step 3: export that account's library as the database owner, filtered to it on every
+-- table. Read-only, one snapshot; needs no membership. Save the value as a .json file, check it, keep it.
+begin isolation level repeatable read read only;
+do $$ begin
+  if current_user <> 'postgres' then raise exception 'export: run as postgres (the SQL Editor role)'; end if;
+  if not exists (select 1 from auth.users where id = '${user}') then raise exception 'export: no Auth user ${user}'; end if;
+end $$;
+${DOC(where)}
+rollback;`);
+} else if (cmd === 'remove-sql') {
+  const user = opt('--user'), f = readDoc(opt('--file'));
+  if (!UUID.test(user || '')) die('--user <auth user id> --file <the owner export>');
+  const errs = arr(P('validateBackupObject')(f.doc));
+  if (f.doc.formatVersion !== 5 || errs.length) die(`the export doesn’t validate: ${errs.join('; ')}`, 1);
+  const checks = spec5.tables.map(t => `    or (select count(*) from public.${t} where user_id = '${user}') <> ${Number(f.doc.rowCounts[t])}`).join('\n');
+  console.log(`-- Removing a member, step 5: delete that account's library (only). Run only after its export (sha256 ${f.sha256}) was
+-- saved and checked, with the membership disabled and the sessions ended. Refuses, changing nothing, otherwise.
+begin;
+set local lock_timeout = '10s';
+lock table public.tv_shows, public.watchlist_items, public.personal_collections, public.collection_memberships,
+  public.watch_with_choices, public.custom_collections, public.catalog_show_links, public.catalog_film_links,
+  private.stage5_recovery_records, private.stage5_recovery_collections, private.stage5_recovery_othertv,
+  private.stage5_recovery_meta, private.library_members in exclusive mode;
+do $$ begin
+  if exists (select 1 from private.library_members where user_id = '${user}') then raise exception 'remove: ${user} is still a member; nothing was changed'; end if;
+  if false
+${checks} then
+    raise exception 'remove: the library no longer matches the export''s row counts; export again; nothing was changed';
+  end if;
+end $$;
+select set_config('watchlist.library_write', 'on', true);
+delete from public.collection_memberships where user_id = '${user}';
+update public.tv_shows set resume_start_season_id = null, resume_end_season_id = null where user_id = '${user}' and resume_start_season_id is not null;
+delete from public.watchlist_items where user_id = '${user}';
+delete from public.tv_shows where user_id = '${user}';
+delete from public.personal_collections where user_id = '${user}';
+delete from public.watch_with_choices where user_id = '${user}';
+delete from public.custom_collections where user_id = '${user}';
+delete from private.stage5_recovery_records where user_id = '${user}';
+delete from private.stage5_recovery_collections where user_id = '${user}';
+delete from private.stage5_recovery_othertv where user_id = '${user}';
+delete from private.stage5_recovery_meta where user_id = '${user}';
+do $$ begin
+  if exists (select 1 from public.watchlist_items where user_id = '${user}') or exists (select 1 from public.tv_shows where user_id = '${user}')
+     or exists (select 1 from public.personal_collections where user_id = '${user}') or exists (select 1 from public.custom_collections where user_id = '${user}')
+     or exists (select 1 from public.watch_with_choices where user_id = '${user}') or exists (select 1 from public.collection_memberships where user_id = '${user}') then
+    raise exception 'remove: rows remain; nothing was changed';
+  end if;
+end $$;
+select 'REMOVED|${user}' as result;
+commit;`);
 } else if (cmd === 'check') {
   const f = readDoc(opt('--file')), s = readDoc(opt('--safety'));
   const problems = [];

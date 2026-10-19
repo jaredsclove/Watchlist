@@ -49,10 +49,22 @@ The order matters. Membership is restored only once no access token issued befor
 
 ## Removing a member
 
-1. Disable membership (step 1 above) and end their sessions (steps 2–3).
-2. If they want their library, export it first (`docs/ADMIN_RESTORE.md`, step 3).
-3. Only then delete their rows, and finally their Auth user. Deleting a login never deletes a library: the
-   database refuses while rows exist.
+The library is exported as the database owner (it needs no membership, so access is never reopened for the
+account), and is deleted only if it still matches that export exactly.
+
+1. **Disable membership** (step 1 above) and **end their sessions** (steps 2–3 above).
+2. **Export their library as the owner:** `node tools/admin-restore.mjs export-owner-sql --user <id>` prints a
+   read-only query that reads only that account's rows, all in one snapshot. Run it and save the value as a
+   `.json` file.
+   - Never use the member export for this: it refuses a non-member, because a non-member reads no rows.
+3. **Check the file:** `node tools/admin-restore.mjs check --file <export> --safety <export>` must print OK.
+   - Its row counts are the account's counts in that snapshot.
+   - Keep the file (give it to the person if they want it).
+4. **Delete the library:** `node tools/admin-restore.mjs remove-sql --user <id> --file <export>` prints one
+   transaction, which refuses (changing nothing) while the account is a member, or unless every table still holds
+   exactly the export's counts for that account. It then deletes only that account's rows. Run it.
+5. **Delete the Auth user** in the dashboard. That works only once their rows are gone: deleting a login never
+   deletes a library.
 
 ## The owner
 

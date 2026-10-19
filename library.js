@@ -1067,6 +1067,7 @@ async function libraryPatchReturning(path, body) {
       const err = await res.text();
       if (confirmedAnswer(res.status, err)) answered = true;
       if (res.status === 401) sessionLost();
+      if (/not_a_member/.test(err)) membershipEnded();
       throw new Error(`Supabase error ${res.status}: ${err}`);
     }
     answered = true;

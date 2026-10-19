@@ -1048,7 +1048,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     if (u.pathname.includes('/rpc/') && table === 'stage5_capabilities') {
       if (!app.stage5) return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.stage5_capabilities in the schema cache' });
       return response(200, { stage5: 1, phase: app.stage5, backup_format: b45 ? 5 : contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none',
-        ...(b45 ? { b45: 1 } : {}), ...(app.access ? { access: app.access } : {}) });
+        ...(b45 ? { b45: 1 } : {}), ...(app.access ? { access: app.access, member: app.member !== false } : {}) });
     }
     // A B4/B5 function on a database without B4/B5 doesn't exist.
     if (u.pathname.includes('/rpc/') && /_b45$/.test(table) && !b45) {
@@ -1226,11 +1226,14 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
         if (app.requireCurrent && !a.current_password) return { data: {}, error: { message: 'Current password required when setting new password.', code: 'current_password_required' } };
         if (app.requireCurrent && a.current_password !== app.password) return { data: {}, error: { message: 'Current password required when setting new password.', code: 'current_password_mismatch' } };
         app.password = a.password;
+        // A lost answer: the change was made, but no recognised Auth answer came back.
+        if (app.loseUpdateUser) return { data: { user: null }, error: { name: 'AuthRetryableFetchError', message: 'Failed to fetch', status: 0 } };
         return { data: { user: app.session && app.session.user }, error: null };
       },
       signOut: async a => {
         app.authCalls.push([probe ? 'probe-signOut' : 'signOut', a]);
         if (probe) { own = null; return { error: null }; }
+        if (app.signOutError) return { error: app.signOutError };
         if (!a || a.scope !== 'others') app.session = null;
         return { error: null };
       }

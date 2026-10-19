@@ -24,7 +24,12 @@ const lib = (...ns) => ({ rows: ns.map(linkedRow), tvShows: ns.map(showRow) });
 function reloads(app) { app.reloadCount = 0; app.ctx.location = Object.assign(app.ctx.location || {}, { reload: () => { app.reloadCount++; } }); }
 // A change through the lane: creating a collection (the harness's org_create_collection).
 const createCollection = (app, name = 'ZZ New') => app.run(`runWrite('Create collection', () => sbRpc('org_create_collection', { p_id: ${JSON.stringify(uuid(9100))}, p_name: ${JSON.stringify(name)} })).catch(e => (window.__lastError = e, null))`);
-const notes = (storage, user = HARNESS_USER) => JSON.parse(storage.getItem(userKeyOf('watchlist_pending_writes', user)) || '{}');
+// The pending notes in storage for a user: { id: note } (one entry per note, watchlist_pending_write:<id>).
+const notes = (storage, user = HARNESS_USER) => {
+  const suffix = userKeyOf('', user), out = {};
+  for (const [k, v] of storage.m) if (k.startsWith('watchlist_pending_write:') && k.endsWith(suffix)) out[k.slice('watchlist_pending_write:'.length, k.length - suffix.length)] = JSON.parse(v);
+  return out;
+};
 
 // ─── Boot and sign-in ─────────────────────────────────────────────────────────
 test('no saved session: the sign-in screen (email and password, the ask-the-owner line), no request at all', async () => {
@@ -187,7 +192,7 @@ test('done or refused: the note saved before sending is cleared; no answer (lost
   assert.strictEqual(app.writes().filter(r => r.url.includes('org_create_collection')).length, 4, 'nothing was ever resent');
 });
 
-test('a closed tab after sending: the next page for that account shows the unknown outcome until dismissed; another account never sees it', async () => {
+test('a closed tab after sending: the next page for that account shows the unknown outcome until acknowledged (never deleted); another account never sees it', async () => {
   const storage = memStorage();
   const app = await createApp({ ...lib(1), storage });
   // The page goes away while the request is out: the note is already saved.
@@ -197,10 +202,12 @@ test('a closed tab after sending: the next page for that account shows the unkno
   const other = await createApp({ ...lib(1), storage, session: session(OTHER) });
   assert.strictEqual(other.el('unknownBanner').innerHTML, '', 'not shown to another account');
   const next = await createApp({ ...lib(1), storage });
-  assert.match(next.el('unknownBanner').innerHTML, /got no answer, so it may or may not have been made[\s\S]*Create collection[\s\S]*Nothing was sent again/);
-  next.ctx.dismissLeftoverNotes();
-  assert.strictEqual(next.el('unknownBanner').innerHTML, '');
-  assert.deepStrictEqual(notes(storage), {});
+  assert.match(next.el('unknownBanner').innerHTML, /hasn’t been confirmed[\s\S]*may or may not have been made[\s\S]*Create collection[\s\S]*Nothing was sent again/);
+  next.ctx.acknowledgeShownNotes();
+  assert.strictEqual(next.el('unknownBanner').innerHTML, '', 'hidden once acknowledged');
+  assert.strictEqual(Object.keys(notes(storage)).length, 1, 'acknowledging deletes nothing: the note remains, unresolved');
+  const later = await createApp({ ...lib(1), storage });
+  assert.strictEqual(later.el('unknownBanner').innerHTML, '', 'that version stays acknowledged');
 });
 
 test('one tab never clears another tab’s note', async () => {
@@ -288,6 +295,111 @@ test('when the file and the safety backup hold the same data, the comparison say
   app.loseNext(r => r.url.includes('/rpc/restore_backup'), 'before');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle(50);
   assert.match(app.el('restoreModalBox').innerHTML, /may or may not have been made[\s\S]*matches both the restore file and the safety backup/);
+});
+
+// ─── Correction batch (Codex review): acknowledgement, membership, Auth outcomes ───
+test('another tab acknowledging a warning while the request is still in progress never removes it; a later no-answer shows it again', async () => {
+  const storage = memStorage();
+  const a = await createApp({ ...lib(1), storage });
+  const g = a.hold(r => r.url.includes('/rpc/org_create_collection'));
+  const p = createCollection(a, 'Live in A'); await g.reached; await settle();
+  const b = await createApp({ ...lib(1), storage });
+  assert.match(b.el('unknownBanner').innerHTML, /may still be in progress in another tab/);
+  b.ctx.acknowledgeShownNotes();
+  assert.strictEqual(Object.keys(notes(storage)).length, 1, 'A’s note survives B’s acknowledgement');
+  g.lose('after'); await p; await settle();
+  const n = Object.values(notes(storage))[0];
+  assert.strictEqual(n.version, 2, 'A’s no-answer raised the version');
+  const c = await createApp({ ...lib(1), storage });
+  assert.match(c.el('unknownBanner').innerHTML, /Create collection/, 'shown again: the acknowledged version is older');
+});
+test('a confirmed answer in the originating tab deletes its note (and an acknowledgement of it); another tab’s acknowledgement deletes nothing', async () => {
+  const storage = memStorage();
+  const a = await createApp({ ...lib(1), storage });
+  const g = a.hold(r => r.url.includes('/rpc/org_create_collection'));
+  const p = createCollection(a, 'Confirmed later'); await g.reached; await settle();
+  const b = await createApp({ ...lib(1), storage });
+  b.ctx.acknowledgeShownNotes();
+  g.release(); await p; await settle();
+  assert.deepStrictEqual(notes(storage), {});
+  assert.ok(![...storage.m.keys()].some(k => k.startsWith('watchlist_pending_ack:')), 'its acknowledgement went with it');
+});
+test('two tabs writing notes at the same moment keep both (one entry per note)', async () => {
+  const storage = memStorage();
+  const a = await createApp({ ...lib(1), storage }), b = await createApp({ ...lib(1), storage });
+  const ga = a.hold(r => r.url.includes('/rpc/org_create_collection')), gb = b.hold(r => r.url.includes('/rpc/org_create_collection'));
+  createCollection(a, 'From A'); createCollection(b, 'From B');
+  await ga.reached; await gb.reached; await settle();
+  assert.strictEqual(Object.keys(notes(storage)).length, 2);
+});
+test('an unanswered restore keeps its warning (with its safety backup) after another tab acknowledged an earlier version', async () => {
+  const storage = memStorage();
+  const app = await restoreSetup(storage);
+  const g = app.hold(r => r.url.includes('/rpc/restore_backup'));
+  const p = app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await g.reached; await settle();
+  const other = await createApp({ ...lib(1), storage });
+  other.ctx.acknowledgeShownNotes();
+  g.lose('after'); await p; await settle(50);
+  const next = await createApp({ ...lib(1), storage });
+  assert.match(next.el('unknownBanner').innerHTML, /Restore from a backup file[\s\S]*Safety backup taken before it: safety\.json/);
+});
+
+test('a signed-in account that is not a member: no library is read; the account controls stay; no backup file', async () => {
+  // A page that signs in while the account isn't a member:
+  const page = await createAppNonMember();
+  assert.match(page.el('phaseBanner').innerHTML, /has no library here/);
+  assert.deepStrictEqual(page.requests.map(r => r.url.split('/rest/v1/')[1]), ['rpc/stage5_capabilities'], 'nothing but the capability is read');
+  assert.match(page.el('authScreen').innerHTML, /Sign out on this device[\s\S]*Sign out other devices[\s\S]*Change password/);
+  const res = await page.run('buildBackupObject()').then(() => 'made', e => e.message);
+  assert.match(res, /has no library here[\s\S]*No file was made/);
+});
+async function createAppNonMember() {
+  // The harness reads app.member when answering the capability; set it before boot via a session-less boot.
+  const app = await createApp({ ...lib(1), session: null });
+  app.member = false;
+  app.session = session();
+  await app.ctx.startSignedIn(app.session.user); await settle(30);
+  return app;
+}
+test('a membership that ends while a backup is being read: no file (the check after the reads refuses)', async () => {
+  const app = await createApp({ ...lib(1) });
+  const g = app.hold(r => r.url.includes('/rest/v1/tv_shows'));
+  const p = app.run('buildBackupObject()').then(() => 'made', e => e.message);
+  await g.reached; app.member = false; g.release();
+  assert.match(await p, /It ended while the backup was being read\.\) No file was made\./);
+});
+test('an active member with an empty library: a valid, empty backup', async () => {
+  const app = await createApp({ rows: [], tvShows: [] });
+  const doc = JSON.parse(JSON.stringify(await app.run('buildBackupObject()')));
+  assert.deepStrictEqual(Array.from(app.get('validateBackupObject')(doc)), []);
+  assert.strictEqual(doc.tables.watchlist_items.length, 0);
+});
+test('a change refused with not_a_member (membership ended mid-session): the page stops writing', async () => {
+  const app = await createApp({ ...lib(1) });
+  app.refuseNext(r => r.url.includes('/rpc/org_create_collection'), '42501', 'not_a_member: This account has no library here. Nothing was changed.');
+  await createCollection(app); await settle();
+  assert.match(app.el('phaseBanner').innerHTML, /has no library here[\s\S]*changes nothing more/);
+  const before = app.requests.length;
+  await createCollection(app, 'After'); await settle();
+  assert.strictEqual(app.writes().filter(r => r.url.includes('org_create_collection')).length, 1, 'nothing more sent');
+});
+
+test('Change password whose answer is lost after Auth made the change: “may or may not”, never “not changed”', async () => {
+  const app = await createApp({ ...lib(1) });
+  app.ctx.openSettings(null);
+  app.loseUpdateUser = true;
+  app.el('accountCurrentPassword').value = 'harness password 1'; app.el('accountNewPassword').value = 'a brand new password'; app.el('accountNewPassword2').value = 'a brand new password';
+  await app.ctx.changePassword(); await settle();
+  assert.match(app.el('settingsAccountNote').textContent, /may or may not have been changed[\s\S]*try the new password first/);
+  assert.doesNotMatch(app.el('settingsAccountNote').textContent, /wasn’t changed|Nothing was changed/);
+  assert.strictEqual(app.password, 'a brand new password', '(the stand-in Auth did change it)');
+});
+test('Sign out other devices with an unrecognised error: “may or may not”', async () => {
+  const app = await createApp({ ...lib(1) });
+  app.ctx.openSettings(null);
+  app.signOutError = { message: 'Bad gateway', status: 502 };
+  await app.ctx.signOutOtherDevices(); await settle();
+  assert.match(app.el('settingsAccountNote').textContent, /may or may not have been signed out/);
 });
 
 T.run();

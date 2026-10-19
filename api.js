@@ -17,9 +17,12 @@ function stopB45Writes() {
   if (el) el.innerHTML = `<div class="error-banner">⚠️ ${esc(STATE_MISMATCH_TEXT)} Until then this page changes nothing.</div>`;
 }
 // Whether this page may write to a database whose capability reads cap.
+// M1: and only for a caller the database reports as a member now (cap.member). A signed-in non-member reads
+// no rows, so nothing it reads may be treated as the library, backed up or written over.
 function pageMayWrite(cap) {
-  return !b45Stopped && !!cap && cap.phase === B45_PHASE && cap.access === 'members';
+  return !b45Stopped && !!cap && cap.phase === B45_PHASE && cap.access === 'members' && cap.member === true;
 }
+const NOT_A_MEMBER_TEXT = 'This account has no library here (its membership isn’t active), so nothing was read, saved or changed. Ask the library owner.';
 function stage5Refusal(text) {
   return new Error(`Supabase error 412: ${JSON.stringify({ code: 'P0001', details: null, hint: null, message: `update_required: ${text}` })}`);
 }
@@ -98,6 +101,7 @@ async function sbRequest(method, path, body, headers, onAnswer = () => {}) {
     const err = await res.text();
     if (confirmedAnswer(res.status, err)) onAnswer();
     if (res.status === 401 && typeof sessionLost === 'function') sessionLost();
+    if (/not_a_member/.test(err) && typeof membershipEnded === 'function') membershipEnded();
     // A B4/B5 function that doesn't exist: the database isn't (or is no longer) in this
     // page's phase. Nothing ran; the page stops writing until it is reloaded.
     if (res.status === 404 && /^rpc\/[a-z0-9_]+_b45$/.test(path) && /PGRST202/.test(err)) {

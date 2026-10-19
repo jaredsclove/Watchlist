@@ -64,6 +64,7 @@ async function stage5Capabilities() {
 async function detectBackupFormat() {
   const cap = await stage5Capabilities();
   if (b45Stopped) throw new Error(STATE_MISMATCH_TEXT + ' No file was made.');
+  if (cap && cap.access === 'members' && cap.member !== true) throw new Error(NOT_A_MEMBER_TEXT + ' No file was made.');
   if (pageMayWrite(cap)) return 5;
   throw new Error('This page makes backups only of a database in its own state (format 5), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
 }
@@ -103,7 +104,10 @@ async function buildBackupObject() {
     tables[table] = rows;
     rowCounts[table] = rows.length;
   }
+  // Membership is checked again after the reads: a membership ended during them would have made the later
+  // reads empty, so no file is made rather than an incomplete one.
   const after = await stage5Capabilities();
+  if (after && after.access === 'members' && after.member !== true) throw new Error(NOT_A_MEMBER_TEXT + ' (It ended while the backup was being read.) No file was made.');
   if (!pageMayWrite(after)) throw updated;
   return {
     format: BACKUP_FORMAT,

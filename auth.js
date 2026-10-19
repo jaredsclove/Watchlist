@@ -16,7 +16,6 @@
 // outcome, until the person dismisses it. Nothing is ever sent again.
 
 const AUTH_NOT_SENT_TEXT = 'You’re not signed in (or your sign-in has ended), so nothing was sent and nothing was changed. Sign in again.';
-const PENDING_NOTES_KEY = 'watchlist_pending_writes';
 // Remembered settings from before sign-in existed: not tied to any account, so discarded (plan D9).
 const LEGACY_STORAGE_KEYS = ['watchlist_last_backup_at', 'watchlist_last_collection', 'watchlist_alltv_presentation'];
 const LEGACY_STORAGE_PREFIXES = ['watchlist_browse_layout_'];
@@ -25,7 +24,6 @@ let authClientInstance = null;
 let pageUser = null; // { id, email }: the account this page was loaded for; null until bound
 let authStopped = false; // an account change or sign-out: nothing more is sent from this page
 let authAckPending = false; // the account changed while an outcome was unknown: waiting for "I understand"
-let pageNotes = new Set(); // ids of the pending notes this page wrote and hasn't seen answered
 let pageNoteSeq = 0;
 let signInState = { email: '', busy: false, message: '' };
 
@@ -76,57 +74,76 @@ function discardLegacyStorage() {
 }
 
 // ── Pending notes (unknown outcomes survive a closed tab) ──
-function readNotes() {
-  try { const v = JSON.parse(userStorage.getItem(PENDING_NOTES_KEY) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; }
-}
-function writeNotes(notes) {
+// One storage entry per note (watchlist_pending_write:<id>), so tabs never overwrite each other's notes. A
+// note has a version; acknowledging it records the version shown (watchlist_pending_ack:<id>) and means only
+// "I understand this remains unresolved": it never deletes the note and never says the request finished or
+// failed. Only the tab that sent the request deletes its note, after a confirmed answer. If that tab's request
+// then ends with no answer, it raises the version, so the warning is shown again even if an earlier version
+// was acknowledged (for example while the request was still in progress in that tab).
+const NOTE_PREFIX = 'watchlist_pending_write:', ACK_PREFIX = 'watchlist_pending_ack:';
+let pageNoteVersions = new Map(); // id → version, for the notes this page wrote and hasn't seen answered
+let pageUnknown = new Set(); // the ids of this page's requests that ended with no answer
+let shownNotes = []; // [{ id, version }]: what the warning on screen shows, for acknowledgement
+function storageKeys() {
   try {
-    if (Object.keys(notes).length) userStorage.setItem(PENDING_NOTES_KEY, JSON.stringify(notes)); else userStorage.removeItem(PENDING_NOTES_KEY);
-    return true;
-  } catch (e) { return false; }
+    if (typeof localStorage.length !== 'number' || typeof localStorage.key !== 'function') return [];
+    const out = []; for (let i = 0; i < localStorage.length; i++) out.push(localStorage.key(i)); return out;
+  } catch (e) { return []; }
 }
+function noteIds() {
+  const suffix = userKey('');
+  return storageKeys().filter(k => k && k.startsWith(NOTE_PREFIX) && k.endsWith(suffix)).map(k => k.slice(NOTE_PREFIX.length, k.length - suffix.length));
+}
+function readNote(id) { try { const v = JSON.parse(userStorage.getItem(NOTE_PREFIX + id)); return v && typeof v === 'object' ? v : null; } catch (e) { return null; } }
+function writeNote(id, note) { try { userStorage.setItem(NOTE_PREFIX + id, JSON.stringify(note)); return true; } catch (e) { return false; } }
+function ackedVersion(id) { try { return Number(userStorage.getItem(ACK_PREFIX + id)) || 0; } catch (e) { return 0; } }
 let notesUnavailableShown = false;
 // Saved immediately before a write is sent. Returns its id.
 function savePendingNote(what, extra = {}) {
   const id = `${Date.now().toString(36)}-${(++pageNoteSeq).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const notes = readNotes();
-  notes[id] = { what: String(what || 'A change'), at: new Date().toISOString(), ...extra };
-  if (!writeNotes(notes) && !notesUnavailableShown) {
+  const note = { what: String(what || 'A change'), at: new Date().toISOString(), version: 1, ...extra };
+  if (!writeNote(id, note) && !notesUnavailableShown) {
     notesUnavailableShown = true;
     if (typeof showError === 'function') showError('This browser isn’t keeping notes about changes in progress, so if this page closes while a change is out, it can’t warn you about it later.');
   }
-  pageNotes.add(id);
+  pageNoteVersions.set(id, 1);
   return id;
 }
-// A confirmed answer (done or refused) for that request: its note goes. Only the page that
-// wrote a note clears it, by its id.
+// A confirmed answer (done or refused) for that request: its note (and any acknowledgement of it) goes. Only
+// the page that wrote a note deletes it, by its id.
 function clearPendingNote(id) {
-  if (!id) return;
-  pageNotes.delete(id);
-  const notes = readNotes();
-  if (notes[id]) { delete notes[id]; writeNotes(notes); }
+  if (!id || !pageNoteVersions.has(id)) return;
+  pageNoteVersions.delete(id); pageUnknown.delete(id);
+  try { userStorage.removeItem(NOTE_PREFIX + id); userStorage.removeItem(ACK_PREFIX + id); } catch (e) { /* storage unavailable */ }
 }
-// No answer: the note stays (shown again at the next load) and this page keeps it as unknown.
-function keepPendingNote(id) { if (id) pageNotes.add(id); }
-function unknownOutcomesHere() { const notes = readNotes(); return [...pageNotes].filter(id => notes[id]); }
+// No answer: the note stays, with a new version (shown again even if an earlier version was acknowledged); it
+// is written again in case it was missing.
+function keepPendingNote(id) {
+  if (!id) return;
+  const prev = readNote(id) || {};
+  const version = Math.max(pageNoteVersions.get(id) || 1, Number(prev.version) || 1) + 1;
+  writeNote(id, { ...prev, version, noAnswerAt: new Date().toISOString() });
+  pageNoteVersions.set(id, version); pageUnknown.add(id);
+}
+function unknownOutcomesHere() { return [...pageUnknown].filter(id => readNote(id)); }
 
-// The notes left from earlier pages (the outcome of those changes is unknown).
+// The unresolved notes of other pages and earlier visits that aren't acknowledged at their current version.
 function showLeftoverNotes() {
   const el = document.getElementById('unknownBanner');
   if (!el) return;
-  const notes = readNotes();
-  const ids = Object.keys(notes).filter(id => !pageNotes.has(id));
-  if (!ids.length) { el.innerHTML = ''; return; }
-  const items = ids.sort((a, b) => String(notes[a].at).localeCompare(String(notes[b].at)))
-    .map(id => `<li>${esc(notes[id].what)} <span class="unknown-when">(${esc(formatNoteTime(notes[id].at))})</span>${notes[id].safetyBackup ? `<br>Safety backup taken before it: ${esc(notes[id].safetyBackup)}` : ''}</li>`).join('');
-  el.innerHTML = `<div class="error-banner unknown-banner" role="alert">⚠️ ${ids.length === 1 ? 'A change' : `${ids.length} changes`} sent earlier from this browser got no answer, so ${ids.length === 1 ? 'it' : 'each'} may or may not have been made:
+  const notes = noteIds().filter(id => !pageNoteVersions.has(id)).map(id => ({ id, n: readNote(id) }))
+    .filter(x => x.n && (Number(x.n.version) || 1) > ackedVersion(x.id))
+    .sort((a, b) => String(a.n.at).localeCompare(String(b.n.at)));
+  shownNotes = notes.map(x => ({ id: x.id, version: Number(x.n.version) || 1 }));
+  if (!notes.length) { el.innerHTML = ''; return; }
+  const items = notes.map(x => `<li>${esc(x.n.what)} <span class="unknown-when">(${esc(formatNoteTime(x.n.at))})</span>${x.n.safetyBackup ? `<br>Safety backup taken before it: ${esc(x.n.safetyBackup)}` : ''}</li>`).join('');
+  el.innerHTML = `<div class="error-banner unknown-banner" role="alert">⚠️ ${notes.length === 1 ? 'A change' : `${notes.length} changes`} sent from this browser ${notes.length === 1 ? 'hasn’t' : 'haven’t'} been confirmed: ${notes.length === 1 ? 'it' : 'each'} may still be in progress in another tab, or got no answer, so it may or may not have been made:
     <ul>${items}</ul>Check what is saved now. Nothing was sent again.
-    <button class="btn" onclick="dismissLeftoverNotes()">I’ve checked — dismiss</button></div>`;
+    <button class="btn" onclick="acknowledgeShownNotes()">I understand these remain unresolved — hide</button></div>`;
 }
-function dismissLeftoverNotes() {
-  const notes = readNotes();
-  Object.keys(notes).filter(id => !pageNotes.has(id)).forEach(id => delete notes[id]);
-  writeNotes(notes);
+// Records that exactly the versions shown were seen. Nothing is deleted.
+function acknowledgeShownNotes() {
+  shownNotes.forEach(x => { try { userStorage.setItem(ACK_PREFIX + x.id, String(x.version)); } catch (e) { /* storage unavailable */ } });
   showLeftoverNotes();
 }
 function formatNoteTime(iso) { const d = new Date(iso); return isNaN(d) ? String(iso) : d.toLocaleString(); }
@@ -149,8 +166,7 @@ function finishAccountChange() {
   reloadPage();
 }
 function renderAccountChangeAck() {
-  const notes = readNotes();
-  const items = unknownOutcomesHere().map(id => `<li>${esc(notes[id].what)}${notes[id].safetyBackup ? ` (safety backup: ${esc(notes[id].safetyBackup)})` : ''}</li>`).join('');
+  const items = unknownOutcomesHere().map(id => { const n = readNote(id) || {}; return `<li>${esc(n.what || 'A change')}${n.safetyBackup ? ` (safety backup: ${esc(n.safetyBackup)})` : ''}</li>`; }).join('');
   showAuthOverlay(`<div class="modal-title">The sign-in changed while a change had no answer</div>
     <div class="modal-error">This page sent a change that got no answer, so it may or may not have been made:<ul>${items}</ul>
 It wasn’t sent again. When you next sign in to that account, this warning is shown again until you dismiss it.</div>
@@ -248,12 +264,26 @@ async function signOutHere() {
   if (typeof resetRouteAfterSignOut === 'function') resetRouteAfterSignOut();
   reloadPage();
 }
+// An Auth answer counts as a confirmed refusal only when it is one of Auth's recognised refusals for that
+// request (its error code); a network failure, a server error or anything unrecognised leaves the outcome
+// unknown: the request may or may not have been carried out.
+const AUTH_REFUSALS = {
+  password: ['current_password_mismatch', 'current_password_required', 'weak_password', 'same_password', 'validation_failed', 'reauthentication_needed', 'session_not_found', 'user_not_found', 'not_admin', 'bad_jwt', 'no_authorization'],
+  signOut: ['session_not_found', 'bad_jwt', 'no_authorization', 'validation_failed']
+};
+function authOutcome(error, kind) {
+  if (!error) return 'done';
+  const code = String(error.code || error.error_code || '');
+  return AUTH_REFUSALS[kind].includes(code) ? 'refused' : 'unknown';
+}
 // Ends every other session of this account (other devices and browsers); this one stays signed in.
 async function signOutOtherDevices() {
   let error = null;
   try { ({ error } = await authClient().auth.signOut({ scope: 'others' })); } catch (e) { error = e; }
-  setAccountNote(error ? `Other devices couldn’t be signed out (${String(error.message || error)}). Try again.`
-    : 'Every other device and browser signed in to this account has been signed out. Each can keep working only until its current access token expires (up to about an hour).');
+  const o = authOutcome(error, 'signOut');
+  setAccountNote(o === 'done' ? 'Every other device and browser signed in to this account has been signed out. Each can keep working only until its current access token expires (up to about an hour).'
+    : o === 'refused' ? `Other devices weren’t signed out (${String(error.message || error.code)}). Sign in again here, then try again.`
+    : 'There was no clear answer, so other devices may or may not have been signed out. Try again; signing out again is safe.');
 }
 
 // ── Change password (Settings) ──
@@ -271,11 +301,17 @@ async function changePassword() {
   setAccountNote('Changing…');
   let error = null;
   try { ({ error } = await authClient().auth.updateUser({ password: next, current_password: current })); } catch (e) { error = e; }
-  if (error) {
-    const code = String(error.code || ''), m = String(error.message || error);
-    setAccountNote(/current_password/.test(code) || /current password/i.test(m) ? 'Your current password isn’t right. Nothing was changed.'
-      : /weak|short|characters|same_password|different/i.test(code + ' ' + m) ? `That password isn’t accepted (${m}). Nothing was changed.`
-      : `The password wasn’t changed (${m}).`);
+  const o = authOutcome(error, 'password');
+  if (o === 'refused') {
+    const code = String(error.code || error.error_code || ''), m = String(error.message || code);
+    setAccountNote(/^current_password/.test(code) ? 'Your current password isn’t right. Nothing was changed.'
+      : /weak_password|same_password|validation_failed/.test(code) ? `That password isn’t accepted (${m}). Nothing was changed.`
+      : `The password wasn’t changed (${m}). Sign in again, then try again.`);
+    return;
+  }
+  if (o === 'unknown') {
+    // Never "not changed" without a recognised refusal: the change may have been made with its answer lost.
+    setAccountNote('There was no clear answer, so your password may or may not have been changed. If you sign in again, try the new password first, then the old one; if neither works, ask the library owner to reset it. Neither password was kept.');
     return;
   }
   setAccountNote('Your password has been changed. Other devices stay signed in until you use “Sign out other devices”.');
@@ -300,6 +336,22 @@ function accountSectionHtml() {
     </form>
     <p class="settings-text" id="settingsAccountNote" role="status">${esc(accountNote)}</p>
   </section>`;
+}
+
+function showNonMemberAccount() {
+  setSignedOutMark(true);
+  const el = document.getElementById('phaseBanner');
+  if (el) el.innerHTML = `<div class="error-banner">⚠️ ${esc(NOT_A_MEMBER_TEXT)}</div>`;
+  const screen = document.getElementById('authScreen');
+  if (screen) screen.innerHTML = `<div class="auth-box auth-account">${accountSectionHtml()}</div>`;
+  showLeftoverNotes();
+}
+// A change refused with not_a_member: the membership ended while this page was open. Nothing more is
+// sent from it; a reload shows the account without a library.
+function membershipEnded() {
+  if (typeof b45Stopped !== 'undefined') { b45Stopped = true; stage5Phase = null; }
+  const el = document.getElementById('phaseBanner');
+  if (el) el.innerHTML = `<div class="error-banner">⚠️ ${esc(NOT_A_MEMBER_TEXT)} This page changes nothing more; reload it.</div>`;
 }
 
 function setSignedOutMark(on) {
@@ -332,6 +384,10 @@ async function startSignedIn(user) {
     if (el) el.innerHTML = `<div class="error-banner">⚠️ ${failed ? 'The database couldn’t be reached, so nothing is shown yet. Reload to try again.' : 'You’re signed in, but the database hasn’t been updated for signed-in libraries yet, so nothing is shown and nothing will be changed.'}</div>`;
     return;
   }
+  // Signed in, but not a member now (never added, or membership disabled): no library is read, so nothing
+  // empty is shown, backed up or written. The Account controls stay available (sign out, other devices,
+  // password), which recovery uses.
+  if (cap.member !== true) { showNonMemberAccount(); return; }
   showLeftoverNotes();
   if (typeof bootAuth.start === 'function') bootAuth.start(cap);
 }
