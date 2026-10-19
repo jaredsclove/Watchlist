@@ -13,7 +13,8 @@
 //       membership, so it never reopens access to the account. Its rowCounts are that snapshot's counts.
 //   node tools/admin-restore.mjs remove-sql --user <id> --file <the owner export>
 //       Prints the removal transaction: it refuses while the account is a member or unless every table still
-//       holds exactly the export's row counts for that account, then deletes that account's rows (only).
+//       holds exactly the export's row counts for that account, or while it has recovery-archive rows (not in any
+//       export), then deletes that account's library rows (only).
 //   node tools/admin-restore.mjs check --file <backup.json> --safety <safety.json> [--out <converted.json>]
 //       The page's checks, refusing as the page refuses: the file and the safety backup
 //       validate; a format-3 or -4 file is converted exactly as the page converts it (written
@@ -114,6 +115,13 @@ do $$ begin
 ${checks} then
     raise exception 'remove: the library no longer matches the export''s row counts; export again; nothing was changed';
   end if;
+  -- The recovery archive isn't part of a backup or this export, so it is never deleted here.
+  if exists (select 1 from private.stage5_recovery_records where user_id = '${user}')
+     or exists (select 1 from private.stage5_recovery_collections where user_id = '${user}')
+     or exists (select 1 from private.stage5_recovery_othertv where user_id = '${user}')
+     or exists (select 1 from private.stage5_recovery_meta where user_id = '${user}') then
+    raise exception 'remove: ${user} has recovery-archive rows, which the export does not hold; nothing was changed';
+  end if;
 end $$;
 select set_config('watchlist.library_write', 'on', true);
 delete from public.collection_memberships where user_id = '${user}';
@@ -123,10 +131,6 @@ delete from public.tv_shows where user_id = '${user}';
 delete from public.personal_collections where user_id = '${user}';
 delete from public.watch_with_choices where user_id = '${user}';
 delete from public.custom_collections where user_id = '${user}';
-delete from private.stage5_recovery_records where user_id = '${user}';
-delete from private.stage5_recovery_collections where user_id = '${user}';
-delete from private.stage5_recovery_othertv where user_id = '${user}';
-delete from private.stage5_recovery_meta where user_id = '${user}';
 do $$ begin
   if exists (select 1 from public.watchlist_items where user_id = '${user}') or exists (select 1 from public.tv_shows where user_id = '${user}')
      or exists (select 1 from public.personal_collections where user_id = '${user}') or exists (select 1 from public.custom_collections where user_id = '${user}')

@@ -378,6 +378,15 @@ section('adm: the admin restore runbook');
     fs.writeFileSync(path.join(dir, 'b-stale.json'), JSON.stringify(stale));
     const staleRun = await runSql(tool('remove-sql', '--user', B, '--file', path.join(dir, 'b-stale.json')).out);
     ok(!staleRun.ok && /no longer matches the export/.test(staleRun.message), 'removal refuses when the library no longer matches the export', staleRun.message || 'removed');
+    await db.exec(`begin; select set_config('watchlist.library_write', 'on', true);
+      insert into private.stage5_recovery_meta (user_id, origin, counts, hashes) values ('${B}', 'contraction', '{}'::jsonb, '{}'::jsonb); commit;`);
+    const bBefore = await rowsFor(db, B);
+    const archived = await runSql(tool('remove-sql', '--user', B, '--file', path.join(dir, 'b-owner.json')).out);
+    ok(!archived.ok && /recovery-archive rows/.test(archived.message) && same(bBefore, await rowsFor(db, B))
+      && Number(await val(db, `select count(*) from private.stage5_recovery_meta where user_id = $1`, [B])) === 1,
+      'removal refuses, changing nothing, while B has recovery-archive rows (not in any export)', archived.message || 'removed');
+    await db.exec(`begin; select set_config('watchlist.library_write', 'on', true);
+      delete from private.stage5_recovery_meta where user_id = '${B}'; commit;`);
     const aBefore = await rowsFor(db, A);
     const removed = await runSql(tool('remove-sql', '--user', B, '--file', path.join(dir, 'b-owner.json')).out);
     let bLeft = 0; for (const [sc, t] of OWNED) bLeft += Number(await val(db, `select count(*) from ${sc}.${t} where user_id = $1`, [B]));
