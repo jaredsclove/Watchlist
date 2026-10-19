@@ -46,7 +46,7 @@
     <label>Password <input id="bp" type="password" autocomplete="new-password" required></label>
   </fieldset>
   <button id="run" type="submit">Sign in both and run</button>
-  <button id="rerunB" type="button" disabled>Recheck B (after its membership is removed)</button>
+  <button id="rerunB" type="button" disabled>Check B’s original session (recovery rehearsal)</button>
 </form>
 <div id="summary"></div>
 <div id="log"></div>
@@ -115,7 +115,7 @@
     return supabase.createClient(TEST_URL, KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'm1-isolation-unused' } });
   }
 
-  let tokB = null;
+  let tokB = null, cbOriginal = null;
   async function run(ev) {
     ev.preventDefault();
     logEl.textContent = ''; passed = failed = 0;
@@ -125,7 +125,7 @@
     const sa = await ca.auth.signInWithPassword({ email: ea, password: pa });
     const sb = await cb.auth.signInWithPassword({ email: eb, password: pb });
     if (sa.error || sb.error) { line('bad', 'Sign-in failed: ' + scrub((sa.error || sb.error).message)); return; }
-    const tokA = sa.data.session.access_token; tokB = sb.data.session.access_token;
+    const tokA = sa.data.session.access_token; tokB = sb.data.session.access_token; cbOriginal = cb;
     await test('the two sessions are members A and B', async () => assert(sa.data.user.id === A && sb.data.user.id === B, 'unexpected user ids'));
     const [fileA, fileB] = await Promise.all([CFG.syntheticA, CFG.syntheticB].map(p => fetch(p).then(r => r.json())));
 
@@ -188,14 +188,16 @@
       assert(fpB0 === await fingerprint(tokB), 'B changed');
     });
     document.getElementById('rerunB').disabled = false;
-    line('info', 'Done. For the membership-removal check: remove B from private.library_members in the SQL Editor, then press “Recheck B” (B’s token is still valid).');
+    line('info', 'Done. Recovery rehearsal (docs/MEMBER_RECOVERY.md): B’s original session is kept in this page as the “lost device”. Press “Check B’s original session” after each step.');
   }
+  // The "lost device": B's session from the run above. Reports, without deciding the step, what it can do now.
   async function recheckB() {
-    await test('B, no longer a member, with a still-valid token: reads empty, writes refused', async () => {
-      const t = await rows(tokB, 'tv_shows');
-      const w = await rpc(tokB, 'org_create_collection', { p_id: crypto.randomUUID(), p_name: 'zz after removal' });
-      assert(t.length === 0 && !w.ok && /not_a_member/.test(w.text), `rows ${t.length}; write ${w.status} ${w.text}`);
-    });
+    const reads = await rest(tokB, 'GET', 'tv_shows?select=id');
+    const write = await rpc(tokB, 'org_create_collection', { p_id: crypto.randomUUID(), p_name: 'zz recovery check' });
+    const ref = await cbOriginal.auth.refreshSession();
+    const refreshed = !ref.error && ref.data && ref.data.session;
+    if (refreshed) tokB = ref.data.session.access_token;
+    line('info', `B’s original session at ${new Date().toLocaleTimeString()}: read ${reads.status}${reads.ok ? ` (${reads.json.length} rows)` : ''}; write ${write.status}${/not_a_member/.test(write.text) ? ' not_a_member' : ''}; refresh ${refreshed ? 'WORKS' : 'refused'}.`);
   }
   document.getElementById('f').addEventListener('submit', e => { run(e).catch(err => line('bad', 'Stopped: ' + scrub(err && err.message))); });
   document.getElementById('rerunB').addEventListener('click', () => recheckB().catch(err => line('bad', 'Stopped: ' + scrub(err && err.message))));

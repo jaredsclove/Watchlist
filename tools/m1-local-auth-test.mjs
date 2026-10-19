@@ -1,7 +1,8 @@
 // M1 Phase B1 (local Supabase stack only; refuses any address but 127.0.0.1): real Auth and PostgREST.
 //   node tools/m1-local-auth-test.mjs --api http://127.0.0.1:54321 --mail http://127.0.0.1:54324 --key <local publishable key>
 //        --a <member A email> --b <member B email> --file-a synthetic-1.json --file-b synthetic-2.json [--expiry]
-// Members sign in by emailed code, read from the local mail catcher (Mailpit); no password exists or is stored.
+// Members sign in with email and password (A1); local test passwords are generated in this process and never
+// printed or stored. --psql <psql path> lets the recovery rehearsal change membership in the local database.
 // Checks: code sign-in (shouldCreateUser false refuses an unknown address); the anonymous caller is refused
 // (tables, views, functions, GraphQL); each member sees only their own rows; cross-member writes and functions
 // change nothing; restore isolation; refresh; a signed-out (revoked) session can't refresh; with --expiry, a write
@@ -40,38 +41,45 @@ async function fingerprint(t) {
   return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
 }
 
-// ── Sign-in by emailed code (Mailpit) ──
-async function latestCode(email, after) {
-  for (let i = 0; i < 40; i++) {
-    const s = await (await fetch(`${MAIL}/api/v1/search?query=${encodeURIComponent('to:' + email)}`)).json();
-    const m = (s.messages || []).filter(x => new Date(x.Created) > after).sort((a, b) => new Date(b.Created) - new Date(a.Created))[0];
-    if (m) {
-      const full = await (await fetch(`${MAIL}/api/v1/message/${m.ID}`)).json();
-      const code = (String(full.Text || '') + ' ' + String(full.HTML || '')).match(/\b(\d{6})\b/);
-      if (code) return code[1];
-    }
-    await new Promise(r => setTimeout(r, 500));
-  }
-  throw new Error(`no code email for ${email}`);
+// ── Sign-in by email and password (amendment A1) ──
+// Passwords are generated here for the local test users, set through the local Auth admin API (the stack's own
+// development service key, from LOCAL_SERVICE_KEY), and never printed or written anywhere.
+const SERVICE = process.env.LOCAL_SERVICE_KEY;
+if (!SERVICE) { console.error('set LOCAL_SERVICE_KEY to the local stack’s service key'); process.exit(2); }
+const PSQL = opt('--psql');
+const newPassword = () => 'Local-' + crypto.randomBytes(18).toString('base64url');
+async function admin(method, path, body) {
+  const r = await fetch(`${API}/auth/v1/admin/${path}`, { method, headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch (e) { j = null; }
+  return { ok: r.ok, status: r.status, json: j };
 }
-async function signInByCode(email) {
-  const t0 = new Date(Date.now() - 1000);
-  const o = await call(null, 'POST', 'auth/v1/otp', { email, create_user: false });
-  if (!o.ok) throw new Error(`otp ${o.status} ${o.text}`);
-  const code = await latestCode(email, t0);
-  const v = await call(null, 'POST', 'auth/v1/verify', { type: 'email', email, token: code });
-  if (!v.ok || !v.json.access_token) throw new Error(`verify ${v.status} ${v.text}`);
+async function userId(email) {
+  const r = await admin('GET', 'users?per_page=200');
+  const u = ((r.json && r.json.users) || []).find(x => x.email === email);
+  if (!u) throw new Error(`no local user ${email}`);
+  return u.id;
+}
+async function signIn(email, password) {
+  const v = await call(null, 'POST', 'auth/v1/token?grant_type=password', { email, password });
+  if (!v.ok || !v.json.access_token) throw new Error(`password sign-in ${v.status}`);
   return v.json;
 }
+async function mailCount() { const s = await (await fetch(`${MAIL}/api/v1/messages?limit=1`)).json(); return s.total || 0; }
+const pw = { a: newPassword(), b: newPassword() };
+const idA = await userId(EA), idB = await userId(EB);
+for (const [id, p] of [[idA, pw.a], [idB, pw.b]]) { const r = await admin('PUT', `users/${id}`, { password: p }); if (!r.ok) { console.error(`could not set a local test password (${r.status})`); process.exit(1); } }
+const mail0 = await mailCount();
 
-console.log('[sign-in by code]');
+console.log('[sign-in with email and password]');
 let sa, sb;
-await test('an unknown address gets no code and no account (sign-ups off, create_user false)', async () => {
-  const r = await call(null, 'POST', 'auth/v1/otp', { email: `nobody-${Date.now()}@test.local`, create_user: false });
-  assert(!r.ok, `${r.status} ${r.text}`);
+await test('sign-up is refused (sign-ups off)', async () => { const r = await call(null, 'POST', 'auth/v1/signup', { email: `nobody-${Date.now()}@test.local`, password: newPassword() }); assert(!r.ok, `${r.status} ${r.text}`); });
+await test('a wrong password is refused, with the same answer as an unknown email', async () => {
+  const w = await call(null, 'POST', 'auth/v1/token?grant_type=password', { email: EA, password: 'Not-the-password-123' });
+  const u = await call(null, 'POST', 'auth/v1/token?grant_type=password', { email: `nobody-${Date.now()}@test.local`, password: 'Not-the-password-123' });
+  assert(!w.ok && !u.ok && w.status === u.status && (w.json || {}).error_code === (u.json || {}).error_code, `${w.status}/${u.status}`);
 });
-await test('member A signs in with the emailed code', async () => { sa = await signInByCode(EA); assert(sa.user.email === EA, 'wrong user'); });
-await test('member B signs in with the emailed code', async () => { sb = await signInByCode(EB); assert(sb.user.email === EB, 'wrong user'); });
+await test('member A signs in with email and password', async () => { sa = await signIn(EA, pw.a); assert(sa.user.email === EA, 'wrong user'); });
+await test('member B signs in with email and password', async () => { sb = await signIn(EB, pw.b); assert(sb.user.email === EB, 'wrong user'); });
 if (!sa || !sb) { console.log(`\nFAILED: ${failed}`); process.exit(1); }
 const A = sa.user.id, B = sb.user.id;
 
@@ -126,6 +134,79 @@ if (argv.includes('--expiry')) {
     assert(r.status === 401 && /PGRST30\d|expired/i.test(r.text), `${r.status} ${r.text}`);
     const fresh = (await call(null, 'POST', 'auth/v1/token?grant_type=refresh_token', { refresh_token: sa.refresh_token })).json;
     assert(fresh && fresh.access_token && before === await fingerprint(fresh.access_token), 'changed');
+  });
+}
+console.log('\n[change password]');
+await test('Change password with the right current password succeeds; the new one signs in, the old one doesn’t', async () => {
+  const fresh = await signIn(EA, pw.a);
+  const next = newPassword();
+  const r = await call(fresh.access_token, 'PUT', 'auth/v1/user', { password: next, current_password: pw.a });
+  assert(r.ok, `${r.status} ${r.text}`);
+  await signIn(EA, next);
+  const old = await call(null, 'POST', 'auth/v1/token?grant_type=password', { email: EA, password: pw.a });
+  assert(!old.ok, 'the old password still works');
+  pw.a = next;
+});
+await test('Change password with a wrong current password: recorded (Auth checks it only when its setting is on; the page checks it itself)', async () => {
+  const fresh = await signIn(EA, pw.a);
+  const r = await call(fresh.access_token, 'PUT', 'auth/v1/user', { password: newPassword(), current_password: 'Wrong-current-123' });
+  console.log(`       local Auth answered ${r.status}${r.ok ? ' (accepted: the setting is off here; the page’s own check refuses first)' : ` (${(r.json || {}).error_code || ''})`}`);
+  if (r.ok) { const back = await call(fresh.access_token, 'PUT', 'auth/v1/user', { password: pw.a }); assert(back.ok || back.status === 422, 'restore'); }
+});
+await test('no email was sent by sign-in, sign-up refusal or password change', async () => assert(await mailCount() === mail0, `${(await mailCount()) - mail0} new message(s)`));
+
+console.log('\n[recovery: lost device (corrected sequence)]');
+if (!PSQL) console.log('  skip (no --psql)');
+else {
+  const { execFileSync } = await import('child_process');
+  const sql = q => execFileSync(PSQL, ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', '-h', '127.0.0.1', '-p', '54322', '-U', 'postgres', '-d', 'postgres', '-c', q], { env: { ...process.env, PGPASSWORD: 'postgres' }, encoding: 'utf8' }).trim();
+  const lost = await signIn(EB, pw.b); // the "lost device"
+  await test('1. membership disabled: the lost device’s still-valid token reads nothing and changes nothing', async () => {
+    sql(`delete from private.library_members where user_id = '${B}'`);
+    const t = await rows(lost.access_token, 'tv_shows');
+    const w = await rpc(lost.access_token, 'org_create_collection', { p_id: crypto.randomUUID(), p_name: 'zz lost device' });
+    assert(t.length === 0 && !w.ok && /not_a_member/.test(w.text), `rows ${t.length}; write ${w.status}`);
+  });
+  await test('2. the owner’s tool resets the password (values piped, never printed)', async () => {
+    const next = newPassword();
+    const out = execFileSync(process.execPath, [new URL('./admin-set-password.mjs', import.meta.url).pathname, '--project', 'local', '--user', B],
+      { input: `${SERVICE}\n${next}\n${next}\n`, encoding: 'utf8' });
+    assert(/Password set/.test(out) && !out.includes(next) && !out.includes(SERVICE), 'unexpected output');
+    pw.b = next;
+  });
+  let trusted;
+  await test('observed: after the reset alone, the lost device’s refresh token (recorded, not relied on)', async () => {
+    const r = await call(null, 'POST', 'auth/v1/token?grant_type=refresh_token', { refresh_token: lost.refresh_token });
+    console.log(`       refresh after password reset: ${r.ok ? 'still works' : `refused (${r.status})`}`);
+    if (r.ok) lost.refresh_token = r.json.refresh_token, lost.access_token = r.json.access_token;
+  });
+  await test('3. sign in on a trusted device and “Sign out other devices” (scope others)', async () => {
+    trusted = await signIn(EB, pw.b);
+    const o = await call(trusted.access_token, 'POST', 'auth/v1/logout?scope=others', {});
+    assert(o.ok || o.status === 204, `logout ${o.status}`);
+  });
+  const doneAt = Date.now();
+  await test('4. the lost device’s refresh token now fails; the trusted session still refreshes', async () => {
+    const r = await call(null, 'POST', 'auth/v1/token?grant_type=refresh_token', { refresh_token: lost.refresh_token });
+    assert(!r.ok, `lost device refresh ${r.status}`);
+    const t = await call(null, 'POST', 'auth/v1/token?grant_type=refresh_token', { refresh_token: trusted.refresh_token });
+    assert(t.ok, `trusted refresh ${t.status}`); trusted = t.json;
+  });
+  const exp = JSON.parse(Buffer.from(lost.access_token.split('.')[1], 'base64url').toString()).exp;
+  const lifetime = exp - JSON.parse(Buffer.from(lost.access_token.split('.')[1], 'base64url').toString()).iat;
+  const waitUntil = doneAt + (lifetime + 300) * 1000;
+  console.log(`  …  5. waiting ${Math.round((waitUntil - Date.now()) / 1000)} s (token lifetime ${lifetime} s + 5 min, from step 3)`);
+  await new Promise(r => setTimeout(r, Math.max(0, waitUntil - Date.now())));
+  await test('5. after the wait, the lost device’s access token is refused by the API itself (401)', async () => {
+    const r = await rest(lost.access_token, 'GET', 'tv_shows?select=id&limit=1');
+    assert(r.status === 401, `${r.status} ${r.text}`);
+  });
+  await test('6. membership restored: B signs in afresh and sees B’s library; the old token stays refused', async () => {
+    sql(`insert into private.library_members (user_id, note) values ('${B}', 'local member B')`);
+    const again = await signIn(EB, pw.b);
+    assert((await rows(again.access_token, 'tv_shows')).length > 0, 'no rows');
+    const r = await rest(lost.access_token, 'GET', 'tv_shows?select=id&limit=1');
+    assert(r.status === 401, `old token ${r.status}`);
   });
 }
 console.log(`\n${failed ? `FAILED: ${failed}` : 'all local auth checks passed'} (${passed} passed)`);
