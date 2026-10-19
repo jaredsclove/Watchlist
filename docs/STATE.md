@@ -12,8 +12,9 @@ names and evidence hashes out of it.
 
 A personal TV and film watchlist: a static page on GitHub Pages (`watchlist.html` + classic-script
 JS files, no build step) with a Supabase (PostgREST) backend and TMDB for identities and metadata.
-Each database has one owner using it from one device at a time. A second user would get their own
-database; collaborative editing of a shared database is not a goal.
+Members sign in with an email and a password (accounts are created by the library owner; there is no
+public sign-up). Each member's library is theirs alone: the database allows a signed-in member only their
+own rows, and nothing to anyone signed out. Collaborative editing of a shared library is not a goal.
 
 - **Views:** TV (Currently Watching, All TV, Coming Soon), Movies (All Movies), Collections
   (personal collections: shows, seasons and, since S4, films editable there; Remove from a
@@ -22,7 +23,8 @@ database; collaborative editing of a shared database is not a goal.
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
 - **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
-  `catalog_film_links`. Rows are owner-scoped (`user_id`, never sent by the client).
+  `catalog_film_links`. Rows are owner-scoped: `user_id` is the signed-in member (`auth.uid()`), never sent
+  by the client; membership is `private.library_members`.
 - **Writes** go mainly through database functions (the `library_*_b45` family, `org_*`,
   `set_season_watched` / `set_season_skipped`, `delete_tv_season`, `restore_backup`). Some take
   `p_expected` values and refuse a stale write; not every path does, so check each one before relying on it.
@@ -34,7 +36,7 @@ database; collaborative editing of a shared database is not a goal.
 
 | Area | Files |
 |---|---|
-| Boot, config, API | `watchlist.html`, `config.js`, `api.js` (the writable phase, the stop switch), `write-lane.js` (one change at a time; read freshness), `ui-helpers.js` (incl. dialog keyboard and focus return), `identity.js`, `history.js` (routes, Back / Forward, leave warning) |
+| Boot, config, API | `watchlist.html`, `config.js`, `auth.js` (sign-in, the bound account, per-account storage, Account controls, pending notes), `api.js` (the writable phase, the stop switch), `write-lane.js` (one change at a time; read freshness), `ui-helpers.js` (incl. dialog keyboard and focus return), `identity.js`, `history.js` (routes, Back / Forward, leave warning) |
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views, the movie tools' film row), `metadata.js` (Details) |
 | Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog; the membership request, answer and Undo rules both UIs use), `collection-members.js` (Remove / Undo and the Add picker from a collection view) |
@@ -44,8 +46,8 @@ database; collaborative editing of a shared database is not a goal.
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261018-batchb`). The tests
-check only that all 25 versioned files share one token; before releasing, check that it differs from
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261019-m1`). The tests
+check only that all 26 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
@@ -56,16 +58,20 @@ Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6
 test runner and token check [#4].
 
 - **App release:** `1618e1a`, simplification Batch B (PR #3). Later `main` commits are tests and docs only.
-- **Database (as last recorded, not freshly observed):** phase `contracted-b45`, backup format 5,
-  recovery archive active. G9 (archive retirement) is paused. Rollbacks follow the recorded order
-  (history §18: P1 → P2 → P3′ → D2), each with its own approval; a B4/B5 rollback is lossy.
+- **Database (as last recorded, not freshly observed):** phase `contracted-b45` with M1 owner-only access
+  (`access = members`), backup format 5, recovery archive active. G9 (archive retirement) is paused.
+  **Repairs are fix-forward:** the B4/B5 and D2 rollbacks are retired (they refuse against the M1 state),
+  and reopening anonymous access is never a recovery step. Data recovery is a format-5 restore through
+  the signed-in page, or `docs/ADMIN_RESTORE.md`; accounts, `docs/MEMBER_RECOVERY.md`.
 - **Done:** the B3 / B1 / B7 plan (S1–S6; D10 deferred), simplification Batches A and B.
 - **Reverting releases** (each needs its own approval, tested like any change):
   - S4–S6: no database migration, but the app's actions change saved data (memberships, film state,
     deletes, Match, Pull rest) and reverting code doesn't reverse them. The stage commits depend on each
     other: revert the set together, newest first.
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
-- **Recovery reference (not a recipe):** the deployed page meets a rolled-back (`contracted`) database
+  - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
+    writes refused, reads error); repairs are fix-forward.
+- **Recovery reference before M1 (historical; those rollbacks are now retired):** the deployed page meets a rolled-back (`contracted`) database
   with the mismatch notice, no usable list, no backup and every write refused. P3′'s verified target is
   the application files of `aeb9f73` (documentation-only commits excluded); reaching it means removing
   every application commit after `aeb9f73` (now including Batch A, S4–S6 and Batch B). The procedure is
@@ -161,12 +167,10 @@ test runner and token check [#4].
 
 ## Open items
 
-- **Data access (unverified, needs a separate owner decision):** the page has no sign-in and uses
-  the publishable key, and the `db/` scripts give the `anon` role broad table access (recorded
-  earlier as an accepted family-app trade-off). Production's current policies have not been checked.
-  If they match the scripts, anyone holding the public key can read and change the data. Moving
-  configuration or adding sign-in does not by itself close anonymous access; the policies are the
-  boundary. The read-only policy check needs its own authorization.
+- **Access (M1):** signed-out callers get nothing (no table, view or function; the `db/` scripts before
+  M1 granted `anon` broad access, which M1 removes). Default privileges owned by `supabase_admin` can't
+  be changed by `postgres`, so every later migration revokes from `anon` explicitly and verifies before
+  commit. Deleting a removed member's library is deferred (`docs/MEMBER_RECOVERY.md`).
 - **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip); on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
   instead of a sentence (polish, not a blocker).
