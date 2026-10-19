@@ -20,7 +20,7 @@ insert into rv_tables values ('public', 'watchlist_items'), ('public', 'tv_shows
 do $$
 declare v_snap jsonb := (select s from rv_snap); v_owner uuid; t record; n bigint;
 begin
-  if to_regclass('private.zz_test_environment') is null then raise exception 'm1_reverse: not a marked test environment; nothing was changed'; end if;
+  if to_regclass('zz_test.environment') is null then raise exception 'm1_reverse: not a marked test environment; nothing was changed'; end if;
   if v_snap is null or v_snap ->> 'bootstrap' is null then raise exception 'm1_reverse: set watchlist.m1_snapshot first'; end if;
   if to_regclass('private.library_members') is null then raise exception 'm1_reverse: M1 is not installed'; end if;
   if (select count(*) from private.library_members) <> 1 then raise exception 'm1_reverse: remove every member but the owner (and their rows) first'; end if;

@@ -8,10 +8,13 @@ do $$ begin
   if coalesce(current_setting('watchlist.test_project', true), '') !~ '^[a-z0-9-]{3,40}$' then
     raise exception 'set watchlist.test_project to the test project ref (or local) first';
   end if;
-  if to_regclass('private.zz_test_environment') is not null then raise exception 'already marked as %',
-    (select project_ref from private.zz_test_environment); end if;
+  if to_regclass('zz_test.environment') is not null then raise exception 'already marked as %',
+    (select project_ref from zz_test.environment); end if;
 end $$;
-create table private.zz_test_environment (project_ref text not null, marked_at timestamptz not null default now());
-revoke all on private.zz_test_environment from public, anon, authenticated;
-insert into private.zz_test_environment (project_ref) values (current_setting('watchlist.test_project'));
+-- Its own schema (never exposed, no browser grants), so it can be installed before the app's schemas exist.
+create schema zz_test;
+revoke all on schema zz_test from public, anon, authenticated;
+create table zz_test.environment (project_ref text not null, marked_at timestamptz not null default now());
+revoke all on zz_test.environment from public, anon, authenticated;
+insert into zz_test.environment (project_ref) values (current_setting('watchlist.test_project'));
 commit;
