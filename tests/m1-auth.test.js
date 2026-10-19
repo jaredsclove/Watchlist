@@ -72,15 +72,15 @@ test('nothing typed is kept: no password in storage, page state or the sign-in s
   assert.ok(!JSON.stringify(app.get('signInState')).includes('harness password 1'), 'not in page state');
 });
 
-test('Change password: the current password is checked (a separate, unsaved sign-in, signed out at once) and sent; a wrong one changes nothing', async () => {
+test('Change password: the current password goes to Auth, which refuses a wrong one (nothing changed); only one sign-in session exists', async () => {
   const app = await createApp({ ...lib(1) });
-  app.requireCurrent = true;
   app.ctx.openSettings(null);
   const fill = (cur, a, b) => { app.el('accountCurrentPassword').value = cur; app.el('accountNewPassword').value = a; app.el('accountNewPassword2').value = b; };
   fill('wrong current', 'a brand new password', 'a brand new password');
   await app.ctx.changePassword(); await settle();
   assert.match(app.el('settingsAccountNote').textContent, /current password isn’t right\. Nothing was changed\./);
-  assert.ok(!app.authCalls.some(c => c[0] === 'updateUser'), 'not sent');
+  assert.strictEqual(JSON.stringify(app.authCalls.filter(c => c[0] === 'updateUser').pop()), JSON.stringify(['updateUser', { password: '(new)', current_password: '(wrong)' }]), 'sent; Auth refused it');
+  assert.strictEqual(app.password, 'harness password 1', 'unchanged');
   fill('harness password 1', 'too short', 'too short');
   await app.ctx.changePassword(); await settle();
   assert.match(app.el('settingsAccountNote').textContent, /at least 12 characters/);
@@ -91,7 +91,7 @@ test('Change password: the current password is checked (a separate, unsaved sign
   await app.ctx.changePassword(); await settle();
   assert.match(app.el('settingsAccountNote').textContent, /Your password has been changed/);
   assert.strictEqual(JSON.stringify(app.authCalls.filter(c => c[0] === 'updateUser').pop()), JSON.stringify(['updateUser', { password: '(new)', current_password: '(right)' }]));
-  assert.ok(app.authCalls.some(c => c[0] === 'probe-signOut'), 'the check sign-in is signed out at once');
+  assert.ok(!app.authCalls.some(c => /^probe/.test(c[0])), 'no extra sign-in');
   assert.ok(app.session, 'the page stays signed in');
   ['accountCurrentPassword', 'accountNewPassword', 'accountNewPassword2'].forEach(id => assert.strictEqual(app.el(id).value, '', `${id} emptied`));
 });

@@ -257,8 +257,8 @@ async function signOutOtherDevices() {
 }
 
 // ── Change password (Settings) ──
-// The current password is checked twice: by Supabase Auth when its "require current password" setting is on
-// (always sent), and here, by a separate sign-in that is never saved and is signed out at once.
+// The current password is checked by Supabase Auth ("Require current password when updating", a project setting
+// that must be on; the pinned client sends current_password as given). No email is involved.
 let accountNote = '';
 function setAccountNote(text) { accountNote = text; const el = document.getElementById('settingsAccountNote'); if (el) el.textContent = text; }
 async function changePassword() {
@@ -268,27 +268,17 @@ async function changePassword() {
   if (next !== again) { setAccountNote('The two new passwords don’t match. Nothing was changed.'); return; }
   if (next.length < PASSWORD_MIN_LENGTH) { setAccountNote(`Use at least ${PASSWORD_MIN_LENGTH} characters. Nothing was changed.`); return; }
   if (!pageUser || authStopped) { setAccountNote(AUTH_NOT_SENT_TEXT); return; }
-  setAccountNote('Checking…');
-  if (!(await currentPasswordIsRight(current))) { setAccountNote('Your current password isn’t right. Nothing was changed.'); return; }
+  setAccountNote('Changing…');
   let error = null;
   try { ({ error } = await authClient().auth.updateUser({ password: next, current_password: current })); } catch (e) { error = e; }
   if (error) {
-    const m = String(error.message || error.code || error);
-    setAccountNote(/current password/i.test(m) ? 'Your current password isn’t right. Nothing was changed.'
-      : /weak|short|characters/i.test(m) ? `That password isn’t accepted (${m}). Nothing was changed.`
+    const code = String(error.code || ''), m = String(error.message || error);
+    setAccountNote(/current_password/.test(code) || /current password/i.test(m) ? 'Your current password isn’t right. Nothing was changed.'
+      : /weak|short|characters|same_password|different/i.test(code + ' ' + m) ? `That password isn’t accepted (${m}). Nothing was changed.`
       : `The password wasn’t changed (${m}).`);
     return;
   }
   setAccountNote('Your password has been changed. Other devices stay signed in until you use “Sign out other devices”.');
-}
-async function currentPasswordIsRight(current) {
-  try {
-    const probe = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'watchlist-password-check' } });
-    const { data, error } = await probe.auth.signInWithPassword({ email: pageUser.email, password: current });
-    const ok = !error && data && data.session && data.session.user && data.session.user.id === pageUser.id;
-    if (data && data.session) { try { await probe.auth.signOut({ scope: 'local' }); } catch (e) { /* that check session ends at its expiry anyway */ } }
-    return !!ok;
-  } catch (e) { return false; }
 }
 const PASSWORD_MIN_LENGTH = 12;
 

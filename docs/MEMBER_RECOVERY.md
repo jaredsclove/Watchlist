@@ -38,8 +38,11 @@ The order matters. Membership is restored only once no access token issued befor
    - Note the time it completed.
 4. **Check** that the lost device's session no longer works. It should be asked to sign in again once its
    current access ends. Never assume it from missing rows.
-5. **Wait** for the project's access-token lifetime plus 5 minutes after step 3. That is 1 hour 5 minutes at the
-   default lifetime; the 5 minutes cover the API's clock-skew allowance.
+5. **Wait** for the access-token lifetime plus 5 minutes, counted from step 3's confirmed completion.
+   - Read the lifetime from the project as it is configured now: Dashboard → Authentication → Sessions → Access
+     token expiry time. Don't use a remembered value.
+   - At the default 3,600 s, that is 1 hour 5 minutes.
+   - The 5 minutes cover the API's clock-skew allowance.
 6. **Restore membership:**
    `insert into private.library_members (user_id, note) values ('<id>', '<who>');`
    The person signs in afresh with the new password.
