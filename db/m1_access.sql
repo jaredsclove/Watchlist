@@ -251,6 +251,9 @@ end $$;
 create or replace function public.stage5_capabilities() returns jsonb
 language sql stable set search_path = '' as $$
   select jsonb_build_object('stage5', 1, 'phase', 'contracted-b45', 'backup_format', 5, 'b45', 1, 'access', 'members',
+    -- Whether the caller is a member now. A signed-in non-member's reads return no rows (RLS), so pages and
+    -- exports check this explicitly before treating anything they read as the library (never an empty one).
+    'member', private.is_member(),
     'recovery_archive', case when to_regclass('private.stage5_recovery_meta') is null then 'retired' else 'active' end)
 $$;
 revoke execute on function public.stage5_capabilities() from public, anon;
@@ -324,6 +327,7 @@ begin
     raise exception 'm1: a policy still applies to anon or PUBLIC';
   end if;
   if public.stage5_capabilities() ->> 'access' is distinct from 'members' then raise exception 'm1: capability not updated'; end if;
+  if (public.stage5_capabilities() -> 'member') is distinct from 'false'::jsonb then raise exception 'm1: capability member flag wrong for a caller with no claims'; end if;
 
   -- (e) simulated callers (each inside a subtransaction that is rolled back)
   perform set_config('request.jwt.claims', '', true);
@@ -350,11 +354,13 @@ begin
     raise exception 'm1-check: a non-member resolved as owner';
   exception when insufficient_privilege then null;
   end;
+  if (public.stage5_capabilities() -> 'member') is distinct from 'false'::jsonb then raise exception 'm1-check: a non-member is reported as a member'; end if;
   perform set_config('role', 'none', true);
 
   perform set_config('request.jwt.claims', json_build_object('sub', v_owner, 'role', 'authenticated')::text, true);
   perform set_config('role', 'authenticated', true);
   if private.current_owner_id() <> v_owner then raise exception 'm1-check: owner not resolved'; end if;
+  if (public.stage5_capabilities() -> 'member') is distinct from 'true'::jsonb then raise exception 'm1-check: the owner is not reported as a member'; end if;
   if array[(select count(*) from public.watchlist_items), (select count(*) from public.tv_shows), (select count(*) from private.stage5_recovery_records)]
      is distinct from v_expect then
     raise exception 'm1-check: the owner doesn''t see every row';
