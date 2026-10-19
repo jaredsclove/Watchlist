@@ -63,6 +63,8 @@ account), and is deleted only if it still matches that export exactly.
 4. **Delete the library:** `node tools/admin-restore.mjs remove-sql --user <id> --file <export>` prints one
    transaction, which refuses (changing nothing) while the account is a member, or unless every table still holds
    exactly the export's counts for that account. It then deletes only that account's rows. Run it.
+   - It also refuses if the account has rows in the recovery archive (`private.stage5_recovery_*`). Those are not
+     in any backup or export, so deleting them is a separate decision for the owner; stop there.
 5. **Delete the Auth user** in the dashboard. That works only once their rows are gone: deleting a login never
    deletes a library.
 
