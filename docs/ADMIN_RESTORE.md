@@ -10,7 +10,8 @@ Tools: `node tools/admin-restore.mjs` (offline; it never connects to anything). 
 page's own code.
 
 1. **Validate the file offline.** Keep the backup file you mean to restore. `check` (step 4) validates
-   it, and converts a format-3 or format-4 file exactly as the page does.
+   it, and converts a format-3, -4 or -5 file to format 6 exactly as the page does (since EP1; a format-5
+   file has no episode marks, and `check` says how many the library would lose).
 2. **Confirm the destination account.** In the SQL Editor:
    `select id, email from auth.users where lower(email) = lower('<email>');`
    The owner confirms that this id is the account to restore into, and that it is a member
@@ -25,7 +26,7 @@ page's own code.
    recovery section, then compares the file with the safety backup for identity loss. **Any
    finding stops the runbook. There is no override:** bypassing the identity-loss refusal would be
    removing a safeguard, which needs its own proposal and the owner's explicit authorization.
-5. **Restore.** `node tools/admin-restore.mjs restore-sql --file <the checked format-5 file> --owner <id> --email <email> --run <fresh run id>`
+5. **Restore.** `node tools/admin-restore.mjs restore-sql --file <the checked format-6 file> --owner <id> --email <email> --run <fresh run id>`
    prints one transaction: a run label, the destination check (that id is that email and a
    member), then `restore_backup` as that member. Check the printed file hash, paste, run.
 6. **Verify.** Export again (step 3's query) as `after.json`, then

@@ -70,7 +70,9 @@ test('C2 open page when B4/B5 is rolled back: a _b45 call answers 404 → “Thi
   assert.match(app.el('tbody').innerHTML + banners(app), /This page and the database don’t match/);
 });
 
-test('C2 unchanged names on 5c: an open page sends exactly the arguments the 5c database takes (set_season_watched, set_season_skipped, delete_tv_season, watch-with PATCH; as G8 sends them), and they succeed', async () => {
+// EP1: delete_tv_season takes the season's mark count, which a database before EP1 doesn't have: that call
+// answers 404 and stops the page like a missing _b45 function (never an unguarded delete).
+test('C2 unchanged names on 5c: an open page sends exactly the arguments the 5c database takes (set_season_watched, set_season_skipped, watch-with PATCH; as G8 sends them), and they succeed; its delete (EP1, with the mark count) is refused and stops the page', async () => {
   // Each view was loaded before the rollback committed (a view read afterwards shows the notice instead).
   const run = async (mediaType, ops) => {
     const lib = library();
@@ -79,23 +81,26 @@ test('C2 unchanged names on 5c: an open page sends exactly the arguments the 5c 
     app.rollbackB45();
     app.ctx.confirm = () => true;
     await ops(app, lib);
-    assert.ok(!/does not exist|schema cache|client_outdated|library_write_required/.test(banners(app)), banners(app));
-    return { lib, shapes: app.writes().map(r => [r.method, r.url.split('/rest/v1/')[1], r.body]), store: app.store };
+    if (mediaType !== 'tv-delete') assert.ok(!/does not exist|schema cache|client_outdated|library_write_required/.test(banners(app)), banners(app));
+    return { app, lib, shapes: app.writes().map(r => [r.method, r.url.split('/rest/v1/')[1], r.body]), store: app.store };
   };
   const tv = await run('tv', async (app, lib) => {
     await app.ctx.toggleWatch(lib.s1.id); await settle();
     await app.ctx.setSeasonSkipped(lib.s3.id, true); await settle();
-    await app.ctx.delRowInView(lib.s2.id); await settle();
   });
   assert.deepStrictEqual(tv.shapes, [
     ['POST', 'rpc/set_season_watched', { p_row_id: tv.lib.s1.id, p_watched: true }],
-    ['POST', 'rpc/set_season_skipped', { p_row_id: tv.lib.s3.id, p_skipped: true }],
-    ['POST', 'rpc/delete_tv_season', { p_row_id: tv.lib.s2.id }]
+    ['POST', 'rpc/set_season_skipped', { p_row_id: tv.lib.s3.id, p_skipped: true }]
   ]);
+  const del = await run('tv-delete', async (app, lib) => { await app.ctx.delRowInView(lib.s2.id); await settle(); });
+  assert.deepStrictEqual(del.shapes, [['POST', 'rpc/delete_tv_season', { p_row_id: del.lib.s2.id, p_marks_expected: 0 }]]);
+  assert.ok(del.store.watchlist_items.some(r => r.season === 'Season 2'), 'nothing deleted');
+  assert.match(banners(del.app), /This page and the database don’t match/);
+  assert.strictEqual(del.app.get('b45Stopped'), true, 'the page stops until it is reloaded');
   const film = await run('movie', async (app, lib) => { await app.ctx.toggleWatchWith(lib.film.id, 'Rina', true); await settle(); });
   assert.deepStrictEqual(film.shapes, [['PATCH', `watchlist_items?id=eq.${film.lib.film.id}`, { watch_with: ['Rina'] }]]);
   const s1 = tv.store.watchlist_items.find(r => r.season === 'Season 1'), s3 = tv.store.watchlist_items.find(r => r.season === 'Season 3');
-  assert.deepStrictEqual([s1.watched, s3.skipped, tv.store.watchlist_items.some(r => r.season === 'Season 2')], [true, true, false], 'they succeeded');
+  assert.deepStrictEqual([s1.watched, s3.skipped], [true, true], 'they succeeded');
   assert.deepStrictEqual(film.store.watchlist_items.find(r => r.title === 'Dune').watch_with, ['Rina']);
 });
 
@@ -111,7 +116,7 @@ async function stoppedChecks(app, lib, label) {
   await app.ctx.setSeasonSkipped(lib.s3.id, true); await settle();
   assert.strictEqual(app.writes().length, n, `${label}: later writes are refused before sending, though the capability still reads B4/B5`);
   const cap = await (await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/rpc/stage5_capabilities`, {})).json();
-  assert.strictEqual(cap.phase, 'contracted-b45', `${label}: (the capability really does still say B4/B5)`);
+  assert.strictEqual(cap.phase, 'contracted-ep1', `${label}: (the capability really does still say the page's phase)`);
   const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
   assert.match(res, /This page and the database don’t match[\s\S]*Reload the page\. No file was made\./, `${label}: no backup file`);
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
@@ -169,7 +174,7 @@ test('C2 code scan: no app script calls an old name (set_show_status, the librar
   });
   assert.deepStrictEqual(hits, []);
   const calls = scripts.flatMap(f => [...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/sbRpc\('([a-z0-9_]+)'/g)].map(m => m[1]));
-  assert.ok(calls.filter(x => /^library_/.test(x)).every(x => /_b45$/.test(x)), calls.join(', '));
+  assert.ok(calls.filter(x => /^library_/.test(x)).every(x => /_b45$/.test(x) || x === 'library_set_episode_marks'), calls.join(', ')); // (EP1's own function)
   assert.ok(!calls.includes('set_show_status'));
 });
 

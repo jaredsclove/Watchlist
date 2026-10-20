@@ -677,7 +677,7 @@ test('Catalog updates from the Browse bar: hints by GET, Review opens the dialog
 
 // ─── Review fixes (2026-10-08) ────────────────────────────────────────────────
 test('a show by hand named like an unmatched show: pointed out first, nothing sent; "Add as a new show" sends the ids shown (distinct_from); adding a season is the checked alternative', async () => {
-  for (const phase of ['contracted-b45']) { // (since B4/B5 the page writes only to the B4/B5 database)
+  for (const phase of ['contracted-ep1']) { // (since EP1 the page writes only to the EP1 database)
     const app = await boot(library(), { stage5: phase });
     await allTv(app); await openPanel(app, 'tv', 'manual');
     const local = showOf(app, 'Local Show');

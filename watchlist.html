@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261019-m1">
+<link rel="stylesheet" href="styles.css?v=20261020-ep1">
 </head>
 <body>
 
@@ -98,31 +98,32 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261019-m1"></script>
-<script src="api.js?v=20261019-m1"></script>
-<script src="write-lane.js?v=20261019-m1"></script>
-<script src="ui-helpers.js?v=20261019-m1"></script>
-<script src="metadata.js?v=20261019-m1"></script>
-<script src="backup-restore.js?v=20261019-m1"></script>
-<script src="backup-format3.js?v=20261019-m1"></script>
-<script src="tabs.js?v=20261019-m1"></script>
-<script src="render.js?v=20261019-m1"></script>
-<script src="row-actions.js?v=20261019-m1"></script>
-<script src="tmdb-search.js?v=20261019-m1"></script>
-<script src="collections-pull.js?v=20261019-m1"></script>
-<script src="universe-pull.js?v=20261019-m1"></script>
-<script src="person-pull.js?v=20261019-m1"></script>
-<script src="refresh-shows.js?v=20261019-m1"></script>
-<script src="tmdb-match.js?v=20261019-m1"></script>
-<script src="derived-views.js?v=20261019-m1"></script>
-<script src="tv-shows.js?v=20261019-m1"></script>
-<script src="organization.js?v=20261019-m1"></script>
-<script src="organization-manage.js?v=20261019-m1"></script>
-<script src="collection-members.js?v=20261019-m1"></script>
-<script src="catalog-apply.js?v=20261019-m1"></script>
-<script src="browse-views.js?v=20261019-m1"></script>
-<script src="history.js?v=20261019-m1"></script>
-<script src="library.js?v=20261019-m1"></script>
+<script src="auth.js?v=20261020-ep1"></script>
+<script src="api.js?v=20261020-ep1"></script>
+<script src="write-lane.js?v=20261020-ep1"></script>
+<script src="ui-helpers.js?v=20261020-ep1"></script>
+<script src="metadata.js?v=20261020-ep1"></script>
+<script src="backup-restore.js?v=20261020-ep1"></script>
+<script src="backup-format3.js?v=20261020-ep1"></script>
+<script src="tabs.js?v=20261020-ep1"></script>
+<script src="render.js?v=20261020-ep1"></script>
+<script src="row-actions.js?v=20261020-ep1"></script>
+<script src="tmdb-search.js?v=20261020-ep1"></script>
+<script src="collections-pull.js?v=20261020-ep1"></script>
+<script src="universe-pull.js?v=20261020-ep1"></script>
+<script src="person-pull.js?v=20261020-ep1"></script>
+<script src="refresh-shows.js?v=20261020-ep1"></script>
+<script src="tmdb-match.js?v=20261020-ep1"></script>
+<script src="derived-views.js?v=20261020-ep1"></script>
+<script src="tv-shows.js?v=20261020-ep1"></script>
+<script src="episodes.js?v=20261020-ep1"></script>
+<script src="organization.js?v=20261020-ep1"></script>
+<script src="organization-manage.js?v=20261020-ep1"></script>
+<script src="collection-members.js?v=20261020-ep1"></script>
+<script src="catalog-apply.js?v=20261020-ep1"></script>
+<script src="browse-views.js?v=20261020-ep1"></script>
+<script src="history.js?v=20261020-ep1"></script>
+<script src="library.js?v=20261020-ep1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -149,7 +150,7 @@ let activeArea = 'tv'; // S2: 'tv' | 'movie' | 'collections' | 'settings' — th
 let activeViewId = 'watching'; // the open view (derived or browse)
 let tabData = {}; // per-run caches by name: tabData.films = the movie tools' films (library.js); no storage
 let libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(), seq: 0 }; // the newest catalog-governance snapshot (library.js)
-let stage5Phase = null; // the database's phase from stage5_capabilities(); this page writes only in 'contracted-b45' (null: not read yet, or any other phase)
+let stage5Phase = null; // the database's phase from stage5_capabilities(); this page writes only in 'contracted-ep1' (null: not read yet, or any other phase)
 let derivedData = null; // { rows, loaded } — cross-TV rows for the derived views, kept apart from tabData
 let derivedLoadSeq = 0; // lets a late derived-view load see that it's been superseded
 let derivedSectionOpen = { uptodate: true, tba: false, alltvTba: false }; // collapsible sections in the derived views (Up to date starts open, TBA sections closed)
@@ -211,6 +212,9 @@ let browseLayoutPending = false; // S6: a collection opened by its route before 
 let collectionUndo = null; // S4: the open collection's Undo after a confirmed Remove: { kind, id, title, name, collectionId, viewId, epoch }; withdrawn on leaving the view or a restore
 let removeNotice = null; // S4: the open collection's Remove notice { text, withUndo }, drawn with the Add notice (collection-members.js renderCollectionBanner)
 let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.js)
+let episodeMarks = new Map(); // EP1: the owner's episode marks, read with each view: season id → Map(TMDB episode id → { id, episode_number }) (episodes.js)
+let episodePanel = null; // EP1: the one open episode list: { seasonId, seq, status: 'loading' | 'ready' | 'error', episodes, error, titles }; page memory only
+let episodePanelSeq = 0; // EP1: bumped each time an episode list is loaded; a late TMDB answer for an earlier one changes nothing
 
 
 

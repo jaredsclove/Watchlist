@@ -728,9 +728,10 @@ function seasonSubRowHtml(r, opts) {
   const isSkipped = isOffList(r);
   const rowClass = isSkipped ? 'row-skipped' : '';
   const hooks = ` data-season-row="${esc(r.id)}"${opts.showOf ? ` data-show-of="${esc(opts.showOf)}"` : ''}`;
+  // EP1: a matched season's episode progress and its Episodes toggle; the open list follows the row.
   const label = `<td style="padding-left:28px">
           <span class="season-lbl">${esc(r.season)}</span>
-          ${opts.isNew?'<span class="new-tag">New</span>':''}
+          ${opts.isNew?'<span class="new-tag">New</span>':''}${episodeProgressHtml(r)} ${episodeToggleHtml(r)}
         </td>`;
   const watch = seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, false));
   const control = seasonActionHtml('season-control', seasonRowControlHtml(r));
@@ -741,7 +742,7 @@ function seasonSubRowHtml(r, opts) {
         <td class="date-cell">${esc(r.display_date)}</td>
         <td>${watch}</td>
         <td>${control}</td>
-      </tr>`;
+      </tr>` + episodePanelHtml(r, { showOf: opts.showOf, colspan: 5 });
   }
   return `<tr class="${rowClass} sub-row"${hooks}>
         ${label}
@@ -750,16 +751,17 @@ function seasonSubRowHtml(r, opts) {
         <td>${control}</td>
         <td>${watch}</td>
         <td>${opts.showDelete ? seasonActionHtml('season-delete', seasonDeleteHtml(r, opts, 'del-btn')) : ''}</td>
-      </tr>`;
+      </tr>` + episodePanelHtml(r, { showOf: opts.showOf, colspan: 6 });
 }
 
 function seasonSubCardHtml(r, opts) {
   return `<div class="card-subseason-row" data-season-row="${esc(r.id)}"${opts.showOf ? ` data-show-of="${esc(opts.showOf)}"` : ''}>
-          <span class="card-season">${esc(r.season)} · ${seasonDateHtml(r, opts)}${opts.showMatch ? ` ${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}` : ''}</span>
+          <span class="card-season">${esc(r.season)} · ${seasonDateHtml(r, opts)}${opts.showMatch ? ` ${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}` : ''}${episodeProgressHtml(r)}</span>
           <div class="card-actions">
+            ${episodeToggleHtml(r)}
             ${seasonActionHtml('season-control', seasonRowControlHtml(r))}
             ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, true))}
             ${opts.showDelete ? seasonActionHtml('season-delete', seasonDeleteHtml(r, opts, 'card-del-btn')) : ''}
           </div>
-        </div>`;
+        </div>` + episodePanelHtml(r, { showOf: opts.showOf }, true);
 }

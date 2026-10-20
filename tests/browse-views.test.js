@@ -124,7 +124,9 @@ const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'rende
 // (S4) All Movies' film controls and the collection's Remove (tests/collection-films.test.js has their
 // positive checks).
 const TV_EDIT_HANDLERS = new Set(['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
-  'keepCurrentStatus', 'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow']);
+  'keepCurrentStatus', 'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
+  // EP1: a matched season's episode list and its marks (tests/episodes.test.js)
+  'toggleEpisodes', 'retryEpisodes', 'toggleEpisodeTitle', 'setEpisodeMark', 'markEpisodesThrough']);
 const FILM_EDIT_HANDLERS = new Set(['setStatus', 'setFilmPriority', 'toggleMorePopover', 'toggleWatchWith', 'libraryPullRest', 'dismissCatalogNew',
   'removeFromCollection']);
 function assertReadOnlyDom(app) {
@@ -187,7 +189,8 @@ for (const [id, label, from] of [[B['disney'], 'Disney+', 'tv'], [B['sheridan'],
     // Stage 3b-1: members come from the stored collections and memberships, read with everything else.
     assert.deepStrictEqual([...new Set(reqs.map(r => new URL(r.url).pathname.split('/').pop()))].sort(),
       // Stage 5: catalog governance comes from the read views; storage never names a collection.
-      ['collection_memberships', 'library_catalog_films', 'library_catalog_shows', 'library_collection_catalogs', 'library_collection_presentation', 'library_film_theme_kinds',
+      // EP1: the episode marks are read with the rows.
+      ['collection_memberships', 'episode_marks', 'library_catalog_films', 'library_catalog_shows', 'library_collection_catalogs', 'library_collection_presentation', 'library_film_theme_kinds',
         'personal_collections', 'tv_shows', 'watchlist_items']);
     assert.ok(reqs.every(r => !r.url.includes('collection=')), 'a destination id is never sent as a collection');
     assert.strictEqual(mutating(app).length, 0);

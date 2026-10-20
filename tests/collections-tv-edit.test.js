@@ -502,7 +502,7 @@ test('G3 F14 Delete… (last season): D6-b text, Cancel sends nothing; confirmed
   app.dialogAnswer = 'confirm';
   const before = snap(app), mark = app.requests.length;
   await app.ctx.delRow(L.lone.rows[0].id); await settle(); await settle();
-  assert.deepStrictEqual(writes(app).map(r => [path(r), body(r)]), [['rpc/delete_tv_season', { p_row_id: L.lone.rows[0].id }]]);
+  assert.deepStrictEqual(writes(app).map(r => [path(r), body(r)]), [['rpc/delete_tv_season', { p_row_id: L.lone.rows[0].id, p_marks_expected: 0 }]]);
   const d = diff(before, snap(app));
   assert.deepStrictEqual([d.watchlist_items.removed, d.tv_shows.removed, d.collection_memberships.removed.length], [[L.lone.rows[0].id], [L.lone.show.id], 1]);
   assert.ok(app.requests.slice(mark).some(r => r.method === 'GET' && r.url.includes('/collection_memberships')), 'the collection is read again');

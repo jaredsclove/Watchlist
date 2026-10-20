@@ -830,3 +830,25 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .unknown-when { opacity: 0.75; }
 .auth-help { margin-top: 10px; }
 .account-password { max-width: 420px; }
+
+/* EP1: episode progress within seasons (episodes.js) */
+.ep-progress { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--text2); white-space: nowrap; }
+.ep-toggle { font-size: 12px; padding: 0 4px; }
+.ep-panel { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; font-size: 13px; }
+.ep-summary { color: var(--text2); }
+.ep-note { color: var(--text3); font-size: 12px; }
+.ep-suggest { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text2); }
+.ep-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ep-item { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ep-check { display: inline-flex; gap: 8px; align-items: center; min-height: 32px; cursor: pointer; }
+.ep-check input { width: 18px; height: 18px; margin: 0; }
+.ep-item.ep-checked .ep-check span { color: var(--text2); }
+.ep-date { font-size: 11px; color: var(--text3); }
+.ep-title, .ep-through { font-size: 12px; }
+.ep-panel-card { border-left-style: dashed; }
+@media (max-width: 700px) {
+  /* Phone: each episode row and its controls are at least 44px tall. */
+  .ep-check { min-height: 44px; flex: 1 1 auto; }
+  .ep-check input { width: 22px; height: 22px; }
+  .ep-title, .ep-through, .ep-toggle { min-height: 44px; }
+}

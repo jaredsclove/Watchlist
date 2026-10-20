@@ -13,7 +13,8 @@ const B45 = require('./b45-harness');
 // capability), also what legacyBackupFixture reads an older backup's tables from; any other
 // string, an unknown phase. The page writes only at B4/B5; the other phases exist to check
 // that it refuses there.
-const isContracted = app => app.stage5 === 'contracted' || app.stage5 === B45.B45_PHASE;
+const isContracted = app => app.stage5 === 'contracted' || B45.isB45Schema(app.stage5);
+const isEp1 = app => app.stage5 === B45.EP1_PHASE;
 
 const ROOT = path.join(__dirname, '..');
 // Requests the harness can't model (a misuse, not an answer the page should handle): runner() fails
@@ -82,7 +83,7 @@ const validDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
 class DbError extends Error {
   constructor(code, message, detail = null) { super(message); this.code = code; this.detail = detail; }
 }
-const HTTP_FOR = { '22023': 400, '23505': 409, P0002: 404, '23000': 409, '40001': 409, '55000': 400 };
+const HTTP_FOR = { '22023': 400, '23505': 409, P0002: 404, '23000': 409, '40001': 409, '55000': 400, PGRST202: 404 };
 
 const TV_STATUSES = ['confirmed', 'highpriority', 'watching', 'complete', 'pending', 'maybe', 'skipped'];
 
@@ -407,9 +408,21 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       if (inserted.length && target.status === 'complete') { target.status = 'confirmed'; reopened = true; }
       return { show_id: target.id, show_created: created, inserted: clone(inserted), existing, rejected, reopened, show_status: target.status };
     },
-    delete_tv_season({ p_row_id: id }) {
+    delete_tv_season({ p_row_id: id, p_marks_expected: expected }) {
       const r = items().find(x => x.id === id && isTvRow(x));
       if (!r) throw new DbError('P0002', 'not_found: TV season');
+      // EP1 (db/ep1_episode_marks.sql): a call without a count (a page from before EP1) is refused for
+      // a marked season; a count other than the one stored is stale. The marks go with the season.
+      if (app.stage5 === 'contracted-ep1') {
+        const n = store.episode_marks.filter(m => m.season_id === id).length;
+        if (expected != null && (!Number.isInteger(expected) || expected < 0)) throw new DbError('22023', 'invalid_input: p_marks_expected');
+        if (expected == null && n > 0) throw new DbError('P0001', `update_required: This season has ${n} episode mark${n === 1 ? '' : 's'}, which this page doesn't show, so it wasn't deleted. Reload the page. Nothing was changed.`);
+        if (expected != null && expected !== n) throw new DbError('P0001', 'target_changed: This changed since the page showed it, so nothing was changed. Look at it again.');
+        store.episode_marks = store.episode_marks.filter(m => m.season_id !== id);
+      } else if (expected !== undefined) {
+        // Before EP1 only delete_tv_season(p_row_id) exists: PostgREST finds no function for these arguments.
+        throw new DbError('PGRST202', 'Could not find the function public.delete_tv_season(p_marks_expected, p_row_id) in the schema cache');
+      }
       store.watchlist_items = items().filter(x => x.id !== id);
       const show = shows().find(s => s.id === r.show_id);
       let showDeleted = false;
@@ -607,6 +620,34 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       r.watched = watched;
       return clone(r);
     },
+    // EP1: one season's marks set or cleared, refused while the season is watched or skipped.
+    library_set_episode_marks({ p_season_id: id, p_expected: expected, p_watched: watched, p_episodes: eps }) {
+      const okId = v => Number.isInteger(v) && v > 0 && v < 1e9, okNum = v => Number.isInteger(v) && v >= 0 && v < 1e6;
+      if (typeof id !== 'string' || typeof watched !== 'boolean' || !expected || typeof expected !== 'object' || Array.isArray(expected)
+          || Object.keys(expected).sort().join() !== 'skipped,watched' || !Array.isArray(eps) || eps.length < 1 || eps.length > 500
+          || eps.some(e => !e || typeof e !== 'object' || !okId(e.tmdb_episode_id) || (watched && !okNum(e.episode_number)))
+          || new Set(eps.map(e => e.tmdb_episode_id)).size !== eps.length) throw new DbError('22023', 'invalid_input: episode marks');
+      const r = items().find(x => x.id === id && !isFilmRow(x));
+      if (!r) throw new DbError('P0001', 'target_missing: This season is no longer on your list, so nothing was changed.');
+      if (expected.watched !== !!r.watched || expected.skipped !== !!r.skipped) throw new DbError('P0001', 'target_changed: This changed since the page showed it, so nothing was changed. Look at it again.');
+      if (r.show_id == null || r.media_type !== 'tv' || r.tmdb_id == null || r.season_number == null) throw new DbError('P0001', 'season_unmatched: Only a season matched to TMDB has episode marks. Nothing was changed.');
+      if (r.watched || r.skipped) throw new DbError('P0001', 'season_locked: This season is marked watched or skipped, so its episodes can\'t be changed. Change that first. Nothing was changed.');
+      if (watched) {
+        for (const e of eps) {
+          if (!store.episode_marks.some(m => m.season_id === id && m.tmdb_episode_id === e.tmdb_episode_id)) {
+            store.episode_marks.push({ id: `0f000000-0000-4000-8000-${String(app.markSeq = (app.markSeq || 0) + 1).padStart(12, '0')}`,
+              season_id: id, tmdb_episode_id: e.tmdb_episode_id, episode_number: e.episode_number });
+          }
+        }
+      } else {
+        const gone = new Set(eps.map(e => e.tmdb_episode_id));
+        store.episode_marks = store.episode_marks.filter(m => !(m.season_id === id && gone.has(m.tmdb_episode_id)));
+      }
+      const marks = store.episode_marks.filter(m => m.season_id === id)
+        .sort((a, b) => a.episode_number - b.episode_number || a.tmdb_episode_id - b.tmdb_episode_id)
+        .map(m => ({ id: m.id, tmdb_episode_id: m.tmdb_episode_id, episode_number: m.episode_number }));
+      return { season_id: id, watched: !!r.watched, skipped: !!r.skipped, marks: clone(marks) };
+    },
     set_season_skipped({ p_row_id: id, p_skipped: skipped }) {
       if (typeof skipped !== 'boolean') throw new DbError('22023', 'invalid_input: skipped');
       const r = items().find(x => x.id === id && x.show_id != null);
@@ -620,7 +661,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
   return Object.fromEntries(Object.entries(handlers).map(([name, fn]) => [name, body => {
     try {
       // B4/B5 installed: the old names refuse (an old page still open), before anything is read.
-      if (app.stage5 === B45.B45_PHASE && B45.B45_STUBS.includes(name)) {
+      if (B45.isB45Schema(app.stage5) && B45.B45_STUBS.includes(name)) {
         throw new DbError('P0001', 'client_outdated: This page is out of date. Reload it. Nothing was changed.');
       }
       return response(200, fn(body));
@@ -764,11 +805,12 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null, access = 'members', session } = {}) {
-  const page = PAGE;
+  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null, access = 'members', session, episodeMarks = [], pageRoot = null } = {}) {
+  // pageRoot: the page from another directory (a release exported from git), for old-page tests.
+  const page = pageRoot ? pageOf(pageRoot) : PAGE;
   // The default phase is B4/B5 (production's schema once B4/B5 is installed); a database
   // older than personal collections (org: false, format1) has no Stage 5.
-  if (stage5 === undefined) stage5 = format1 || org === false ? null : B45.B45_PHASE;
+  if (stage5 === undefined) stage5 = format1 || org === false ? null : B45.EP1_PHASE;
   const store = { watchlist_items: clone(rows), othertv_shows: clone(othertvShows), custom_collections: clone(customCollections) };
   if (!format1) store.tv_shows = clone(tvShows || []);
   const requests = [];
@@ -780,7 +822,9 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   const app = { store, requests, selectors, consoleErrors, countOverride, configText, stage5, recoveryArchive };
   if (store.tv_shows) linkFixtureRows(store, () => `new-${nextId++}`);
   // B4/B5 (the default phase): the fixtures as db/b45_expand.sql would leave them.
-  if (stage5 === B45.B45_PHASE && store.tv_shows) B45.migrateFixtures(store, isFilmRow);
+  if (B45.isB45Schema(stage5) && store.tv_shows) B45.migrateFixtures(store, isFilmRow);
+  // EP1: the episode marks table (only once EP1 is installed; a request for it before then answers 404).
+  if (stage5 === B45.EP1_PHASE) store.episode_marks = clone(episodeMarks);
 
   // ── personal organization (db/phase3b_org.sql) ──
   const orgOn = !format1 && org !== false;
@@ -928,9 +972,18 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   app.rpcHandlers = {
     restore_backup: body => {
       const b = body.p_backup;
-      if (app.stage5 === B45.B45_PHASE) {
-        if (b.formatVersion !== 5) return pgError(400, '22023', `restore_invalid: format ${b.formatVersion} backups ${[3, 4].includes(b.formatVersion) ? 'are converted in the page first (Restore shows what the conversion keeps and what it can\'t); nothing was changed' : 'can\'t be restored here'}`);
-        if (b.conversion && (![3, 4].includes(Number(b.conversion.source_format)) || !/^[0-9a-f]{64}$/.test(b.conversion.source_sha256 || ''))) return pgError(400, '22023', 'restore_invalid: the conversion record is malformed');
+      // EP1: format 6 (format 5's tables plus episode_marks); B4/B5 before EP1: format 5.
+      const ep1 = app.stage5 === B45.EP1_PHASE;
+      if (ep1 || app.stage5 === B45.B45_PHASE) {
+        const want = ep1 ? 6 : 5, sources = ep1 ? [3, 4, 5] : [3, 4];
+        if (b.formatVersion !== want) return pgError(400, '22023', `restore_invalid: format ${b.formatVersion} backups ${[3, 4, 5].includes(b.formatVersion) && b.formatVersion < want ? 'are converted in the page first (Restore shows what the conversion keeps and what it can\'t); nothing was changed' : 'can\'t be restored here'}`);
+        if (b.conversion && (!sources.includes(Number(b.conversion.source_format)) || !/^[0-9a-f]{64}$/.test(b.conversion.source_sha256 || ''))) return pgError(400, '22023', 'restore_invalid: the conversion record is malformed');
+        if (ep1) {
+          const marks = b.tables.episode_marks;
+          const seasons = new Map(b.tables.watchlist_items.filter(r => r.show_id).map(r => [r.id, r]));
+          if (!Array.isArray(marks) || marks.some(m => !seasons.has(m.season_id))) return pgError(400, '22023', 'restore_invalid: an episode mark in the backup points at a season that isn\'t in it, so nothing was changed');
+          if (marks.some(m => { const r = seasons.get(m.season_id); return r.media_type !== 'tv' || r.tmdb_id == null || r.season_number == null; })) return pgError(400, '22023', 'restore_invalid: an episode mark in the backup breaks a rule (season_unmatched), so nothing was changed');
+        }
         if (b.recovery && (!b.conversion || Number(b.conversion.source_format) !== 3)) return pgError(400, 'P0001', 'recovery_not_accepted: a recovery section belongs only to a converted format-3 backup; nothing was changed');
         if (b.recovery && app.recoveryArchive !== 'active') return pgError(400, 'P0001', 'recovery_not_accepted: the recovery archive has been retired, so a recovery section can\'t be kept; convert the file again without it. Nothing was changed.');
         const t = b.tables;
@@ -949,14 +1002,15 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
           collection: r.show_id ? byShow.get(r.show_id) : filmCat.get(r.id) || (theme_kind === 'genre' ? 'movies' : 'othertv') })));
         store.personal_collections = clone(t.personal_collections.map(({ catalog_id, presentation_key, ...c }) => ({ ...c, legacy_source: mapC.has(c.id) ? mapC.get(c.id) : (presentation_key ?? catalog_id) })));
         for (const k of ['custom_collections', 'collection_memberships', 'watch_with_choices']) store[k] = clone(t[k]);
+        if (ep1) store.episode_marks = clone(t.episode_marks);
         store.othertv_shows = clone((b.recovery || {}).othertv_shows || []);
         store.__links = { shows: clone(t.catalog_show_links), films: clone(t.catalog_film_links) };
         app.restored = (app.restored || 0) + 1;
-        return response(200, { formatVersion: 5, restored: Object.fromEntries(Object.keys(t).map(k => [k, t[k].length])), recovery: b.recovery ? 'archived' : 'none' });
+        return response(200, { formatVersion: want, restored: Object.fromEntries(Object.keys(t).map(k => [k, t[k].length])), recovery: b.recovery ? 'archived' : 'none' });
       }
-      // The page sends a restore only at B4/B5 (and so only format 5). Anything else fails the test (the runner
+      // The page sends a restore only in its own phase (EP1: format 6; a page from before EP1: B4/B5, format 5). Anything else fails the test (the runner
       // checks harnessErrors), whatever the page does with the rejected request.
-      const misuse = new Error(`harness: restore_backup is modelled only on the B4/B5 database (phase ${app.stage5})`);
+      const misuse = new Error(`harness: restore_backup is modelled only on the B4/B5 and EP1 databases (phase ${app.stage5})`);
       harnessErrors.push(misuse);
       throw misuse;
     },
@@ -969,7 +1023,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   app.applyCatalog = async (coll, defs) => {
     const d = clone(defs || app.get(`COLLECTIONS.find(c => c.id === ${JSON.stringify(coll)}).defaults`));
     // B4/B5: library_catalog_apply_b45 (the old names refuse); a rolled-back database: library_catalog_apply.
-    const fn = app.stage5 === B45.B45_PHASE ? 'library_catalog_apply_b45' : 'library_catalog_apply';
+    const fn = B45.isB45Schema(app.stage5) ? 'library_catalog_apply_b45' : 'library_catalog_apply';
     const p = await app.rpcHandlers[fn]({ p_catalog: coll, p_defaults: d }).json();
     return app.rpcHandlers[fn]({ p_catalog: coll, p_defaults: d, p_approved: p.hash }).json();
   };
@@ -994,10 +1048,10 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       for (const t of Object.keys(older)) { now[t] = store[t]; store[t] = older[t]; }
       try { return serveRequest(req, url, method, body); } finally { for (const t of Object.keys(now)) store[t] = now[t]; }
     }
-    if (app.stage5 === B45.B45_PHASE) B45.normalize(store, isFilmRow);
+    if (B45.isB45Schema(app.stage5)) B45.normalize(store, isFilmRow);
     let res;
     try { res = serveRequest(req, url, method, body); }
-    finally { if (app.stage5 === B45.B45_PHASE && method !== 'GET') B45.normalize(store, isFilmRow); }
+    finally { if (B45.isB45Schema(app.stage5) && method !== 'GET') B45.normalize(store, isFilmRow); }
     if (lose === 'after') throw new TypeError('Failed to fetch');
     return res;
   }
@@ -1024,7 +1078,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const params = [...u.searchParams.entries()];
     // ── Stage 5 (db/phase5a_expand.sql, db/phase5c_contract.sql) ──
     const contracted = isContracted(app);
-    const b45 = app.stage5 === B45.B45_PHASE;
+    const b45 = B45.isB45Schema(app.stage5), ep1 = isEp1(app);
     if (contracted) {
       const retired = k => k === 'collection' || k === 'legacy_source';
       const select = (u.searchParams.get('select') || '').split(',');
@@ -1047,8 +1101,17 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     }
     if (u.pathname.includes('/rpc/') && table === 'stage5_capabilities') {
       if (!app.stage5) return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.stage5_capabilities in the schema cache' });
-      return response(200, { stage5: 1, phase: app.stage5, backup_format: b45 ? 5 : contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none',
-        ...(b45 ? { b45: 1 } : {}), ...(app.access ? { access: app.access, member: app.member !== false } : {}) });
+      return response(200, { stage5: 1, phase: app.stage5, backup_format: ep1 ? 6 : b45 ? 5 : contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none',
+        ...(b45 ? { b45: 1 } : {}), ...(ep1 ? { ep1: 1 } : {}), ...(app.access ? { access: app.access, member: app.member !== false } : {}) });
+    }
+    // EP1: library_set_episode_marks exists only once EP1 is installed.
+    if (u.pathname.includes('/rpc/') && table === 'library_set_episode_marks' && !ep1) {
+      return response(404, { code: 'PGRST202', details: null, hint: null, message: `Could not find the function public.${table} in the schema cache` });
+    }
+    // EP1: marks change only through library_set_episode_marks, a season delete or a restore.
+    if (ep1 && !u.pathname.includes('/rpc/') && method !== 'GET' && (table === 'episode_marks'
+        || (table === 'watchlist_items' && method === 'DELETE' && store.watchlist_items.filter(r => matches(r, params)).some(r => store.episode_marks.some(m => m.season_id === r.id))))) {
+      return pgError(400, 'P0001', 'library_write_required: This change is made only through the app\'s library functions. Reload the page. Nothing was changed.');
     }
     // A B4/B5 function on a database without B4/B5 doesn't exist.
     if (u.pathname.includes('/rpc/') && /_b45$/.test(table) && !b45) {
@@ -1296,6 +1359,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   // The database changes phase under an open page (tests/b45-compat.test.js): B4/B5 installed
   // (the store migrated as db/b45_expand.sql does), or rolled back (its columns gone).
   app.migrateB45 = () => { app.stage5 = B45.B45_PHASE; B45.migrateFixtures(store, isFilmRow); B45.normalize(store, isFilmRow); };
+  // EP1 installed under an open page (db/ep1_episode_marks.sql): the phase, an empty marks table.
+  app.migrateEp1 = () => { app.stage5 = B45.EP1_PHASE; store.episode_marks = []; };
   app.rollbackB45 = () => {
     app.stage5 = 'contracted';
     for (const s of store.tv_shows || []) for (const k of B45.SHOW_COLUMNS) delete s[k];

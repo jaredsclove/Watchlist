@@ -25,12 +25,12 @@ const show = name => ({ id: uuid('5' + name), collection: 'othertv', title: `Sho
   tmdb_id: Number(name.replace(/\D/g, '')) || 1, status: 'confirmed', created_at: '2026-01-01T00:00:00+00:00' });
 const linked = (name, o = {}) => row(name, { show_id: uuid('5' + name), skipped: false, ...o });
 
-// A backup of different content than the app's current database. Since B4/B5 restore runs
-// only on the B4/B5 database, so the backup is the format-5 export of another one.
+// A backup of different content than the app's current database. Since EP1 restore runs
+// only on the EP1 database, so the backup is the format-6 export of another one.
 async function setup() {
   const src = await createApp({ rows: [linked('b7', { title: 'Restored' })], tvShows: [show('b7')] });
   const backup = JSON.parse(JSON.stringify(await src.run('buildBackupObject()'))); // a plain copy, as a file would be
-  assert.strictEqual(backup.formatVersion, 5);
+  assert.strictEqual(backup.formatVersion, 6);
   const app = await createApp({ rows: [linked('a1'), linked('a2')], tvShows: [show('a1'), show('a2')] });
   assert.deepStrictEqual(Array.from(app.get('validateBackupObject')(backup)), []);
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings

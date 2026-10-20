@@ -184,11 +184,11 @@ test('watch-with: labels from your choices, tokens in the data; an archived choi
 });
 
 // ── backup format 3 ──
-test('backup (B4/B5) is format 5 with the eight tables and exact organization columns; never user_id, is_film or item_is_film; it validates', async () => {
+test('backup (EP1) is format 6 with the nine tables and exact organization columns; never user_id, is_film or item_is_film; it validates', async () => {
   const app = await boot(library());
   const b = await app.run('buildBackupObject()');
-  assert.strictEqual(b.formatVersion, 5);
-  assert.deepStrictEqual(Object.keys(b.tables).sort(), ['catalog_film_links', 'catalog_show_links', 'collection_memberships', 'custom_collections', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
+  assert.strictEqual(b.formatVersion, 6);
+  assert.deepStrictEqual(Object.keys(b.tables).sort(), ['catalog_film_links', 'catalog_show_links', 'collection_memberships', 'custom_collections', 'episode_marks', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
   assert.strictEqual(Object.keys(b.tables.watchlist_items[0]).length, 30, 'format 4’s 20 columns and the 10 film columns of B4/B5');
   assert.strictEqual(Object.keys(b.tables.tv_shows[0]).length, 21, 'format 4’s 6 columns and the 15 show columns of B4/B5');
   assert.deepStrictEqual(Object.keys(b.tables.collection_memberships[0]), ['id', 'collection_id', 'show_id', 'item_id', 'created_at']);
@@ -291,7 +291,7 @@ test('without personal collections: the page doesn’t start (the sign-in boot�
   assert.match(app.el('phaseBanner').innerHTML, /hasn’t been updated for signed-in libraries yet, so nothing is shown and nothing will be changed/);
   assert.deepStrictEqual(app.requests.map(r => r.url.split('/rest/v1/')[1]), ['rpc/stage5_capabilities']);
   const res = await app.run('buildBackupObject()').then(() => 'made', e => e.message);
-  assert.match(res, /makes backups only of a database in its own state \(format 5\), and this database isn’t in it, so no file was made/);
+  assert.match(res, /makes backups only of a database in its own state \(format 6\), and this database isn’t in it, so no file was made/);
 });
 
 // ── organization refresh (review finding 1) ──
