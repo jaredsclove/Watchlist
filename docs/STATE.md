@@ -51,13 +51,16 @@ check only that all 26 versioned files share one token; before releasing, check 
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
-## Where things stand (2026-10-18)
+## Where things stand (2026-10-20)
 
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
-test runner and token check [#4].
+test runner and token check [#4], M1 sign-in and owner-only access [#7].
 
-- **App release:** `1618e1a`, simplification Batch B (PR #3). Later `main` commits are tests and docs only.
+- **App release:** `502570a`, M1 sign-in and owner-only access (PR #7), released 2026-10-20: `db/m1_access.sql`
+  applied to production once (its run record confirmed by a separate read), then the page deployed. Verified after
+  deployment: the owner signs in on the deployed page; a backup made then is identical, table by table, to the one
+  made just before the migration; signed-out requests to tables, views, functions and GraphQL are refused.
 - **Database (as last recorded, not freshly observed):** phase `contracted-b45` with M1 owner-only access
   (`access = members`), backup format 5, recovery archive active. G9 (archive retirement) is paused.
   **Repairs are fix-forward:** the B4/B5 and D2 rollbacks are retired (they refuse against the M1 state),
@@ -81,6 +84,7 @@ test runner and token check [#4].
 [#2]: https://github.com/jaredsclove/Watchlist/pull/2
 [#3]: https://github.com/jaredsclove/Watchlist/pull/3
 [#4]: https://github.com/jaredsclove/Watchlist/pull/4
+[#7]: https://github.com/jaredsclove/Watchlist/pull/7
 
 ## How we work
 
