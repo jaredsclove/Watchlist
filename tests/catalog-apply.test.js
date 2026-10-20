@@ -489,13 +489,13 @@ test('a database without the Stage 5 functions: Review says catalog updates aren
   assert.ok(!app.requests.some(r => r.url.includes('/rpc/catalog_apply')));
 });
 
-test('a backup taken after an application is format 5 and holds the applied rows, their governance and New from catalog (validation and restore: db/test/t_b45.sql, real ids)', async () => {
+test('a backup taken after an application is format 6 and holds the applied rows, their governance and New from catalog (validation and restore: db/test/t_b45.sql, real ids)', async () => {
   const { app, missingSeason, missingFilm } = await behind();
   await app.applyCatalog('sheridan');
   const b = await app.ctx.buildBackupObject();
-  assert.strictEqual(b.formatVersion, 5);
+  assert.strictEqual(b.formatVersion, 6);
   assert.deepStrictEqual([b.tables.watchlist_items.find(r => r.item_key === missingFilm.k)].map(r => [r.status, r.priority, r.catalog_new]), [['confirmed', 'normal', true]]);
-  assert.deepStrictEqual(Object.keys(b.tables).sort(), ['catalog_film_links', 'catalog_show_links', 'collection_memberships', 'custom_collections', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
+  assert.deepStrictEqual(Object.keys(b.tables).sort(), ['catalog_film_links', 'catalog_show_links', 'collection_memberships', 'custom_collections', 'episode_marks', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items']);
   for (const d of [missingSeason, missingFilm]) assert.ok(b.tables.watchlist_items.some(r => r.item_key === d.k));
   const film = b.tables.watchlist_items.find(r => r.item_key === missingFilm.k);
   assert.ok(b.tables.catalog_film_links.some(l => l.item_id === film.id && l.catalog === 'sheridan'), 'the applied film is governed by its catalog');

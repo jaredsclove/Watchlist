@@ -306,13 +306,14 @@ async function loadDerivedView() {
   }
   const showsRead = startShowsRead();
   try {
-    const [rows, shows, gov] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows'), readGovernance()]);
+    const [rows, shows, gov, marks] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows'), readGovernance(), readEpisodeMarks(false)]);
     requireB45Shape(shows, 'priority');
     requireB45Shape(rows, 'priority');
     publishAllTvShows(showsRead, shows);
     if (seq !== derivedLoadSeq || activeViewId !== viewId) return null;
     if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === derivedLoadSeq && activeViewId === viewId) loadDerivedView(); }); return null; }
     publishGovernance(governanceCovers(gov, rows, shows));
+    publishEpisodeMarks(marks); // EP1 (episodes.js)
     derivedData = { rows: rows.filter(isTvViewRow), loaded: true };
     endListReread(true);
     renderFilters();
@@ -785,7 +786,7 @@ function allTvSeasonRowHtml(r, today, needsReview, section = 'dated') {
   const row = `<tr class="${rowClass}"${item}>
       <td tabindex="-1" data-primary="1">
         ${priorityMarkHtml(show.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(show.priority, true)}
-        <span class="season-lbl"> · ${esc(r.season)}</span>
+        <span class="season-lbl"> · ${esc(r.season)}</span>${episodeProgressHtml(r)}
         ${todayTag}
       </td>
       <td>${badges}</td>
@@ -798,7 +799,7 @@ function allTvSeasonRowHtml(r, today, needsReview, section = 'dated') {
       <div class="card-top">
         <div class="card-title-block" tabindex="-1" data-primary="1">
           <span class="card-title">${priorityMarkHtml(show.priority)}${esc(r.title)}${priorityMarkHtml(show.priority, true)}</span>
-          <span class="card-season">${esc(r.season)}</span>
+          <span class="card-season">${esc(r.season)}${episodeProgressHtml(r)}</span>
           ${todayTag}
         </div>
       </div>
@@ -1120,7 +1121,7 @@ function comingSoonRowHtml(r, today, section = 'dated') {
   const row = `<tr class="${rowClass}"${item}>
       <td tabindex="-1" data-primary="1">
         ${priorityMarkHtml(show.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(show.priority, true)}
-        <span class="season-lbl"> · ${esc(r.season)}</span>
+        <span class="season-lbl"> · ${esc(r.season)}</span>${episodeProgressHtml(r)}
         ${todayTag}
       </td>
       <td>${chips}</td>
@@ -1132,7 +1133,7 @@ function comingSoonRowHtml(r, today, section = 'dated') {
       <div class="card-top">
         <div class="card-title-block" tabindex="-1" data-primary="1">
           <span class="card-title">${priorityMarkHtml(show.priority)}${esc(r.title)}${priorityMarkHtml(show.priority, true)}</span>
-          <span class="card-season">${esc(r.season)}</span>
+          <span class="card-season">${esc(r.season)}${episodeProgressHtml(r)}</span>
           ${todayTag}
         </div>
       </div>

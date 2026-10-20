@@ -879,6 +879,7 @@ function librarySeasonHtml() {
 async function libraryLoadSeasonDetails(session, show) {
   try {
     const d = await tmdbFetch(`/tv/${show.tmdb_id}`);
+    noteSeasonEpisodeCounts(show.tmdb_id, d && d.seasons); // EP1: totals for collapsed seasons (episodes.js)
     if (!libraryLive(session) || libraryPanel.seasonShowId !== show.id) return;
     libraryPanel.seasonDetails = d;
   } catch (e) {
@@ -946,6 +947,7 @@ async function libraryRefreshShows() {
   for (const show of shows) {
     let details;
     try { details = await tmdbFetch(`/tv/${show.tmdb_id}`); } catch (e) { failed.push(show.title); continue; }
+    noteSeasonEpisodeCounts(show.tmdb_id, details && details.seasons); // EP1: totals for collapsed seasons (episodes.js)
     if (!libraryLive(session)) return;
     const rows = lib.rows.filter(r => r.show_id === show.id);
     const fresh = [];
@@ -1251,10 +1253,12 @@ async function delRowInView(id) {
   }
   const show = isTvSeason(row) ? showOfRow(row) : null;
   const what = isTvSeason(row) ? `“${row.title}” · ${row.season}` : `“${row.title}”`;
+  // EP1: the marks the dialog names go with the request; the database refuses another count.
+  const marksShown = isTvSeason(row) ? episodeMarkCount(row.id) : 0;
   if (!await askEffect(deleteEffectText(row, show), 'Delete from library')) return;
   const current = stillAsShown();
   if (!current) return;
-  return deleteFromLibrary(current, viewId, what);
+  return deleteFromLibrary(current, viewId, what, marksShown);
 }
 
 // D6 (S3): what a delete from the library does, in the dialog's words. A season is named by its
@@ -1268,13 +1272,15 @@ function deleteEffectText(row, show) {
   const last = !actionRows().some(r => r.id !== row.id && r.show_id && r.show_id === row.show_id);
   // A season that starts or bounds its show's earlier-seasons range: deleting it ends that choice (§4.7.5).
   const endsRange = !!show && (show.resume_start_season_id === row.id || show.resume_end_season_id === row.id);
+  const marks = episodeMarkCount(row.id);
   return `Delete “${title} · ${row.season}” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in.`
+    + (marks ? ` Its ${marks} episode mark${marks === 1 ? ' is' : 's are'} deleted with it.` : '')
     + (last ? ' This is the show’s last season, so the show is deleted too, along with its place in every collection.' : '')
     + (endsRange ? ` The earlier-seasons choice for “${show.title}” ends too.` : '')
     + (dest ? ` To keep it but take the show out of ${dest.label} only, use Remove show from ${dest.label} instead.` : '');
 }
 
-async function deleteFromLibrary(row, viewId, what) {
+async function deleteFromLibrary(row, viewId, what, marksShown = 0) {
   await runWrite(`Delete ${what}`, async () => {
     const id = row.id;
     const rows = actionRows();
@@ -1284,8 +1290,9 @@ async function deleteFromLibrary(row, viewId, what) {
     try {
       if (isTvSeason(row)) {
         try {
-          const res = await sbRpc('delete_tv_season', { p_row_id: id });
+          const res = await sbRpc('delete_tv_season', { p_row_id: id, p_marks_expected: marksShown });
           if (res && res.show_deleted) tvShowsById.delete(res.show_id);
+          episodeMarks.delete(id); // its marks went with it (EP1)
         } catch (e) {
           if (!String(e.message).includes('not_found:')) throw e; // already gone counts as deleted
         }

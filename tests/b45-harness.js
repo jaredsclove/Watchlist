@@ -6,6 +6,10 @@
 // Used by tests/app-harness.js when createApp({ stage5: 'contracted-b45' }) (the default).
 
 const B45_PHASE = 'contracted-b45';
+// EP1 (db/ep1_episode_marks.sql): the B4/B5 schema plus episode marks; the page's own phase since EP1.
+// The B4/B5 columns, guards and functions are the same in both.
+const EP1_PHASE = 'contracted-ep1';
+const isB45Schema = phase => phase === B45_PHASE || phase === EP1_PHASE;
 // The old names that refuse once B4/B5 is installed (an old page still open).
 const B45_STUBS = ['set_show_status', 'library_add_seasons', 'library_create_show', 'library_add_films', 'library_create_film',
   'library_match_season', 'library_match_film', 'library_catalog_apply'];
@@ -90,7 +94,7 @@ function patchGuard(table, body, targets, isFilmRow) {
 function b45Handlers({ app, store, handlers, newId, org, DbError, isFilmRow, BUILTIN }) {
   const shows = () => store.tv_shows;
   const items = () => store.watchlist_items;
-  const on = () => app.stage5 === B45_PHASE;
+  const on = () => isB45Schema(app.stage5);
   const changed = () => { throw new DbError('P0001', 'target_changed: This changed since the page showed it, so nothing was changed. Look at it again.'); };
   const refuse = (code, text) => { throw new DbError('P0001', `${code}: ${text}`); };
   const showState = s => ({ status: s.status, priority: s.priority, ended: s.ended, catalog_new: s.catalog_new, status_review: s.status_review });
@@ -405,5 +409,5 @@ function b45Handlers({ app, store, handlers, newId, org, DbError, isFilmRow, BUI
   return fns;
 }
 
-module.exports = { B45_PHASE, B45_STUBS, SHOW_COLUMNS, FILM_COLUMNS, showDefaults, filmDefaults, seasonNulls,
+module.exports = { B45_PHASE, EP1_PHASE, isB45Schema, B45_STUBS, SHOW_COLUMNS, FILM_COLUMNS, showDefaults, filmDefaults, seasonNulls,
   migrateFixtures, normalize, patchGuard, b45Handlers, canon, md5 };

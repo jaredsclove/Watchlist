@@ -706,14 +706,15 @@ async function loadBrowseView() {
   const showsRead = startShowsRead();
   try {
     const orgRead = orgReadStart();
-    const [rows, shows, gov, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
-      readGovernance(), ...(isCollection ? [readPersonalCollections(), fetchAllRowsStrict('collection_memberships')] : [])]);
+    const [rows, shows, gov, marks, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
+      readGovernance(), readEpisodeMarks(true), ...(isCollection ? [readPersonalCollections(), fetchAllRowsStrict('collection_memberships')] : [])]);
     requireB45Shape(shows, 'priority');
     requireB45Shape(rows, 'priority');
     publishAllTvShows(showsRead, shows);
     if (seq !== browseLoadSeq || activeViewId !== viewId) return null;
     if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === browseLoadSeq && activeViewId === viewId) loadBrowseView(); }); return null; }
     publishGovernance(governanceCovers(gov, rows, shows));
+    publishEpisodeMarks(marks); // EP1 (episodes.js)
     let dest = null, members = null, memberRows = null;
     if (isCollection) {
       const hadFocus = chooserHasFocus();
@@ -1111,7 +1112,7 @@ function browseSeasonEntryHtml(e, today, combined, part) {
   const statusHtml = `<span class="status-pill s-${esc(show.status)}" title="Show status — applies to every season of ${esc(show.title)}. Switch to Shows to change it.">${esc(statusOptionLabel(show.status))}</span>`;
   const releaseOpts = { requireReleased: true, today };
   const row = `<tr class="browse-season-row ${dimClass}"${item}>
-      <td tabindex="-1" data-primary="1">${priorityMarkHtml(show.priority)}<span class="show-title">${esc(show.title)}</span>${priorityMarkHtml(show.priority, true)}<span class="season-lbl"> · ${esc(r.season)}</span>${kindTag}</td>
+      <td tabindex="-1" data-primary="1">${priorityMarkHtml(show.priority)}<span class="show-title">${esc(show.title)}</span>${priorityMarkHtml(show.priority, true)}<span class="season-lbl"> · ${esc(r.season)}</span>${episodeProgressHtml(r)}${kindTag}</td>
       <td>${badges}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusHtml}</td>
@@ -1122,7 +1123,7 @@ function browseSeasonEntryHtml(e, today, combined, part) {
       <div class="card-top">
         <div class="card-title-block" tabindex="-1" data-primary="1">
           <span class="card-title">${esc(show.title)}</span>
-          <span class="card-season">${esc(r.season)}${kindTag}</span>
+          <span class="card-season">${esc(r.season)}${episodeProgressHtml(r)}${kindTag}</span>
         </div>
       </div>
       <div class="card-meta">

@@ -1,4 +1,6 @@
 // Offline tests for backup format 5 and the restore input classes (B4/B5 Batch A, plan §9),
+// carried forward to format 6 (EP1: format 5 plus episode_marks; every format-5 document is converted
+// 5 → 6 before restoring, tests/episodes.test.js has the marks themselves),
 // in the whole-page harness: the format-5 export (exact tables and columns, made only on the
 // B4/B5 database, phase read before and after); a native format-5 round trip with an active
 // and a completed-but-retained earlier-seasons range, a preserved pair, provenance and
@@ -55,7 +57,7 @@ async function format4File() {
 }
 
 // ─── The format-5 export ──────────────────────────────────────────────────────
-test('format 5: the eight tables with exactly the format-5 columns, in order; the phase is read before and after the tables; it validates', async () => {
+test('format 6: the nine tables with exactly the format-6 columns, in order; the phase is read before and after the tables; it validates', async () => {
   const sh = showOf({ priority: 'high', ended: true, genres: ['Drama'], network: 'HBO', network_candidates: ['HBO'] });
   const a = seasonOf(sh, 1), b = seasonOf(sh, 2, { watched: true });
   Object.assign(sh, { resume_start_season_id: a.id, resume_end_season_id: b.id });
@@ -65,8 +67,9 @@ test('format 5: the eight tables with exactly the format-5 columns, in order; th
   const reads = app.requests.slice(before).map(r => r.url.split('/rest/v1/')[1].split('?')[0]);
   assert.strictEqual(reads[0], 'rpc/stage5_capabilities');
   assert.strictEqual(reads.at(-1), 'rpc/stage5_capabilities', 'read again after the tables');
-  const spec = app.get('BACKUP_FORMAT_V5');
-  assert.strictEqual(doc.formatVersion, 5);
+  const spec = app.get('BACKUP_FORMAT_V6');
+  assert.strictEqual(doc.formatVersion, 6);
+  assert.deepStrictEqual(Array.from(spec.tables), Array.from(app.get('BACKUP_FORMAT_V5').tables).concat(['episode_marks']));
   assert.deepStrictEqual(Object.keys(doc.tables), Array.from(spec.tables));
   for (const t of spec.tables) for (const r of doc.tables[t]) assert.deepStrictEqual(Object.keys(r), Object.keys(spec.columns[t]), t);
   assert.ok(!('conversion' in doc) && !('recovery' in doc));
@@ -74,7 +77,7 @@ test('format 5: the eight tables with exactly the format-5 columns, in order; th
   assert.deepStrictEqual(app.writes(), []);
 });
 
-test('RL8 a native format-5 round trip restores every value exactly — an active and a completed-but-retained range, a preserved pair, provenance, markers, metadata — and the derived sequence is unchanged', async () => {
+test('RL8 a native format-6 round trip restores every value exactly — an active and a completed-but-retained range, a preserved pair, provenance, markers, metadata — and the derived sequence is unchanged', async () => {
   const act = showOf({ title: 'Active', status: 'watching', ended: true, legacy_status: 'complete', status_review: true });
   const a1 = seasonOf(act, 1), a2 = seasonOf(act, 2), a3 = seasonOf(act, 3, { watched: true });
   Object.assign(act, { resume_start_season_id: a1.id, resume_end_season_id: a3.id });
@@ -89,7 +92,7 @@ test('RL8 a native format-5 round trip restores every value exactly — an activ
   const file = fileOf(doc);
   await choose(target, file);
   assert.match(modal(target), /Restore database/);
-  assert.strictEqual(target.get('pendingRestoreData.formatVersion'), 5);
+  assert.strictEqual(target.get('pendingRestoreData.formatVersion'), 6);
   await send(target);
   assert.match(target.el('restoreModalBox').innerHTML, /restored and verified/);
   assert.deepStrictEqual(out(restoreCalls(target)[0].body.p_backup), doc, 'sent unchanged');
@@ -114,8 +117,9 @@ test('M2 native format 4: converted by the converter column of §7.1 (every old 
   const file = fileOf(f4);
   await choose(app, file);
   const doc = out(app.get('pendingRestoreData'));
-  assert.strictEqual(doc.formatVersion, 5);
-  assert.deepStrictEqual(doc.conversion, { source_format: 4, source_exported_at: f4.exportedAt, source_sha256: file.sha, converter_version: 'b45.1' });
+  assert.strictEqual(doc.formatVersion, 6);
+  assert.deepStrictEqual(doc.conversion, { source_format: 4, source_exported_at: f4.exportedAt, source_sha256: file.sha, converter_version: 'b45.1+ep1.1' });
+  assert.deepStrictEqual(doc.tables.episode_marks, [], 'format 4 → 5 → 6: no episode marks');
   assert.ok(!('recovery' in doc));
   const S = t => doc.tables.tv_shows.find(s => s.title === t);
   const pick = (r, ks) => ks.map(k => r[k]);
@@ -146,6 +150,7 @@ test('M2 native format 4: converted by the converter column of §7.1 (every old 
   }
   const m = modal(app);
   assert.match(m, /This backup is converted to format 5 before restoring/);
+  assert.match(m, /This backup is converted to format 6 before restoring[\s\S]*no season has episode marks/);
   assert.match(m, /1 shows and 1 films that were Pending: To Watch, marked New from catalog\./);
   assert.match(m, /1 shows that were Complete: To Watch, Show ended, Needs status review\./);
   assert.match(m, /3 films that were Watching or Complete: To Watch or Watched \(as marked\), Needs status review\./);
@@ -154,10 +159,10 @@ test('M2 native format 4: converted by the converter column of §7.1 (every old 
   assert.match(m, /No field of the backup is lost\./);
   await send(app);
   assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
-  assert.strictEqual(restoreCalls(app)[0].body.p_backup.formatVersion, 5, 'never the format-4 file itself');
+  assert.strictEqual(restoreCalls(app)[0].body.p_backup.formatVersion, 6, 'never the format-4 file itself');
 });
 
-test('format 3 → 4 → 5: the conversion record (source format 3, the file’s hash, converter 5.1+b45.1) and the recovery section are preserved verbatim while the archive is active; none once it is retired (RL11)', async () => {
+test('format 3 → 4 → 5 → 6: the conversion record (source format 3, the file’s hash, converter 5.1+b45.1+ep1.1) and the recovery section are preserved verbatim while the archive is active; none once it is retired (RL11)', async () => {
   const lib = oldLibrary();
   const co = await createApp({ rows: lib.rows, tvShows: lib.shows, stage5: null });
   const f3 = await legacyBackupFixture(co, 3);
@@ -168,7 +173,7 @@ test('format 3 → 4 → 5: the conversion record (source format 3, the file’s
     await choose(app, file);
     const doc = out(app.get('pendingRestoreData'));
     const ref = out(app.ctx.convertFormat3To4(f3, { includeRecovery: archive === 'active', sourceSha256: file.sha }).doc);
-    assert.deepStrictEqual(doc.conversion, { ...ref.conversion, converter_version: `${ref.conversion.converter_version}+b45.1` });
+    assert.deepStrictEqual(doc.conversion, { ...ref.conversion, converter_version: `${ref.conversion.converter_version}+b45.1+ep1.1` });
     assert.strictEqual(doc.conversion.source_format, 3);
     assert.strictEqual(doc.conversion.source_sha256, file.sha);
     if (archive === 'active') assert.deepStrictEqual(doc.recovery, ref.recovery, 'verbatim');
@@ -217,18 +222,21 @@ test('a format-4 file carrying a conversion record and recovery section (made by
 // GA-1 review 7: the recovery section is checked against the backup's own rows before any
 // actionable confirmation (restore_backup's rules; the database checks again). Each case changes
 // one thing in a valid section; each is refused in the preview with nothing sent, both for a
-// format-4 file (converted 4 → 5) and for a format-5 file carrying the sections.
-test('recovery section: malformed entries and entries not corresponding to the backup are refused in the preview, nothing sent (format 4 and format 5 carrying the sections)', async () => {
+// format-4 file (converted 4 → 5 → 6) and for format-5 and format-6 files carrying the sections.
+test('recovery section: malformed entries and entries not corresponding to the backup are refused in the preview, nothing sent (formats 4, 5 and 6 carrying the sections)', async () => {
   const lib = oldLibrary();
   const co = await createApp({ rows: lib.rows, tvShows: lib.shows, stage5: null });
   const f3 = await legacyBackupFixture(co, 3);
   const helper = await createApp();
   const good = out(helper.ctx.convertFormat3To4(f3, { includeRecovery: true, sourceSha256: 'b'.repeat(64) }).doc);
-  // The same sections on a format-5 document (what the page makes of a format-3 file while the archive is active).
+  // The same sections on a format-5 document (what a page before EP1 made of a format-3 file while the archive was
+  // active), and on a format-6 document (what this page makes of it).
+  const good5 = out(helper.ctx.convertFormat4To5(good, { sourceSha256: 'b'.repeat(64) }).doc);
+  assert.strictEqual(good5.formatVersion, 5); assert.ok(good5.recovery && good5.conversion);
   const conv = await createApp();
   await choose(conv, fileOf(good));
-  const good5 = out(conv.get('pendingRestoreData'));
-  assert.strictEqual(good5.formatVersion, 5); assert.ok(good5.recovery && good5.conversion);
+  const good6 = out(conv.get('pendingRestoreData'));
+  assert.strictEqual(good6.formatVersion, 6); assert.ok(good6.recovery && good6.conversion);
   const film = d => d.tables.watchlist_items.find(w => w.media_type === 'movie');
   const season = d => d.tables.watchlist_items.find(w => w.show_id);
   const ent = (d, kind, id) => d.recovery.storage_map[kind].find(x => x.id === id);
@@ -268,7 +276,7 @@ test('recovery section: malformed entries and entries not corresponding to the b
     ['an other-TV row with a missing field', d => { const { network, ...o } = otv(); d.recovery.othertv_shows.push(o); }, /recovery other-TV entry doesn’t have exactly the expected fields/],
     ['repeated other-TV rows', d => { d.recovery.othertv_shows.push(otv(), otv({ id: '0d000000-0000-4000-8000-000000000002' })); }, /other-TV recovery rows repeat a show/]
   ];
-  for (const [fmt, base] of [['format 4', good], ['format 5', good5]]) {
+  for (const [fmt, base] of [['format 4', good], ['format 5', good5], ['format 6', good6]]) {
     for (const [label, change, refusal] of cases) {
       const doc = out(base); change(doc);
       const app = await createApp();
@@ -297,7 +305,7 @@ test('recovery section: malformed entries and entries not corresponding to the b
   }
 });
 
-test('N1 / RL9: a format-5 document breaking the row-class or range rules is refused in the preview — nothing sent, downloaded or pending', async () => {
+test('N1 / RL9: a format-6 document breaking the row-class or range rules is refused in the preview — nothing sent, downloaded or pending', async () => {
   const sh = showOf({ title: 'R' }), other = showOf({ title: 'O' });
   const a = seasonOf(sh, 1), b = seasonOf(sh, 2, { watched: true }), o1 = seasonOf(other, 1), f = filmOf();
   const src = await createApp({ rows: [a, b, o1, f], tvShows: [sh, other] });
@@ -341,7 +349,7 @@ test('a restore preview cancelled (Close) sends nothing; formats 1 and 2 stay re
   assert.deepStrictEqual(app.writes(), []);
   const v1 = await createApp({ rows: [filmOf()], format1: true });
   await choose(app, fileOf(await legacyBackupFixture(v1, 1)));
-  assert.match(modal(app), /predates TV shows \(format 1\)[\s\S]*only format 5 backups can be restored/);
+  assert.match(modal(app), /predates TV shows \(format 1\)[\s\S]*only format 6 backups can be restored/);
   assert.deepStrictEqual(app.writes(), []);
 });
 

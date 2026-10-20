@@ -1,6 +1,6 @@
 // Offline tests for backup formats 1 and 2 (backup-restore.js; format 3 is in tests/organization.test.js):
 // since the 5c clean-up (G8) a database without Stage 5 gets no backup and no restore (since B4/B5
-// the page backs up and restores only format 5); format 1–2
+// the page backs up and restores only format 6 since EP1); format 1–2
 // files (from the test-only fixture builder) are still validated exactly (format 2 adds
 // tv_shows/show_id/skipped, checked against the database's show rules).
 // Run from the repo root: node tests/backup-format.test.js
@@ -29,14 +29,14 @@ const v2Shows = () => [show('c1')];
 const v1Rows = () => [item('a1'), movie('b1')];
 
 // Since the 5c clean-up (G8) the page exports and restores only on a contracted database;
-// since B4/B5 only on the B4/B5 database (format 5). A database without Stage 5 gets no file and no format probe; format 1–2 files
+// since EP1 only on the EP1 database (format 6). A database without Stage 5 gets no file and no format probe; format 1–2 files
 // come from the test-only fixture builder (the page's format 1–3 export is retired).
 test('a database without Stage 5 (format 1 or 2): no backup file, no format probe, only the phase read', async () => {
   for (const opts of [{ rows: v1Rows(), format1: true }, { rows: v2Rows(), tvShows: v2Shows(), org: false }]) {
     const app = await createApp({ ...opts, stage5: null });
     const before = app.requests.length;
     const res = await app.run('buildBackupObject()').then(() => 'made', e => e.message);
-    assert.match(res, /makes backups only of a database in its own state \(format 5\), and this database isn’t in it, so no file was made/);
+    assert.match(res, /makes backups only of a database in its own state \(format 6\), and this database isn’t in it, so no file was made/);
     const reads = app.requests.slice(before);
     assert.deepStrictEqual(reads.map(r => `${r.method} ${r.url.split('/rest/v1/')[1].split('?')[0]}`), ['GET rpc/stage5_capabilities']);
   }
@@ -66,7 +66,7 @@ test('format 2 validation refuses user_id, dangling or cross-collection links, l
   assert.match(variant(b => { b.tables.tv_shows[0].status = 'caughtup'; }), /tv_shows status/);
   assert.match(variant(b => { b.tables.tv_shows.push({ ...b.tables.tv_shows[0], id: uuid('c2') }); b.rowCounts.tv_shows = 2; }), /duplicate identified show/);
   assert.match(variant(b => { delete b.tables.tv_shows; }), /Missing or invalid data for table "tv_shows"/);
-  assert.match(variant(b => { b.formatVersion = 6; }), /Unsupported backup format version \(6\)/);
+  assert.match(variant(b => { b.formatVersion = 7; }), /Unsupported backup format version \(7\)/);
   assert.match(variant(b => { b.formatVersion = 3; }), /Missing or invalid data for table "personal_collections"/);
   assert.match(variant(b => { b.formatVersion = 1; }), /Unexpected table\(s\) for format 1: tv_shows/);
 });
@@ -89,10 +89,10 @@ test('a database without Stage 5 (format 1 or 2): restore isn’t offered for a 
   }
 });
 
-test('restore: a format 5 restore sends the flag as false', async () => {
+test('restore: a format 6 restore sends the flag as false', async () => {
   const app = await createApp({ rows: v2Rows(), tvShows: v2Shows() });
   const b = await app.run('buildBackupObject()');
-  assert.strictEqual(b.formatVersion, 5);
+  assert.strictEqual(b.formatVersion, 6);
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
@@ -101,7 +101,7 @@ test('restore: a format 5 restore sends the flag as false', async () => {
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
   const call = app.requests.find(r => r.url.includes('/rpc/restore_backup'));
   assert.strictEqual(call.body.p_allow_v1_reset, false);
-  assert.strictEqual(call.body.p_backup.formatVersion, 5);
+  assert.strictEqual(call.body.p_backup.formatVersion, 6);
 });
 
 T.run();

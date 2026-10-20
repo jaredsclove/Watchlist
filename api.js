@@ -1,9 +1,10 @@
 // The page writes only to a database whose phase it has read (stage5_capabilities):
-// the B4/B5 phase, B45_PHASE. Any other phase (an older one, an unknown one, none)
+// PAGE_PHASE (EP1: B4/B5 with M1 access and episode marks). Any other phase (an older one,
+// contracted-b45 from before EP1 included, an unknown one, none)
 // authorizes nothing; a phase not read yet is read again (GET) once before a write. The refusal is raised before anything is
 // sent and is formatted as a database refusal (code update_required), so every caller
 // reports that nothing was changed.
-const B45_PHASE = 'contracted-b45';
+const PAGE_PHASE = 'contracted-ep1';
 const STATE_MISMATCH_TEXT = 'This page and the database don’t match (the database may have been updated or rolled back), so nothing was changed. Reload the page.';
 // Once a B4/B5 function is missing or a read lacks the B4/B5 columns, this page stops writing
 // (and makes no backup or restore) until it is reloaded. A later capability read that still
@@ -20,7 +21,7 @@ function stopB45Writes() {
 // M1: and only for a caller the database reports as a member now (cap.member). A signed-in non-member reads
 // no rows, so nothing it reads may be treated as the library, backed up or written over.
 function pageMayWrite(cap) {
-  return !b45Stopped && !!cap && cap.phase === B45_PHASE && cap.access === 'members' && cap.member === true;
+  return !b45Stopped && !!cap && cap.phase === PAGE_PHASE && cap.access === 'members' && cap.member === true;
 }
 const NOT_A_MEMBER_TEXT = 'This account has no library here (its membership isn’t active), so nothing was read, saved or changed. Ask the library owner.';
 function stage5Refusal(text) {
@@ -28,7 +29,7 @@ function stage5Refusal(text) {
 }
 async function requireWritablePhase() {
   if (b45Stopped) throw stage5Refusal(STATE_MISMATCH_TEXT);
-  if (stage5Phase === B45_PHASE) return stage5Phase;
+  if (stage5Phase === PAGE_PHASE) return stage5Phase;
   let cap;
   try { cap = await stage5Capabilities(); }
   catch (e) { throw stage5Refusal('The database’s update state couldn’t be read, so nothing was changed. Try again.'); }
@@ -102,9 +103,10 @@ async function sbRequest(method, path, body, headers, onAnswer = () => {}) {
     if (confirmedAnswer(res.status, err)) onAnswer();
     if (res.status === 401 && typeof sessionLost === 'function') sessionLost();
     if (/not_a_member/.test(err) && typeof membershipEnded === 'function') membershipEnded();
-    // A B4/B5 function that doesn't exist: the database isn't (or is no longer) in this
-    // page's phase. Nothing ran; the page stops writing until it is reloaded.
-    if (res.status === 404 && /^rpc\/[a-z0-9_]+_b45$/.test(path) && /PGRST202/.test(err)) {
+    // A B4/B5 function that doesn't exist, or an EP1 one (the marks function, or delete_tv_season with
+    // its mark count): the database isn't (or is no longer) in this page's phase. Nothing ran; the
+    // page stops writing until it is reloaded.
+    if (res.status === 404 && /^rpc\/([a-z0-9_]+_b45|library_set_episode_marks|delete_tv_season)$/.test(path) && /PGRST202/.test(err)) {
       stopB45Writes();
       throw stage5Refusal(STATE_MISMATCH_TEXT);
     }

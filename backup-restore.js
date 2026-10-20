@@ -58,15 +58,15 @@ async function stage5Capabilities() {
   }
 }
 
-// Which backup format this page makes and restores: 5, and only on a database in the
-// B4/B5 phase. Any other phase (an older one, none, unknown) is refused,
-// never guessed: this page makes no format 4 (it would leave out every B4/B5 value).
+// Which backup format this page makes and restores: 6, and only on a database in the
+// page's phase (EP1). Any other phase (an older one, none, unknown) is refused,
+// never guessed: this page makes no format 5 (it would leave out every episode mark).
 async function detectBackupFormat() {
   const cap = await stage5Capabilities();
   if (b45Stopped) throw new Error(STATE_MISMATCH_TEXT + ' No file was made.');
   if (cap && cap.access === 'members' && cap.member !== true) throw new Error(NOT_A_MEMBER_TEXT + ' No file was made.');
-  if (pageMayWrite(cap)) return 5;
-  throw new Error('This page makes backups only of a database in its own state (format 5), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
+  if (pageMayWrite(cap)) return 6;
+  throw new Error('This page makes backups only of a database in its own state (format 6), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
 }
 
 // At boot (doesn't hold up the first view): which phase this database is in. A database
@@ -99,7 +99,7 @@ async function buildBackupObject() {
     catch (e) {
       // A read refused because the phase changed underneath it is the same case.
       const now = await stage5Capabilities().catch(() => undefined);
-      throw now !== undefined && !(now && now.phase === B45_PHASE) ? updated : e;
+      throw now !== undefined && !(now && now.phase === PAGE_PHASE) ? updated : e;
     }
     tables[table] = rows;
     rowCounts[table] = rows.length;
@@ -265,13 +265,21 @@ const RESTORE_COLUMNS_V5 = {
   }
 };
 const BACKUP_FORMAT_V5 = { tables: Object.keys(RESTORE_COLUMNS_V5), columns: RESTORE_COLUMNS_V5 };
+// Format 6 (EP1): format 5 plus episode_marks, the watched episodes of TMDB-matched seasons
+// (no dates, no titles: episode lists are TMDB's and never stored).
+const RESTORE_COLUMNS_V6 = {
+  ...RESTORE_COLUMNS_V5,
+  episode_marks: { id: 'uuid', season_id: 'uuid', tmdb_episode_id: 'int', episode_number: 'int' }
+};
+const BACKUP_FORMAT_V6 = { tables: Object.keys(RESTORE_COLUMNS_V6), columns: RESTORE_COLUMNS_V6 };
+const FORMAT5_CONVERTER_VERSION = 'ep1.1';
 const CATALOG_GOVERNANCE_IDS = ['disney', '90day', 'sheridan'];
 const PRESENTATION_KEYS = ['disney', '90day', 'sheridan', 'truecrime'];
 const FORMAT4_CONVERTER_VERSION = 'b45.1';
 
-// The tables and columns of a format (4 and 5 here; 1–3 in backup-format3.js).
+// The tables and columns of a format (4–6 here; 1–3 in backup-format3.js).
 function backupSpec(formatVersion) {
-  return formatVersion === 5 ? BACKUP_FORMAT_V5 : formatVersion === 4 ? BACKUP_FORMAT_V4 : legacyBackupSpec(formatVersion);
+  return formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : formatVersion === 4 ? BACKUP_FORMAT_V4 : legacyBackupSpec(formatVersion);
 }
 
 const TV_SHOW_STATUSES = ['confirmed', 'highpriority', 'watching', 'complete', 'pending', 'maybe', 'skipped'];
@@ -351,9 +359,10 @@ function validateBackupRows(tables, formatVersion = 1) {
   report('watchlist_items identity shape (must be movie, TV season, or legacy with all three empty)', shapeProblems);
   report('custom_collections duplicate name', findDuplicates(tables.custom_collections.filter(r => r && typeof r === 'object'),
     r => typeof r.name === 'string' ? r.name : null, r => `"${r.name}"`));
-  if (formatVersion === 5) {
+  if (formatVersion === 5 || formatVersion === 6) {
     validateFormat4Rows(tables, items, report, rowLabel, findDuplicates, TV_SHOW_STATUSES_V5);
     validateFormat5Rows(tables, items, report, rowLabel);
+    if (formatVersion === 6) validateFormat6Rows(tables, items, report, rowLabel, findDuplicates);
   } else if (formatVersion === 4) validateFormat4Rows(tables, items, report, rowLabel, findDuplicates);
   else validateLegacyBackupRows(tables, formatVersion, report, rowLabel, findDuplicates);
   return errors;
@@ -396,6 +405,44 @@ function validateFormat5Rows(tables, items, report, rowLabel) {
     else if (a != null && [a, b].some(id => !seasonsById.has(id) || seasonsById.get(id).show_id !== s.id)) showProblems.push(`${rowLabel(s, i)} has an earlier-seasons range naming a season that isn’t one of its own`);
   });
   report('tv_shows B4/B5 values', showProblems);
+}
+
+// Format 6: what the database's episode_marks rules enforce, before anything is sent. A mark
+// belongs to a TMDB-matched season of a show in the backup, once per TMDB episode.
+function validateFormat6Rows(tables, items, report, rowLabel, findDuplicates) {
+  const marks = tables.episode_marks.filter(r => r && typeof r === 'object');
+  const seasons = new Map(items.filter(r => r.show_id != null).map(r => [r.id, r]));
+  const problems = [];
+  marks.forEach((m, i) => {
+    const s = seasons.get(m.season_id);
+    if (!s) problems.push(`${rowLabel(m, i)} points at season ${m.season_id}, which isn't a TV season in the backup`);
+    else if (!(s.media_type === 'tv' && s.tmdb_id != null && s.season_number != null)) problems.push(`${rowLabel(m, i)} points at a season that isn't matched to TMDB`);
+    if (!(Number.isInteger(m.tmdb_episode_id) && m.tmdb_episode_id > 0)) problems.push(`${rowLabel(m, i)} has tmdb_episode_id ${JSON.stringify(m.tmdb_episode_id)}`);
+    if (!(Number.isInteger(m.episode_number) && m.episode_number >= 0)) problems.push(`${rowLabel(m, i)} has episode_number ${JSON.stringify(m.episode_number)}`);
+  });
+  report('episode_marks', problems);
+  report('episode_marks duplicate episode of a season', findDuplicates(marks, m => `${m.season_id}|${m.tmdb_episode_id}`, m => `(season ${m.season_id}, TMDB episode ${m.tmdb_episode_id})`));
+}
+
+// ─── Converting a format-5 document to format 6 ───────────────────────────────
+// Format 6 adds episode marks, which a format-5 file can't have: the converted document has
+// none, and every other table is kept as it is. A format-5 document converted from format 3 or 4
+// keeps its conversion record (and a format-3 recovery section) verbatim, with this converter
+// added to its version; a native format-5 file gets its own record (source format 5).
+function convertFormat5To6(doc5, { sourceSha256 } = {}) {
+  const tables = { ...doc5.tables, episode_marks: [] };
+  const doc = { format: doc5.format, formatVersion: 6, exportedAt: doc5.exportedAt,
+    rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
+  doc.conversion = doc5.conversion
+    ? { ...doc5.conversion, converter_version: `${doc5.conversion.converter_version}+${FORMAT5_CONVERTER_VERSION}` }
+    : { source_format: 5, source_exported_at: doc5.exportedAt, source_sha256: sourceSha256, converter_version: FORMAT5_CONVERTER_VERSION };
+  if (doc5.recovery) doc.recovery = doc5.recovery;
+  return { doc };
+}
+function format5ConversionHtml() {
+  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 6 before restoring</div><ul class="manage-list">
+    <li>Format 6 adds episode marks. This backup was made before them, so after restoring no season has episode marks; seasons keep their watched and skipped marks from the backup.</li>
+    <li>The file itself isn’t changed.</li></ul></div>`;
 }
 
 // ─── Converting a format-4 document to format 5 ───────────────────────────────
@@ -452,7 +499,7 @@ function format4SectionProblems(doc4, archiveActive) {
   return sectionProblems(doc4, archiveActive, ['3']);
 }
 // The optional sections of a document about to be restored (format 4 from disk: conversion
-// source 3 only; format 5: source 3 or 4), checked as restore_backup checks them: the
+// source 3 only; format 5: source 3 or 4; format 6: 3, 4 or 5), checked as restore_backup checks them: the
 // conversion record's fields; a recovery section only with a format-3 conversion and an
 // active archive, of exactly the expected shape, and corresponding to the document's own rows.
 function sectionProblems(doc, archiveActive, sources) {
@@ -761,14 +808,14 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
   let currentItems = [];
   let dbFormat;
   try {
-    // A restore needs a database in this page's phase (format 5); formats 3 and 4 are
+    // A restore needs a database in this page's phase (format 6); formats 3, 4 and 5 are
     // converted here first. Never a fallback to another format.
     const phaseCap = await stage5Capabilities();
     if (!restoreSessionLive(session)) return;
     if (!pageMayWrite(phaseCap)) {
       showRestoreModal(`<div class="modal-title">Restore isn't available</div>
         <div class="modal-error">${b45Stopped ? esc(STATE_MISMATCH_TEXT) : phaseCap
-          ? 'This page restores only into a database in its own state (format 5), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
+          ? 'This page restores only into a database in its own state (format 6), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
           : 'This page needs a database update that hasn’t been made yet, so it can’t restore here. Nothing was changed.'}</div>
         <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
       pendingRestoreData = null;
@@ -790,51 +837,62 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
     return;
   }
 
-  // Formats 3 and 4 into the B4/B5 database: an explicit, previewed conversion (3 → 4 with
-  // the retained converter, then 4 → 5). Only the converted document is ever sent.
-  let conversion = null, conversion5 = null;
+  // Formats 3, 4 and 5 into the EP1 database: an explicit, previewed conversion (3 → 4 with
+  // the retained converter, 4 → 5, then 5 → 6). Only the converted document is ever sent.
+  let conversion = null, conversion5 = null, conversion6 = false;
   const refuseConversion = (lines) => {
     showRestoreModal(`<div class="modal-title">This format ${backup.formatVersion} backup can't be converted</div>
       <div class="modal-error">${lines.map(esc).join('\n')}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
     pendingRestoreData = null;
   };
-  if (dbFormat === 5 && (backup.formatVersion === 3 || backup.formatVersion === 4)) {
+  if (dbFormat === 6 && [3, 4, 5].includes(backup.formatVersion)) {
     let cap;
     try { cap = await stage5Capabilities(); } catch (e) { cap = null; }
     if (!restoreSessionLive(session)) return;
     if (!cap) { refuseConversion(['Couldn’t read whether the recovery archive is active, so nothing was changed.']); return; }
     // The conversion record names the file it came from (its SHA-256, computed when the file was read).
     if (!/^[0-9a-f]{64}$/.test(sourceSha256 || '')) { refuseConversion(['The file’s fingerprint couldn’t be computed, so nothing was changed. Choose the file again.']); return; }
-    let doc4 = backup;
-    if (backup.formatVersion === 3) {
-      const conv = convertFormat3To4(backup, { includeRecovery: cap.recovery_archive === 'active', sourceSha256 });
-      if (conv.refusals.length) { refuseConversion(['It breaks a rule your updated list enforces, so nothing was changed:'].concat(conv.refusals)); return; }
-      conversion = conv.summary;
-      doc4 = conv.doc;
-    } else {
-      const problems = format4SectionProblems(backup, cap.recovery_archive === 'active');
+    let doc5 = backup;
+    if (backup.formatVersion === 3 || backup.formatVersion === 4) {
+      let doc4 = backup;
+      if (backup.formatVersion === 3) {
+        const conv = convertFormat3To4(backup, { includeRecovery: cap.recovery_archive === 'active', sourceSha256 });
+        if (conv.refusals.length) { refuseConversion(['It breaks a rule your updated list enforces, so nothing was changed:'].concat(conv.refusals)); return; }
+        conversion = conv.summary;
+        doc4 = conv.doc;
+      } else {
+        const problems = format4SectionProblems(backup, cap.recovery_archive === 'active');
+        if (problems.length) { refuseConversion(['Nothing was changed:'].concat(problems)); return; }
+      }
+      const conv5 = convertFormat4To5(doc4, { sourceSha256 });
+      if (conv5.refusals.length) { refuseConversion(['It breaks a rule your list enforces, so nothing was changed:'].concat(conv5.refusals)); return; }
+      conversion5 = conv5.summary;
+      doc5 = conv5.doc;
+    } else if (backup.conversion !== undefined || backup.recovery !== undefined) {
+      // A format-5 file carrying a conversion record or a recovery section (possible only by hand
+      // or from a converted document saved elsewhere): checked as the database checks them first.
+      const problems = sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4']);
       if (problems.length) { refuseConversion(['Nothing was changed:'].concat(problems)); return; }
     }
-    const conv5 = convertFormat4To5(doc4, { sourceSha256 });
-    if (conv5.refusals.length) { refuseConversion(['It breaks a rule your list enforces, so nothing was changed:'].concat(conv5.refusals)); return; }
-    const docErrors = validateBackupObject(conv5.doc);
+    const conv6 = convertFormat5To6(doc5, { sourceSha256 });
+    const docErrors = validateBackupObject(conv6.doc);
     if (docErrors.length) { refuseConversion(['The converted backup doesn’t pass validation, so nothing was changed:'].concat(docErrors)); return; }
-    if (conv5.doc.recovery !== undefined) {
-      const rp = recoverySectionProblems(conv5.doc);
+    if (conv6.doc.recovery !== undefined) {
+      const rp = recoverySectionProblems(conv6.doc);
       if (rp.length) { refuseConversion(['Nothing was changed:'].concat(rp)); return; }
     }
-    conversion5 = conv5.summary;
-    backup = conv5.doc;
+    conversion6 = true;
+    backup = conv6.doc;
     pendingRestoreData = backup;
   }
-  // A format-5 file carrying a conversion record or a recovery section (possible only by hand
+  // A format-6 file carrying a conversion record or a recovery section (possible only by hand
   // or from a converted document saved elsewhere): checked as the database checks them first.
-  if (dbFormat === 5 && backup.formatVersion === 5 && (backup.conversion !== undefined || backup.recovery !== undefined)) {
+  if (dbFormat === 6 && backup.formatVersion === 6 && !conversion6 && (backup.conversion !== undefined || backup.recovery !== undefined)) {
     let cap;
     try { cap = await stage5Capabilities(); } catch (e) { cap = null; }
     if (!restoreSessionLive(session)) return;
-    const problems = cap ? sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4'])
+    const problems = cap ? sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4', '5'])
       : ['Couldn’t read whether the recovery archive is active, so nothing was changed.'];
     if (problems.length) {
       showRestoreModal(`<div class="modal-title">This file can't be used for restore</div>
@@ -870,6 +928,11 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
   pendingRestoreDbFormat = dbFormat;
 
   const backupDate = new Date(backup.exportedAt).toLocaleString();
+  // EP1: episode marks are replaced like everything else; say so plainly when the file has fewer.
+  const marksNow = currentCounts.episode_marks || 0, marksFile = (backup.tables.episode_marks || []).length;
+  const marksNote = marksNow > marksFile
+    ? `<div class="modal-warning">Your library has ${marksNow} episode mark${marksNow === 1 ? '' : 's'} now; this backup has ${marksFile}. Restoring replaces them with the backup’s. The safety backup keeps the current ones.</div>`
+    : '';
   const tables = [...new Set([...backupSpec(dbFormat).tables, ...backupSpec(backup.formatVersion).tables])];
   const rows = tables.map(t => `
     <div class="modal-row"><span>${esc(t)}</span><span>${currentCounts[t] ?? 0} → ${backup.tables[t] ? (backup.rowCounts[t] ?? backup.tables[t].length) : 0}</span></div>
@@ -883,10 +946,12 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
     </div>
     ${conversion ? format3ConversionHtml(conversion) : ''}
     ${conversion5 ? format4ConversionHtml(conversion5) : ''}
+    ${conversion6 ? format5ConversionHtml() : ''}
     <div class="modal-section">
       <div class="modal-label">Rows: current → backup</div>
       ${rows}
     </div>
+    ${marksNote}
     <div class="modal-warning">This will permanently replace all current data in these ${tables.length} tables with the contents of this backup. A safety backup of your current data will be downloaded automatically before anything is changed.</div>
     <div class="modal-actions">
       <button class="btn" onclick="closeRestoreModal()">Cancel</button>
@@ -1018,12 +1083,12 @@ async function sendRestore(preRestoreFilename) {
   // atomically: if anything fails, the database rolls back to exactly what it was.
   const restoredTables = backupSpec(backup.formatVersion).tables;
   // The phase is read again right before sending: it must still be this page's, and only
-  // a format-5 document is ever sent (formats 3 and 4 were converted in the preview).
+  // a format-6 document is ever sent (formats 3, 4 and 5 were converted in the preview).
   // Nothing is sent otherwise.
   let sendCap = null;
   try { sendCap = await stage5Capabilities(); } catch (e) { sendCap = null; }
   if (!restoreSessionLive(session) || pendingRestoreData !== backup) return;
-  if (!pageMayWrite(sendCap) || backup.formatVersion !== 5 || !pendingRestoreData) {
+  if (!pageMayWrite(sendCap) || backup.formatVersion !== 6 || !pendingRestoreData) {
     showRestoreModal(`<div class="modal-title">Restore not sent</div>
       <div class="modal-error">The database’s update state ${sendCap ? 'changed after this restore was prepared' : 'couldn’t be confirmed'}, so nothing was sent and nothing was changed. Choose the file again to see what restoring it would do now.</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);

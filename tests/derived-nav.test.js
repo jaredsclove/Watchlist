@@ -69,7 +69,9 @@ test('startup: Currently Watching opens with one paginated GET of the TV rows, o
   const govReads = app.requests.filter(r => /\/rest\/v1\/library_(catalog_shows|catalog_films|film_theme_kinds)\?/.test(r.url));
   assert.strictEqual(govReads.length, 3);
   assert.ok(app.requests.some(r => r.method === 'GET' && r.url.endsWith('/rpc/stage5_capabilities')));
-  assert.strictEqual(app.requests.length, 10, 'no per-storage loads, no seeding reads');
+  // EP1: the owner's episode marks are read with the rows.
+  assert.strictEqual(app.requests.filter(r => /\/rest\/v1\/episode_marks\?/.test(r.url)).length, 1);
+  assert.strictEqual(app.requests.length, 11, 'no per-storage loads, no seeding reads');
   assert.ok(reads[0].url.includes('is_film=eq.false') && !reads[0].url.includes('collection='), 'TV rows by kind, never by storage');
   assert.strictEqual(reads[0].headers['Prefer'], 'count=exact');
   noStorage(app);
@@ -188,8 +190,8 @@ test('restore reload re-reads the active view (no loadTab(null))', async () => {
   const after = app.requests.slice(before);
   // Stage 3b-1: the restored collections and watch-with choices are read again too (GET only).
   assert.deepStrictEqual(after.map(r => new URL(r.url).pathname.split('/').pop()).sort(),
-    ['library_catalog_films', 'library_catalog_shows', 'library_collection_catalogs', 'library_collection_presentation', 'library_film_theme_kinds', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items'],
-    'the TV rows, the shows, the governance and the organization');
+    ['episode_marks', 'library_catalog_films', 'library_catalog_shows', 'library_collection_catalogs', 'library_collection_presentation', 'library_film_theme_kinds', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items'],
+    'the TV rows, the shows, the episode marks (EP1), the governance and the organization');
   assert.ok(after.every(r => r.method === 'GET'));
   assert.ok(after.some(isDerivedRead) && after.some(r => r.url.includes('/rest/v1/tv_shows')));
   assertViewIntact(app);
