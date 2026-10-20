@@ -10,7 +10,8 @@
 --   1. preconditions; the before-state (counts and fingerprints without user_id);
 --   2. ownership: the bootstrap owner's rows in all twelve owned tables move to the Auth user;
 --      user_id → auth.users (ON DELETE RESTRICT: deleting a login never deletes a library);
---   3. membership (private.library_members) and owner resolution from auth.uid();
+--   3. membership (private.library_members) and owner resolution from auth.uid(); the run record
+--      (private.migration_runs: this run's id, written inside this transaction);
 --   4. policies: owner-only per command plus one restrictive membership policy per table;
 --      RLS on the recovery archive;
 --   5. grants: nothing for anon; the function set authenticated could already execute, minus
@@ -18,8 +19,12 @@
 --   6. stage5_capabilities() gains access = members;
 --   7. verify before commit (preservation, ownership, privileges, policies, simulated callers,
 --      a default-privilege probe).
--- Whether an unanswered run committed is decided only by the run label (observed, then absent)
--- and then the state; never by rerunning. A rerun is refused by section 1 once this committed.
+-- Completion: this run committed if and only if private.migration_runs holds its run id. Confirm it
+-- with a fresh read of that exact row in a separate execution (an authorized administrative read; the
+-- table is closed to every application role). A missing row is "not committed" only once the
+-- transaction is known to have ended (the run label observed, then absent); otherwise the outcome is
+-- unknown. Never rerun to find out: every attempt needs a fresh run id, and a rerun is refused by
+-- section 1 once this committed.
 -- Test environments only: db/test/m1_reverse.sql.
 begin;
 select set_config('application_name', 'watchlist-m1-' || coalesce(nullif(current_setting('watchlist.m1_run', true), ''), 'unset'), true);
@@ -68,6 +73,7 @@ begin
   end if;
   if to_regclass('private.stage5_recovery_meta') is null then raise exception 'm1: the recovery archive is not active; nothing was changed'; end if;
   if to_regclass('private.library_members') is not null then raise exception 'm1: private.library_members already exists; nothing was changed'; end if;
+  if to_regclass('private.migration_runs') is not null then raise exception 'm1: private.migration_runs already exists; nothing was changed'; end if;
   if c.bootstrap is null then raise exception 'm1: no bootstrap owner; nothing was changed'; end if;
   if c.bootstrap = v_owner then raise exception 'm1: the Auth user is the bootstrap owner already; nothing was changed'; end if;
   if not exists (select 1 from auth.users where id = v_owner) then raise exception 'm1: no Auth user %; nothing was changed', v_owner; end if;
@@ -146,6 +152,17 @@ create table private.library_members (
 alter table private.library_members enable row level security;
 revoke all on private.library_members from public, anon, authenticated;
 insert into private.library_members (user_id, note) select owner_text::uuid, 'owner (M1)' from m1_ctx;
+
+-- The run record: written in this transaction, so it exists only if this run commits. Read only by the
+-- database owner (an administrative confirmation); no application role can reach it.
+create table private.migration_runs (
+  run_id text primary key check (run_id ~ '^[A-Za-z0-9_-]{6,64}$'),
+  migration text not null,
+  recorded_at timestamptz not null default now()
+);
+alter table private.migration_runs enable row level security;
+revoke all on private.migration_runs from public, anon, authenticated;
+insert into private.migration_runs (run_id, migration) select run_id, 'm1' from m1_ctx;
 
 create or replace function private.is_member() returns boolean
 language sql stable security definer set search_path = '' as $$
@@ -275,6 +292,18 @@ begin
   end loop;
   if (select count(*) from pg_constraint c join m1_fk f on f.conname = c.conname and c.conrelid = f.tbl::regclass and pg_get_constraintdef(c.oid) = f.def) <> 2 then
     raise exception 'm1: the catalog-link foreign keys were not restored exactly';
+  end if;
+
+  -- (a2) the run record: exactly this run, and no application role can reach it
+  if (select count(*) from private.migration_runs) <> 1
+     or not exists (select 1 from private.migration_runs r join m1_ctx c on c.run_id = r.run_id where r.migration = 'm1') then
+    raise exception 'm1: the run record does not hold exactly this run';
+  end if;
+  if has_table_privilege('anon', 'private.migration_runs', 'select, insert, update, delete, truncate, references, trigger')
+     or has_table_privilege('authenticated', 'private.migration_runs', 'select, insert, update, delete, truncate, references, trigger')
+     or has_any_column_privilege('authenticated', 'private.migration_runs', 'select, insert, update, references')
+     or not (select relrowsecurity from pg_class where oid = 'private.migration_runs'::regclass) then
+    raise exception 'm1: the run record is reachable by an application role';
   end if;
 
   -- (b) anon: no privilege on any app relation, column, function or the private schema

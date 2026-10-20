@@ -191,8 +191,9 @@ if (inject) {
     const text = preamble(A, `inject-${k}`) + st.slice(0, k + 1).join('') + `\ndo $zz$ begin raise exception 'zz injected after %', ${k}; end $zz$;\n` + st.slice(k + 1).join('');
     const x = await tryExec(db, text);
     if (x.ok || !/zz injected/.test(x.message) || !same(s0, await state(db))) bad.push(`${k}: ${stmtHead(st[k])} ${x.message || 'committed'}`);
+    if ((await val(db, `select to_regclass('private.migration_runs')::text`)) !== null) bad.push(`${k}: a run record remains`);
   }
-  ok(bad.length === 0, `a failure after each of its ${ci - bi} statements leaves the state unchanged`, bad.join('\n'));
+  ok(bad.length === 0, `a failure after each of its ${ci - bi} statements leaves the state unchanged and no run record`, bad.join('\n'));
 }
 
 section('M: the migration');
@@ -209,19 +210,23 @@ ok(notA === 0, 'every owned row belongs to A');
 ok((await val(db, `select public.stage5_capabilities() ->> 'access'`)) === 'members', 'the capability says access = members');
 ok((await val(db, `select public.stage5_capabilities() ->> 'phase'`)) === 'contracted-b45', 'the phase string is unchanged');
 ok(Number(await val(db, `select count(*) from private.library_members`)) === 1, 'one member (A)');
+ok((await val(db, `select string_agg(run_id || '/' || migration, ',') from private.migration_runs`)) === 'rehearsal-1/m1',
+  'the run record holds exactly this run (rehearsal-1, m1)');
 const s1 = await state(db);
 const aPub0 = await rowsFor(db, A);
 const cat0 = JSON.parse(s0.cat), cat1 = JSON.parse(s1.cat);
 const onlyAfter = k => (cat1[k] || []).filter(x => !(cat0[k] || []).includes(x));
 const onlyBefore = k => (cat0[k] || []).filter(x => !(cat1[k] || []).includes(x));
-ok(JSON.stringify(onlyBefore('columns')) === '[]' && JSON.stringify(onlyAfter('columns').map(x => x.split(' ')[0])) === JSON.stringify(['private.library_members.added_at', 'private.library_members.note', 'private.library_members.user_id']),
-  'columns: only private.library_members added', JSON.stringify({ before: onlyBefore('columns'), after: onlyAfter('columns') }));
+ok(JSON.stringify(onlyBefore('columns')) === '[]' && JSON.stringify(onlyAfter('columns').map(x => x.split(' ')[0])) === JSON.stringify(['private.library_members.added_at', 'private.library_members.note', 'private.library_members.user_id',
+  'private.migration_runs.migration', 'private.migration_runs.recorded_at', 'private.migration_runs.run_id']),
+  'columns: only private.library_members and private.migration_runs added', JSON.stringify({ before: onlyBefore('columns'), after: onlyAfter('columns') }));
 ok(same(cat0.triggers, cat1.triggers), 'triggers unchanged');
-ok(JSON.stringify(onlyAfter('tables')) === '["private.library_members"]' && onlyBefore('tables').length === 0, 'tables: only private.library_members added');
-ok(onlyBefore('constraints').length === 0 && onlyAfter('constraints').every(x => /(_user_id_auth_fkey FOREIGN KEY \(user_id\) REFERENCES auth\.users\(id\) ON DELETE RESTRICT|^private\.library_members\.)/.test(x)),
-  'constraints: the exact catalog-link FKs kept; only the user_id → auth.users FKs and the membership table’s added', JSON.stringify(onlyAfter('constraints').filter(x => !/_user_id_auth_fkey|library_members/.test(x))));
+ok(JSON.stringify(onlyAfter('tables')) === '["private.library_members","private.migration_runs"]' && onlyBefore('tables').length === 0, 'tables: only private.library_members and private.migration_runs added', JSON.stringify(onlyAfter('tables')));
+ok(onlyBefore('constraints').length === 0 && onlyAfter('constraints').every(x => /(_user_id_auth_fkey FOREIGN KEY \(user_id\) REFERENCES auth\.users\(id\) ON DELETE RESTRICT|^private\.library_members\.|^private\.migration_runs\.)/.test(x)),
+  'constraints: the exact catalog-link FKs kept; only the user_id → auth.users FKs, the membership table’s and the run record’s added', JSON.stringify(onlyAfter('constraints').filter(x => !/_user_id_auth_fkey|library_members|migration_runs/.test(x))));
 const replay = await tryExec(db, preamble(A, 'rehearsal-2') + M1);
 ok(!replay.ok && /already applied/.test(replay.message) && same(s1, await state(db)), 'a replay is refused, state unchanged', replay.message || 'committed');
+ok((await val(db, `select string_agg(run_id, ',') from private.migration_runs`)) === 'rehearsal-1', 'the refused replay (fresh id rehearsal-2) left no run record; only rehearsal-1');
 
 section('anon: nothing');
 const anonChecks = [
@@ -236,12 +241,17 @@ const anonChecks = [
   ['restore_backup()', `select public.restore_backup($1::jsonb, false)`, [doc]],
   ['org_create_collection()', `select public.org_create_collection(gen_random_uuid(), 'x')`],
   ['a private helper', `select private.current_owner_id()`],
+  ['read the run record', `select count(*) from private.migration_runs`],
 ];
 for (const [label, s, p] of anonChecks) {
   const x = await attempt(() => asAnon(db, s, p));
   ok(!x.ok && /permission denied/.test(x.message), `anon: ${label} → permission denied`, x.ok ? 'succeeded' : x.message);
 }
 ok(same(s1, await state(db)), 'state unchanged by the anon attempts');
+{
+  const x = await attempt(() => asUser(db, A, `select count(*) from private.migration_runs`));
+  ok(!x.ok && /permission denied/.test(x.message), 'member A: reading the run record → permission denied (administrative read only)', x.ok ? 'succeeded' : x.message);
+}
 
 section('iso: a second member and a non-member');
 // B: the same library under new ids (local only), restored by B through the page's restore.

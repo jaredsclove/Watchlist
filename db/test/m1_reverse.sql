@@ -83,6 +83,7 @@ do $$ declare f record; begin
 end $$;
 drop function private.is_member();
 drop table private.library_members;
+drop table if exists private.migration_runs;
 
 -- Privileges exactly as they were: every app relation, column and function, the private schema,
 -- and the default privileges (roles this session may change).

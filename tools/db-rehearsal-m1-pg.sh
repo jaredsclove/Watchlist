@@ -1,7 +1,8 @@
 #!/bin/bash
 # Local rehearsal of db/m1_access.sql on a real, throwaway PostgreSQL 17 server (two real connections),
 # for what PGlite can't show: the run label in pg_stat_activity (active, waiting on a lock, idle in
-# transaction; gone after commit or rollback) and two runs started together (exactly one commits).
+# transaction; gone after commit or rollback), two runs started together (exactly one commits), and the run
+# record read from a separate connection (present only for the run that committed).
 #   PG_BIN=/path/to/postgres17/bin tools/db-rehearsal-m1-pg.sh <format5-backup.json>
 # The server listens on a Unix socket in a temporary directory only (no TCP), and is removed at the
 # end. Output: pass/fail and counts only; never record contents.
@@ -40,6 +41,8 @@ ok $? "contracted-b45 replica holding the backup (restored as the pre-M1 page do
 STATE0="$(Q "select md5(string_agg(x, '|' order by x)) from (select (to_jsonb(w) - 'user_id')::text x from public.watchlist_items w union all select (to_jsonb(s) - 'user_id')::text from public.tv_shows s) q")"
 LABEL() { Q "select coalesce(string_agg(state || '/' || coalesce(wait_event_type, '-'), ','), 'absent') from pg_stat_activity where application_name = 'watchlist-m1-$1'"; }
 APPLIED() { Q "select public.stage5_capabilities() ? 'access'"; }
+# The run record as a separate connection sees it: 'none' when the table doesn't exist (yet) or lacks that id.
+RUNREC() { if [ -z "$(Q "select to_regclass('private.migration_runs')")" ]; then echo none; else Q "select coalesce(string_agg(run_id, ','), 'none') from private.migration_runs where run_id = '$1'"; fi; }
 pre() { echo "select set_config('watchlist.m1_owner', '$A', false), set_config('watchlist.m1_run', '$1', false);"; }
 BODY="$(sed '/^commit;$/d' "$ROOT/db/m1_access.sql")"
 
@@ -51,10 +54,12 @@ exec 3> "$WORK/f1"
 for i in $(seq 1 60); do L="$(LABEL run-idle-1)"; [ "$L" = "idle in transaction/Client" ] && break; sleep 0.5; done
 [ "$L" = "idle in transaction/Client" ]; ok $? "the label is visible while the transaction is idle in transaction (uncommitted): $L"
 [ "$(APPLIED)" = "f" ]; ok $? "meanwhile a state read shows the old state (not decisive while the label is present)"
+[ "$(RUNREC run-idle-1)" = "none" ]; ok $? "meanwhile no run record is visible to another connection (uncommitted)"
 echo "rollback;" >&3; exec 3>&-; wait $P1
 [ "$(LABEL run-idle-1)" = "absent" ]; ok $? "after rollback the label is gone"
 [ "$(APPLIED)" = "f" ] && [ "$(Q "select md5(string_agg(x, '|' order by x)) from (select (to_jsonb(w) - 'user_id')::text x from public.watchlist_items w union all select (to_jsonb(s) - 'user_id')::text from public.tv_shows s) q")" = "$STATE0" ]
 ok $? "observed, then absent, with the old state: ended without committing"
+[ "$(RUNREC run-idle-1)" = "none" ]; ok $? "the rolled-back run left no run record"
 
 echo "[label: waiting on a lock, then commit]"
 mkfifo "$WORK/f2"
@@ -69,6 +74,8 @@ echo "commit;" >&4; exec 4>&-; wait $P2
 wait $PM; RM=$?
 ok $RM "M1 commits once the lock is released"
 [ "$(LABEL run-lock-1)" = "absent" ] && [ "$(APPLIED)" = "t" ]; ok $? "observed, then absent, with the new state: committed"
+[ "$(RUNREC run-lock-1)" = "run-lock-1" ]; ok $? "a fresh read from another connection finds this run's record (run-lock-1)"
+[ "$(RUNREC run-idle-1)" = "none" ]; ok $? "and none for the earlier rolled-back run"
 
 echo "[two runs started together]"
 DB=m1twin
@@ -79,6 +86,9 @@ wait $T1; R1=$?; wait $T2; R2=$?
 [ $((R1 == 0 ? 1 : 0)) -ne $((R2 == 0 ? 1 : 0)) ]; ok $? "exactly one run commits (exit codes $R1, $R2)"
 grep -q "already applied" "$WORK/t1.out" "$WORK/t2.out"; ok $? "the other waited on the locks, then refused (already applied), changing nothing"
 [ "$(Q "select count(*) from private.library_members")" = "1" ] && [ "$(APPLIED)" = "t" ]; ok $? "one member, M1 applied once"
+if [ "$R1" = 0 ]; then WIN=run-twin-1; LOSE=run-twin-2; else WIN=run-twin-2; LOSE=run-twin-1; fi
+[ "$(RUNREC $WIN)" = "$WIN" ] && [ "$(RUNREC $LOSE)" = "none" ] && [ "$(Q "select count(*) from private.migration_runs")" = "1" ]
+ok $? "exactly the committed run's record ($WIN); none for the refused one ($LOSE)"
 
 echo
 if [ "$FAILED" = 0 ]; then echo "all pg checks passed"; else echo "FAILED: $FAILED"; fi
