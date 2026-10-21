@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EP1 hosted test</title>
+<!--
+  EP1 hosted pass (db/ep1_episode_marks.sql) against the TEMPORARY test project, through its real PostgREST API,
+  as two members (A, B), a signed-out caller and (after B's membership is removed in the SQL Editor) a non-member.
+  Synthetic data only: every row it creates is titled "ZZ EP1 Hosted …" and is removed by Clean up.
+  * Locked to the test project's ref below; refuses production's URL and key (../config.js) and every other host.
+  * The person running it pastes the publishable key and types both passwords; nothing is pre-filled or stored;
+    tokens stay in memory (refreshed by the Auth client) and are never shown.
+  * Serve from 127.0.0.1 at the repo root (../config.js, ../vendor/ and the page's backup code resolve).
+  * Output: pass/fail, counts and sanitized error codes; never record contents, tokens or keys.
+-->
+<script src="../vendor/supabase-js-2.117.2.umd.js"></script>
+<script src="../config.js"></script>
+<script src="../ui-helpers.js"></script>
+<script src="../metadata.js"></script>
+<script src="../api.js"></script>
+<script src="../backup-restore.js"></script>
+<script src="../backup-format3.js"></script>
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --ok: #1a7f37; --bad: #c62828; --line: #e5e5ea; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161618; --fg: #f2f2f7; --muted: #a1a1a6; --ok: #4cc26b; --bad: #ff6b6b; --line: #2c2c2e; } }
+  :root[data-theme="dark"] { --bg: #161618; --fg: #f2f2f7; --muted: #a1a1a6; --ok: #4cc26b; --bad: #ff6b6b; --line: #2c2c2e; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.45 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; }
+  main { max-width: 900px; margin: 0 auto; } h1 { font-size: 18px; margin: 0 0 6px; } p { color: var(--muted); }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 10px; padding: 10px; }
+  label { display: block; margin: 4px 0; } input { width: 100%; max-width: 360px; padding: 6px; box-sizing: border-box; }
+  button { padding: 8px 14px; font-size: 14px; margin: 4px 6px 4px 0; }
+  .row { padding: 3px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .info { color: var(--muted); } #summary { font-weight: 600; margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+<h1>EP1 hosted test — temporary test project</h1>
+<p>Test project only. Paste the test project’s publishable key and type both test users’ passwords; nothing is saved.</p>
+<form id="f" autocomplete="off">
+  <fieldset><legend>Test project</legend>
+    <label>Publishable key <input id="key" type="password" autocomplete="off" required></label>
+  </fieldset>
+  <fieldset><legend>Member A</legend>
+    <label>Email <input id="ae" type="email" autocomplete="off" value="m1-test-a@example.com" required></label>
+    <label>Password <input id="ap" type="password" autocomplete="new-password" required></label>
+  </fieldset>
+  <fieldset><legend>Member B</legend>
+    <label>Email <input id="be" type="email" autocomplete="off" value="m1-test-b@example.com" required></label>
+    <label>Password <input id="bp" type="password" autocomplete="new-password" required></label>
+  </fieldset>
+  <button id="run" type="submit">Sign in both and run the main checks</button>
+</form>
+<button id="nonMember" type="button" disabled>Non-member checks (after B’s membership is removed)</button>
+<button id="cleanup" type="button" disabled>Clean up (after B’s membership is back)</button>
+<div id="summary"></div>
+<div id="log"></div>
+</main>
+<script>
+(() => {
+  const REF = 'lqvfteujudxttiuxptgs';
+  const URL_ = `https://${REF}.supabase.co`;
+  const PROD_URL = SUPABASE_URL, PROD_KEY = SUPABASE_KEY;
+  const TAG = 'ZZ EP1 Hosted';
+  const R = window.__ep1 = { results: [], passed: 0, failed: 0, phase: 'idle', notes: [] };
+  const logEl = document.getElementById('log'), sumEl = document.getElementById('summary');
+  const line = (cls, text) => { const d = document.createElement('div'); d.className = `row ${cls}`; d.textContent = text; logEl.appendChild(d); };
+  const summary = () => { sumEl.textContent = `${R.phase}: ${R.passed} passed, ${R.failed} failed`; };
+  const sanitize = t => String(t || '').replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[token]').replace(/sb_[a-z]+_[\w-]+/g, '[key]').slice(0, 220);
+  async function test(name, fn) {
+    try { await fn(); R.passed++; R.results.push({ name, ok: true }); line('ok', `ok   ${name}`); }
+    catch (e) { R.failed++; R.results.push({ name, ok: false, why: sanitize(e.message) }); line('bad', `FAIL ${name} — ${sanitize(e.message)}`); }
+    summary();
+  }
+  const assert = (c, m) => { if (!c) throw new Error(m || 'assertion failed'); };
+  const note = t => { R.notes.push(t); line('info', t); };
+
+  let KEY = null, A = null, B = null, users = {};
+  window.fetch = (orig => (url, opts) => {
+    const u = String(url);
+    if (!u.startsWith(URL_) && !u.startsWith(location.origin)) return Promise.reject(new Error(`refused request outside the test project`));
+    return orig(url, opts);
+  })(window.fetch.bind(window));
+  async function client(email, password, label) {
+    const c = supabase.createClient(URL_, KEY, { auth: { persistSession: false, autoRefreshToken: true, storageKey: `ep1-hosted-${label}` } });
+    const { data, error } = await c.auth.signInWithPassword({ email, password });
+    if (error || !data || !data.session) throw new Error(`${label}: sign-in failed (${sanitize(error && error.message)})`);
+    return { c, id: data.user.id, label };
+  }
+  const tokenOf = async who => { if (!who) return KEY; const { data } = await who.c.auth.getSession(); return data.session.access_token; };
+  async function rest(who, method, path, body, headers = {}) {
+    const res = await fetch(`${URL_}/rest/v1/${path}`, { method, headers: { apikey: KEY, Authorization: `Bearer ${await tokenOf(who)}`, 'Content-Type': 'application/json', ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await res.text();
+    let json = null; try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
+    return { status: res.status, ok: res.ok, json, text, headers: res.headers };
+  }
+  const rpc = (who, fn, args, headers) => rest(who, 'POST', `rpc/${fn}`, args, headers);
+  const code = r => (r.json && (r.json.message || '').split(':')[0]) || String(r.status);
+  const refusedWith = (r, c) => !r.ok && code(r) === c;
+  const denied = r => !r.ok && (r.status === 401 || r.status === 403 || /permission denied|42501|not_a_member|row-level security/.test(r.text));
+  const ep = (id, n) => ({ tmdb_episode_id: id, episode_number: n });
+  const NONE = { watched: false, skipped: false };
+  async function marksOf(who, season) { const r = await rest(who, 'GET', `episode_marks?select=*&season_id=eq.${season}&order=tmdb_episode_id.asc`); assert(r.ok, `read marks ${r.status}`); return r.json; }
+  async function seasonsOf(who, showId) { const r = await rest(who, 'GET', `watchlist_items?select=id,season_number,watched,skipped&show_id=eq.${showId}&order=season_number.asc`); assert(r.ok, `read seasons ${r.status}`); return r.json; }
+  async function freeTmdb(who, start) {
+    for (let t = start; t < start + 200; t++) {
+      const a = await rest(who, 'GET', `tv_shows?select=id&tmdb_id=eq.${t}`), b = await rest(who, 'GET', `watchlist_items?select=id&tmdb_id=eq.${t}`);
+      if (a.ok && b.ok && !a.json.length && !b.json.length) return t;
+    }
+    throw new Error('no free TMDB id');
+  }
+  async function createShow(who, title, tmdb, n) {
+    const key = title.toLowerCase();
+    const seasons = Array.from({ length: n }, (_, i) => ({ item_key: `${key}|season ${i + 1}`, title, season: `Season ${i + 1}`, theme: 'ZZ',
+      display_date: 'Jan 1, 2020', date_sort: '2020-01-01', season_number: i + 1 }));
+    const r = await rpc(who, 'library_create_show_b45', { p_show: { tmdb_id: tmdb, title, show_key: key, network: 'ZZ' }, p_seasons: seasons });
+    assert(r.ok, `create ${title}: ${r.status} ${code(r)}`);
+    const showId = r.json.show.id;
+    return { showId, seasons: (await seasonsOf(who, showId)).map(s => s.id) };
+  }
+
+  // A member's library as a format-6 document, read with that member's token (the page's exact columns).
+  async function exportDoc(who) {
+    const spec = backupSpec(6), tables = {};
+    for (const t of spec.tables) {
+      const rows = [];
+      for (let from = 0; ; from += 500) {
+        const r = await rest(who, 'GET', `${t}?select=${Object.keys(spec.columns[t]).join(',')}&order=id.asc`, undefined, { Range: `${from}-${from + 499}`, 'Range-Unit': 'items', Prefer: 'count=exact' });
+        assert(r.ok, `export ${t}: ${r.status}`);
+        rows.push(...r.json);
+        if (r.json.length < 500) break;
+      }
+      tables[t] = rows;
+    }
+    return { format: BACKUP_FORMAT, formatVersion: 6, exportedAt: new Date().toISOString(), rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
+  }
+  // Every table and field equal (timestamps by instant), as the page verifies after a restore.
+  function sameDoc(want, have) {
+    const spec = backupSpec(6);
+    for (const t of spec.tables) {
+      const w = want.tables[t] || [], h = have.tables[t] || [];
+      if (w.length !== h.length) return `${t}: ${w.length} vs ${h.length}`;
+      const byId = new Map(h.map(r => [r.id, r]));
+      for (const r of w) { if (!byId.has(r.id)) return `${t}: a row missing`; const d = compareRowFields(r, byId.get(r.id), spec.columns[t]); if (d.length) return `${t}: ${d.join(',')}`; }
+    }
+    return null;
+  }
+  const sha256 = async t => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map(x => x.toString(16).padStart(2, '0')).join('');
+
+  let SA = null, SB = null; // the synthetic shows: { showId, seasons }
+  document.getElementById('f').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    R.phase = 'main'; logEl.innerHTML = ''; R.results = []; R.passed = R.failed = 0;
+    KEY = document.getElementById('key').value.trim();
+    const pw = { a: document.getElementById('ap').value, b: document.getElementById('bp').value };
+    document.getElementById('ap').value = ''; document.getElementById('bp').value = ''; document.getElementById('key').value = '';
+    if (!KEY || KEY === PROD_KEY || URL_ === PROD_URL) { line('bad', 'REFUSED: missing key, or production values'); return; }
+    try {
+      A = await client(document.getElementById('ae').value.trim(), pw.a, 'A');
+      B = await client(document.getElementById('be').value.trim(), pw.b, 'B');
+    } catch (e) { line('bad', sanitize(e.message)); return; } finally { pw.a = pw.b = ''; }
+    note('signed in as A and B (tokens in memory only)');
+
+    // ── setup ──
+    await test('capability (A): phase contracted-ep1, backup format 6, member', async () => {
+      const r = await rpc(A, 'stage5_capabilities', {}); assert(r.ok, r.status);
+      assert(r.json.phase === 'contracted-ep1' && String(r.json.backup_format) === '6' && r.json.member === true, JSON.stringify({ phase: r.json.phase, f: r.json.backup_format, m: r.json.member }));
+    });
+    await test('setup: synthetic shows (A: 14 matched seasons; B: 2)', async () => {
+      SA = await createShow(A, `${TAG} A`, await freeTmdb(A, 2147470001), 14);
+      SB = await createShow(B, `${TAG} B`, await freeTmdb(B, 2147471001), 2);
+      assert(SA.seasons.length === 14 && SB.seasons.length === 2);
+    });
+    const [s1, s2, s3, s4] = SA.seasons;
+
+    // ── marks through PostgREST ──
+    await test('A: set two marks; the season’s marks come back in episode order', async () => {
+      const r = await rpc(A, 'library_set_episode_marks', { p_season_id: s1, p_expected: NONE, p_watched: true, p_episodes: [ep(910002, 2), ep(910001, 1)] });
+      assert(r.ok, code(r)); assert(r.json.marks.map(m => m.episode_number).join() === '1,2', JSON.stringify(r.json.marks.map(m => m.episode_number)));
+      const rows = await marksOf(A, s1); assert(rows.length === 2 && rows.every(m => m.user_id === A.id && m.id), 'stored as A’s');
+    });
+    await test('A: setting the same marks again changes nothing; clearing one leaves one', async () => {
+      let r = await rpc(A, 'library_set_episode_marks', { p_season_id: s1, p_expected: NONE, p_watched: true, p_episodes: [ep(910001, 7)] });
+      assert(r.ok && r.json.marks.length === 2 && r.json.marks[0].episode_number === 1, 'idempotent, number kept');
+      r = await rpc(A, 'library_set_episode_marks', { p_season_id: s1, p_expected: NONE, p_watched: false, p_episodes: [{ tmdb_episode_id: 910002 }] });
+      assert(r.ok && r.json.marks.length === 1, code(r));
+    });
+    for (const [label, body, want] of [
+      ['no episodes', { p_season_id: s1, p_expected: NONE, p_watched: true, p_episodes: [] }, 'invalid_input'],
+      ['a repeated episode', { p_season_id: s1, p_expected: NONE, p_watched: true, p_episodes: [ep(5, 1), ep(5, 2)] }, 'invalid_input'],
+      ['stale expected values', { p_season_id: s1, p_expected: { watched: true, skipped: false }, p_watched: true, p_episodes: [ep(5, 1)] }, 'target_changed'],
+      ['a film or unknown id', { p_season_id: '00000000-0000-4000-8000-0000000000ff', p_expected: NONE, p_watched: true, p_episodes: [ep(5, 1)] }, 'target_missing']
+    ]) await test(`A: refused (${want}): ${label}`, async () => { const r = await rpc(A, 'library_set_episode_marks', body); assert(refusedWith(r, want), `${r.status} ${code(r)}`); });
+    await test('watched lock: marking the season watched keeps its mark; marks then refused (season_locked); unmarking keeps it', async () => {
+      assert((await rpc(A, 'set_season_watched', { p_row_id: s1, p_watched: true })).ok);
+      assert((await marksOf(A, s1)).length === 1, 'kept');
+      const r = await rpc(A, 'library_set_episode_marks', { p_season_id: s1, p_expected: { watched: true, skipped: false }, p_watched: false, p_episodes: [{ tmdb_episode_id: 910001 }] });
+      assert(refusedWith(r, 'season_locked'), code(r));
+      assert((await rpc(A, 'set_season_watched', { p_row_id: s1, p_watched: false })).ok && (await marksOf(A, s1)).length === 1, 'kept after unmarking');
+    });
+    await test('skipped lock: skipping keeps the mark; marks refused; keeping it again keeps the mark', async () => {
+      assert((await rpc(A, 'set_season_skipped', { p_row_id: s1, p_skipped: true })).ok && (await marksOf(A, s1)).length === 1);
+      const r = await rpc(A, 'library_set_episode_marks', { p_season_id: s1, p_expected: { watched: false, skipped: true }, p_watched: true, p_episodes: [ep(910003, 3)] });
+      assert(refusedWith(r, 'season_locked'), code(r));
+      assert((await rpc(A, 'set_season_skipped', { p_row_id: s1, p_skipped: false })).ok && (await marksOf(A, s1)).length === 1);
+    });
+    await test('direct writes refused: insert (library_write_required), update (no privilege), delete of a mark, delete of a marked season', async () => {
+      const ins = await rest(A, 'POST', 'episode_marks', [{ season_id: s1, tmdb_episode_id: 920001, episode_number: 1 }]);
+      assert(!ins.ok && /library_write_required/.test(ins.text), `insert ${ins.status} ${code(ins)}`);
+      const upd = await rest(A, 'PATCH', `episode_marks?season_id=eq.${s1}`, { episode_number: 9 });
+      assert(!upd.ok && (upd.status === 401 || upd.status === 403 || /permission denied/.test(upd.text)), `update ${upd.status}`);
+      const del = await rest(A, 'DELETE', `episode_marks?season_id=eq.${s1}`);
+      assert(!del.ok && /library_write_required/.test(del.text), `delete mark ${del.status} ${code(del)}`);
+      const dels = await rest(A, 'DELETE', `watchlist_items?id=eq.${s1}`);
+      assert(!dels.ok && /library_write_required/.test(dels.text), `delete season ${dels.status} ${code(dels)}`);
+      assert((await marksOf(A, s1)).length === 1, 'still one mark');
+    });
+
+    // ── isolation and signed-out ──
+    await test('B sees none of A’s marks; A sees none of B’s', async () => {
+      assert((await rpc(B, 'library_set_episode_marks', { p_season_id: SB.seasons[0], p_expected: NONE, p_watched: true, p_episodes: [ep(940001, 1)] })).ok, 'B marks its own');
+      const b = await rest(B, 'GET', 'episode_marks?select=user_id'); const a = await rest(A, 'GET', 'episode_marks?select=user_id');
+      assert(b.ok && b.json.every(m => m.user_id === B.id) && b.json.length === 1, `B sees ${b.json && b.json.length}`);
+      assert(a.ok && a.json.every(m => m.user_id === A.id), 'A sees only A’s');
+    });
+    await test('B against A: set / clear (target_missing), delete (not_found), direct insert and delete change nothing', async () => {
+      assert(refusedWith(await rpc(B, 'library_set_episode_marks', { p_season_id: s1, p_expected: NONE, p_watched: true, p_episodes: [ep(930001, 1)] }), 'target_missing'));
+      assert(refusedWith(await rpc(B, 'library_set_episode_marks', { p_season_id: s1, p_expected: NONE, p_watched: false, p_episodes: [{ tmdb_episode_id: 910001 }] }), 'target_missing'));
+      const d1 = await rpc(B, 'delete_tv_season', { p_row_id: s1, p_marks_expected: 1 }), d2 = await rpc(B, 'delete_tv_season', { p_row_id: s1 });
+      assert(code(d1) === 'not_found' && code(d2) === 'not_found', `${code(d1)} ${code(d2)}`);
+      const ins = await rest(B, 'POST', 'episode_marks', [{ season_id: s1, tmdb_episode_id: 930002, episode_number: 1 }]);
+      assert(!ins.ok, `B insert ${ins.status}`);
+      const del = await rest(B, 'DELETE', `episode_marks?season_id=eq.${s1}`, undefined, { Prefer: 'return=representation' });
+      assert(del.ok && Array.isArray(del.json) && del.json.length === 0, `B delete ${del.status}`);
+      assert((await marksOf(A, s1)).length === 1, 'A’s mark untouched');
+    });
+    await test('signed out: marks, the marks function, both delete forms and restore are refused', async () => {
+      for (const r of [await rest(null, 'GET', 'episode_marks?select=*'), await rpc(null, 'library_set_episode_marks', { p_season_id: s1, p_expected: NONE, p_watched: true, p_episodes: [ep(1, 1)] }),
+        await rpc(null, 'delete_tv_season', { p_row_id: s1 }), await rpc(null, 'delete_tv_season', { p_row_id: s1, p_marks_expected: 1 }),
+        await rpc(null, 'restore_backup', { p_backup: {}, p_allow_v1_reset: false })]) assert(denied(r) || r.status === 404, `${r.status} ${code(r)}`);
+      assert((await marksOf(A, s1)).length === 1);
+    });
+
+    // ── deletes ──
+    await test('delete: an old-style call refuses a marked season (update_required, never not_found); a stale count is refused; the right count deletes season and marks', async () => {
+      assert((await rpc(A, 'library_set_episode_marks', { p_season_id: s2, p_expected: NONE, p_watched: true, p_episodes: [ep(911001, 1), ep(911002, 2)] })).ok);
+      const old = await rpc(A, 'delete_tv_season', { p_row_id: s2 });
+      assert(refusedWith(old, 'update_required') && !/not_found:/.test(old.text) && /Reload the page/.test(old.text), `${old.status} ${code(old)}`);
+      assert(refusedWith(await rpc(A, 'delete_tv_season', { p_row_id: s2, p_marks_expected: 1 }), 'target_changed'));
+      assert((await seasonsOf(A, SA.showId)).some(s => s.id === s2) && (await marksOf(A, s2)).length === 2, 'nothing changed');
+      const ok = await rpc(A, 'delete_tv_season', { p_row_id: s2, p_marks_expected: 2 });
+      assert(ok.ok && ok.json.marks_deleted === 2, `${ok.status} ${code(ok)}`);
+      assert(!(await seasonsOf(A, SA.showId)).some(s => s.id === s2) && (await marksOf(A, s2)).length === 0);
+    });
+    await test('delete: an old-style call still deletes a season without marks', async () => {
+      const r = await rpc(A, 'delete_tv_season', { p_row_id: s3 });
+      assert(r.ok && r.json.marks_deleted === 0, `${r.status} ${code(r)}`);
+    });
+
+    // ── concurrency ──
+    const pool = SA.seasons.slice(4, 14); // ten seasons
+    const outcomes = { markFirst: 0, deleteFirst: 0 };
+    await test('concurrent mark / clear and delete (10 rounds): the count check and the delete stay coordinated — never both, never a lost mark', async () => {
+      for (let i = 0; i < pool.length; i++) {
+        const s = pool[i];
+        assert((await rpc(A, 'library_set_episode_marks', { p_season_id: s, p_expected: NONE, p_watched: true, p_episodes: [ep(950000 + i * 10 + 1, 1)] })).ok, 'seed');
+        const add = i % 2 === 0;
+        const write = () => rpc(A, 'library_set_episode_marks', { p_season_id: s, p_expected: NONE, p_watched: add, p_episodes: add ? [ep(950000 + i * 10 + 2, 2)] : [{ tmdb_episode_id: 950000 + i * 10 + 1 }] });
+        const del = () => rpc(A, 'delete_tv_season', { p_row_id: s, p_marks_expected: 1 });
+        const [w, d] = i % 4 < 2 ? await Promise.all([write(), del()]) : (([x, y]) => [y, x])(await Promise.all([del(), write()]));
+        const exists = (await seasonsOf(A, SA.showId)).some(x => x.id === s), marks = (await marksOf(A, s)).length;
+        if (d.ok) {
+          assert(d.json.marks_deleted === 1 && refusedWith(w, 'target_missing') && !exists && marks === 0, `round ${i}: delete won, but ${JSON.stringify({ w: code(w), exists, marks, md: d.json.marks_deleted })}`);
+          outcomes.deleteFirst++;
+        } else {
+          assert(refusedWith(d, 'target_changed') && w.ok && exists && marks === (add ? 2 : 0), `round ${i}: write won, but ${JSON.stringify({ d: code(d), w: code(w), exists, marks })}`);
+          outcomes.markFirst++;
+        }
+      }
+      note(`concurrency outcomes: write first ${outcomes.markFirst}, delete first ${outcomes.deleteFirst}`);
+    });
+
+    // ── backup and restore ──
+    let docA = null, docB0 = null;
+    await test('format 6: A’s export validates with the page’s rules and holds A’s marks only', async () => {
+      assert((await rpc(A, 'library_set_episode_marks', { p_season_id: s4, p_expected: NONE, p_watched: true, p_episodes: [ep(960001, 1), ep(960002, 2)] })).ok);
+      docA = await exportDoc(A); docB0 = await exportDoc(B);
+      const errs = validateBackupObject(docA); assert(errs.length === 0, errs.join(' | '));
+      assert(docA.tables.episode_marks.length >= 3 && docB0.tables.episode_marks.length === 1, `${docA.tables.episode_marks.length} / ${docB0.tables.episode_marks.length}`);
+    });
+    await test('format 6 restore: a cleared mark comes back; A equals the file field by field; B unchanged', async () => {
+      assert((await rpc(A, 'library_set_episode_marks', { p_season_id: s4, p_expected: NONE, p_watched: false, p_episodes: [{ tmdb_episode_id: 960002 }] })).ok);
+      const r = await rpc(A, 'restore_backup', { p_backup: docA, p_allow_v1_reset: false });
+      assert(r.ok && r.json.formatVersion === 6 && r.json.restored.episode_marks === docA.tables.episode_marks.length, `${r.status} ${code(r)}`);
+      const diff = sameDoc(docA, await exportDoc(A)); assert(!diff, diff);
+      const diffB = sameDoc(docB0, await exportDoc(B)); assert(!diffB, `B changed: ${diffB}`);
+    });
+    await test('format 5 sent directly is refused (converted in the page first); nothing changes', async () => {
+      const d5 = JSON.parse(JSON.stringify(docA)); d5.formatVersion = 5; delete d5.tables.episode_marks; delete d5.rowCounts.episode_marks;
+      const r = await rpc(A, 'restore_backup', { p_backup: d5, p_allow_v1_reset: false });
+      assert(!r.ok && /converted in the page first/.test(r.text), `${r.status}`);
+      const diff = sameDoc(docA, await exportDoc(A)); assert(!diff, diff);
+    });
+    await test('an older (format-5) backup converted by the page restores with no marks and its conversion record; every other table equals the file; B unchanged', async () => {
+      const d5 = JSON.parse(JSON.stringify(docA)); d5.formatVersion = 5; delete d5.tables.episode_marks; delete d5.rowCounts.episode_marks;
+      const conv = convertFormat5To6(d5, { sourceSha256: await sha256(JSON.stringify(d5)) }).doc;
+      assert(validateBackupObject(conv).length === 0 && conv.conversion.source_format === 5);
+      const r = await rpc(A, 'restore_backup', { p_backup: conv, p_allow_v1_reset: false });
+      assert(r.ok && r.json.converted_from === 5 && r.json.restored.episode_marks === 0, `${r.status} ${code(r)}`);
+      const now = await exportDoc(A); assert(now.tables.episode_marks.length === 0);
+      const want = JSON.parse(JSON.stringify(docA)); want.tables.episode_marks = [];
+      const diff = sameDoc(want, now); assert(!diff, diff);
+      const diffB = sameDoc(docB0, await exportDoc(B)); assert(!diffB, `B changed: ${diffB}`);
+      const back = await rpc(A, 'restore_backup', { p_backup: docA, p_allow_v1_reset: false });
+      assert(back.ok && !sameDoc(docA, await exportDoc(A)), 'the marks come back with the format-6 file');
+    });
+    await test('id collisions: a mark id of B’s, or B restoring A’s file, is refused (restore_id_collision); nothing changes for either', async () => {
+      const bad = JSON.parse(JSON.stringify(docA)); bad.tables.episode_marks[0].id = docB0.tables.episode_marks[0].id;
+      const r1 = await rpc(A, 'restore_backup', { p_backup: bad, p_allow_v1_reset: false });
+      assert(refusedWith(r1, 'restore_id_collision'), `${r1.status} ${code(r1)}`);
+      const r2 = await rpc(B, 'restore_backup', { p_backup: docA, p_allow_v1_reset: false });
+      assert(refusedWith(r2, 'restore_id_collision'), `${r2.status} ${code(r2)}`);
+      assert(!sameDoc(docA, await exportDoc(A)) && !sameDoc(docB0, await exportDoc(B)), 'both unchanged');
+    });
+
+    // ── the private schema ──
+    await test('the private schema isn’t exposed: restore_backup_v5 can’t be called through the API, in public or as private', async () => {
+      const pub = await rpc(A, 'restore_backup_v5', { p_backup: {}, p_allow_v1_reset: false });
+      assert(pub.status === 404 && /PGRST202/.test(pub.text), `public: ${pub.status} ${code(pub)}`);
+      const prv = await rpc(A, 'restore_backup_v5', { p_backup: {}, p_allow_v1_reset: false }, { 'Content-Profile': 'private' });
+      assert(prv.status === 406 && /PGRST106/.test(prv.text), `private profile: ${prv.status} ${sanitize(prv.text)}`);
+      for (const t of ['migration_runs', 'library_members']) {
+        const g = await rest(A, 'GET', `${t}?select=*`, undefined, { 'Accept-Profile': 'private' });
+        assert(g.status === 406 && /PGRST106/.test(g.text), `${t}: ${g.status}`);
+      }
+      const schemas = (prv.json && (prv.json.hint || prv.json.message)) || '';
+      note(`exposed schemas named by the API: ${sanitize((schemas.match(/following: (.*)$/) || [, schemas])[1])}`);
+    });
+
+    R.phase = 'main done'; summary();
+    document.getElementById('nonMember').disabled = false;
+    document.getElementById('cleanup').disabled = false;
+  });
+
+  document.getElementById('nonMember').addEventListener('click', async () => {
+    R.phase = 'non-member';
+    const own = SB.seasons[1];
+    await test('non-member (B after its membership was removed): capability says member false', async () => {
+      const r = await rpc(B, 'stage5_capabilities', {}); assert(r.ok && r.json.member === false, `${r.status} ${r.json && r.json.member}`);
+    });
+    await test('non-member: reads no marks; the marks function and both delete forms are refused (not_a_member); restore refused', async () => {
+      const g = await rest(B, 'GET', 'episode_marks?select=*'); assert(g.ok && g.json.length === 0, `read ${g.status} ${g.json && g.json.length}`);
+      for (const r of [await rpc(B, 'library_set_episode_marks', { p_season_id: own, p_expected: NONE, p_watched: true, p_episodes: [ep(1, 1)] }),
+        await rpc(B, 'delete_tv_season', { p_row_id: own }), await rpc(B, 'delete_tv_season', { p_row_id: own, p_marks_expected: 0 }),
+        await rpc(B, 'restore_backup', { p_backup: docB0Cache(), p_allow_v1_reset: false })]) assert(denied(r), `${r.status} ${code(r)}`);
+    });
+    R.phase = 'non-member done'; summary();
+  });
+  const docB0Cache = () => ({ format: BACKUP_FORMAT, formatVersion: 6 });
+
+  document.getElementById('cleanup').addEventListener('click', async () => {
+    R.phase = 'cleanup';
+    for (const [who, S] of [[A, SA], [B, SB]]) {
+      await test(`clean up ${who.label}: every synthetic season deleted with its mark count; the show goes with its last`, async () => {
+        for (const s of await seasonsOf(who, S.showId)) {
+          const n = (await marksOf(who, s.id)).length;
+          if (s.watched || s.skipped) { /* (no locks matter for deletion) */ }
+          const r = await rpc(who, 'delete_tv_season', { p_row_id: s.id, p_marks_expected: n });
+          assert(r.ok, `${r.status} ${code(r)}`);
+        }
+        const left = await rest(who, 'GET', `watchlist_items?select=id&title=like.${encodeURIComponent(TAG)}*`);
+        const shows = await rest(who, 'GET', `tv_shows?select=id&title=like.${encodeURIComponent(TAG)}*`);
+        const marks = await rest(who, 'GET', 'episode_marks?select=id');
+        assert(left.ok && !left.json.length && shows.ok && !shows.json.length && marks.ok && !marks.json.length,
+          `left: ${left.json && left.json.length} rows, ${shows.json && shows.json.length} shows, ${marks.json && marks.json.length} marks`);
+      });
+    }
+    for (const who of [A, B]) { try { await who.c.auth.signOut({ scope: 'local' }); } catch (e) { /* in memory only */ } }
+    KEY = null;
+    R.phase = 'cleanup done (signed out locally)'; summary();
+  });
+})();
+</script>
+</body>
+</html>
