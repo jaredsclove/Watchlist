@@ -126,7 +126,9 @@ const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'rende
 const TV_EDIT_HANDLERS = new Set(['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
   'keepCurrentStatus', 'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
   // EP1: a matched season's episode list and its marks (tests/episodes.test.js)
-  'toggleEpisodes', 'retryEpisodes', 'toggleEpisodeTitle', 'setEpisodeMark', 'markEpisodesThrough']);
+  'toggleEpisodes', 'retryEpisodes', 'toggleEpisodeTitle', 'setEpisodeMark',
+  // EP2: the one Mark watched through control
+  'chooseEpisodesThrough', 'applyEpisodesThrough']);
 const FILM_EDIT_HANDLERS = new Set(['setStatus', 'setFilmPriority', 'toggleMorePopover', 'toggleWatchWith', 'libraryPullRest', 'dismissCatalogNew',
   'removeFromCollection']);
 function assertReadOnlyDom(app) {

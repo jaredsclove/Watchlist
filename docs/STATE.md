@@ -21,8 +21,11 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   collection with Undo; Add to <collection>…, S5), Settings (Manage collections and watch-with
   choices, Catalog updates, Backup & Restore). ⬇ Backup is also in the header. Since S6 every view
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
-- **Episode progress (EP1):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
-  one open at a time, titles hidden until asked) with a checkbox per episode and "Through here". A season with
+- **Episode progress (EP1, EP2):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
+  one open at a time) with a checkbox per episode and one "Mark watched through [Episode N ▾] [Apply]" control above
+  it (marks only the unmarked episodes up to N; starts on the first unmarked, keeps the choice). Titles are hidden
+  behind a Show title button per episode unless Settings' "Show episode titles by default" is on (per account,
+  this browser only; a choice that can't be saved holds for the open page). A season with
   marks reads "In progress · N/T watched" (T from a per-device cache of the list; "N marked" when unknown).
   Show-level Watching is unchanged; nothing completes a season automatically (a fully checked list offers
   Mark season watched); a watched or skipped season's episodes are locked and its marks kept. The same
@@ -56,7 +59,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261020-ep1`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261021-ep2`; the released page's is `20261020-ep1`). The tests
 check only that all 27 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
@@ -82,6 +85,9 @@ admin enrichment extensions [#11].
   and D2 rollbacks are retired, EP1 has none, and reopening anonymous access is never a recovery step. Data
   recovery is a format-6 restore through the signed-in page, or `docs/ADMIN_RESTORE.md`; accounts,
   `docs/MEMBER_RECOVERY.md`.
+- **EP2 (episode-list controls; not released):** the title setting and the single Mark watched through control,
+  on branch `ep2-episode-list-controls`, awaiting the owner's review. Interface and device storage only: no database,
+  backup-format or provider change.
 - **Admin enrichment extensions** (PR #11; database only, not an app release): `db/admin/tv_enrich_partial.sql`
   installed in production on 2026-10-21, with its run record confirmed by a separate read. It adds
   `private.tv_enrich_show_partial` and `private.tv_enrich_season`. Verified after the install: no application
