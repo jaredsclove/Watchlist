@@ -524,8 +524,10 @@ begin
 end $$;
 
 select 'EP1|' || json_build_object('run', (select run_id from ep1_ctx),
+  -- (the same season selection as the simulated writes in section 6)
   'checked_writes', (select count(*) > 0 from public.watchlist_items w join private.library_members m on m.user_id = w.user_id
-                     where not w.is_film and w.media_type = 'tv' and w.tmdb_id is not null and not w.watched and not w.skipped)) as result;
+                     where not w.is_film and w.show_id is not null and w.media_type = 'tv' and w.tmdb_id is not null and w.season_number is not null
+                       and not w.watched and not w.skipped)) as result;
 
 notify pgrst, 'reload schema';
 commit;
