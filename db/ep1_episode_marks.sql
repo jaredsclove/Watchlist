@@ -81,6 +81,8 @@ end $$;
 create temp table ep1_before on commit drop as
 select schema_name, table_name, pg_temp.ep1_fp(schema_name, table_name) fp from ep1_tables;
 -- What authenticated may execute now (the grant check compares against it).
+-- Whether the synthetic write checks of section 6 ran (a row is added after their rolled-back subtransaction).
+create temp table ep1_checked (ran boolean) on commit drop;
 create temp table ep1_fn_before on commit drop as
 select p.oid::regprocedure::text f from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 where n.nspname in ('public', 'private') and has_function_privilege('authenticated', p.oid, 'execute');
@@ -373,7 +375,7 @@ insert into private.migration_runs (run_id, migration) select run_id, 'ep1' from
 
 -- ── 6. Verify before commit ────────────────────────────────────────────────────
 do $$
-declare v_bad jsonb; v_owner uuid; v_season public.watchlist_items; v_fake uuid := gen_random_uuid(); v_out jsonb; v_n bigint;
+declare v_bad jsonb; v_owner uuid; v_tmdb integer; v_sid uuid; v_fake uuid := gen_random_uuid(); v_out jsonb;
 begin
   -- (a) every existing row unchanged; no marks yet
   select jsonb_agg(b.schema_name || '.' || b.table_name) into v_bad from ep1_before b where b.fp is distinct from pg_temp.ep1_fp(b.schema_name, b.table_name);
@@ -469,65 +471,79 @@ begin
   end;
   perform set_config('role', 'none', true);
 
-  -- A member's matched, unwatched, unskipped season, if there is one: set and clear marks, a stale and
-  -- an old-style delete refused, a direct delete refused, then the guarded delete; all rolled back.
-  select w.* into v_season from public.watchlist_items w join private.library_members m on m.user_id = w.user_id
-  where not w.is_film and w.show_id is not null and w.media_type = 'tv' and w.tmdb_id is not null and w.season_number is not null
-    and not w.watched and not w.skipped order by w.id limit 1;
-  if v_season.id is not null then
-    v_owner := v_season.user_id;
+  -- The write checks use synthetic rows only: for the first member, a show "ZZ EP1 Migration Check" with one
+  -- TMDB-matched season (a TMDB id that member doesn't use), created through library_create_show_b45 inside a
+  -- subtransaction that is always rolled back. On it: marks set and cleared, a stale, an old-style and a
+  -- direct delete refused, then the guarded delete (season, marks and the emptied show). No existing row is
+  -- written; (a) below and the synthetic-row check confirm it.
+  select m.user_id into v_owner from private.library_members m order by m.user_id limit 1;
+  if v_owner is not null then
+    select min(t) into v_tmdb from generate_series(2147480000, 2147480999) t
+    where not exists (select 1 from public.tv_shows s where s.user_id = v_owner and s.tmdb_id = t)
+      and not exists (select 1 from public.watchlist_items w where w.user_id = v_owner and w.tmdb_id = t);
+    if v_tmdb is null then raise exception 'ep1: no free TMDB id for the synthetic check season'; end if;
     perform set_config('request.jwt.claims', json_build_object('sub', v_owner, 'role', 'authenticated')::text, true);
     perform set_config('role', 'authenticated', true);
     begin
-      v_out := public.library_set_episode_marks(v_season.id, '{"watched": false, "skipped": false}', true,
+      perform public.library_create_show_b45(
+        jsonb_build_object('tmdb_id', v_tmdb, 'title', 'ZZ EP1 Migration Check', 'show_key', 'zz ep1 migration check', 'network', 'ZZ'),
+        jsonb_build_array(jsonb_build_object('item_key', 'zz ep1 migration check|season 1', 'title', 'ZZ EP1 Migration Check', 'season', 'Season 1',
+          'theme', 'ZZ', 'display_date', 'Jan 1, 2020', 'date_sort', '2020-01-01', 'season_number', 1)));
+      select w.id into v_sid from public.watchlist_items w where w.user_id = v_owner and w.tmdb_id = v_tmdb and w.season_number = 1;
+      if v_sid is null then raise exception 'ep1-check: the synthetic season was not created'; end if;
+      v_out := public.library_set_episode_marks(v_sid, '{"watched": false, "skipped": false}', true,
         '[{"tmdb_episode_id": 900000001, "episode_number": 1}, {"tmdb_episode_id": 900000002, "episode_number": 2}]');
       if jsonb_array_length(v_out -> 'marks') <> 2 then raise exception 'ep1-check: marks not set: %', v_out; end if;
-      v_out := public.library_set_episode_marks(v_season.id, '{"watched": false, "skipped": false}', false, '[{"tmdb_episode_id": 900000002}]');
+      v_out := public.library_set_episode_marks(v_sid, '{"watched": false, "skipped": false}', false, '[{"tmdb_episode_id": 900000002}]');
       if jsonb_array_length(v_out -> 'marks') <> 1 then raise exception 'ep1-check: mark not cleared: %', v_out; end if;
       begin
-        perform public.delete_tv_season(v_season.id);
+        perform public.delete_tv_season(v_sid);
         raise exception 'ep1-check: an old-style delete of a marked season succeeded';
       exception when raise_exception then
         if sqlerrm !~ '^update_required: ' then raise; end if;
       end;
       begin
-        perform public.delete_tv_season(v_season.id, 0);
+        perform public.delete_tv_season(v_sid, 0);
         raise exception 'ep1-check: a stale delete succeeded';
       exception when raise_exception then
         if sqlerrm !~ '^target_changed: ' then raise; end if;
       end;
-      -- (each request is its own transaction; here the mark writes above left library_write on)
+      -- (each request is its own transaction; here the writes above left library_write on)
       perform set_config('watchlist.library_write', '', true);
       begin
-        delete from public.watchlist_items where id = v_season.id;
+        delete from public.watchlist_items where id = v_sid;
         raise exception 'ep1-check: a direct delete of a marked season succeeded';
       exception when raise_exception then
         if sqlerrm !~ '^library_write_required: ' then raise; end if;
       end;
-      v_out := public.delete_tv_season(v_season.id, 1);
-      if (v_out ->> 'marks_deleted') <> '1' or exists (select 1 from public.watchlist_items where id = v_season.id)
-         or exists (select 1 from public.episode_marks where season_id = v_season.id) then
-        raise exception 'ep1-check: the guarded delete did not delete the season and its marks: %', v_out;
+      v_out := public.delete_tv_season(v_sid, 1);
+      if (v_out ->> 'marks_deleted') <> '1' or (v_out ->> 'show_deleted') <> 'true' or exists (select 1 from public.watchlist_items where id = v_sid)
+         or exists (select 1 from public.episode_marks where season_id = v_sid) then
+        raise exception 'ep1-check: the guarded delete did not delete the season, its marks and the emptied show: %', v_out;
       end if;
       raise exception 'ep1-rollback';
     exception when raise_exception then
       if sqlerrm <> 'ep1-rollback' then raise; end if;
     end;
     perform set_config('role', 'none', true);
+    insert into ep1_checked values (v_owner is not null);
   end if;
   perform set_config('request.jwt.claims', '', true);
 
-  -- (a) again, after the simulated writes
+  -- (a) again, after the simulated writes; and no synthetic row survived
+  if exists (select 1 from public.tv_shows where title = 'ZZ EP1 Migration Check' or show_key = 'zz ep1 migration check')
+     or exists (select 1 from public.watchlist_items where title = 'ZZ EP1 Migration Check')
+     or exists (select 1 from public.episode_marks where tmdb_episode_id in (900000001, 900000002)) then
+    raise exception 'ep1: a synthetic check row survived';
+  end if;
   select jsonb_agg(b.schema_name || '.' || b.table_name) into v_bad from ep1_before b where b.fp is distinct from pg_temp.ep1_fp(b.schema_name, b.table_name);
   if v_bad is not null then raise exception 'ep1: content changed in % (after the checks)', v_bad; end if;
   if exists (select 1 from public.episode_marks) then raise exception 'ep1: episode_marks is not empty (after the checks)'; end if;
 end $$;
 
 select 'EP1|' || json_build_object('run', (select run_id from ep1_ctx),
-  -- (the same season selection as the simulated writes in section 6)
-  'checked_writes', (select count(*) > 0 from public.watchlist_items w join private.library_members m on m.user_id = w.user_id
-                     where not w.is_film and w.show_id is not null and w.media_type = 'tv' and w.tmdb_id is not null and w.season_number is not null
-                       and not w.watched and not w.skipped)) as result;
+  -- (whether section 6 ran its synthetic write checks: it does whenever there is a member)
+  'checked_writes', exists (select 1 from ep1_checked)) as result;
 
 notify pgrst, 'reload schema';
 commit;
