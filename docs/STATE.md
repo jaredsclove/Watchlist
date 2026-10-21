@@ -59,7 +59,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261021-ep2`; the released page's is `20261020-ep1`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261021-ep2`). The tests
 check only that all 27 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
@@ -69,9 +69,20 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
-admin enrichment extensions [#11].
+admin enrichment extensions [#11], EP2 episode-list controls [#12].
 
-- **App release:** `45f12d9`, EP1 episode progress within seasons (PR #9), released 2026-10-21:
+- **App release:** `b7c698a`, EP2 episode-list controls (PR #12), released 2026-10-21 (interface and device
+  storage only; no database change): the "Show episode titles by default" setting and the single Mark watched
+  through control. Verified after deployment: Pages built `b7c698a` and serves `20261021-ep2` on all 27 versioned
+  files, each (and `config.js`) byte-identical to the commit; the signed-in page loads in phase `contracted-ep1`
+  with no console errors. The owner's checks on a physical phone passed: the setting on and off, kept after a
+  reload; Show title / Hide title; the native episode selector. Write smoke test (owner-operated): Apply marked
+  through the chosen episode, a second Apply changed nothing, only the test's marks were cleared, and the
+  original marks, the season's watched / skipped and the show's status were as before. Limits: Claude's own read-only
+  check of the deployed episode list was cut short (the browser extension disconnected), so the list's rendering
+  on the live site rests on the owner's checks; no screen reader or dark-mode check; offline 1207/1207 and local
+  synthetic-data browser checks before release (PR #12).
+- **Previous app release:** `45f12d9`, EP1 episode progress within seasons (PR #9), released 2026-10-21:
   `db/ep1_episode_marks.sql` applied to production once (its run record confirmed by a separate read), then the
   page deployed. Verified after deployment: the first format-6 backup's eight original tables are identical to
   the backup made just before the migration, and `episode_marks` was empty; signed-out requests to
@@ -85,9 +96,6 @@ admin enrichment extensions [#11].
   and D2 rollbacks are retired, EP1 has none, and reopening anonymous access is never a recovery step. Data
   recovery is a format-6 restore through the signed-in page, or `docs/ADMIN_RESTORE.md`; accounts,
   `docs/MEMBER_RECOVERY.md`.
-- **EP2 (episode-list controls; not released):** the title setting and the single Mark watched through control,
-  on branch `ep2-episode-list-controls`, awaiting the owner's review. Interface and device storage only: no database,
-  backup-format or provider change.
 - **Admin enrichment extensions** (PR #11; database only, not an app release): `db/admin/tv_enrich_partial.sql`
   installed in production on 2026-10-21, with its run record confirmed by a separate read. It adds
   `private.tv_enrich_show_partial` and `private.tv_enrich_season`. Verified after the install: no application
@@ -107,6 +115,8 @@ admin enrichment extensions [#11].
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - EP2: no database or saved-data effect beyond the marks an owner sets with it; a code revert of `b7c698a`
+    (the setting's device key is then ignored).
   - EP1: not revertible by a code revert. The M1 page against the EP1 database keeps its ordinary writes, but
     its backups and restores are refused and the database refuses its delete of a marked season; repairs are
     fix-forward.
@@ -123,6 +133,7 @@ admin enrichment extensions [#11].
 [#7]: https://github.com/jaredsclove/Watchlist/pull/7
 [#9]: https://github.com/jaredsclove/Watchlist/pull/9
 [#11]: https://github.com/jaredsclove/Watchlist/pull/11
+[#12]: https://github.com/jaredsclove/Watchlist/pull/12
 
 ## How we work
 
