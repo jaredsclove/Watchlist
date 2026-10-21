@@ -216,7 +216,11 @@ if (inject) {
 section('EP: the migration');
 const run = await tryExec(db, preamble('ep1-rehearsal-1') + EP1);
 if (!ok(run.ok, 'db/ep1_episode_marks.sql commits', run.message)) { console.log('\nFAILED: the migration did not commit; stopping'); process.exit(1); }
-console.log(`       ${String(run.out.map(r => r.rows && r.rows[0] && r.rows[0].result).find(Boolean)).slice(0, 300)}`);
+const result = String(run.out.map(r => r.rows && r.rows[0] && r.rows[0].result).find(Boolean));
+console.log(`       ${result.slice(0, 300)}`);
+ok(/"checked_writes" : true/.test(result), 'the migration ran its synthetic write checks (checked_writes true)', result);
+ok(Number(await val(db, `select count(*) from public.tv_shows where title = 'ZZ EP1 Migration Check'`)) + Number(await val(db, `select count(*) from public.watchlist_items where title = 'ZZ EP1 Migration Check'`)) === 0,
+  'no synthetic check row survived');
 const s1 = await state(db);
 ok(same(Object.fromEntries(Object.entries(s0.rows).filter(([k]) => k !== 'marks')), Object.fromEntries(Object.entries(s1.rows).filter(([k]) => k !== 'marks'))),
   'every existing row (user_id included) is unchanged, the archive and memberships included');
