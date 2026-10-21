@@ -1,7 +1,8 @@
 // Offline tests for episode progress within seasons (EP1, db/ep1_episode_marks.sql), in the whole-page
 // harness: the collapsed "N/T watched" with its per-device cache and fallbacks; the inline episode list
-// (fetched from TMDB, titles hidden until asked); marks set and cleared one change at a time through
-// library_set_episode_marks (refusals put back what was shown; no answer is never resent); Mark through;
+// (fetched from TMDB, titles hidden until asked unless Settings' "Show episode titles by default" is on,
+// EP2); marks set and cleared one change at a time through library_set_episode_marks (refusals put back
+// what was shown; no answer is never resent); the one "Mark watched through" control (EP2);
 // the explicit Mark season watched suggestion (never automatic); watched and skipped seasons locked, their
 // marks kept; unmatched seasons untouched; the guarded delete; backup format 6 and its restore; the same
 // controls in a collection; and a page from before EP1 (the released files, from git) against the
@@ -14,6 +15,7 @@ const path = require('path');
 const assert = require('assert');
 const { execSync } = require('child_process');
 const { createApp, runner, settle, userKeyOf } = require('./app-harness');
+const { makeMiniDom } = require('./mini-dom');
 
 const T = runner('episodes');
 const test = T.test;
@@ -114,10 +116,13 @@ test('the list: fetched from TMDB on opening, one season at a time; titles hidde
   assert.match(p, /1\/4 watched · 1 not aired yet · 1 without an air date/);
   assert.match(p, /Episode 1 .*Episode 2 .*Episode 3 .*Episode 4/);
   assert.doesNotMatch(p, /Title 1/, 'titles are hidden until asked');
+  assert.strictEqual((html(app).match(/>Show title</g) || []).length, 4, 'one Show title button per listed episode');
+  assert.ok(html(app).includes('aria-label="Show title of episode 2"'), 'each button names its episode');
   assert.match(p, /Marks for episodes TMDB no longer lists \(kept; not counted\): Episode 9 \(no longer listed\)/);
   app.ctx.toggleEpisodeTitle(lib.s2.id, 9002);
   assert.match(panel(app), /Episode 2: Title 2/);
   assert.doesNotMatch(panel(app), /Title 1/);
+  assert.ok(html(app).includes('aria-label="Hide title of episode 2"') && />Hide title</.test(html(app)));
   await open(app, lib.s3);
   assert.strictEqual((html(app).match(/ep-panel-row/g) || []).length, 1, 'one list open at a time');
   assert.deepStrictEqual(app.writes(), [], 'opening and reading write nothing');
@@ -167,6 +172,153 @@ test('Mark through: every listed episode up to it that isn’t marked, in one ca
   assert.strictEqual(rpcs(app, 'library_set_episode_marks').length, 1, 'nothing left to mark: nothing sent');
 });
 
+// ── Episode titles by default (EP2) ──
+const titlesKey = () => userKeyOf('watchlist_episode_titles');
+test('titles by default: off unless chosen; on shows every title with no reveal buttons; blank titles never get one; per account in this browser', async () => {
+  const eps = { 2: [E(9001, 1), E(9002, 2, { name: '   ' }), E(9003, 3, { name: '' }), E(9004, 4, { name: null })] };
+  const storage = memoryStorage();
+  const { app, lib } = await boot({ storage, episodes: eps });
+  await open(app, lib.s2);
+  assert.match(panel(app), /Episode 1 Show title Episode 2 Episode 3 Episode 4/, 'off by default: numbers, and Show title only where there is a title');
+  app.ctx.switchView('settings'); await settle();
+  const box = app.el('settingsScreen').innerHTML;
+  assert.match(text(box), /Show episode titles by default/);
+  assert.match(text(box), /Saved for this account in this browser on this device only/);
+  assert.ok(!/settings-episode-titles" checked/.test(box), 'unchecked');
+  app.ctx.setEpisodeTitlesShown(true);
+  assert.strictEqual(storage.getItem(titlesKey()), 'on', 'saved under this account');
+  assert.strictEqual(app.el('settingsEpisodeTitlesNote').textContent, '', 'saved: no warning');
+  app.ctx.switchView('alltv'); await settle();
+  app.ctx.toggleDerivedShow(lib.sev.id); await settle();
+  if (!/ep-panel-row/.test(html(app))) await open(app, lib.s2);
+  assert.match(panel(app), /Episode 1: Title 1 Episode 2 Episode 3 Episode 4/);
+  assert.doesNotMatch(html(app), /Show title|Hide title/, 'no reveal buttons while titles are shown by default');
+  // A new page for the same account reads it back; another account doesn't share it.
+  const again = await boot({ storage, episodes: eps });
+  await open(again.app, again.lib.s2);
+  assert.match(panel(again.app), /Episode 1: Title 1/);
+  assert.ok(titlesKey().endsWith('::' + again.app.get('pageUser.id')), 'the key is the account’s');
+  storage.setItem(titlesKey(), 'off');
+  const off = await boot({ storage, episodes: eps });
+  await open(off.app, off.lib.s2);
+  assert.doesNotMatch(panel(off.app), /Title 1/);
+  assert.deepStrictEqual(app.writes().concat(off.app.writes()), [], 'a display choice writes nothing to the database');
+});
+
+test('titles by default: storage that can’t be read is off; a choice that can’t be saved holds for this page across redraws and says so', async () => {
+  const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() {} };
+  const { app, lib } = await boot({ storage: broken });
+  await open(app, lib.s2);
+  assert.doesNotMatch(panel(app), /Title 1/, 'unreadable: off');
+  app.ctx.toggleEpisodeTitle(lib.s2.id, 9001);
+  assert.match(panel(app), /Episode 1: Title 1/);
+  app.ctx.switchView('settings'); await settle();
+  app.ctx.setEpisodeTitlesShown(true);
+  assert.match(app.el('settingsEpisodeTitlesNote').textContent, /couldn’t save the choice, so it applies only until this page is closed or reloaded/);
+  app.ctx.renderSettings();
+  assert.ok(/settings-episode-titles" checked/.test(app.el('settingsScreen').innerHTML), 'the redrawn Settings shows the page’s choice');
+  assert.match(text(app.el('settingsScreen').innerHTML), /couldn’t save the choice/);
+  app.ctx.switchView('alltv'); await settle();
+  if (!/data-season-row="[^"]*"[^>]*>[\s\S]*Season 2/.test(html(app))) { app.ctx.toggleDerivedShow(lib.sev.id); await settle(); }
+  if (!/ep-panel-row/.test(html(app))) await open(app, lib.s2);
+  assert.match(panel(app), /Episode 1: Title 1 .*Episode 2: Title 2/, 'on for this page');
+  app.ctx.switchView('settings'); await settle();
+  app.ctx.setEpisodeTitlesShown(false);
+  app.ctx.switchView('alltv'); await settle();
+  if (!/ep-panel-row/.test(html(app))) await open(app, lib.s2);
+  assert.doesNotMatch(panel(app), /Title 1/, 'off again, and the title revealed earlier is hidden again');
+});
+
+// ── Mark watched through (EP2) ──
+const throughSelect = app => (html(app).match(/<select class="ep-through-select"[\s\S]*?<\/select>/) || [''])[0];
+const selectedEpisode = app => ((throughSelect(app).match(/<option value="(\d+)" selected>/) || [])[1] || null);
+test('Mark watched through: one control above the list (no per-episode buttons); starts on the first unmarked episode, else the last', async () => {
+  const { app, lib } = await boot({ marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9003, 3)] });
+  await open(app, lib.s2);
+  const p = panel(app);
+  assert.match(p, /Mark watched through Episode 1 Episode 2 Episode 3 Episode 4 Apply Episode 1/, 'one control, above the list');
+  assert.doesNotMatch(p, /Through here/);
+  assert.strictEqual((html(app).match(/ep-through-apply/g) || []).length, 2, 'one Apply (its class and its focus hook)');
+  assert.strictEqual(selectedEpisode(app), '9002');
+  assert.ok(/<label class="ep-bulk-label">Mark watched through <span class="season-action" data-action="ep-through-select"><select/.test(html(app)), 'the label names the selector');
+  assert.ok(!/<select[^>]* id=/.test(throughSelect(app)), 'no ids (both layouts are on the page)');
+  const all = await boot({ marks: l => [9001, 9002, 9003, 9004].map((id, i) => mark(l.s2, id, i + 1)) });
+  await open(all.app, all.lib.s2);
+  assert.strictEqual(selectedEpisode(all.app), '9004', 'all marked: the last');
+});
+
+test('Mark watched through: Apply marks only the unmarked episodes through the chosen one in one call, keeps later marks and the choice; again is a no-op that sends nothing', async () => {
+  const { app, lib } = await boot({ marks: l => [mark(l.s2, 9002, 2), mark(l.s2, 9004, 4)] });
+  await open(app, lib.s2);
+  app.ctx.chooseEpisodesThrough(lib.s2.id, '9003');
+  app.ctx.renderTable();
+  assert.strictEqual(selectedEpisode(app), '9003', 'a redraw keeps the choice');
+  await app.ctx.applyEpisodesThrough(lib.s2.id); await settle();
+  const calls = rpcs(app, 'library_set_episode_marks');
+  assert.strictEqual(calls.length, 1);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(calls[0].body)), { p_season_id: lib.s2.id, p_expected: { watched: false, skipped: false }, p_watched: true,
+    p_episodes: [{ tmdb_episode_id: 9001, episode_number: 1 }, { tmdb_episode_id: 9003, episode_number: 3 }] });
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002, 9003, 9004], 'the later mark is kept');
+  assert.strictEqual(selectedEpisode(app), '9003', 'the choice stays after success');
+  await app.ctx.applyEpisodesThrough(lib.s2.id); await settle();
+  assert.strictEqual(rpcs(app, 'library_set_episode_marks').length, 1, 'again: nothing sent');
+  assert.match(panel(app), /Already marked through episode 3\./);
+  app.ctx.chooseEpisodesThrough(lib.s2.id, '9001');
+  assert.doesNotMatch(panel(app), /Already marked/, 'a new choice clears the note');
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s2.id).watched, false, 'nothing completes the season');
+  assert.strictEqual(app.store.tv_shows.find(s => s.id === lib.sev.id).status, 'watching', 'the show is unchanged');
+  assert.match(panel(app), /Every listed episode is checked/, 'only the explicit suggestion');
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_set_episode_marks']);
+});
+
+test('Mark watched through: the default choice stays put after Apply; a refusal puts back what was shown and keeps the choice; locked seasons have no control and send nothing', async () => {
+  const { app, lib } = await boot();
+  await open(app, lib.s2);
+  assert.strictEqual(selectedEpisode(app), '9001');
+  await app.ctx.applyEpisodesThrough(lib.s2.id); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001]);
+  assert.strictEqual(selectedEpisode(app), '9001', 'kept, not moved to the next unmarked');
+  app.ctx.chooseEpisodesThrough(lib.s2.id, '9003');
+  app.refuseNext(r => r.url.endsWith('/rpc/library_set_episode_marks'), 'P0001', 'season_locked: This season is marked watched or skipped, so its episodes can\'t be changed. Change that first. Nothing was changed.');
+  await app.ctx.applyEpisodesThrough(lib.s2.id); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001]);
+  assert.match(panel(app), /1\/4 watched/, 'what was shown is put back');
+  assert.match(banners(app), /Nothing was changed/);
+  assert.strictEqual(selectedEpisode(app), '9003', 'the choice stays after a refusal');
+  await app.ctx.setSeasonSkipped(lib.s2.id, true); await settle();
+  if (!/ep-panel-row/.test(html(app))) await open(app, lib.s2);
+  assert.doesNotMatch(panel(app), /Mark watched through/, 'skipped: no control');
+  const before = rpcs(app, 'library_set_episode_marks').length;
+  await app.ctx.applyEpisodesThrough(lib.s2.id); await settle();
+  assert.strictEqual(rpcs(app, 'library_set_episode_marks').length, before, 'a locked season sends nothing');
+  await open(app, lib.s1);
+  assert.doesNotMatch(panel(app), /Mark watched through/, 'watched: no control');
+});
+
+test('Mark watched through: focus stays on Apply through the change and its redraws, in the table and the phone card; a change already in progress refuses a second Apply', async () => {
+  for (const layout of ['tbody', 'cardList']) {
+    const { app, lib } = await boot();
+    await open(app, lib.s2);
+    const dom = makeMiniDom(app);
+    dom.hide(layout === 'tbody' ? 'cardList' : 'tbody');
+    const sel = `[data-season-row="${lib.s2.id}"] [data-action="ep-through-apply"] button`;
+    app.ctx.chooseEpisodesThrough(lib.s2.id, '9002');
+    dom.focus(layout, sel);
+    const held = app.hold(r => r.url.endsWith('/rpc/library_set_episode_marks'));
+    const p = app.ctx.applyEpisodesThrough(lib.s2.id);
+    await held.reached;
+    assert.strictEqual(dom.active(), dom.in(layout, sel), `${layout}: on Apply while it is saved`);
+    await app.ctx.applyEpisodesThrough(lib.s2.id); // a second press while the first is saved
+    held.release(); await p; await settle();
+    assert.strictEqual(rpcs(app, 'library_set_episode_marks').length, 1, `${layout}: the second press sent nothing`);
+    assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002]);
+    assert.strictEqual(dom.active(), dom.in(layout, sel), `${layout}: on Apply after the change and its reread`);
+    await app.ctx.applyEpisodesThrough(lib.s2.id); await settle();
+    assert.strictEqual(dom.active(), dom.in(layout, sel), `${layout}: on Apply after a no-op`);
+    assert.strictEqual(rpcs(app, 'library_set_episode_marks').length, 1);
+  }
+});
+
 test('the suggestion: only with a loaded, non-empty list and every listed episode checked; never automatic; it is the normal Watched action; marks kept and locked afterwards', async () => {
   const { app, lib } = await boot({ marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2), mark(l.s2, 9003, 3)] });
   await open(app, lib.s2);
@@ -181,7 +333,7 @@ test('the suggestion: only with a loaded, non-empty list and every listed episod
   const p = panel(app);
   assert.match(p, /This season is marked watched, so its episodes are locked; unmark it to change them\. Its marks are kept\./);
   assert.match(p, /4\/4 watched/, 'its recorded progress is still shown');
-  assert.doesNotMatch(p, /Through here|Every listed episode/);
+  assert.doesNotMatch(p, /Mark watched through|Every listed episode/);
   assert.ok((html(app).match(/<input type="checkbox" checked disabled/g) || []).length === 4, 'locked');
   await app.ctx.setEpisodeMark(lib.s2.id, 9001, false); await settle();
   assert.strictEqual(rpcs(app, 'library_set_episode_marks').length, 1, 'a locked season sends nothing');
@@ -312,6 +464,11 @@ test('a collection’s show entry has the same progress, list and marks; the pho
   assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002]);
   const c = card(app);
   assert.ok(c.includes(`toggleEpisodes('${lib.s2.id}')`) && /ep-panel-card/.test(c) && c.includes(`setEpisodeMark('${lib.s2.id}', 9003, this.checked)`), 'the card carries the toggle and the list');
+  assert.match(panel(app), /Mark watched through Episode 1 Episode 2 Episode 3 Episode 4 Apply/, 'EP2: the same bulk control in a collection');
+  assert.ok(c.includes(`applyEpisodesThrough('${lib.s2.id}')`) && c.includes(`chooseEpisodesThrough('${lib.s2.id}', this.value)`) && />Show title</.test(c), 'and in its phone card');
+  app.ctx.chooseEpisodesThrough(lib.s2.id, '9003');
+  await app.ctx.applyEpisodesThrough(lib.s2.id); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002, 9003]);
 });
 
 // ── A page from before EP1 ──

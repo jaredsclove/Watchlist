@@ -764,6 +764,9 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .settings-card h3 { font-size: 14px; font-weight: 600; margin: 0; color: var(--text); }
 .settings-sub { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
 .settings-text { font-size: 13px; color: var(--text2); margin: 0; }
+.settings-check { display: inline-flex; gap: 8px; align-items: center; min-height: 32px; font-size: 14px; cursor: pointer; }
+.settings-check input { width: 18px; height: 18px; margin: 0; }
+.settings-status:empty { display: none; }
 .settings-status { font-size: 13px; color: var(--text); margin: 0; }
 .settings-status.warn { color: var(--amber); }
 .settings-status.urgent { color: var(--orange); font-weight: 600; }
@@ -841,14 +844,18 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .ep-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .ep-item { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ep-check { display: inline-flex; gap: 8px; align-items: center; min-height: 32px; cursor: pointer; }
-.ep-check input { width: 18px; height: 18px; margin: 0; }
+.ep-check input { width: 18px; height: 18px; margin: 0; flex: none; } /* a long, wrapping title never shrinks the box */
 .ep-item.ep-checked .ep-check span { color: var(--text2); }
 .ep-date { font-size: 11px; color: var(--text3); }
-.ep-title, .ep-through { font-size: 12px; }
+.ep-title { font-size: 12px; }
+.ep-bulk { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ep-bulk-label { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text2); }
+.ep-through-select { font: inherit; padding: 2px 4px; }
+.ep-through-apply { font-size: 12px; }
 .ep-panel-card { border-left-style: dashed; }
 @media (max-width: 700px) {
   /* Phone: each episode row and its controls are at least 44px tall. */
   .ep-check { min-height: 44px; flex: 1 1 auto; }
   .ep-check input { width: 22px; height: 22px; }
-  .ep-title, .ep-through, .ep-toggle { min-height: 44px; }
+  .ep-title, .ep-toggle, .ep-through-select, .ep-through-apply, .settings-check { min-height: 44px; }
 }

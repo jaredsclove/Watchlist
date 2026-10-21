@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261020-ep1">
+<link rel="stylesheet" href="styles.css?v=20261021-ep2">
 </head>
 <body>
 
@@ -98,32 +98,32 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261020-ep1"></script>
-<script src="api.js?v=20261020-ep1"></script>
-<script src="write-lane.js?v=20261020-ep1"></script>
-<script src="ui-helpers.js?v=20261020-ep1"></script>
-<script src="metadata.js?v=20261020-ep1"></script>
-<script src="backup-restore.js?v=20261020-ep1"></script>
-<script src="backup-format3.js?v=20261020-ep1"></script>
-<script src="tabs.js?v=20261020-ep1"></script>
-<script src="render.js?v=20261020-ep1"></script>
-<script src="row-actions.js?v=20261020-ep1"></script>
-<script src="tmdb-search.js?v=20261020-ep1"></script>
-<script src="collections-pull.js?v=20261020-ep1"></script>
-<script src="universe-pull.js?v=20261020-ep1"></script>
-<script src="person-pull.js?v=20261020-ep1"></script>
-<script src="refresh-shows.js?v=20261020-ep1"></script>
-<script src="tmdb-match.js?v=20261020-ep1"></script>
-<script src="derived-views.js?v=20261020-ep1"></script>
-<script src="tv-shows.js?v=20261020-ep1"></script>
-<script src="episodes.js?v=20261020-ep1"></script>
-<script src="organization.js?v=20261020-ep1"></script>
-<script src="organization-manage.js?v=20261020-ep1"></script>
-<script src="collection-members.js?v=20261020-ep1"></script>
-<script src="catalog-apply.js?v=20261020-ep1"></script>
-<script src="browse-views.js?v=20261020-ep1"></script>
-<script src="history.js?v=20261020-ep1"></script>
-<script src="library.js?v=20261020-ep1"></script>
+<script src="auth.js?v=20261021-ep2"></script>
+<script src="api.js?v=20261021-ep2"></script>
+<script src="write-lane.js?v=20261021-ep2"></script>
+<script src="ui-helpers.js?v=20261021-ep2"></script>
+<script src="metadata.js?v=20261021-ep2"></script>
+<script src="backup-restore.js?v=20261021-ep2"></script>
+<script src="backup-format3.js?v=20261021-ep2"></script>
+<script src="tabs.js?v=20261021-ep2"></script>
+<script src="render.js?v=20261021-ep2"></script>
+<script src="row-actions.js?v=20261021-ep2"></script>
+<script src="tmdb-search.js?v=20261021-ep2"></script>
+<script src="collections-pull.js?v=20261021-ep2"></script>
+<script src="universe-pull.js?v=20261021-ep2"></script>
+<script src="person-pull.js?v=20261021-ep2"></script>
+<script src="refresh-shows.js?v=20261021-ep2"></script>
+<script src="tmdb-match.js?v=20261021-ep2"></script>
+<script src="derived-views.js?v=20261021-ep2"></script>
+<script src="tv-shows.js?v=20261021-ep2"></script>
+<script src="episodes.js?v=20261021-ep2"></script>
+<script src="organization.js?v=20261021-ep2"></script>
+<script src="organization-manage.js?v=20261021-ep2"></script>
+<script src="collection-members.js?v=20261021-ep2"></script>
+<script src="catalog-apply.js?v=20261021-ep2"></script>
+<script src="browse-views.js?v=20261021-ep2"></script>
+<script src="history.js?v=20261021-ep2"></script>
+<script src="library.js?v=20261021-ep2"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -213,7 +213,8 @@ let collectionUndo = null; // S4: the open collection's Undo after a confirmed R
 let removeNotice = null; // S4: the open collection's Remove notice { text, withUndo }, drawn with the Add notice (collection-members.js renderCollectionBanner)
 let matchRequestSeq = 0; // every Match call takes the next number (tmdb-match.js)
 let episodeMarks = new Map(); // EP1: the owner's episode marks, read with each view: season id → Map(TMDB episode id → { id, episode_number }) (episodes.js)
-let episodePanel = null; // EP1: the one open episode list: { seasonId, seq, status: 'loading' | 'ready' | 'error', episodes, error, titles }; page memory only
+let episodePanel = null; // EP1: the one open episode list: { seasonId, seq, status: 'loading' | 'ready' | 'error', episodes, error, titles, throughId, throughNote }; page memory only
+let episodeTitlesChoice = null; // EP2: this page's "Show episode titles by default" choice once made here: { on, saved }; null: the stored choice (else off)
 let episodePanelSeq = 0; // EP1: bumped each time an episode list is loaded; a late TMDB answer for an earlier one changes nothing
 
 
