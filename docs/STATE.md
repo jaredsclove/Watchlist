@@ -21,16 +21,25 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   collection with Undo; Add to <collection>…, S5), Settings (Manage collections and watch-with
   choices, Catalog updates, Backup & Restore). ⬇ Backup is also in the header. Since S6 every view
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
+- **Episode progress (EP1):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
+  one open at a time, titles hidden until asked) with a checkbox per episode and "Through here". A season with
+  marks reads "In progress · N/T watched" (T from a per-device cache of the list; "N marked" when unknown).
+  Show-level Watching is unchanged; nothing completes a season automatically (a fully checked list offers
+  Mark season watched); a watched or skipped season's episodes are locked and its marks kept. The same
+  controls are in collections; the flat Seasons lists show progress only; Coming Soon has no episode list.
 - **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
-  `catalog_film_links`. Rows are owner-scoped: `user_id` is the signed-in member (`auth.uid()`), never sent
+  `catalog_film_links`, `episode_marks` (watched episodes of TMDB-matched seasons; no dates or titles).
+  Rows are owner-scoped: `user_id` is the signed-in member (`auth.uid()`), never sent
   by the client; membership is `private.library_members`.
 - **Writes** go mainly through database functions (the `library_*_b45` family, `org_*`,
-  `set_season_watched` / `set_season_skipped`, `delete_tv_season`, `restore_backup`). Some take
-  `p_expected` values and refuse a stale write; not every path does, so check each one before relying on it.
-- **Backup** is format 5 (eight tables, no `user_id`). **Restore** validates the file, checks for
-  identity loss, makes and validates a safety backup, then replaces the owner's rows in one
-  database transaction and verifies field by field.
+  `set_season_watched` / `set_season_skipped`, `library_set_episode_marks`, `delete_tv_season`, `restore_backup`).
+  Some take `p_expected` values and refuse a stale write; not every path does, so check each one before relying
+  on it. `delete_tv_season` takes the mark count the page showed: a page from before EP1 can't delete a marked season.
+- **Backup** is format 6 (nine tables: format 5's eight plus `episode_marks`; no `user_id`). **Restore**
+  converts a format-3, -4 or -5 file to format 6 first (a format-5 file has no marks; the preview says how many
+  marks a restore removes), validates the file, checks for identity loss, makes and validates a safety backup,
+  then replaces the owner's rows in one database transaction and verifies field by field.
 
 ## Code map (classic globals; mutable page state is in `watchlist.html`)
 
@@ -39,33 +48,39 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Boot, config, API | `watchlist.html`, `config.js`, `auth.js` (sign-in, the bound account, per-account storage, Account controls, pending notes), `api.js` (the writable phase, the stop switch), `write-lane.js` (one change at a time; read freshness), `ui-helpers.js` (incl. dialog keyboard and focus return), `identity.js`, `history.js` (routes, Back / Forward, leave warning) |
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views, the movie tools' film row), `metadata.js` (Details) |
+| Episode progress | `episodes.js` (marks read with each view, the list cache, progress text, the inline list, mark writes); its rows in `render.js` (`seasonSubRowHtml` / `seasonSubCardHtml`) |
 | Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog; the membership request, answer and Undo rules both UIs use), `collection-members.js` (Remove / Undo and the Add picker from a collection view) |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `refresh-shows.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Catalogs | `catalog-apply.js` (Catalog updates); catalog definitions in `config.js` |
-| Backup / restore | `backup-restore.js`, `backup-format3.js` (format-3 → 4 → 5 converter) |
+| Backup / restore | `backup-restore.js` (formats 4–6; 4 → 5 and 5 → 6 converters), `backup-format3.js` (format-3 → 4 converter) |
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
-| Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit) |
+| Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261019-m1`). The tests
-check only that all 26 versioned files share one token; before releasing, check that it differs from
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261020-ep1`). The tests
+check only that all 27 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
-## Where things stand (2026-10-20)
+## Where things stand (2026-10-21)
 
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
-test runner and token check [#4], M1 sign-in and owner-only access [#7].
+test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9].
 
-- **App release:** `502570a`, M1 sign-in and owner-only access (PR #7), released 2026-10-20: `db/m1_access.sql`
-  applied to production once (its run record confirmed by a separate read), then the page deployed. Verified after
-  deployment: the owner signs in on the deployed page; a backup made then is identical, table by table, to the one
-  made just before the migration; signed-out requests to tables, views, functions and GraphQL are refused.
-- **Database (as last recorded, not freshly observed):** phase `contracted-b45` with M1 owner-only access
-  (`access = members`), backup format 5, recovery archive active. G9 (archive retirement) is paused.
-  **Repairs are fix-forward:** the B4/B5 and D2 rollbacks are retired (they refuse against the M1 state),
-  and reopening anonymous access is never a recovery step. Data recovery is a format-5 restore through
-  the signed-in page, or `docs/ADMIN_RESTORE.md`; accounts, `docs/MEMBER_RECOVERY.md`.
+- **App release:** `45f12d9`, EP1 episode progress within seasons (PR #9), released 2026-10-21:
+  `db/ep1_episode_marks.sql` applied to production once (its run record confirmed by a separate read), then the
+  page deployed. Verified after deployment: the first format-6 backup's eight original tables are identical to
+  the backup made just before the migration, and `episode_marks` was empty; signed-out requests to
+  `episode_marks`, the marks and delete functions, restore and the `private` API schema are refused; on desktop
+  the owner checked and cleared one episode (one mark saved, then none; the season's watched / skipped and the
+  show's status unchanged); the episode list loads on the phone. The previous release: `502570a`, M1 (PR #7).
+- **Database (as last recorded, not freshly observed):** phase `contracted-ep1` (B4/B5 with M1 owner-only
+  access, `access = members`, and episode marks), backup format 6, recovery archive active. G9 (archive
+  retirement) is paused. The API exposes only `public` and `graphql_public`; the format-5 restore is kept as
+  `private.restore_backup_v5`, reachable only through `restore_backup`. **Repairs are fix-forward:** the B4/B5
+  and D2 rollbacks are retired, EP1 has none, and reopening anonymous access is never a recovery step. Data
+  recovery is a format-6 restore through the signed-in page, or `docs/ADMIN_RESTORE.md`; accounts,
+  `docs/MEMBER_RECOVERY.md`.
 - **Done:** the B3 / B1 / B7 plan (S1–S6; D10 deferred), simplification Batches A and B.
 - **Reverting releases** (each needs its own approval, tested like any change):
   - S4–S6: no database migration, but the app's actions change saved data (memberships, film state,
@@ -74,6 +89,9 @@ test runner and token check [#4], M1 sign-in and owner-only access [#7].
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - EP1: not revertible by a code revert. The M1 page against the EP1 database keeps its ordinary writes, but
+    its backups and restores are refused and the database refuses its delete of a marked season; repairs are
+    fix-forward.
 - **Recovery reference before M1 (historical; those rollbacks are now retired):** the deployed page meets a rolled-back (`contracted`) database
   with the mismatch notice, no usable list, no backup and every write refused. P3′'s verified target is
   the application files of `aeb9f73` (documentation-only commits excluded); reaching it means removing
@@ -85,6 +103,7 @@ test runner and token check [#4], M1 sign-in and owner-only access [#7].
 [#3]: https://github.com/jaredsclove/Watchlist/pull/3
 [#4]: https://github.com/jaredsclove/Watchlist/pull/4
 [#7]: https://github.com/jaredsclove/Watchlist/pull/7
+[#9]: https://github.com/jaredsclove/Watchlist/pull/9
 
 ## How we work
 
@@ -195,8 +214,9 @@ missing or has unequal numbers (an incomplete run that exits 0). It prints one l
 failure gives the reason, exit status and last summary line) and `suites=N failing=N cases=P/T`, and
 exits non-zero if any suite failed. `tests/run.sh tests/<suite>.test.js` runs only the suites named.
 
-The harness models B4/B5, a rolled-back (5c) database, no Stage 5 and an unknown phase only; its
-session history is opt-in (`routes: {}`). `b45-compat` keeps C2 and the stop-until-reload cases. Syntax check:
+The harness models EP1 (the default), B4/B5 before EP1, a rolled-back (5c) database, no Stage 5 and an
+unknown phase only; its session history is opt-in (`routes: {}`). `tests/episodes.test.js` also runs the
+released M1 page (from git) against the EP1 database. `b45-compat` keeps C2 and the stop-until-reload cases. Syntax check:
 `node --check` on each `*.js`, `tests/*.js`, `tools/*.mjs`. Database rehearsals run locally on PGlite
 (`tools/db-rehearsal-*.mjs`; see `db/README.md`). The identity audit (`tools/identity-audit.mjs`)
 reads production, so it needs approval.
