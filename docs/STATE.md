@@ -65,7 +65,8 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
-test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9].
+test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
+admin enrichment extensions [#11].
 
 - **App release:** `45f12d9`, EP1 episode progress within seasons (PR #9), released 2026-10-21:
   `db/ep1_episode_marks.sql` applied to production once (its run record confirmed by a separate read), then the
@@ -81,6 +82,17 @@ test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 epi
   and D2 rollbacks are retired, EP1 has none, and reopening anonymous access is never a recovery step. Data
   recovery is a format-6 restore through the signed-in page, or `docs/ADMIN_RESTORE.md`; accounts,
   `docs/MEMBER_RECOVERY.md`.
+- **Admin enrichment extensions** (PR #11; database only, not an app release): `db/admin/tv_enrich_partial.sql`
+  installed in production on 2026-10-21, with its run record confirmed by a separate read. It adds
+  `private.tv_enrich_show_partial` and `private.tv_enrich_season`. Verified after the install: no application
+  role can execute either function, the strict `private.tv_enrich_show` is unchanged, and no library data
+  changed. One owner-approved batch then matched a few catalog shows and some of their seasons in a single
+  transaction, leaving the rest of each show's seasons unmatched on purpose. Verified by a separate commit read,
+  a post-batch read, a before/after backup comparison and the owner's in-app checks: only the intended TMDB
+  identity fields changed, and every other row, episode marks included, is identical. A season left unmatched
+  is matched later only as its own approved step, and only where the current model allows it: a plain
+  `Season N` of the same TMDB show, once confirmed. Split seasons, seasons that belong to a different TMDB
+  show, and non-plain labels stay unmatched.
 - **Done:** the B3 / B1 / B7 plan (S1–S6; D10 deferred), simplification Batches A and B.
 - **Reverting releases** (each needs its own approval, tested like any change):
   - S4–S6: no database migration, but the app's actions change saved data (memberships, film state,
@@ -104,6 +116,7 @@ test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 epi
 [#4]: https://github.com/jaredsclove/Watchlist/pull/4
 [#7]: https://github.com/jaredsclove/Watchlist/pull/7
 [#9]: https://github.com/jaredsclove/Watchlist/pull/9
+[#11]: https://github.com/jaredsclove/Watchlist/pull/11
 
 ## How we work
 
