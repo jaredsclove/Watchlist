@@ -90,7 +90,7 @@ test('rounding to one decimal, and the colour band follows the rounded score (8.
 });
 
 // ── In the views ──
-test('a cached score shows with the show\'s categories, in rows and phone cards; an uncached show has an empty slot; a show not matched to TMDB has none', async () => {
+test('a cached score shows directly after the show\'s title, in rows and phone cards; an uncached show has an empty slot; a show not matched to TMDB has none', async () => {
   const now = Date.now();
   const { app, lib } = await boot({ storage: memoryStorage(cached({ 900001: { a: 8.153, c: 1987, t: now }, 900002: { a: 6.7, c: 50, t: now } })) });
   for (const s of [html(app), card(app)]) {
@@ -100,11 +100,17 @@ test('a cached score shows with the show\'s categories, in rows and phone cards;
   }
   assert.ok(!html(app).includes(`data-rating-of="null"`), 'no slot for a show without a TMDB id');
   assert.strictEqual((html(app).match(/data-rating-of="/g) || []).length, 2, 'one slot per matched show in the rows');
-  // The rating is in the categories cell, not in the title or the controls.
+  // The rating follows the title text directly (a space between), in the title cell, not with the categories or the controls.
   const row = html(app).split('<tr').find(x => x.includes(`data-show-row="${lib.a.id}"`));
   const cells = row.split('<td');
-  assert.ok(cells[2].includes('tmdb-rating'), 'the second cell (categories) holds it');
-  assert.ok(!cells[1].includes('tmdb-rating') && !cells[4].includes('tmdb-rating'), 'not with the title or the status controls');
+  assert.ok(cells[1].includes('<span class="show-title">ZZ Synthetic Alpha</span> <span class="tmdb-rating-slot" data-rating-of="900001"><button'), 'directly after the title');
+  assert.ok(!cells[2].includes('tmdb-rating') && !cells[4].includes('tmdb-rating'), 'not with the categories or the status controls');
+  const cardOf = card(app).split('<div class="item-card').find(x => x.includes(`data-show-row="${lib.a.id}"`));
+  assert.match(cardOf, /<span class="card-title"><span class="show-title">ZZ Synthetic Alpha<\/span> <span class="tmdb-rating-slot" data-rating-of="900001"><button/, 'the card\'s title line too');
+  assert.ok(!/card-meta[\s\S]*tmdb-rating/.test(cardOf), 'not in the card\'s categories line');
+  // A show without a score keeps its title exactly as before (no stray space).
+  const local = html(app).split('<tr').find(x => x.includes(`data-show-row="${lib.c.id}"`));
+  assert.ok(local.includes('<span class="show-title">ZZ Synthetic Local</span></div>'));
   // Currently Watching too.
   app.ctx.switchView('watching'); await settle();
   assert.match(html(app), /data-action="rating"[^>]*>8\.2<\/button>/);
@@ -261,7 +267,7 @@ test('focus: the rating is a list control found by identity (data-action="rating
 test('phones: the rating is a 44 px target; desktop and phone cards both carry it', async () => {
   const now = Date.now();
   const { app } = await boot({ width: 375, storage: memoryStorage(cached({ 900001: { a: 8.2, c: 500, t: now } })) });
-  assert.match(card(app), /card-meta[\s\S]*?tmdb-rating r-high/);
+  assert.match(card(app), /card-title"><span class="show-title">[^<]*<\/span> <span class="tmdb-rating-slot"[^>]*><button type="button" class="tmdb-rating r-high"/);
   const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
   assert.match(css, /@media \(max-width: 700px\) \{\n  \.tmdb-rating \{ min-height: 44px; min-width: 44px; padding: 0 6px; \}/);
 });
