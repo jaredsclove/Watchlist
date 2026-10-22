@@ -270,7 +270,9 @@ test('missing defaults and a stale TBA date cause no write from any view or any 
   setFilter(app, 'fStatus', 'all'); setFilter(app, 'fSearch', 'mando'); setFilter(app, 'fSearch', '');
   app.ctx.switchMediaType('tv'); await settle();
   for (const v of ['alltv', 'comingsoon', 'watching']) { app.ctx.switchView(v); await settle(); }
-  assert.deepStrictEqual(mutating(app), [], 'no POST/PATCH/DELETE/RPC/TMDB request');
+  // Item 2: expanding a TMDB-matched show may read its TMDB show details for the score (a GET, no write).
+  const ratingRead = r => r.method === 'GET' && /^https:\/\/api\.themoviedb\.org\/3\/tv\/\d+$/.test(r.url);
+  assert.deepStrictEqual(mutating(app).filter(r => !ratingRead(r)), [], 'no POST/PATCH/DELETE/RPC/TMDB request beyond show scores');
 });
 
 // S3 / S4: a collection's TV and film actions write now (their positive checks are tests/collections-tv-edit.test.js

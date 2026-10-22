@@ -870,7 +870,8 @@ function derivedShowHtml(item, today, opts = {}) {
   const isExpanded = expandedShows.has(key);
   const keyArg = esc(key).replace(/'/g, "\\'");
   const theme = (upNext || seasons[0]).theme;
-  const badges = metadataChipsHtml(show, key, themeBadgeHtml(showCatalogOf(show), theme, key));
+  const badges = metadataChipsHtml(show, key, themeBadgeHtml(showCatalogOf(show), theme, key))
+    + showRatingHtml(show); // item 2: the TMDB score sits with the categories (show-ratings.js)
   const range = item.resume;
   const resumeTag = range && range.state === 'active' && range.start
     ? ` <span class="state-tag resume-tag" title="Watching earlier seasons">Earlier seasons from ${esc(range.start.season)}</span>` : '';
@@ -1153,7 +1154,7 @@ function toggleDerivedShow(key, ev) {
   const target = ev && ev.target;
   if (target && typeof target.closest === 'function' && target.closest('button, select, input, label, a, textarea')) return;
   if (expandedShows.has(key)) expandedShows.delete(key);
-  else expandedShows.add(key);
+  else { expandedShows.add(key); requestShowRating(tvShowsById.get(key)); }
   renderTable();
 }
 

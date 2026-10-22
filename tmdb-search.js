@@ -79,6 +79,7 @@ async function selectTMDBShow(tmdbId, name, mediaType, resultId) {
   try {
     const details = await tmdbFetch(`/${tmdbSelectedShow.mediaType}/${tmdbId}`);
     tmdbSelectedShow.details = details;
+    if (tmdbSelectedShow.mediaType === 'tv') noteShowRating(tmdbId, details); // item 2 (show-ratings.js)
     renderTMDBPreview();
   } catch(e) {
     previewContainer.innerHTML = `<div class="tmdb-no-results">Failed to load details: ${esc(e.message)}</div>`;

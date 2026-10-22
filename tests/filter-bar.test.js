@@ -540,14 +540,14 @@ test('assets: one new token on every versioned file; config.js, identity.js and 
   const html = fs.readFileSync(path.join(__dirname, '..', 'watchlist.html'), 'utf8');
   // Consistency only: that the token differs from the previous release's is a release check (docs/STATE.md).
   const versioned = [...html.matchAll(/\?v=([\w-]+)/g)].map(m => m[1]);
-  assert.strictEqual(versioned.length, 27, 'every versioned file carries a token');
+  assert.strictEqual(versioned.length, 28, 'every versioned file carries a token');
   assert.strictEqual(new Set(versioned).size, 1, `one token on every versioned file: ${[...new Set(versioned)].join(', ')}`);
   const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1].split('?')[0]);
   // The order at the baseline (fa69c9a), with write-lane.js after api.js (Batch A) and collection-members.js after organization-manage.js (S4) and history.js after browse-views.js (S6);
-  // M1: the vendored supabase-js after config.js, and auth.js after identity.js. EP1: episodes.js after tv-shows.js.
+  // M1: the vendored supabase-js after config.js, and auth.js after identity.js. EP1: episodes.js after tv-shows.js. Item 2: show-ratings.js after episodes.js.
   assert.deepStrictEqual(scripts, ['config.js', 'vendor/supabase-js-2.117.2.umd.js', 'identity.js', 'auth.js', 'api.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'backup-restore.js', 'backup-format3.js', 'tabs.js',
     'render.js', 'row-actions.js', 'tmdb-search.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'refresh-shows.js', 'tmdb-match.js',
-    'derived-views.js', 'tv-shows.js', 'episodes.js', 'organization.js', 'organization-manage.js', 'collection-members.js', 'catalog-apply.js', 'browse-views.js', 'history.js', 'library.js']);
+    'derived-views.js', 'tv-shows.js', 'episodes.js', 'show-ratings.js', 'organization.js', 'organization-manage.js', 'collection-members.js', 'catalog-apply.js', 'browse-views.js', 'history.js', 'library.js']);
   assert.ok(/src="config\.js"/.test(html) && /src="identity\.js"/.test(html), 'unversioned');
 });
 

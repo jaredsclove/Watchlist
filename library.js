@@ -880,6 +880,7 @@ async function libraryLoadSeasonDetails(session, show) {
   try {
     const d = await tmdbFetch(`/tv/${show.tmdb_id}`);
     noteSeasonEpisodeCounts(show.tmdb_id, d && d.seasons); // EP1: totals for collapsed seasons (episodes.js)
+    noteShowRating(show.tmdb_id, d); // item 2: the show's TMDB score (show-ratings.js)
     if (!libraryLive(session) || libraryPanel.seasonShowId !== show.id) return;
     libraryPanel.seasonDetails = d;
   } catch (e) {
@@ -948,6 +949,7 @@ async function libraryRefreshShows() {
     let details;
     try { details = await tmdbFetch(`/tv/${show.tmdb_id}`); } catch (e) { failed.push(show.title); continue; }
     noteSeasonEpisodeCounts(show.tmdb_id, details && details.seasons); // EP1: totals for collapsed seasons (episodes.js)
+    noteShowRating(show.tmdb_id, details); // item 2: the show's TMDB score (show-ratings.js)
     if (!libraryLive(session)) return;
     const rows = lib.rows.filter(r => r.show_id === show.id);
     const fresh = [];

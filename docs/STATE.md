@@ -62,6 +62,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views, the movie tools' film row), `metadata.js` (Details) |
 | Episode progress | `episodes.js` (marks read with each view, the list cache, progress text, the inline list, mark writes); its rows in `render.js` (`seasonSubRowHtml` / `seasonSubCardHtml`) |
+| TMDB show ratings | `show-ratings.js` (item 2: the show-level score and its per-device cache, filled on expansion and from the show details other paths read); shown with the categories in `derived-views.js` `derivedShowHtml`; Settings' Credits in `tabs.js` with `assets/tmdb-logo.svg` |
 | Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog; the membership request, answer and Undo rules both UIs use), `collection-members.js` (Remove / Undo and the Add picker from a collection view) |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `refresh-shows.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Catalogs | `catalog-apply.js` (Catalog updates); catalog definitions in `config.js` |
@@ -69,8 +70,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261022-coll`). The tests
-check only that all 27 versioned files share one token; before releasing, check that it differs from
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261022-rate`). The tests
+check only that all 28 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
