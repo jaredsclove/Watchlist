@@ -247,10 +247,12 @@ test('tap or click (Enter / Space activate a button) toggles the note without ex
   // The row and card expand handlers also ignore a click that lands on a button (toggleDerivedShow).
   const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
   assert.match(css, /\.tmdb-rating-note \{ display: none;/);
-  assert.match(css, /\.tmdb-rating\[data-open="1"\] \+ \.tmdb-rating-note, \.tmdb-rating:focus-visible \+ \.tmdb-rating-note \{ display: inline; \}/);
+  assert.match(css, /\.tmdb-rating\[data-open="1"\] \+ \.tmdb-rating-note, \.tmdb-rating:focus-visible \+ \.tmdb-rating-note \{ display: block; flex-basis: 100%; order: 1; \}/);
   assert.match(css, /\.tmdb-rating:focus-visible \{ outline: 2px solid var\(--accent\)/);
-  // The note sits in the flow (no popup), so on a phone it wraps inside the card instead of overflowing.
-  assert.match(css, /\.tmdb-rating-slot \{ display: inline-flex; align-items: center; flex-wrap: wrap;/);
+  // The note sits in the flow (no popup) on a line of its own below the title, so the score stays beside the title and
+  // the note wraps inside the row or card instead of overflowing.
+  assert.match(css, /\.tmdb-rating-slot \{ display: contents;/);
+  assert.match(css, /\.show-title-left \{ display: flex; align-items: center; flex-wrap: wrap;/);
 });
 
 test('focus: the rating is a list control found by identity (data-action="rating"), so a redraw returns focus to it', async () => {
