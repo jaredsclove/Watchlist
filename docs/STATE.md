@@ -40,6 +40,14 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   has ids only, so its line appears after the list is opened once. Show-level Watching is unchanged; nothing completes a season automatically (a fully checked list offers
   Mark season watched); a watched or skipped season's episodes are locked and its marks kept. The same
   controls are in collections; the flat Seasons lists show progress only; Coming Soon has no episode list.
+- **TMDB show ratings (item 2, first part):** a TMDB-matched show's score sits with its categories in show rows and
+  cards (Currently Watching, All TV, collections) as the number alone, "8.2" ("8.2*" under 100 votes), coloured by
+  the rounded score (8.0+, 7.0–7.9, below 7.0); blank under 10 votes or without a score or count. Tap or keyboard
+  focus shows "TMDB: 8.2 out of 10 · N votes" (also the accessible label). Scores are a per-device, per-account cache
+  (`show-ratings.js`; not library data or backups), filled from show details other paths read (Refresh shows, Add
+  season, a TMDB preview, Match) and by one read when a show is expanded whose score is missing or over 7 days old;
+  views never fetch to display. Settings ends with Credits (TMDB's logo and notice). Season and episode scores aren't
+  shown.
 - **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
   `catalog_film_links`, `episode_marks` (watched episodes of TMDB-matched seasons; no dates or titles).
@@ -80,9 +88,22 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
-admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16].
+admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
+TMDB show ratings [#18].
 
-- **App release:** `2299166`, film-collection suggestions (PR #16; commits `dd585c4` and `2299166`, the branch's
+- **App release:** `acc8262`, TMDB show ratings and Settings Credits (PR #18; commits `3a1026c` and `acc8262`, the
+  branch's two commits rebased, same tree), released 2026-10-22 UTC (interface and device storage only; no database,
+  backup or saved-data change). Before release: offline 1238/1238, and local browser checks with synthetic data at
+  desktop, 375 and 300 px (one read per expanded show, no writes, the tap and keyboard explanation, 44 px targets, no
+  overflow, collections, Credits). Verified after deployment (read-only): Pages built `acc8262` and serves
+  `20261022-rate` on all 28 versioned files; all 34 application files byte-identical to the commit; the signed-in
+  page loads in phase `contracted-ep1` with no console errors. Expanding one TMDB-matched show sent one TMDB show
+  read and nothing else, and showed its green score; a click and keyboard focus showed the explanation (the show
+  stayed expanded); Settings ended with Credits, its logo loaded. No writes were sent and Refresh shows wasn't run.
+  Not observed live: an asterisked, amber or red score, a failed read, and the phone layout. Limits: scores appear
+  only after a show is expanded (or after Refresh shows, Add season, a preview or Match) on each device; a tab already
+  open doesn't see scores another tab cached.
+- **Earlier release:** `2299166`, film-collection suggestions (PR #16; commits `dd585c4` and `2299166`, the branch's
   two commits rebased, same tree), released 2026-10-22 UTC (interface only; no database, backup or saved-data
   change). Before release: offline 1220/1220, and local browser checks with synthetic data only: every menu state
   with real clicks (the menu stays open, focus kept), Refresh collections finding a film added later, the add-screen
@@ -127,6 +148,8 @@ admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unw
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - TMDB show ratings: no database or saved-data effect; a code revert of `acc8262` and `3a1026c`, newest first
+    (the device cache key is then ignored).
   - Film-collection suggestions: no database or saved-data effect; a code revert of `2299166` and `dd585c4`,
     newest first.
   - EP3: no database or saved-data effect; a code revert of `f01f0fa` (the cache's numbers and titles are then
@@ -152,6 +175,7 @@ admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unw
 [#12]: https://github.com/jaredsclove/Watchlist/pull/12
 [#14]: https://github.com/jaredsclove/Watchlist/pull/14
 [#16]: https://github.com/jaredsclove/Watchlist/pull/16
+[#18]: https://github.com/jaredsclove/Watchlist/pull/18
 
 ## How we work
 
