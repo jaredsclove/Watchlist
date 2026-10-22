@@ -1207,9 +1207,9 @@ function filmMenuHtml(r, policy, extra = '') {
   const stateActions = `<div class="popover-section-label" style="margin-top:8px">Details</div><button class="popover-action" onclick="openDetails('film', '${idArg}', this)">Categories…</button>`
     + (r.catalog_new ? `<button class="popover-action" onclick="dismissCatalogNew([{ kind: 'film', id: '${idArg}' }])">Dismiss “New”</button>` : '')
     + (r.status_review ? `<button class="popover-action" onclick="keepCurrentStatus('film', '${idArg}')">Keep current status</button>` : '');
-  const franchise = cleanCollectionName(r.tmdb_collection_name || '');
+  // Its TMDB collection: Check collection, then Pull rest only when other films can be added (collections-pull.js).
   const pullBtn = r.tmdb_collection_id && filmThemeKindOf(r) === 'genre'
-    ? `<div class="popover-section-label" style="margin-top:8px">Collection</div><button class="popover-action" onclick="libraryPullRest('${r.id}', ${r.tmdb_collection_id}, '${esc(franchise).replace(/'/g, "\\'")}')">🔗 Pull rest of ${esc(franchise || 'collection')}</button>` : '';
+    ? `<div class="film-franchise" data-film-franchise="${esc(r.id)}">${filmCollectionSectionHtml(r)}</div>` : '';
   const matchBtn = policy.matchable
     ? `<div class="popover-section-label" style="margin-top:8px">TMDB</div><button class="popover-action" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>` : '';
   return `<div class="more-popover" id="more-popover-${r.id}" style="display:none">
