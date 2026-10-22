@@ -229,6 +229,17 @@ function updateSettingsCounts() {
   if (w) w.textContent = settingsChoicesText();
 }
 
+// Credits (item 2): TMDB's attribution, as its terms ask: an approved logo, less prominent than the
+// app's own, and the notice, in the app's credits.
+function creditsSectionHtml() {
+  return `<section class="settings-card settings-credits" aria-labelledby="settingsCreditsTitle">
+        <h3 id="settingsCreditsTitle">Credits</h3>
+        <a class="tmdb-credit-logo" href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer"><img src="assets/tmdb-logo.svg" alt="TMDB (The Movie Database)" width="110" height="14"></a>
+        <p class="settings-text">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+        <p class="settings-text">Show, season, episode and film details, and the TMDB scores shown with shows, come from TMDB.</p>
+      </section>`;
+}
+
 function renderSettings() {
   const screen = document.getElementById('settingsScreen');
   if (!screen) return;
@@ -270,5 +281,6 @@ function renderSettings() {
         </div>
         <p class="settings-text">Restore checks the file first, downloads a safety copy of your current data, asks you to confirm, then replaces everything in one transaction. Leaving this screen before you confirm cancels it.</p>
       </section>
+      ${creditsSectionHtml()}
     </div>`;
 }

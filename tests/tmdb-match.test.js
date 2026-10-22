@@ -10,7 +10,7 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const FILES = ['config.js', 'identity.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'tmdb-search.js', 'tmdb-match.js', 'tv-shows.js', 'library.js', 'organization-manage.js'];
+const FILES = ['config.js', 'identity.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'tmdb-search.js', 'tmdb-match.js', 'tv-shows.js', 'show-ratings.js', 'library.js', 'organization-manage.js'];
 const CATALOGS = ['disney', 'sheridan', '90day'];
 // Governance as the read views give it (coexistence: derived from where a row is stored).
 function governanceOf(rows) {

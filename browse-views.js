@@ -664,7 +664,7 @@ function toggleBrowseShow(key) {
   if (!isBrowseView(activeViewId)) return;
   const container = focusedContainerOf(['tbody', 'cardList']);
   if (expandedShows.has(key)) expandedShows.delete(key);
-  else expandedShows.add(key);
+  else { expandedShows.add(key); requestShowRating(tvShowsById.get(key)); }
   renderBrowseTable(false);
   refocus(container, `[data-show-key=${JSON.stringify(String(key))}]`);
 }

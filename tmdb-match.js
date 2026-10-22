@@ -181,6 +181,7 @@ async function chooseTmdbMatchResult(idx) {
   body.innerHTML = `<div class="tmdb-loading">Loading details…</div>`;
   try {
     const details = await tmdbFetch(`/${picked.mediaType}/${picked.id}`);
+    if (picked.mediaType === 'tv') noteShowRating(picked.id, details); // item 2 (show-ratings.js)
     m.target = { mediaType: picked.mediaType, details, seasonNumber: null };
     renderTmdbMatchConfirm();
   } catch(e) {
