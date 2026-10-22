@@ -81,7 +81,8 @@ test('collapsed: against the cached list "N/T watched" counts only listed marks,
   app.ctx.toggleEpisodes(lib.s2.id); await settle(); // closed again
   assert.match(text(seasonRow(app, lib.s2)), /In progress · 1\/4 watched · 1 not listed/);
   const cacheKey = userKeyOf('watchlist-episode-lists');
-  assert.deepStrictEqual(JSON.parse(storage.getItem(cacheKey))['95396:2'], { ids: [9001, 9002, 9003, 9004] });
+  assert.deepStrictEqual(JSON.parse(storage.getItem(cacheKey))['95396:2'], { ids: [9001, 9002, 9003, 9004], numbers: [1, 2, 3, 4],
+    names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'] }, 'with each episode’s number and title (the next-unwatched line)');
   // A count only (Refresh shows / Add season): N/T while the marks are fewer; never a complete-looking T/T.
   storage.setItem(cacheKey, JSON.stringify({ '95396:2': { count: 4 }, '95396:1': { count: 1 } }));
   app.ctx.renderTable();
@@ -447,6 +448,88 @@ test('restore: a format-5 file is converted to format 6 with no marks (its own c
   assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
   assert.strictEqual(rpcs(app, 'restore_backup')[0].body.p_backup.formatVersion, 6, 'only the converted document is sent');
   assert.deepStrictEqual(app.store.episode_marks, []);
+});
+
+// ── Next unwatched ──
+const nextIn = s => (s.match(/<span class="ep-next">([^<]*)<\/span>/) || [])[1] || '';
+test('next unwatched: the first listed episode without a mark (gaps included), from the cached list after it closes; titles hidden by default', async () => {
+  const { app, lib } = await boot({ marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9003, 3)] });
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), '', 'no list known yet: nothing, never a guess from the marks');
+  await open(app, lib.s2);
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E2', 'the open list: E2, not E3 from the count of marks');
+  app.ctx.toggleEpisodes(lib.s2.id); await settle();
+  assert.match(text(seasonRow(app, lib.s2)), /In progress · 2\/4 watched Next unwatched: E2/, 'beside the progress, from the cache once closed');
+  assert.doesNotMatch(html(app) + card(app), /Title 2/, 'no title while titles are hidden by default');
+  assert.ok(/ep-next">Next unwatched: E2</.test(card(app)), 'the phone card has it too');
+  await open(app, lib.s2); // a mark is set from the open list
+  await app.ctx.setEpisodeMark(lib.s2.id, 9002, true); await settle();
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E4', 'marking E2 moves it past the marked E3');
+  await app.ctx.setEpisodeMark(lib.s2.id, 9001, false); await settle();
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E1', 'clearing a mark brings it back');
+  assert.ok(rpcs(app, 'library_set_episode_marks').length === 2 && app.writes().length === 2, 'the line itself writes nothing');
+});
+
+test('next unwatched: follows "Show episode titles by default" on return from Settings; a blank title shows the number only', async () => {
+  const eps = { 2: [E(9001, 1), E(9002, 2), E(9003, 3, { name: '  ' })] };
+  const storage = memoryStorage();
+  const { app, lib } = await boot({ storage, episodes: eps, marks: l => [mark(l.s2, 9001, 1)] });
+  await open(app, lib.s2); app.ctx.toggleEpisodes(lib.s2.id); await settle();
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E2');
+  app.ctx.switchView('settings'); await settle();
+  app.ctx.setEpisodeTitlesShown(true);
+  app.ctx.switchView('alltv'); await settle();
+  if (!seasonRow(app, lib.s2)) { app.ctx.toggleDerivedShow(lib.sev.id); await settle(); }
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E2 — Title 2');
+  assert.ok(card(app).includes('Next unwatched: E2 — Title 2'));
+  await open(app, lib.s2);
+  await app.ctx.setEpisodeMark(lib.s2.id, 9002, true); await settle();
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E3', 'no title available: the number only');
+  app.ctx.switchView('settings'); await settle();
+  app.ctx.setEpisodeTitlesShown(false);
+  app.ctx.switchView('alltv'); await settle();
+  if (!seasonRow(app, lib.s2)) { app.ctx.toggleDerivedShow(lib.sev.id); await settle(); }
+  if (!/ep-panel-row/.test(html(app))) await open(app, lib.s2);
+  await app.ctx.setEpisodeMark(lib.s2.id, 9002, false); await settle();
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E2', 'off again: no title');
+});
+
+test('next unwatched: hidden for a list cached before it (ids only), a count only, an unreadable or malformed cache, an empty or fully marked list, a watched or skipped season', async () => {
+  const storage = memoryStorage(), cacheKey = userKeyOf('watchlist-episode-lists');
+  const { app, lib } = await boot({ storage, episodes: { 2: [E(9001, 1), E(9002, 2)], 1: [] }, marks: l => [mark(l.s2, 9001, 1), mark(l.s1, 8001, 1), mark(l.s3, 5, 1)] });
+  const hidden = (cache, why) => { storage.setItem(cacheKey, JSON.stringify(cache)); app.ctx.renderTable(); assert.strictEqual(nextIn(html(app) + card(app)), '', why); };
+  hidden({ '95396:2': { ids: [9001, 9002] } }, 'a list cached before the line: no numbers, nothing shown');
+  hidden({ '95396:2': { count: 2 } }, 'a count only');
+  hidden({ '95396:2': { ids: [9001, 9002], numbers: [1] } }, 'numbers that don’t line up');
+  hidden({ '95396:2': { ids: [9001, 9002], numbers: [1, 'x'] } }, 'a number that isn’t one');
+  hidden({ '95396:2': { ids: [9001], numbers: [1], names: ['Title 1'] } }, 'every listed episode marked (a kept, unlisted mark doesn’t count)');
+  hidden({ '95396:3': { ids: [], numbers: [], names: [] } }, 'an empty list');
+  hidden({ '95396:1': { ids: [8001, 8002], numbers: [1, 2], names: ['A', 'B'] } }, 'a watched season');
+  storage.setItem(cacheKey, JSON.stringify({ '95396:2': { ids: [9001, 9002], numbers: [1, 2] } })); app.ctx.renderTable();
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E2', 'names missing: the number only');
+  await app.ctx.setSeasonSkipped(lib.s2.id, true); await settle();
+  assert.strictEqual(nextIn(html(app) + card(app)), '', 'a skipped season');
+  const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() {} };
+  const b = await boot({ storage: broken, marks: l => [mark(l.s2, 9001, 1)] });
+  assert.strictEqual(nextIn(seasonRow(b.app, b.lib.s2)), '', 'unreadable storage: nothing');
+  await open(b.app, b.lib.s2);
+  assert.strictEqual(nextIn(seasonRow(b.app, b.lib.s2)), 'Next unwatched: E2', 'the open list in page memory still gives it');
+});
+
+test('next unwatched: in Currently Watching and in a collection (row and phone card), from the same cached list', async () => {
+  const lib = library(), storage = memoryStorage();
+  storage.setItem(userKeyOf('watchlist-episode-lists'), JSON.stringify({ '95396:2': { ids: [9001, 9002, 9003, 9004], numbers: [1, 2, 3, 4], names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'] } }));
+  storage.setItem(userKeyOf('watchlist_episode_titles'), 'on');
+  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: tmdb(), storage, episodeMarks: [mark(lib.s2, 9001, 1), mark(lib.s2, 9002, 2)],
+    personalCollections: [{ id: '0c000000-0000-4000-8000-000000000002', name: 'Mine', legacy_source: null, sort_order: 1, archived_at: null, created_at: TS }],
+    memberships: [{ id: '0d000000-0000-4000-8000-000000000002', collection_id: '0c000000-0000-4000-8000-000000000002', show_id: lib.sev.id, item_id: null, created_at: TS }] });
+  app.ctx.switchView('watching'); await settle();
+  if (!(html(app) + card(app)).includes('ep-next')) { app.ctx.toggleDerivedShow(lib.sev.id); await settle(); }
+  assert.ok((html(app) + card(app)).includes('Next unwatched: E3 — Title 3'), 'Currently Watching');
+  app.ctx.openBrowseCollection('browse:0c000000-0000-4000-8000-000000000002'); await settle();
+  app.ctx.toggleBrowseShow(lib.sev.id); await settle();
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E3 — Title 3', 'a collection’s show entry');
+  assert.ok(card(app).includes('Next unwatched: E3 — Title 3'), 'and its phone card');
+  assert.deepStrictEqual(app.writes(), [], 'reading only');
 });
 
 // ── Collections and the phone ──
