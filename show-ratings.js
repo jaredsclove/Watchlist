@@ -1,9 +1,10 @@
 // ─── TMDB show ratings (item 2, first part) ───────────────────────────────────
-// A TMDB-matched show's community score with its categories: "TMDB 8.2/10", rounded to one decimal
-// and coloured by that rounded score (8.0 and up; 7.0 to 7.9; below 7.0), the number always shown.
-// Its vote count is behind a tap or keyboard focus. Practical display rules, not a measure of
-// reliability: fewer than 10 votes, a missing or zero score, or no vote count shows nothing; 10–99
-// votes adds an asterisk and "Limited votes: N."
+// A TMDB-matched show's community score with its categories: the number alone, "8.2", rounded to one
+// decimal and coloured by that rounded score (8.0 and up; 7.0 to 7.9; below 7.0). Its source, scale
+// and vote count are behind a tap or keyboard focus, and in its accessible label ("TMDB: 8.2 out of
+// 10 · 1,987 votes."). Practical display rules, not a measure of reliability: fewer than 10 votes, a
+// missing or zero score, or no vote count shows nothing; 10–99 votes adds an asterisk ("8.2*") and
+// "· Limited votes" to the explanation.
 // Scores come from TMDB's show details (vote_average, vote_count) and are kept in a per-device cache
 // (per account): replaceable reference data, never library data, never in backups, never sent to the
 // database. It fills from show details the page already reads (Refresh shows, Add season, a TMDB
@@ -55,14 +56,15 @@ function showRatingModel(entry) {
   const score = Math.round(a * 10) / 10;
   if (!(score > 0)) return null;
   const limited = c < 100;
-  const votes = c.toLocaleString('en-US');
   const shown = score.toFixed(1);
+  // The explanation names the source and the scale, which the compact number leaves out.
+  const note = `TMDB: ${shown} out of 10 · ${c.toLocaleString('en-US')} votes${limited ? ' · Limited votes' : ''}.`;
   return {
-    text: `TMDB ${shown}/10${limited ? '*' : ''}`,
+    text: `${shown}${limited ? '*' : ''}`,
     band: score >= 8 ? 'high' : score >= 7 ? 'mid' : 'low',
     limited,
-    note: limited ? `Limited votes: ${votes}.` : `TMDB votes: ${votes}.`,
-    label: `TMDB rating ${shown} out of 10. ${limited ? `Limited votes: ${votes}.` : `${votes} votes.`}`
+    note,
+    label: note
   };
 }
 function showRatingInnerHtml(m) {

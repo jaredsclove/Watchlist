@@ -49,21 +49,21 @@ const ratingReads = app => app.requests.filter(r => r.url.startsWith('https://ap
 const writes = app => app.requests.filter(r => r.method !== 'GET' || (/\/rpc\//.test(r.url) && !r.url.endsWith('/rpc/stage5_capabilities')));
 
 // ── Display rules (pure) ──
-test('vote thresholds: fewer than 10 blank; 10–99 an asterisk and "Limited votes: N."; 100 and up plain, the count on tap/focus', async () => {
+test('vote thresholds: fewer than 10 blank; 10–99 an asterisk and "· Limited votes"; 100 and up plain; the number alone, its source, scale and count on tap/focus', async () => {
   const { app } = await boot();
   const m = e => app.ctx.showRatingModel(e);
   assert.strictEqual(m({ a: 8.2, c: 9 }), null, '9 votes: blank');
   assert.strictEqual(m({ a: 8.2, c: 0 }), null, '0 votes: blank');
   const ten = m({ a: 8.2, c: 10 });
-  assert.strictEqual(ten.text, 'TMDB 8.2/10*'); assert.strictEqual(ten.note, 'Limited votes: 10.'); assert.ok(ten.limited);
-  assert.strictEqual(m({ a: 8.2, c: 63 }).note, 'Limited votes: 63.');
+  assert.strictEqual(ten.text, '8.2*'); assert.strictEqual(ten.note, 'TMDB: 8.2 out of 10 · 10 votes · Limited votes.'); assert.ok(ten.limited);
+  assert.strictEqual(m({ a: 8.2, c: 63 }).note, 'TMDB: 8.2 out of 10 · 63 votes · Limited votes.');
   const ninetyNine = m({ a: 8.2, c: 99 });
-  assert.strictEqual(ninetyNine.text, 'TMDB 8.2/10*');
+  assert.strictEqual(ninetyNine.text, '8.2*');
   const hundred = m({ a: 8.2, c: 100 });
-  assert.strictEqual(hundred.text, 'TMDB 8.2/10'); assert.strictEqual(hundred.note, 'TMDB votes: 100.'); assert.ok(!hundred.limited);
-  assert.strictEqual(m({ a: 8.957, c: 18900 }).note, 'TMDB votes: 18,900.');
-  assert.strictEqual(m({ a: 8.2, c: 63 }).label, 'TMDB rating 8.2 out of 10. Limited votes: 63.', 'a screen reader hears the count without opening it');
-  assert.strictEqual(m({ a: 8.2, c: 1987 }).label, 'TMDB rating 8.2 out of 10. 1,987 votes.');
+  assert.strictEqual(hundred.text, '8.2'); assert.strictEqual(hundred.note, 'TMDB: 8.2 out of 10 · 100 votes.'); assert.ok(!hundred.limited);
+  assert.strictEqual(m({ a: 8.957, c: 18900 }).note, 'TMDB: 9.0 out of 10 · 18,900 votes.');
+  assert.strictEqual(m({ a: 8.2, c: 63 }).label, 'TMDB: 8.2 out of 10 · 63 votes · Limited votes.', 'a screen reader hears the count without opening it');
+  assert.strictEqual(m({ a: 8.2, c: 1987 }).label, 'TMDB: 8.2 out of 10 · 1,987 votes.');
 });
 
 test('missing data: no score, a zero score, a score rounding to 0.0, no or an unusable vote count, or a nonsense score → blank (never "No TMDB score")', async () => {
@@ -73,12 +73,12 @@ test('missing data: no score, a zero score, a score rounding to 0.0, no or an un
     { a: NaN, c: 500 }, { a: '8.2', c: 500 }, { a: 8.2 }, { a: 8.2, c: null }, { a: 8.2, c: 50.5 }, { a: 8.2, c: '500' }]) {
     assert.strictEqual(m(e), null, JSON.stringify(e));
   }
-  assert.strictEqual(m({ a: 10, c: 500 }).text, 'TMDB 10.0/10', '10 is a valid score');
+  assert.strictEqual(m({ a: 10, c: 500 }).text, '10.0', '10 is a valid score');
 });
 
 test('rounding to one decimal, and the colour band follows the rounded score (8.0+, 7.0–7.9, below 7.0)', async () => {
   const { app } = await boot();
-  const r = a => { const x = app.ctx.showRatingModel({ a, c: 500 }); return `${x.text.slice(5, -3)} ${x.band}`; };
+  const r = a => { const x = app.ctx.showRatingModel({ a, c: 500 }); return `${x.text} ${x.band}`; };
   assert.strictEqual(r(8.0), '8.0 high');
   assert.strictEqual(r(7.95), '8.0 high', '7.95 rounds to 8.0: green');
   assert.strictEqual(r(7.949), '7.9 mid');
@@ -94,8 +94,8 @@ test('a cached score shows with the show\'s categories, in rows and phone cards;
   const now = Date.now();
   const { app, lib } = await boot({ storage: memoryStorage(cached({ 900001: { a: 8.153, c: 1987, t: now }, 900002: { a: 6.7, c: 50, t: now } })) });
   for (const s of [html(app), card(app)]) {
-    assert.match(s, /<button type="button" class="tmdb-rating r-high" data-action="rating" aria-label="TMDB rating 8\.2 out of 10\. 1,987 votes\." onclick="toggleShowRatingNote\(this, event\)" onblur="this\.removeAttribute\('data-open'\)">TMDB 8\.2\/10<\/button><span class="tmdb-rating-note" aria-hidden="true">TMDB votes: 1,987\.<\/span>/);
-    assert.match(s, /class="tmdb-rating r-low"[^>]*>TMDB 6\.7\/10\*<\/button><span class="tmdb-rating-note" aria-hidden="true">Limited votes: 50\.<\/span>/);
+    assert.match(s, /<button type="button" class="tmdb-rating r-high" data-action="rating" aria-label="TMDB: 8\.2 out of 10 · 1,987 votes\." onclick="toggleShowRatingNote\(this, event\)" onblur="this\.removeAttribute\('data-open'\)">8\.2<\/button><span class="tmdb-rating-note" aria-hidden="true">TMDB: 8\.2 out of 10 · 1,987 votes\.<\/span>/);
+    assert.match(s, /class="tmdb-rating r-low"[^>]*>6\.7\*<\/button><span class="tmdb-rating-note" aria-hidden="true">TMDB: 6\.7 out of 10 · 50 votes · Limited votes\.<\/span>/);
     assert.ok(!s.includes('No TMDB score'));
   }
   assert.ok(!html(app).includes(`data-rating-of="null"`), 'no slot for a show without a TMDB id');
@@ -107,7 +107,7 @@ test('a cached score shows with the show\'s categories, in rows and phone cards;
   assert.ok(!cells[1].includes('tmdb-rating') && !cells[4].includes('tmdb-rating'), 'not with the title or the status controls');
   // Currently Watching too.
   app.ctx.switchView('watching'); await settle();
-  assert.match(html(app), /TMDB 8\.2\/10</);
+  assert.match(html(app), /data-action="rating"[^>]*>8\.2<\/button>/);
   assert.strictEqual(writes(app).length, 0);
 });
 
@@ -128,7 +128,7 @@ test('expanding an uncached show reads its TMDB show details once; the score is 
   app.ctx.toggleDerivedShow(lib.a.id); await settle();
   assert.deepStrictEqual(ratingReads(app), ['GET /tv/900001']);
   app.ctx.renderTable();
-  assert.match(html(app), /class="tmdb-rating r-mid"[^>]*>TMDB 7\.9\/10</);
+  assert.match(html(app), /class="tmdb-rating r-mid"[^>]*>7\.9</);
   const stored = JSON.parse(storage.map.get(userKeyOf(KEY)));
   assert.deepStrictEqual(Object.keys(stored), ['900001']);
   assert.strictEqual(stored[900001].a, 7.91); assert.strictEqual(stored[900001].c, 603); assert.ok(Math.abs(stored[900001].t - Date.now()) < 5000);
@@ -146,12 +146,12 @@ test('a fresh cached score (under 7 days) is not read again; an older one is rea
   const { app, lib } = await boot({ storage, tmdb: details({ 900002: { vote_average: 7.6, vote_count: 520 } }) });
   app.ctx.toggleDerivedShow(lib.a.id); await settle();
   assert.deepStrictEqual(ratingReads(app), []);
-  assert.match(html(app), /TMDB 7\.2\/10</, 'the older score shows until a newer one arrives');
+  assert.match(html(app), /data-action="rating"[^>]*>7\.2<\/button>/, 'the older score shows until a newer one arrives');
   app.ctx.toggleDerivedShow(lib.b.id); await settle();
   assert.deepStrictEqual(ratingReads(app), ['GET /tv/900002']);
   app.ctx.renderTable();
-  assert.match(html(app), /TMDB 7\.6\/10</);
-  assert.ok(!html(app).includes('TMDB 7.2/10'));
+  assert.match(html(app), /data-action="rating"[^>]*>7\.6<\/button>/);
+  assert.ok(!html(app).includes('>7.2<'));
 });
 
 test('request failures (an HTTP error, a network failure): nothing shown or cached, controls unchanged, no write, and not requested again on this page', async () => {
@@ -189,7 +189,7 @@ test('storage that refuses writes: the score still shows on this page (page memo
   assert.ok(html(app).includes('<span class="tmdb-rating-slot" data-rating-of="900001"></span>'));
   app.ctx.toggleDerivedShow(lib.a.id); await settle();
   app.ctx.renderTable();
-  assert.match(html(app), /class="tmdb-rating r-high"[^>]*>TMDB 8\.0\/10</);
+  assert.match(html(app), /class="tmdb-rating r-high"[^>]*>8\.0</);
   assert.deepStrictEqual(app.consoleErrors, []);
 });
 
@@ -197,7 +197,7 @@ test('the cache belongs to the signed-in account: another account\'s entry isn\'
   const other = '0a000000-0000-4000-8000-0000000000bb';
   const storage = memoryStorage({ [`${KEY}::${other}`]: JSON.stringify({ 900001: { a: 9.1, c: 900, t: Date.now() } }) });
   const { app } = await boot({ storage });
-  assert.ok(!html(app).includes('TMDB 9.1'));
+  assert.ok(!html(app).includes('9.1'));
 });
 
 test('show details the page already reads (Refresh shows) leave scores in the cache without extra requests', async () => {
@@ -207,8 +207,8 @@ test('show details the page already reads (Refresh shows) leave scores in the ca
   app.ctx.noteShowRating(900001, { vote_average: 8.5, vote_count: 2000 });
   app.ctx.noteShowRating(900002, { vote_average: 6.2, vote_count: 40 });
   app.ctx.renderTable();
-  assert.match(html(app), /TMDB 8\.5\/10</);
-  assert.match(html(app), /TMDB 6\.2\/10\*</);
+  assert.match(html(app), /data-action="rating"[^>]*>8\.5<\/button>/);
+  assert.match(html(app), /data-action="rating"[^>]*>6\.2\*<\/button>/);
   assert.deepStrictEqual(ratingReads(app), []);
   const src = fs.readFileSync(path.join(ROOT, 'library.js'), 'utf8');
   assert.strictEqual((src.match(/noteShowRating\(show\.tmdb_id, (?:d|details)\)/g) || []).length, 2, 'Refresh shows and Add season both record the score');
