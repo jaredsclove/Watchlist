@@ -61,7 +61,8 @@ test('controls: To Watch / ▶ Watching / ✕ Skipped, ★ High / Normal / Low b
   assert.ok(/<option value="confirmed" selected>To Watch<\/option><option value="watching">▶ Watching<\/option><option value="skipped">✕ Skipped<\/option>/.test(r), r);
   assert.ok(/<option value="high" selected>★ High<\/option><option value="normal">Normal<\/option><option value="low">Low<\/option>/.test(r));
   assert.ok(r.includes('<span class="priority-high" role="img" aria-label="High priority" title="High priority">★</span> <span class="show-title">Hi</span>'));
-  assert.ok(rowOf(app, 'Lo').includes('<span class="show-title">Lo</span> <span class="priority-low" title="Low priority">Low</span>'));
+  // Item 2: a TMDB-matched show's score slot (empty here: nothing cached) sits directly after the title, before Low.
+  assert.match(rowOf(app, 'Lo'), /<span class="show-title">Lo<\/span>(?: <span class="tmdb-rating-slot" data-rating-of="\d+"><\/span>)? <span class="priority-low" title="Low priority">Low<\/span>/);
   assert.ok(!/row-maybe/.test(body(app)), 'no dimming for Low');
 });
 

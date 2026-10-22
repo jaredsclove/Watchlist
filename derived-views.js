@@ -870,12 +870,13 @@ function derivedShowHtml(item, today, opts = {}) {
   const isExpanded = expandedShows.has(key);
   const keyArg = esc(key).replace(/'/g, "\\'");
   const theme = (upNext || seasons[0]).theme;
-  const badges = metadataChipsHtml(show, key, themeBadgeHtml(showCatalogOf(show), theme, key))
-    + showRatingHtml(show); // item 2: the TMDB score sits with the categories (show-ratings.js)
+  const badges = metadataChipsHtml(show, key, themeBadgeHtml(showCatalogOf(show), theme, key));
   const range = item.resume;
   const resumeTag = range && range.state === 'active' && range.start
     ? ` <span class="state-tag resume-tag" title="Watching earlier seasons">Earlier seasons from ${esc(range.start.season)}</span>` : '';
-  const titleHtml = `${priorityMarkHtml(show.priority)}<span class="show-title">${esc(item.title)}</span>${priorityMarkHtml(show.priority, true)}${stateTagsHtml(show, 'show')}${resumeTag}`;
+  // Item 2: the TMDB score directly after the title, in rows and cards alike (show-ratings.js).
+  const rating = showRatingHtml(show);
+  const titleHtml = `${priorityMarkHtml(show.priority)}<span class="show-title">${esc(item.title)}</span>${rating ? ` ${rating}` : ''}${priorityMarkHtml(show.priority, true)}${stateTagsHtml(show, 'show')}${resumeTag}`;
 
   const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;

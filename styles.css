@@ -179,7 +179,7 @@ thead th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 50
 .show-group-row:hover td { background: var(--surface); }
 .expand-chevron { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface2); border: 1px solid var(--border); color: var(--text2); font-size: 10px; flex-shrink: 0; transition: border-color 0.15s, color 0.15s; }
 .show-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.show-title-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.show-title-left { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; min-width: 0; } /* wraps: a long title, the TMDB score and its explanation, the markers */
 .show-group-row:hover .expand-chevron, .card-top:hover .expand-chevron { border-color: var(--accent); color: var(--accent); }
 .sub-row td { background: var(--bg); }
 .sub-row td:first-child { border-left: 2px solid var(--accent-dim); }
@@ -713,16 +713,17 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .state-tag.resume-tag { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
 .meta-chip { font-size: 11px; }
 .meta-more { font-size: 11px; color: var(--text2); }
-/* Item 2: a show's TMDB score with its categories (show-ratings.js). Plain text, not a filter pill: the
-   number is always shown, and its colour (by the rounded score) is 4.5:1 or more on every surface. */
-.tmdb-rating-slot { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; vertical-align: middle; }
+/* Item 2: a show's TMDB score directly after its title (show-ratings.js), a little smaller than the title. Plain
+   text, not a filter pill: the number is always shown, and its colour (by the rounded score) is 4.5:1 or more on
+   every surface. The slot and its explanation wrap within the title's width, never past it. */
+.tmdb-rating-slot { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; vertical-align: middle; max-width: 100%; font-weight: 400; }
 .tmdb-rating-slot:empty { display: none; }
-.tmdb-rating { background: none; border: 0; padding: 2px 4px; margin: 0; font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; border-radius: 4px; text-decoration: underline dotted; text-underline-offset: 3px; }
+.tmdb-rating { background: none; border: 0; padding: 2px 4px; margin: 0; font: inherit; font-size: 0.875em; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; border-radius: 4px; text-decoration: underline dotted; text-underline-offset: 3px; }
 .tmdb-rating:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tmdb-rating.r-high { color: #3ecf8e; }
 .tmdb-rating.r-mid { color: #e0b04a; }
 .tmdb-rating.r-low { color: #ff7f70; }
-.tmdb-rating-note { display: none; font-size: 12px; color: var(--text2); }
+.tmdb-rating-note { display: none; min-width: 0; font-size: 12px; font-weight: 400; color: var(--text2); white-space: normal; }
 .tmdb-rating[data-open="1"] + .tmdb-rating-note, .tmdb-rating:focus-visible + .tmdb-rating-note { display: inline; }
 @media (prefers-color-scheme: light) {
   .tmdb-rating.r-high { color: #137a52; }
