@@ -21,13 +21,17 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   collection with Undo; Add to <collection>…, S5), Settings (Manage collections and watch-with
   choices, Catalog updates, Backup & Restore). ⬇ Backup is also in the header. Since S6 every view
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
-- **Episode progress (EP1, EP2):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
+- **Episode progress (EP1, EP2, EP3):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
   one open at a time) with a checkbox per episode and one "Mark watched through [Episode N ▾] [Apply]" control above
   it (marks only the unmarked episodes up to N; starts on the first unmarked, keeps the choice). Titles are hidden
   behind a Show title button per episode unless Settings' "Show episode titles by default" is on (per account,
   this browser only; a choice that can't be saved holds for the open page). A season with
   marks reads "In progress · N/T watched" (T from a per-device cache of the list; "N marked" when unknown).
-  Show-level Watching is unchanged; nothing completes a season automatically (a fully checked list offers
+  Beside that progress (EP3), "Next unwatched: E6" names the first listed episode without a mark, with " — Title" only
+  while titles are shown by default; it comes from the open list or the per-device cache and is hidden when the list is
+  unknown, empty or fully marked, or the season is watched or skipped. That cache (replaceable device storage, not
+  library data or backups) holds each list's episode ids and, since EP3, numbers and titles; a list cached before EP3
+  has ids only, so its line appears after the list is opened once. Show-level Watching is unchanged; nothing completes a season automatically (a fully checked list offers
   Mark season watched); a watched or skipped season's episodes are locked and its marks kept. The same
   controls are in collections; the flat Seasons lists show progress only; Coming Soon has no episode list.
 - **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
@@ -59,36 +63,32 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261021-ep2`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261021-ep3`). The tests
 check only that all 27 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
-## Where things stand (2026-10-21)
+## Where things stand (2026-10-22)
 
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
-admin enrichment extensions [#11], EP2 episode-list controls [#12].
+admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14].
 
-- **App release:** `b7c698a`, EP2 episode-list controls (PR #12), released 2026-10-21 (interface and device
-  storage only; no database change): the "Show episode titles by default" setting and the single Mark watched
-  through control. Verified after deployment: Pages built `b7c698a` and serves `20261021-ep2` on all 27 versioned
-  files, each (and `config.js`) byte-identical to the commit; the signed-in page loads in phase `contracted-ep1`
-  with no console errors. The owner's checks on a physical phone passed: the setting on and off, kept after a
-  reload; Show title / Hide title; the native episode selector. Write smoke test (owner-operated): Apply marked
-  through the chosen episode, a second Apply changed nothing, only the test's marks were cleared, and the
-  original marks, the season's watched / skipped and the show's status were as before. Limits: Claude's own read-only
-  check of the deployed episode list was cut short (the browser extension disconnected), so the list's rendering
-  on the live site rests on the owner's checks; no screen reader or dark-mode check; offline 1207/1207 and local
-  synthetic-data browser checks before release (PR #12).
-- **Previous app release:** `45f12d9`, EP1 episode progress within seasons (PR #9), released 2026-10-21:
-  `db/ep1_episode_marks.sql` applied to production once (its run record confirmed by a separate read), then the
-  page deployed. Verified after deployment: the first format-6 backup's eight original tables are identical to
-  the backup made just before the migration, and `episode_marks` was empty; signed-out requests to
-  `episode_marks`, the marks and delete functions, restore and the `private` API schema are refused; on desktop
-  the owner checked and cleared one episode (one mark saved, then none; the season's watched / skipped and the
-  show's status unchanged); the episode list loads on the phone. The previous release: `502570a`, M1 (PR #7).
+- **App release:** `f01f0fa`, EP3 "Next unwatched" line (PR #14; the branch commit `69851e2` rebased, same tree),
+  released 2026-10-22 UTC (interface and device storage only; no database, backup or saved-data change).
+  Before release: offline 1211/1211 and a local browser check with synthetic data only (gaps in marks, the line
+  moving after a mark, titles on and off through Settings, Currently Watching / All TV / a collection, phone cards
+  at 375 and 300 px). Verified after deployment (read-only): Pages built `f01f0fa` and serves `20261021-ep3` on all
+  27 versioned files, each (and `config.js` and `watchlist.html`) byte-identical to the commit; the signed-in page
+  loads in phase `contracted-ep1` with the new code and no console errors, and sent no writes. Limits: the library
+  had no episode marks at the check, so no progress or next-unwatched line could appear and the line's rendering on
+  the live site is unverified (no marks were made for testing); that browser's cached lists predate EP3 (ids only);
+  no screen reader or separate light-mode check.
+- **Previous app releases:** `b7c698a`, EP2 episode-list controls (PR #12, 2026-10-21; interface and device storage
+  only): verified deployed, with the owner's phone checks and an owner-operated write smoke test. `45f12d9`, EP1
+  episode progress (PR #9, 2026-10-21): `db/ep1_episode_marks.sql` applied once, original tables preserved in the
+  first format-6 backup, signed-out access refused, a desktop mark / clear smoke test. Each PR holds the details.
 - **Database (as last recorded, not freshly observed):** phase `contracted-ep1` (B4/B5 with M1 owner-only
   access, `access = members`, and episode marks), backup format 6, recovery archive active. G9 (archive
   retirement) is paused. The API exposes only `public` and `graphql_public`; the format-5 restore is kept as
@@ -115,6 +115,8 @@ admin enrichment extensions [#11], EP2 episode-list controls [#12].
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - EP3: no database or saved-data effect; a code revert of `f01f0fa` (the cache's numbers and titles are then
+    ignored).
   - EP2: no database or saved-data effect beyond the marks an owner sets with it; a code revert of `b7c698a`
     (the setting's device key is then ignored).
   - EP1: not revertible by a code revert. The M1 page against the EP1 database keeps its ordinary writes, but
@@ -134,6 +136,7 @@ admin enrichment extensions [#11], EP2 episode-list controls [#12].
 [#9]: https://github.com/jaredsclove/Watchlist/pull/9
 [#11]: https://github.com/jaredsclove/Watchlist/pull/11
 [#12]: https://github.com/jaredsclove/Watchlist/pull/12
+[#14]: https://github.com/jaredsclove/Watchlist/pull/14
 
 ## How we work
 
