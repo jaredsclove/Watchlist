@@ -176,7 +176,6 @@ test('source scan: no app script but backup-format3.js names a storage value, a 
     ['render.js', /filterPillHtml\('collection', c, c, \{ cls: 'collection-tag'/],
     ['collections-pull.js', /tmdbLookupFailureNote\(collectionsMap\.size, failedCollections, 'collection'\)/],
     ['organization-manage.js', /res\.collection \|\| res\.choice|const noun = choice \? 'watch-with choice' : 'collection'|if \(res\.collection\) put\(d\.collections, res\.collection\)|manageCreate\('collection'\)/],
-    ['browse-views.js', /Pull rest of \$\{esc\(franchise \|\| 'collection'\)\}/],
   ];
   // B4/B5: the preview checks a file's recovery section as restore_backup does (its storage
   // values against the file's own rows); that block reads the file only and sends nothing.

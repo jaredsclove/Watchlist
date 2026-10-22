@@ -374,7 +374,9 @@ test('V4.6 Pull rest from a collection: the panel shows only the franchise; film
   const app = await boot(L, { tmdb });
   app.store.collection_memberships.push({ id: '0d000000-0000-4000-8000-0000000009aa', collection_id: CID(app), show_id: null, item_id: franchise.id, created_at: '2026-01-01T00:00:00Z' });
   await openTC(app);
-  assert.ok(html(app).includes(`libraryPullRest('${franchise.id}', 900,`), 'Pull rest offered in the film’s menu');
+  assert.ok(html(app).includes(`checkFilmCollection('${franchise.id}')`) && !html(app).includes('libraryPullRest('), 'unknown contents: Check collection, no Pull rest yet');
+  await app.ctx.checkFilmCollection(franchise.id); await settle(); app.ctx.renderTable();
+  assert.ok(html(app).includes(`libraryPullRest('${franchise.id}', 900,`), 'another film to add: Pull rest offered in the film’s menu');
   await app.ctx.libraryPullRest(franchise.id, 900, 'Saga'); await settle(); await settle();
   const panel = app.el('libraryPanel').innerHTML;
   assert.ok(panel.includes('Pull rest of Saga') && !panel.includes('How to add') && !panel.includes('pull entire MCU'), 'only the franchise preview');

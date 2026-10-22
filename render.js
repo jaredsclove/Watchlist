@@ -666,7 +666,9 @@ function toggleMorePopover(rowId, btn) {
 }
 
 // close any open popover when clicking elsewhere on the page
+// (a control its own click replaced, such as Check collection, is no longer on the page: not outside)
 document.addEventListener('click', function(e) {
+  if (e.target.isConnected === false) return;
   if (e.target.closest('.more-popover') || e.target.closest('.more-btn')) return;
   document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
 });

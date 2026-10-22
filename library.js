@@ -423,7 +423,7 @@ function libraryRenderPreview() {
     }
     p.bound = { kind: 'new-film', tmdbId: sel.id, mediaType: 'movie' };
     previewEl.innerHTML = `<div class="tmdb-preview">${header(meta)}
-      ${d.belongs_to_collection ? `<div class="tmdb-collection-note">🔗 Part of <strong>${esc(cleanCollectionName(d.belongs_to_collection.name))}</strong> — you can pull the rest of it from the film’s ⋯ menu afterwards.</div>` : ''}
+      ${addScreenCollectionNoteHtml(d, sel.id, p.lib.rows)}
       <div class="tmdb-refresh-summary">Adds a new film to your list.</div>${actions('Add film', 'addSelectedTMDBSeasons()')}</div>`;
     return;
   }

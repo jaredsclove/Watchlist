@@ -614,6 +614,8 @@ test('All Movies: Pull rest of a franchise runs in the panel against the whole l
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle();
   app.el('fWatch').value = ''; app.ctx.renderTable();
+  assert.ok(app.html().includes("checkFilmCollection('f-dune')") && !app.html().includes("libraryPullRest('f-dune'"), 'Check collection first');
+  await app.ctx.checkFilmCollection('f-dune'); await settle(); app.ctx.renderTable();
   assert.ok(app.html().includes("libraryPullRest('f-dune', 726871"));
   await app.ctx.libraryPullRest('f-dune', 726871, 'Dune'); await settle();
   assert.match(preview(app), /Dune[\s\S]*Already added[\s\S]*Dune: Part Two/);

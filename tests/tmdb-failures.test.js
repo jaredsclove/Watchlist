@@ -31,6 +31,7 @@ function makeEnv({ tmdb, rows = [], checkboxes = [] }) {
     activeViewId: 'allmovies',
     libraryPanel: { session: 1, media: 'movie', mode: 'tools', viewId: 'allmovies', epoch: 0, toolsReady: true },
     tmdbShowSpecials: false,
+    collectionLookups: new Map(), browseData: null, // page state (watchlist.html)
     tmdbFetch: async p => { log.tmdbCalls++; return tmdb(p); },
     sbFetch: async (method, p) => { throw new Error(`unexpected ${method} ${p}`); },
     // Films are added through library_add_films_b45 (body: the films, recorded as sent).
