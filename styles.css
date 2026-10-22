@@ -836,6 +836,7 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 
 /* EP1: episode progress within seasons (episodes.js) */
 .ep-progress { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--text2); white-space: nowrap; }
+.ep-next { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
 .ep-toggle { font-size: 12px; padding: 0 4px; }
 .ep-panel { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; font-size: 13px; }
 .ep-summary { color: var(--text2); }

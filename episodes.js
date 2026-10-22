@@ -13,6 +13,9 @@
 // EP2: titles are shown by default only when the owner chose so in Settings (per account, on this
 // device); otherwise each listed title has its own Show title button. One "Mark watched through"
 // control above the list marks every listed episode up to the chosen one (never clearing a mark).
+// Next unwatched: beside an in-progress season's progress, the first listed episode without a mark
+// (from the open list, else this device's cached list with its numbers); its title only when titles
+// are shown by default. Hidden whenever that list isn't known: never inferred from the marks.
 
 const EPISODE_LIST_CACHE_KEY = 'watchlist-episode-lists';
 const EPISODE_TITLES_KEY = 'watchlist_episode_titles';
@@ -82,7 +85,8 @@ function replaceSeasonMarks(seasonId, marks) {
   if (m.size) episodeMarks.set(seasonId, m); else episodeMarks.delete(seasonId);
 }
 
-// ── The per-device list cache: { "<tmdb show id>:<season number>": { ids: [...] } | { count } } ──
+// ── The per-device list cache: { "<tmdb show id>:<season number>": { ids, numbers, names } | { count } } ──
+// numbers and names (since the next-unwatched line) run alongside ids; a list cached before them has ids only.
 function readEpisodeListCache() {
   try {
     const v = JSON.parse(userStorage.getItem(EPISODE_LIST_CACHE_KEY) || '{}');
@@ -93,10 +97,12 @@ function writeEpisodeListCache(cache) {
   try { userStorage.setItem(EPISODE_LIST_CACHE_KEY, JSON.stringify(cache)); } catch (e) { /* storage unavailable: totals stay unknown */ }
 }
 const episodeCacheKey = (tmdbId, seasonNumber) => `${tmdbId}:${seasonNumber}`;
-// A loaded list: its episode ids (the exact list the collapsed count is measured against).
-function noteEpisodeList(tmdbId, seasonNumber, ids) {
+// A loaded list: its episode ids (the exact list the collapsed count is measured against), with each
+// episode's number and title for the next-unwatched line.
+function noteEpisodeList(tmdbId, seasonNumber, episodes) {
   const cache = readEpisodeListCache();
-  cache[episodeCacheKey(tmdbId, seasonNumber)] = { ids: ids.slice() };
+  cache[episodeCacheKey(tmdbId, seasonNumber)] = { ids: episodes.map(e => e.id), numbers: episodes.map(e => e.number),
+    names: episodes.map(e => e.name.trim().slice(0, 200)) };
   writeEpisodeListCache(cache);
 }
 // A show's seasons from TMDB's show details (Refresh shows, Add season): a count only, kept unless
@@ -120,6 +126,16 @@ function cachedEpisodeList(r) {
   if (v && Array.isArray(v.ids) && v.ids.every(Number.isInteger)) return { ids: v.ids };
   if (v && Number.isInteger(v.count) && v.count >= 0) return { count: v.count };
   return null;
+}
+// The season's episode list with numbers, in order: the open list once loaded, else the cached one
+// when it has a number for every id (a title is '' when unknown); null when neither is known.
+function knownEpisodeList(r) {
+  if (episodePanel && episodePanel.seasonId === r.id && episodePanel.status === 'ready') return episodePanel.episodes;
+  const v = readEpisodeListCache()[episodeCacheKey(r.tmdb_id, r.season_number)];
+  if (!v || !Array.isArray(v.ids) || !Array.isArray(v.numbers) || v.numbers.length !== v.ids.length) return null;
+  if (!v.ids.every(Number.isInteger) || !v.numbers.every(x => Number.isInteger(x) && x >= 0)) return null;
+  const names = Array.isArray(v.names) && v.names.length === v.ids.length ? v.names : [];
+  return v.ids.map((id, i) => ({ id, number: v.numbers[i], name: typeof names[i] === 'string' ? names[i] : '' }));
 }
 
 // ── Progress text ──
@@ -147,9 +163,23 @@ function episodeProgressText(r) {
   } else if (cached && cached.count > 0 && n < cached.count) text = `${n}/${cached.count} watched`;
   return r.watched ? text : `In progress · ${text}`;
 }
+// Next unwatched: the first episode of the known list without a mark (marks can have gaps), for a
+// season neither watched nor skipped; nothing when the list is unknown, empty or fully marked. It
+// names an unmarked episode, not one that has aired.
+function nextUnwatchedText(r) {
+  if (!isEpisodeTrackable(r) || r.watched || r.skipped) return '';
+  const eps = knownEpisodeList(r), marks = marksOf(r.id);
+  const next = eps && eps.find(e => !marks.has(e.id));
+  if (!next) return '';
+  const name = episodeTitlesShown() ? next.name.trim() : '';
+  return `Next unwatched: E${next.number}${name ? ` — ${name}` : ''}`;
+}
+// Shown wherever a season's progress is: the progress text, then the next-unwatched line beside it.
 function episodeProgressHtml(r) {
   const text = episodeProgressText(r);
-  return text ? ` <span class="ep-progress">${esc(text)}</span>` : '';
+  if (!text) return '';
+  const next = nextUnwatchedText(r);
+  return ` <span class="ep-progress">${esc(text)}</span>${next ? ` <span class="ep-next">${esc(next)}</span>` : ''}`;
 }
 
 // ── The open list ──
@@ -193,7 +223,7 @@ async function loadEpisodeList(row) {
   // Mark watched through: the first episode not marked yet, else the last; kept until changed.
   const marks = marksOf(row.id), first = episodes.find(e => !marks.has(e.id)) || episodes[episodes.length - 1];
   episodePanel.throughId = first ? first.id : null;
-  noteEpisodeList(row.tmdb_id, row.season_number, episodes.map(e => e.id));
+  noteEpisodeList(row.tmdb_id, row.season_number, episodes);
   renderTable();
 }
 
