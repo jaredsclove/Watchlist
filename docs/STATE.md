@@ -40,8 +40,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   has ids only, so its line appears after the list is opened once. Show-level Watching is unchanged; nothing completes a season automatically (a fully checked list offers
   Mark season watched); a watched or skipped season's episodes are locked and its marks kept. The same
   controls are in collections; the flat Seasons lists show progress only; Coming Soon has no episode list.
-- **TMDB show ratings (item 2, first part):** a TMDB-matched show's score sits with its categories in show rows and
-  cards (Currently Watching, All TV, collections) as the number alone, "8.2" ("8.2*" under 100 votes), coloured by
+- **TMDB show ratings (item 2, first part):** a TMDB-matched show's score sits directly after its title (since PR #20;
+  its explanation on a line below, PR #21) in show rows and cards (Currently Watching, All TV, collections) as the
+  number alone, slightly smaller than the title, "8.2" ("8.2*" under 100 votes), coloured by
   the rounded score (8.0+, 7.0–7.9, below 7.0); blank under 10 votes or without a score or count. Tap or keyboard
   focus shows "TMDB: 8.2 out of 10 · N votes" (also the accessible label). Scores are a per-device, per-account cache
   (`show-ratings.js`; not library data or backups), filled from show details other paths read (Refresh shows, Add
@@ -89,9 +90,25 @@ GitHub `main` is the source of truth; check it with `git ls-remote origin main` 
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
-TMDB show ratings [#18].
+TMDB show ratings [#18], rating beside the title [#20] and [#21].
 
-- **App release:** `acc8262`, TMDB show ratings and Settings Credits (PR #18; commits `3a1026c` and `acc8262`, the
+- **App release:** `8baebb1`, the show rating directly after the title (PR #20, `4d850b5`, and its correction PR
+  #21, `8baebb1`, which keeps the score beside the title when its explanation opens), released 2026-10-22 UTC
+  (interface only; no database, backup or saved-data change; fetching, cache and Credits unchanged). Before release:
+  offline 1238/1238, and local browser checks with synthetic data and every explanation open (desktop rows and a
+  collection; 375 and 300 px Currently Watching and All TV with a long title: score beside the title or on the
+  next line when a long title fills it, explanation below inside the row or card, no overlap with the expand button
+  or season line, 44 × 44 targets, no overflow; a real tap doesn't expand). Verified after deployment (read-only):
+  Pages built `8baebb1` and serves `20261022-rnote` on all 28 versioned files, all 34 application files
+  byte-identical; after a hard reload (Pages caches `watchlist.html` for 10 minutes) both scored shows' scores sit 6
+  px after their titles on the same line, not with the categories; a click opened the explanation below without
+  expanding, the score stayed beside the title, keyboard focus showed it; in same-origin frames at 375 and 300 px
+  every score was beside its title, 44 × 44, explanations inside the cards, no overlap or overflow; no console errors.
+  Expanding one more TMDB-matched show (during #20's check) sent one TMDB show read and nothing else; no writes were
+  sent and Refresh shows wasn't run. #20 alone was live briefly: its open explanation moved the score to a new line
+  on desktop rows (fixed by #21). Limits: a very long desktop title puts the score on the next line; not observed
+  live: an asterisked, amber or red score.
+- **Earlier release:** `acc8262`, TMDB show ratings and Settings Credits (PR #18; commits `3a1026c` and `acc8262`, the
   branch's two commits rebased, same tree), released 2026-10-22 UTC (interface and device storage only; no database,
   backup or saved-data change). Before release: offline 1238/1238, and local browser checks with synthetic data at
   desktop, 375 and 300 px (one read per expanded show, no writes, the tap and keyboard explanation, 44 px targets, no
@@ -103,7 +120,7 @@ TMDB show ratings [#18].
   Not observed live: an asterisked, amber or red score, a failed read, and the phone layout. Limits: scores appear
   only after a show is expanded (or after Refresh shows, Add season, a preview or Match) on each device; a tab already
   open doesn't see scores another tab cached.
-- **Earlier release:** `2299166`, film-collection suggestions (PR #16; commits `dd585c4` and `2299166`, the branch's
+- **Before that:** `2299166`, film-collection suggestions (PR #16; commits `dd585c4` and `2299166`, the branch's
   two commits rebased, same tree), released 2026-10-22 UTC (interface only; no database, backup or saved-data
   change). Before release: offline 1220/1220, and local browser checks with synthetic data only: every menu state
   with real clicks (the menu stays open, focus kept), Refresh collections finding a film added later, the add-screen
@@ -148,6 +165,7 @@ TMDB show ratings [#18].
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - Rating beside the title: no saved-data effect; a code revert of `8baebb1` and `4d850b5`, newest first.
   - TMDB show ratings: no database or saved-data effect; a code revert of `acc8262` and `3a1026c`, newest first
     (the device cache key is then ignored).
   - Film-collection suggestions: no database or saved-data effect; a code revert of `2299166` and `dd585c4`,
@@ -176,6 +194,8 @@ TMDB show ratings [#18].
 [#14]: https://github.com/jaredsclove/Watchlist/pull/14
 [#16]: https://github.com/jaredsclove/Watchlist/pull/16
 [#18]: https://github.com/jaredsclove/Watchlist/pull/18
+[#20]: https://github.com/jaredsclove/Watchlist/pull/20
+[#21]: https://github.com/jaredsclove/Watchlist/pull/21
 
 ## How we work
 
