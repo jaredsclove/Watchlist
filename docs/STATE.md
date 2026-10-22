@@ -21,6 +21,12 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   collection with Undo; Add to <collection>…, S5), Settings (Manage collections and watch-with
   choices, Catalog updates, Backup & Restore). ⬇ Backup is also in the header. Since S6 every view
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
+- **Film collections (TMDB):** a film TMDB places in a collection keeps that identity. Its ⋯ menu offers Check
+  collection while the collection's contents are unknown on this page, then Pull rest only when another film can be
+  added, "All collection films are already in your library." when none can, nothing for a collection of one, or a
+  failed check with Retry. The + Add screen checks the selected film's collection once and shows the same states as
+  a note. The lookup is page memory only and every fetch replaces it (Check collection, Pull rest, Refresh
+  collections), so a film TMDB adds later is found on the next check or page load.
 - **Episode progress (EP1, EP2, EP3):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
   one open at a time) with a checkbox per episode and one "Mark watched through [Episode N ▾] [Apply]" control above
   it (marks only the unmarked episodes up to N; starts on the first unmarked, keeps the choice). Titles are hidden
@@ -63,7 +69,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261021-ep3`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261022-coll`). The tests
 check only that all 27 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
@@ -73,19 +79,24 @@ Pages serves files with `max-age=600`; a deployed change can take about 10 minut
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
-admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14].
+admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16].
 
-- **App release:** `f01f0fa`, EP3 "Next unwatched" line (PR #14; the branch commit `69851e2` rebased, same tree),
-  released 2026-10-22 UTC (interface and device storage only; no database, backup or saved-data change).
-  Before release: offline 1211/1211 and a local browser check with synthetic data only (gaps in marks, the line
-  moving after a mark, titles on and off through Settings, Currently Watching / All TV / a collection, phone cards
-  at 375 and 300 px). Verified after deployment (read-only): Pages built `f01f0fa` and serves `20261021-ep3` on all
-  27 versioned files, each (and `config.js` and `watchlist.html`) byte-identical to the commit; the signed-in page
-  loads in phase `contracted-ep1` with the new code and no console errors, and sent no writes. Limits: the library
-  had no episode marks at the check, so no progress or next-unwatched line could appear and the line's rendering on
-  the live site is unverified (no marks were made for testing); that browser's cached lists predate EP3 (ids only);
-  no screen reader or separate light-mode check.
-- **Previous app releases:** `b7c698a`, EP2 episode-list controls (PR #12, 2026-10-21; interface and device storage
+- **App release:** `2299166`, film-collection suggestions (PR #16; commits `dd585c4` and `2299166`, the branch's
+  two commits rebased, same tree), released 2026-10-22 UTC (interface only; no database, backup or saved-data
+  change). Before release: offline 1220/1220, and local browser checks with synthetic data only: every menu state
+  with real clicks (the menu stays open, focus kept), Refresh collections finding a film added later, the add-screen
+  notes, and at 375 and 300 px a long collection name, a failed check and its Retry (fits, no overflow; the add
+  screen's Retry was made 44 × 44 px on phones). Verified after deployment (read-only): Pages built `2299166` and
+  serves `20261022-coll` on all 27 versioned files, each (and `config.js` and `watchlist.html`) byte-identical to
+  the commit; the signed-in All Movies page loads in phase `contracted-ep1` with no console errors; every film's
+  menu offered Check collection and none offered Pull rest before a check; one film in a one-film TMDB collection
+  was checked live (a TMDB read) and then showed nothing, with the menu still open; no writes were sent. Not
+  observed live: Pull rest after a check, "All collection films are already in your library.", a failed check,
+  and the add-screen notes (no film was searched or added). Limits: "already in your library" uses the movie tools'
+  title-or-TMDB-id matching; the menu checks only when asked.
+- **Previous app releases:** `f01f0fa`, EP3 "Next unwatched" line (PR #14, 2026-10-22 UTC; interface and device
+  storage only): verified deployed read-only; the line itself wasn't seen live (no episode marks at the check).
+  `b7c698a`, EP2 episode-list controls (PR #12, 2026-10-21; interface and device storage
   only): verified deployed, with the owner's phone checks and an owner-operated write smoke test. `45f12d9`, EP1
   episode progress (PR #9, 2026-10-21): `db/ep1_episode_marks.sql` applied once, original tables preserved in the
   first format-6 backup, signed-out access refused, a desktop mark / clear smoke test. Each PR holds the details.
@@ -115,6 +126,8 @@ admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unw
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - Film-collection suggestions: no database or saved-data effect; a code revert of `2299166` and `dd585c4`,
+    newest first.
   - EP3: no database or saved-data effect; a code revert of `f01f0fa` (the cache's numbers and titles are then
     ignored).
   - EP2: no database or saved-data effect beyond the marks an owner sets with it; a code revert of `b7c698a`
@@ -137,6 +150,7 @@ admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unw
 [#11]: https://github.com/jaredsclove/Watchlist/pull/11
 [#12]: https://github.com/jaredsclove/Watchlist/pull/12
 [#14]: https://github.com/jaredsclove/Watchlist/pull/14
+[#16]: https://github.com/jaredsclove/Watchlist/pull/16
 
 ## How we work
 
