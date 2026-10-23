@@ -353,7 +353,7 @@ async function cuEditorPreview() {
         });
       } else if (r.type === 'platform_premiere' && r.platform_tmdb_network_id) {
         const d = await tmdbFetch(`/discover/tv?with_networks=${Number(r.platform_tmdb_network_id)}&sort_by=first_air_date.desc`);
-        (d && d.results || []).slice(0, 10).forEach(c => lines.push({ text: `May qualify (premiere region to confirm): ${c.name}${c.first_air_date ? ` (${c.first_air_date.slice(0, 4)})` : ''}` }));
+        (d && d.results || []).slice(0, 10).forEach(c => lines.push({ text: `Candidate (research must confirm a ${r.region || 'regional'} ${r.platform || 'platform'} premiere): ${c.name}${c.first_air_date ? ` (${c.first_air_date.slice(0, 4)})` : ''}` }));
       } else if (r.type === 'franchise' && r.root_title) {
         for (const t of [r.root_title, ...(r.title_roots || [])].slice(0, 5)) {
           const d = await tmdbFetch(`/search/tv?query=${encodeURIComponent(t)}`);

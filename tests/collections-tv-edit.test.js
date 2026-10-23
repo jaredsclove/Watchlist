@@ -517,7 +517,7 @@ test('G3 F14 the earlier-seasons sentence is kept; not the last season: no last-
   await openTC(app);
   app.dialogAnswer = 'cancel';
   await app.ctx.delRow(L.gap.rows[0].id); await settle();
-  assert.strictEqual(app.dialogs[0].text, 'Delete “Gap · Season 1” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in. The earlier-seasons choice for “Gap” ends too. To keep it but take the show out of True Crime / Docs only, use Remove show from True Crime / Docs instead.');
+  assert.strictEqual(app.dialogs[0].text, 'Delete “Gap · Season 1” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in. While TMDB still lists this season, Refresh shows will add it again. To keep it without it counting as something to watch, use Skip instead. The earlier-seasons choice for “Gap” ends too. To keep it but take the show out of True Crime / Docs only, use Remove show from True Crime / Docs instead.');
 });
 for (const [label, act] of [
   ['the view changed', app => app.ctx.switchView('alltv')],
@@ -575,7 +575,7 @@ test('G5 D6-a All TV season ×: the dialog and wording; D6-c All Movies film ×;
   await app.ctx.delRow('f-own'); await settle();
   await app.ctx.delRow('f-cat'); await settle();
   assert.deepStrictEqual(app.dialogs.map(d => [d.text, d.confirmLabel]), [
-    ['Delete “Gap · Season 1” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in.', 'Delete from library'],
+    ['Delete “Gap · Season 1” from your library? It is removed everywhere: All TV, Currently Watching and every collection it’s in. While TMDB still lists this season, Refresh shows will add it again. To keep it without it counting as something to watch, use Skip instead.', 'Delete from library'],
     ['Delete “Own Film” from your library? It is removed everywhere: All Movies and every collection it’s in.', 'Delete from library'],
     [`Skip “${fdef.t}”? It’s part of a built-in catalog, so it is marked Skipped rather than deleted. This also clears Watched.`, 'Skip film']]);
   assert.ok(app.dialogs.every(d => !/\bremove\b|membership/i.test(d.text)), 'no Remove and no membership in any dialog');
