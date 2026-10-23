@@ -18,7 +18,7 @@ page's own code.
    The owner confirms that this id is the account to restore into, and that it is a member
    (`select * from private.library_members where user_id = '<id>';`).
 3. **Take a fresh safety backup.** `node tools/admin-restore.mjs export-sql --owner <id>` (add `--format 6` on an
-   EP1 database) prints a
+   EP1 database; the SQL refuses to run if the database writes another format, and so does step 5's) prints a
    read-only query that runs as that member, all in one snapshot. Run it, save the single value as `safety.json`.
    It refuses (no value) if the account is not a member at that moment: a non-member reads no rows, and an
    empty file must never stand in for their library.

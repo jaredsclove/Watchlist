@@ -54,6 +54,11 @@ const P = expr => vm.runInContext(expr, page);
 const FORMATS = [6, 7];
 const exportFormat = () => { const v = opt('--format') == null ? 7 : Number(opt('--format')); if (!FORMATS.includes(v)) die('--format 7 (CU1) or 6 (EP1)'); return v; };
 const specOf = v => P(`backupSpec(${v})`);
+// The database names the format it writes: an export or restore for another format stops before anything runs
+// (a format-6 export of a CU1 database would silently leave out collection updates' tables).
+const FORMAT_GUARD = (v, what) => `if (public.stage5_capabilities() ->> 'backup_format') is distinct from '${v}' then
+    raise exception '${what}: this database writes backup format %, not ${v}; nothing was done', public.stage5_capabilities() ->> 'backup_format';
+  end if;`;
 const arr = x => Array.from(x || []);
 
 function readDoc(file) {
@@ -83,6 +88,7 @@ select set_config('request.jwt.claims', json_build_object('sub', '${owner}', 'ro
 set local role authenticated;
 do $$ begin
   if not private.is_member() then raise exception 'export: ${owner} is not a member now; a non-member reads no rows, so no backup was made'; end if;
+  ${FORMAT_GUARD(exportFormat(), 'export')}
 end $$;
 ${DOC(exportFormat())}
 rollback;`);
@@ -96,6 +102,7 @@ begin isolation level repeatable read read only;
 do $$ begin
   if current_user <> 'postgres' then raise exception 'export: run as postgres (the SQL Editor role)'; end if;
   if not exists (select 1 from auth.users where id = '${user}') then raise exception 'export: no Auth user ${user}'; end if;
+  ${FORMAT_GUARD(exportFormat(), 'export')}
 end $$;
 ${DOC(exportFormat(), where)}
 rollback;`);
@@ -178,6 +185,7 @@ do $$ begin
   if to_regclass('private.library_members') is null or not exists (select 1 from private.library_members where user_id = '${owner}') then
     raise exception 'admin restore: ${owner} is not a library member; nothing was changed';
   end if;
+  ${FORMAT_GUARD(f.doc.formatVersion, 'admin restore')}
 end $$;
 select set_config('request.jwt.claims', json_build_object('sub', '${owner}', 'role', 'authenticated')::text, true);
 set local role authenticated;
