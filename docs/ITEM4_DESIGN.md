@@ -174,6 +174,17 @@ Each function verifies before returning that the show's status, priority and End
   delete dialog says this for a matched season that isn't the show's last; deleting the last season deletes the
   show, which Refresh then no longer checks. An unmatched season isn't re-added.
 
+### 4.2 Page-side reads and reports (validation pass)
+
+- **Episode lists.** Refresh shows reads TMDB's documented season details (`/tv/{id}/season/{n}`), one request per
+  season, only for a stored season not watched or skipped whose cached list doesn't match the episode count in the
+  show details; other seasons keep that count. It doesn't rely on appending seasons to the show request, which the
+  TMDB documentation doesn't describe.
+- **Import coverage.** The import rebuilds the checks the brief asked for (records and memberships that existed at
+  export, with the brief's rules) and lists any the file's coverage doesn't report, alongside failed and
+  unsupported checks; the summary gives the reported and completed counts and how many findings were already
+  applied or decided (left as they are).
+
 ## 5. Backup format 7
 
 - Tables: format 6's nine plus the ten above (nineteen), no `user_id`.
