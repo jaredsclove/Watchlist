@@ -478,8 +478,10 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
     library_cu_save_hold({ p_hold }) {
       requireOn('library_cu_save_hold');
       holdShapeCheck(p_hold);
+      // As private.cu1_insert_hold stores them: subject_label nullif(btrim), decision btrim, protected_value as given.
       const h = { id: id(), kind: p_hold.kind, collection_id: p_hold.collection_id || null, show_id: p_hold.show_id || null, item_id: p_hold.item_id || null,
-        subject_label: p_hold.subject_label || null, field: p_hold.field || null, protected_value: p_hold.protected_value || null, decision: p_hold.decision,
+        subject_label: p_hold.subject_label && String(p_hold.subject_label).trim() ? String(p_hold.subject_label).trim() : null, field: p_hold.field || null,
+        protected_value: p_hold.protected_value === undefined ? null : p_hold.protected_value, decision: String(p_hold.decision).trim(),
         effect: p_hold.effect, reopen: clone(p_hold.reopen), decided_on: p_hold.decided_on || null, created_at: now() };
       T('update_holds').push(h);
       return clone(h);
@@ -495,7 +497,7 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
       if (HOLD_KEYS.some(k => jsonbText(h[k] === undefined ? null : h[k]) !== jsonbText(p_expected[k] === undefined ? null : p_expected[k]))) changed();
       holdShapeCheck(p_hold);
       Object.assign(h, { kind: p_hold.kind, collection_id: p_hold.collection_id || null, show_id: p_hold.show_id || null, item_id: p_hold.item_id || null,
-        subject_label: p_hold.subject_label ? String(p_hold.subject_label).trim() : null, field: p_hold.field || null, protected_value: p_hold.protected_value == null ? null : p_hold.protected_value,
+        subject_label: p_hold.subject_label && String(p_hold.subject_label).trim() ? String(p_hold.subject_label).trim() : null, field: p_hold.field || null, protected_value: p_hold.protected_value === undefined ? null : p_hold.protected_value,
         decision: String(p_hold.decision).trim(), effect: p_hold.effect, reopen: clone(p_hold.reopen), decided_on: p_hold.decided_on || null });
       return clone(h);
     },

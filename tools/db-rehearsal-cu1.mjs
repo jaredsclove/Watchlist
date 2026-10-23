@@ -569,6 +569,7 @@ section('hold: the hold editor’s shapes, as the page builds them');
     { kind: 'standing_decision', collection_id: null, decision: 'A film', decided_on: null, reopen: { on: 'new_evidence' }, item_id: film.id, effect: 'require_qualifying_evidence' },
     { kind: 'protected_value', collection_id: null, decision: 'Season date', decided_on: null, reopen: { on: 'new_evidence' }, item_id: seasons[0].id, field: 'display_date', protected_value: seasons[0].display_date, effect: 'keep_value' },
     { kind: 'protected_value', collection_id: null, decision: 'Film title', decided_on: null, reopen: { on: 'owner_only' }, item_id: film.id, field: 'title', protected_value: film.title, effect: 'keep_value' },
+    { kind: 'protected_value', collection_id: null, decision: 'Show-wide title', decided_on: null, reopen: { on: 'new_evidence' }, show_id: sh.id, subject_label: null, field: 'title', protected_value: null, effect: 'keep_value' },
     { kind: 'identity_hold', collection_id: null, decision: 'Show matching', decided_on: null, reopen: { on: 'owner_only' }, show_id: sh.id, subject_label: null, effect: 'block_matching' },
     { kind: 'identity_hold', collection_id: null, decision: 'Season mapping', decided_on: null, reopen: { on: 'owner_only' }, show_id: sh.id, subject_label: seasons[0].season, effect: 'block_season_mapping' }];
   const saved = [];

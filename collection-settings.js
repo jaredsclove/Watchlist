@@ -206,7 +206,7 @@ function cuOpenHoldEditor(holdId) {
       decision: h.decision || '', decided_on: h.decided_on || '' };
     if (row && isFilmRow(row)) Object.assign(draft, { target: `film:${row.id}` });
     else if (row && row.show_id) Object.assign(draft, { target: `show:${row.show_id}`, season: row.id, seasonVia: 'item' });
-    else if (h.show_id) Object.assign(draft, { target: `show:${h.show_id}`, season: !h.subject_label ? '' : labelRow ? labelRow.id : 'label', seasonLabel: h.subject_label || '' });
+    else if (h.show_id) Object.assign(draft, { target: `show:${h.show_id}`, season: !h.subject_label ? '' : labelRow && h.kind !== 'protected_value' ? labelRow.id : 'label', seasonLabel: h.subject_label || '' });
     else Object.assign(draft, { target: 'title:', titleLabel: h.subject_label || '' });
   }
   Object.assign(m, { kind: 'hold', message: '', messageError: false, hold: draft, holdEdit: h ? { id: h.id, expected: cuHoldValues(h) } : null });
@@ -238,7 +238,7 @@ function cuHoldPlan(m) {
   const base = { kind: d.kind, collection_id: d.collection_id || null, decision: d.decision.trim(), decided_on: d.decided_on || null };
   const reopen = { on: d.reopen };
   if (d.reopen === 'named_source') {
-    reopen.source_domains = cuList(d.sourceDomains).map(x => x.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, ''));
+    reopen.source_domains = cuList(d.sourceDomains).map(x => x.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''));
     if (d.sourceName.trim()) reopen.source_name = d.sourceName.trim();
   }
   base.reopen = reopen;
@@ -261,9 +261,14 @@ function cuHoldPlan(m) {
   } else if (show) {
     out.subject = `${show.title}${label ? ` · ${label}` : ' (the whole show)'}`;
     if (d.season === 'label' && !label) out.problems.push('Name the season, as it will be labelled (for example “Season 4”).');
-    if (d.kind === 'protected_value') {
-      if (!seasonRow) out.problems.push('Choose a season in your library: a protected value keeps one season’s field as it is now.');
-      else {
+    if (d.kind === 'protected_value' && !seasonRow) {
+      // On the whole show, or a season named by its label: the field is held for every season it matches,
+      // as the setup import writes it (no single current value; an edit keeps whatever value it stored).
+      const keep = was && was.kind === 'protected_value' && was.show_id === show.id && !was.item_id && (was.subject_label || '') === label && was.field === d.field ? was.protected_value : null;
+      out.subject += ` — ${label ? 'its' : 'every season’s'} ${CU_HOLD_FIELDS.find(f => f[0] === d.field)[1].toLowerCase()} kept${keep ? ` as “${keep}”` : ' as it is'}`;
+      out.hold = { ...base, show_id: show.id, subject_label: label || null, field: d.field, protected_value: keep, effect: 'keep_value' };
+    } else if (d.kind === 'protected_value') {
+      {
         const now = d.field === 'title' ? seasonRow.title : d.field === 'season_label' ? seasonRow.season : seasonRow.display_date, value = keptValue(seasonRow.id, now);
         out.subject += ` — ${CU_HOLD_FIELDS.find(f => f[0] === d.field)[1].toLowerCase()} kept as “${value}”${keptNote(value, now)}`;
         out.hold = { ...base, item_id: seasonRow.id, field: d.field, protected_value: value, effect: 'keep_value' };
@@ -272,6 +277,8 @@ function cuHoldPlan(m) {
       out.subject += label ? ' — its season mapping held' : ' — its TMDB matching held';
       out.hold = seasonRow && d.seasonVia === 'item' ? { ...base, item_id: seasonRow.id, effect: 'block_season_mapping' }
         : { ...base, show_id: show.id, subject_label: label || null, effect: label ? 'block_season_mapping' : 'block_matching' };
+      if (was && was.kind === 'identity_hold' && (was.show_id || null) === (out.hold.show_id || null) && (was.item_id || null) === (out.hold.item_id || null)
+        && (was.subject_label || null) === (out.hold.subject_label || null)) out.hold.effect = was.effect;
     } else out.hold = seasonRow && d.seasonVia === 'item' ? { ...base, item_id: seasonRow.id, effect: d.effect }
       : { ...base, show_id: show.id, subject_label: label || null, effect: d.effect };
   } else out.problems.push('Choose what the hold applies to.');
@@ -299,16 +306,16 @@ function cuHoldEditorHtml(m) {
       ${films.length ? `<optgroup label="Films">${films.map(r => opt(`film:${r.id}`, `${r.title}${r.display_date ? ` (${r.display_date})` : ''}`, d.target)).join('')}</optgroup>` : ''}
       ${d.kind === 'standing_decision' ? `<optgroup label="Other">${opt('title:', 'A title not in your library…', d.target)}</optgroup>` : ''}</select></label>
     ${type === 'title' ? `<label class="cu-field">Title (and season, if any) <input type="text" id="cuHoldTitleLabel" maxlength="200" value="${esc(d.titleLabel)}" oninput="cuHoldTyped()"></label>` : ''}
-    ${show ? `<label class="cu-field">Season <select id="cuHoldSeason" onchange="cuModal.hold.seasonVia = 'label'; cuHoldRedraw()">${d.kind === 'protected_value' ? opt('', 'Choose a season…', d.season) : opt('', 'The whole show', d.season)}
+    ${show ? `<label class="cu-field">Season <select id="cuHoldSeason" onchange="cuModal.hold.seasonVia = 'label'; cuHoldRedraw()">${opt('', d.kind === 'protected_value' ? 'The whole show (every season)' : 'The whole show', d.season)}
       ${seasons.map(r => opt(r.id, `${r.season}${r.display_date ? ` · ${r.display_date}` : ''}`, d.season)).join('')}
-      ${d.kind !== 'protected_value' ? opt('label', 'A season not yet in your library…', d.season) : ''}</select></label>
+      ${opt('label', d.kind === 'protected_value' ? 'A season named by its label…' : 'A season not yet in your library…', d.season)}</select></label>
       ${d.season === 'label' ? `<label class="cu-field">Season label <input type="text" id="cuHoldSeasonLabel" maxlength="200" placeholder="Season 4" value="${esc(d.seasonLabel)}" oninput="cuHoldTyped()"></label>` : ''}` : ''}
     ${d.kind === 'protected_value' ? `<label class="cu-field">Field <select id="cuHoldField" onchange="cuHoldRedraw()">${CU_HOLD_FIELDS.filter(f => !(type === 'film' && f[0] === 'season_label')).map(([v, l]) => opt(v, l, d.field)).join('')}</select></label>` : ''}
     ${d.kind === 'standing_decision' ? `<label class="cu-field">Effect <select id="cuHoldEffect">${CU_HOLD_EFFECTS.map(([v, l]) => opt(v, l, d.effect)).join('')}</select></label>` : ''}
     <label class="cu-field">Reopens when <select id="cuHoldReopen" onchange="cuHoldRedraw()">${CU_HOLD_REOPEN.map(v => opt(v, cuReopenText({ on: v, source_name: 'a named source' }), d.reopen)).join('')}</select></label>
     ${d.reopen === 'named_source' ? `<label class="cu-field">The source’s domains (comma-separated) <input type="text" id="cuHoldDomains" value="${esc(d.sourceDomains)}" oninput="cuHoldTyped()"></label>
       <label class="cu-field">The source’s name (optional) <input type="text" id="cuHoldSourceName" maxlength="100" value="${esc(d.sourceName)}"></label>` : ''}
-    <label class="cu-field">Collection (optional) <select id="cuHoldColl">${opt('', 'Any collection', d.collection_id)}${m.colls.filter(c => !c.archived_at).map(c => opt(c.id, c.name, d.collection_id)).join('')}</select></label>
+    <label class="cu-field">Collection (optional) <select id="cuHoldColl">${opt('', 'Any collection', d.collection_id)}${m.colls.filter(c => !c.archived_at || c.id === d.collection_id).map(c => opt(c.id, `${c.name}${c.archived_at ? ' (archived)' : ''}`, d.collection_id)).join('')}</select></label>
     <label class="cu-field">Decision <textarea id="cuHoldDecision" rows="3" maxlength="2000" oninput="cuHoldTyped()">${esc(d.decision)}</textarea></label>
     <label class="cu-field">Decided on <input type="date" id="cuHoldDecided" value="${esc(d.decided_on || '')}"></label>
     <div class="modal-label">This hold applies to</div>
@@ -334,7 +341,7 @@ async function cuSaveHold() {
   if (plan.problems.length || !plan.hold) { m.message = plan.problems[0] || 'Choose what the hold applies to.'; m.messageError = true; cuRenderModal(); return; }
   if (m.holdEdit) {
     const full = Object.fromEntries(CU_HOLD_KEYS.map(k => [k, plan.hold[k] === undefined ? null : plan.hold[k]]));
-    if (JSON.stringify(full) === JSON.stringify(m.holdEdit.expected)) { m.message = 'Nothing to save: the hold is unchanged.'; m.messageError = false; cuRenderModal(); return; }
+    if (jsonCanonical(full) === jsonCanonical(m.holdEdit.expected)) { m.message = 'Nothing to save: the hold is unchanged.'; m.messageError = false; cuRenderModal(); return; }
     const { id, expected } = m.holdEdit;
     await cuDialogWrite('Edit hold', () => sbRpc('library_cu_update_hold', { p_id: id, p_expected: expected, p_hold: plan.hold }));
     if (cuModal !== m) return;
@@ -342,7 +349,7 @@ async function cuSaveHold() {
     // Saved (the stored hold now has these values) or refused as changed meanwhile: back to the list, which shows
     // the outcome and the hold as it is now. Invalid input stays in the form.
     if (!m.messageError || /changed since|no longer/i.test(m.message) || !now) {
-      if (!m.messageError && now && JSON.stringify(cuHoldValues(now)) !== JSON.stringify(full)) { m.message = 'The hold was saved, but the list shows it differently; look at it again.'; m.messageError = true; }
+      if (!m.messageError && now && jsonCanonical(cuHoldValues(now)) !== jsonCanonical(full)) { m.message = 'The hold was saved, but the list shows it differently; look at it again.'; m.messageError = true; }
       m.kind = 'collections'; m.hold = null; m.holdEdit = null; cuRenderModal(); cuShowMessage();
     }
     return;
