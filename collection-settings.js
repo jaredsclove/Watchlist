@@ -144,7 +144,7 @@ function cuCollectionsHtml(m) {
       <div class="cu-item-actions"><button class="btn" onclick="cuOpenEditor('${esc(c.id)}')">Edit updates…</button></div></li>`;
   }).join('');
   const holds = m.st.holds.map(h => `<li class="cu-item"><div class="cu-item-text">${esc(cuHoldSubject(m, h))}</div>
-      <div class="cu-item-why">${esc(h.kind.replace(/_/g, ' '))}: ${esc(h.decision)}${h.reopen ? ` · reopens: ${esc(cuReopenText(h.reopen))}` : ''}</div>
+      <div class="cu-item-why">${esc(h.kind.replace(/_/g, ' '))}${h.kind === 'protected_value' && h.field ? ` (${esc((CU_HOLD_FIELDS.find(f => f[0] === h.field) || [0, h.field])[1].toLowerCase())} kept as “${esc(h.protected_value || '')}”)` : ''}: ${esc(h.decision)}${h.reopen ? ` · reopens: ${esc(cuReopenText(h.reopen))}` : ''}</div>
       <div class="cu-item-actions"><button class="btn" onclick="cuDeleteHold('${esc(h.id)}')">Remove hold</button></div></li>`).join('');
   const skipped = m.lib.shows.filter(s => s.status === 'skipped');
   const followed = skipped.filter(s => (m.st.settings.get(s.id) || {}).follow_when_skipped);
@@ -272,24 +272,33 @@ function cuHoldEditorHtml(m) {
       <optgroup label="Shows">${shows.map(s => opt(`show:${s.id}`, s.title, d.target)).join('')}</optgroup>
       ${films.length ? `<optgroup label="Films">${films.map(r => opt(`film:${r.id}`, `${r.title}${r.display_date ? ` (${r.display_date})` : ''}`, d.target)).join('')}</optgroup>` : ''}
       ${d.kind === 'standing_decision' ? `<optgroup label="Other">${opt('title:', 'A title not in your library…', d.target)}</optgroup>` : ''}</select></label>
-    ${type === 'title' ? `<label class="cu-field">Title (and season, if any) <input type="text" id="cuHoldTitleLabel" maxlength="200" value="${esc(d.titleLabel)}"></label>` : ''}
+    ${type === 'title' ? `<label class="cu-field">Title (and season, if any) <input type="text" id="cuHoldTitleLabel" maxlength="200" value="${esc(d.titleLabel)}" oninput="cuHoldTyped()"></label>` : ''}
     ${show ? `<label class="cu-field">Season <select id="cuHoldSeason" onchange="cuHoldRedraw()">${d.kind === 'protected_value' ? opt('', 'Choose a season…', d.season) : opt('', 'The whole show', d.season)}
       ${seasons.map(r => opt(r.id, `${r.season}${r.display_date ? ` · ${r.display_date}` : ''}`, d.season)).join('')}
       ${d.kind !== 'protected_value' ? opt('label', 'A season not yet in your library…', d.season) : ''}</select></label>
-      ${d.season === 'label' ? `<label class="cu-field">Season label <input type="text" id="cuHoldSeasonLabel" maxlength="200" placeholder="Season 4" value="${esc(d.seasonLabel)}"></label>` : ''}` : ''}
+      ${d.season === 'label' ? `<label class="cu-field">Season label <input type="text" id="cuHoldSeasonLabel" maxlength="200" placeholder="Season 4" value="${esc(d.seasonLabel)}" oninput="cuHoldTyped()"></label>` : ''}` : ''}
     ${d.kind === 'protected_value' ? `<label class="cu-field">Field <select id="cuHoldField" onchange="cuHoldRedraw()">${CU_HOLD_FIELDS.filter(f => !(type === 'film' && f[0] === 'season_label')).map(([v, l]) => opt(v, l, d.field)).join('')}</select></label>` : ''}
     ${d.kind === 'standing_decision' ? `<label class="cu-field">Effect <select id="cuHoldEffect">${CU_HOLD_EFFECTS.map(([v, l]) => opt(v, l, d.effect)).join('')}</select></label>` : ''}
     <label class="cu-field">Reopens when <select id="cuHoldReopen" onchange="cuHoldRedraw()">${CU_HOLD_REOPEN.map(v => opt(v, cuReopenText({ on: v, source_name: 'a named source' }), d.reopen)).join('')}</select></label>
-    ${d.reopen === 'named_source' ? `<label class="cu-field">The source’s domains (comma-separated) <input type="text" id="cuHoldDomains" value="${esc(d.sourceDomains)}"></label>
+    ${d.reopen === 'named_source' ? `<label class="cu-field">The source’s domains (comma-separated) <input type="text" id="cuHoldDomains" value="${esc(d.sourceDomains)}" oninput="cuHoldTyped()"></label>
       <label class="cu-field">The source’s name (optional) <input type="text" id="cuHoldSourceName" maxlength="100" value="${esc(d.sourceName)}"></label>` : ''}
     <label class="cu-field">Collection (optional) <select id="cuHoldColl">${opt('', 'Any collection', d.collection_id)}${m.colls.filter(c => !c.archived_at).map(c => opt(c.id, c.name, d.collection_id)).join('')}</select></label>
-    <label class="cu-field">Decision <textarea id="cuHoldDecision" rows="3" maxlength="2000">${esc(d.decision)}</textarea></label>
+    <label class="cu-field">Decision <textarea id="cuHoldDecision" rows="3" maxlength="2000" oninput="cuHoldTyped()">${esc(d.decision)}</textarea></label>
     <label class="cu-field">Decided on <input type="date" id="cuHoldDecided" value="${esc(d.decided_on || '')}"></label>
     <div class="modal-label">This hold applies to</div>
-    <p class="settings-text cu-hold-subject">${esc(plan.subject || 'Nothing chosen yet.')}</p>
-    ${plan.problems.length ? `<ul class="cu-list">${plan.problems.map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
+    <div id="cuHoldPlan" aria-live="polite">${cuHoldPlanHtml(plan)}</div>
     <p class="settings-text">Saving adds only this hold; no show, season, date, progress or membership changes.</p>
     <div class="modal-actions"><button class="btn btn-accent" onclick="cuSaveHold()">Save hold</button><button class="btn" onclick="cuHoldBack()">Back</button></div>`;
+}
+function cuHoldPlanHtml(plan) {
+  return `<p class="settings-text cu-hold-subject">${esc(plan.subject || 'Nothing chosen yet.')}</p>
+    ${plan.problems.length ? `<ul class="cu-list">${plan.problems.map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}`;
+}
+// Typing updates the summary and what's missing without redrawing the form (focus and caret stay).
+function cuHoldTyped() {
+  cuReadHold();
+  const el = document.getElementById('cuHoldPlan');
+  if (el && cuModal && cuModal.kind === 'hold') el.innerHTML = cuHoldPlanHtml(cuHoldPlan(cuModal));
 }
 async function cuSaveHold() {
   const m = cuModal;

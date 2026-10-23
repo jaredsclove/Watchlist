@@ -915,6 +915,7 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 #cuModalBox input[type="text"], #cuModalBox select, #cuModalBox textarea { max-width: 100%; box-sizing: border-box; }
 #cuModalBox .settings-actions, #cuModalBox .modal-actions { flex-wrap: wrap; }
 #cuModalBox .modal-label { margin-top: 12px; }
+#cuModalBox textarea { font: inherit; width: 100%; box-sizing: border-box; }
 @media (max-width: 700px) {
   .cu-item-actions .btn, .cu-item-actions select, .cu-mode, .cu-rule .ww-option, #cuModalBox .modal-actions .btn,
   #cuModalBox .settings-actions .btn, #cuModalBox select, #cuModalBox input[type="text"] { min-height: 44px; }
