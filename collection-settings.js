@@ -41,9 +41,9 @@ function updateCuSettingsStatus() {
   if (!el) return;
   if (!cuLastState) { el.className = 'settings-status'; el.textContent = 'Review findings shows what waits for your decision.'; return; }
   const gated = !cuLastState.setup && (libraryGovernance.shows.size || libraryGovernance.films.size);
-  const open = cuLastState.open;
+  const open = cuLastState.open, blocked = cuLastState.blocked || 0;
   el.className = `settings-status${gated ? ' warn' : ''}`;
-  el.textContent = `${gated ? 'Automatic updates for catalog shows are paused until the collection setup is imported. ' : ''}${open ? `${open} finding${open === 1 ? '' : 's'} wait${open === 1 ? 's' : ''} for review.` : 'Nothing waits for review.'}`;
+  el.textContent = `${gated ? 'Automatic updates for catalog shows are paused until the collection setup is imported. ' : ''}${open ? `${open} finding${open === 1 ? '' : 's'} wait${open === 1 ? 's' : ''} for your decision.` : 'Nothing waits for your decision.'}${blocked ? ` ${blocked} wait${blocked === 1 ? 's' : ''} for more research (blocked by the evidence standard).` : ''}`;
 }
 
 // ── Files ──

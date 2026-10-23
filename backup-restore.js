@@ -297,7 +297,7 @@ const RESTORE_COLUMNS_V7 = {
   record_aliases: { id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', alias: 'text', match_text: 'text', evidence: 'json', created_at: 'timestamp' },
   membership_removals: { id: 'uuid', collection_id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', removed_at: 'timestamp' },
   show_update_settings: { id: 'uuid', show_id: 'uuid', follow_when_skipped: 'bool', new_season_after_ended_at: 'timestamp?', updated_at: 'timestamp' },
-  research_briefs: { id: 'uuid', exported_at: 'timestamp', collections: 'json' },
+  research_briefs: { id: 'uuid', exported_at: 'timestamp', collections: 'json', checks: 'json' },
   research_imports: { id: 'uuid', brief_id: 'uuid', file_sha256: 'text', imported_at: 'timestamp', counts: 'json' },
   update_findings: { id: 'uuid', fingerprint: 'text', source: 'text', kind: 'text', status: 'text', reason: 'text', collection_id: 'uuid?', show_id: 'uuid?',
     item_id: 'uuid?', season_id: 'uuid?', subject: 'json', proposed: 'json', expected: 'json', evidence: 'json', assessment: 'json', rule_id: 'text?',

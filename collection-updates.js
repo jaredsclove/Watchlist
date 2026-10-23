@@ -11,6 +11,10 @@
 // Page state: cuShowSettings, cuModal (watchlist.html).
 
 const CU_OPEN_STATUSES = ['pending', 'needs_evidence', 'conflict', 'needs_research'];
+// Open findings the evidence standard blocks: nothing in review can apply or add them; only a later research
+// import whose evidence meets the standard reopens them (the database re-checks it on every application).
+const CU_BLOCKED_STATUSES = ['needs_evidence', 'conflict', 'needs_research'];
+const CU_BLOCKED_TEXT = 'Blocked by the evidence standard: they can’t be applied or added from review. A later research import whose evidence meets the standard reopens them; meanwhile you can set them aside (Not now) or dismiss them.';
 const CU_TBA_SORT = '2099-01-01';
 const CU_REASON_TEXT = {
   setup_required: 'automatic updates for catalog shows wait for the collection setup (Settings → Collection updates)',
@@ -94,7 +98,8 @@ async function cuReadState() {
   const definitions = new Map();
   defs.forEach(d => { const c = definitions.get(d.collection_id); if (!c || d.version > c.version) definitions.set(d.collection_id, d); });
   cuPublishShowSettings(settings);
-  cuLastState = { setup: setup.length > 0, open: findings.filter(f => CU_OPEN_STATUSES.includes(f.status)).length };
+  cuLastState = { setup: setup.length > 0, open: findings.filter(f => f.status === 'pending').length,
+    blocked: findings.filter(f => CU_OPEN_STATUSES.includes(f.status) && f.status !== 'pending').length };
   if (typeof updateCuSettingsStatus === 'function') updateCuSettingsStatus(); // Settings' status line, if it is shown
   return { setup: setup[0] || null, definitions, allDefinitions: defs, exclusions, holds, aliases,
     settings: new Map(settings.map(s => [s.show_id, s])), findings, memberships, removals };
@@ -142,13 +147,24 @@ function cuEpisodes(list) {
   const seen = new Set();
   return (Array.isArray(list) ? list : [])
     .filter(e => e && Number.isInteger(e.id) && e.id > 0 && Number.isInteger(e.episode_number) && e.episode_number >= 0 && !seen.has(e.id) && seen.add(e.id))
-    .map(e => ({ id: e.id, number: e.episode_number, name: typeof e.name === 'string' ? e.name : '' }))
+    .map(e => ({ id: e.id, number: e.episode_number, name: typeof e.name === 'string' ? e.name : '',
+      air_date: /^\d{4}-\d{2}-\d{2}$/.test(e.air_date || '') ? e.air_date : null, type: typeof e.episode_type === 'string' ? e.episode_type : null }))
     .sort((a, b) => a.number - b.number || a.id - b.id);
+}
+// Airing lifecycle (owner decision): a season counts as finished only on TMDB's own evidence — the show's status
+// is Ended or Canceled with no next episode scheduled, or the season's cached list ends with an episode TMDB
+// types "finale" that has aired and the next episode isn't in this season. Anything else (upcoming, airing,
+// or no such evidence) is treated as not finished. Viewing progress (Watched, Skipped) never decides this.
+function cuSeasonFinished(details, seasonNumber, cached, today) {
+  const next = details && details.next_episode_to_air && typeof details.next_episode_to_air === 'object' ? details.next_episode_to_air : null;
+  if (/^(ended|canceled|cancelled)$/i.test(String(details && details.status || '')) && !next) return true;
+  const last = cached && cached.last;
+  return !!(last && last.type === 'finale' && cuDate(last.air) && last.air <= today && !(next && next.season_number === seasonNumber));
 }
 
 // ── Results ──
 function cuEmptyResults(source) {
-  return { source, checked: 0, matched: 0, unmatched: 0, skipped: 0, applied: [], review: [], failed: [], setAside: [], episodes: [], unknown: null, laneRefused: null };
+  return { source, checked: 0, matched: 0, unmatched: 0, skipped: 0, applied: [], review: [], blocked: [], failed: [], setAside: [], episodes: [], unknown: null, laneRefused: null };
 }
 function cuResultsHtml(r) {
   const li = items => items.map(x => `<li>${esc(x)}</li>`).join('');
@@ -164,8 +180,9 @@ function cuResultsHtml(r) {
     ${r.unknown ? `<div class="error-banner">⚠️ ${esc(r.unknown)}</div>` : ''}
     ${r.laneRefused ? `<div class="error-banner">⚠️ ${esc(r.laneRefused)}</div>` : ''}
     <h4 class="cu-results-head">Automatic updates (${auto.length})</h4>${auto.length ? `<ul class="cu-list">${li(auto)}</ul>` : '<p class="cu-none">None.</p>'}
-    <h4 class="cu-results-head">Needs review (${r.review.length})</h4>${r.review.length ? `<ul class="cu-list">${li(r.review)}</ul>
+    <h4 class="cu-results-head">Needs your review (${r.review.length})</h4>${r.review.length ? `<ul class="cu-list">${li(r.review)}</ul>
       <div class="settings-actions"><button class="btn" onclick="openCuReview(this)">Review…</button></div>` : '<p class="cu-none">None.</p>'}
+    ${r.blocked.length ? `<h4 class="cu-results-head">Waiting for more research (${r.blocked.length})</h4><p class="cu-none">${esc(CU_BLOCKED_TEXT)}</p><ul class="cu-list">${li(r.blocked)}</ul>` : ''}
     <h4 class="cu-results-head">Couldn’t check or apply (${notChecked.length})</h4>${notChecked.length ? `<ul class="cu-list">${li(notChecked)}</ul>` : '<p class="cu-none">None.</p>'}
   </div>`;
 }
@@ -182,10 +199,10 @@ function cuRecordOutcome(op, res, results) {
       : op.type === 'alias' ? `${op.what}: “${op.alias}” recorded as another title (the title shown is unchanged)`
       : op.what);
   } else if (res.outcome === 'already' || res.outcome === 'not_pending') {
-    if (res.outcome === 'not_pending' && CU_OPEN_STATUSES.includes(res.status)) results.review.push(`${op.what}: ${cuReasonText(res.reason) || 'waits for review'}`);
+    if (res.outcome === 'not_pending' && CU_OPEN_STATUSES.includes(res.status)) (CU_BLOCKED_STATUSES.includes(res.status) ? results.blocked : results.review).push(`${op.what}: ${cuReasonText(res.reason) || 'waits for review'}`);
   } else if (res.outcome === 'policy') {
     if (res.status === 'set_aside' || res.status === 'excluded') results.setAside.push(`${op.what}: not applied — ${why}`);
-    else results.review.push(`${op.what}: ${why}`);
+    else (CU_BLOCKED_STATUSES.includes(res.status) ? results.blocked : results.review).push(`${op.what}: ${why}`);
   }
 }
 
@@ -242,7 +259,7 @@ async function cuRefreshShows() {
   await cuApplyPlan(plan, results, 'Refresh shows');
   const el = document.getElementById('tmdbPreview');
   if (libraryLive(session) && el) el.innerHTML = cuResultsHtml(results);
-  else showNotice(`Refresh shows: ${results.applied.length} automatic update${results.applied.length === 1 ? '' : 's'}, ${results.review.length} to review, ${results.failed.length} couldn’t be checked.`);
+  else showNotice(`Refresh shows: ${results.applied.length} automatic update${results.applied.length === 1 ? '' : 's'}, ${results.review.length} to review, ${results.blocked.length} waiting for more research, ${results.failed.length} couldn’t be checked.`);
   if (libraryLive(session)) libraryLoad(session);
   return results;
 }
@@ -254,19 +271,22 @@ async function cuCheckMatchedShow(show, lib, plan, results) {
   noteShowRating(show.tmdb_id, details); // item 2 (show-ratings.js)
   const seasons = (details.seasons || []).filter(s => s && Number.isInteger(s.season_number) && (tmdbShowSpecials || s.season_number !== 0));
   const rows = lib.rows.filter(r => r.show_id === show.id);
-  // Full episode lists from TMDB's season details (one documented request per season), only for a stored
-  // season still to watch whose cached list doesn't match TMDB's episode count (marks are never touched).
-  const lists = new Map();
+  // Full episode lists from TMDB's season details (one documented request per season) for every stored season of
+  // the show: read on each Refresh while the season isn't finished (cuSeasonFinished); a finished season is read
+  // only when this device has no full list for it or TMDB's count no longer matches it. Marks are never touched.
+  const today = cuToday(), lists = new Map(), cache = readEpisodeListCache();
   for (const s of seasons) {
     const stored = rows.find(r => r.media_type === 'tv' && r.tmdb_id === show.tmdb_id && r.season_number === s.season_number);
-    if (!stored || stored.watched || stored.skipped) continue;
-    const cached = cachedEpisodeList(stored) || {};
-    if (Array.isArray(cached.ids) && Number.isInteger(s.episode_count) && cached.ids.length === s.episode_count) continue;
-    try { const sd = await tmdbFetch(`/tv/${show.tmdb_id}/season/${s.season_number}`); if (sd) lists.set(s.season_number, { sd, before: cached }); }
+    if (!stored) continue;
+    const raw = cache[episodeCacheKey(show.tmdb_id, s.season_number)];
+    const full = !!(raw && Array.isArray(raw.ids));
+    const stale = full && Number.isInteger(s.episode_count) && raw.ids.length !== s.episode_count;
+    if (full && !stale && cuSeasonFinished(details, s.season_number, raw, today)) continue;
+    const before = cachedEpisodeList(stored) || {};
+    try { const sd = await tmdbFetch(`/tv/${show.tmdb_id}/season/${s.season_number}`); if (sd) lists.set(s.season_number, { sd, before }); }
     catch (e) { results.failed.push(`${show.title} · ${stored.season}: TMDB’s episode list didn’t load, so it wasn’t refreshed`); }
   }
   noteSeasonEpisodeCounts(show.tmdb_id, seasons); // the other seasons' counts, from the show details
-  const today = cuToday();
   for (const s of seasons) {
     const got = lists.get(s.season_number), sd = got && got.sd;
     const air = cuDate(s.air_date) || cuDate(sd && sd.air_date);
@@ -413,14 +433,16 @@ function cuReviewHtml() {
     <div class="modal-actions"><button class="btn" onclick="closeCuModal()">Close</button></div>`;
   const open = m.st.findings.filter(f => CU_OPEN_STATUSES.includes(f.status)).sort((a, b) => cmpStr(a.first_seen_at, b.first_seen_at) || cmpStr(a.id, b.id));
   const flagged = m.lib.shows.filter(s => (m.st.settings.get(s.id) || {}).new_season_after_ended_at);
-  const items = open.map(f => `<li class="cu-item" data-finding="${esc(f.id)}">
+  const itemsOf = list => list.map(f => `<li class="cu-item" data-finding="${esc(f.id)}">
       <div class="cu-item-text">${esc(cuFindingSentence(m.lib, f))}</div>
       <div class="cu-item-why">${esc(f.status === 'pending' ? (cuReasonText(f.reason) || 'waits for your decision') : cuReasonText(f.reason) || f.status.replace(/_/g, ' '))}</div>
       ${cuEvidenceHtml(f)}
       <div class="cu-item-actions">${cuReviewActionsHtml(m, f)}</div></li>`).join('');
+  const decide = open.filter(f => f.status === 'pending'), blocked = open.filter(f => f.status !== 'pending');
   return `<div class="modal-title" id="cuTitle">Review collection updates</div>
     ${m.message ? `<div class="${m.messageError ? 'modal-error' : 'banner'}">${esc(m.message)}</div>` : ''}
-    ${open.length ? `<ul class="cu-review-list">${items}</ul>` : '<p class="settings-text">Nothing waits for review.</p>'}
+    ${decide.length ? `<div class="modal-label">Waiting for your decision (${decide.length})</div><ul class="cu-review-list">${itemsOf(decide)}</ul>` : '<p class="settings-text">Nothing waits for your decision.</p>'}
+    ${blocked.length ? `<div class="modal-label">Waiting for more research (${blocked.length})</div><p class="settings-text">${esc(CU_BLOCKED_TEXT)}</p><ul class="cu-review-list">${itemsOf(blocked)}</ul>` : ''}
     ${flagged.length ? `<div class="modal-label">New seasons after Ended</div><ul class="cu-review-list">${flagged.map(s => `<li class="cu-item">${esc(s.title)}
       <button class="btn" onclick="cuClearEndedFlag('${esc(s.id)}')">Clear flag</button></li>`).join('')}</ul>` : ''}
     <div class="modal-actions"><button class="btn" onclick="closeCuModal()">Close</button></div>`;

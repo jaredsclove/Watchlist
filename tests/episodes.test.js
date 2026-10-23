@@ -82,7 +82,7 @@ test('collapsed: against the cached list "N/T watched" counts only listed marks,
   assert.match(text(seasonRow(app, lib.s2)), /In progress · 1\/4 watched · 1 not listed/);
   const cacheKey = userKeyOf('watchlist-episode-lists');
   assert.deepStrictEqual(JSON.parse(storage.getItem(cacheKey))['95396:2'], { ids: [9001, 9002, 9003, 9004], numbers: [1, 2, 3, 4],
-    names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'] }, 'with each episode’s number and title (the next-unwatched line)');
+    names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'], last: { type: null, air: null } }, 'with each episode’s number and title (the next-unwatched line), and the last episode’s type and air date');
   // A count only (Refresh shows / Add season): N/T while the marks are fewer; never a complete-looking T/T.
   storage.setItem(cacheKey, JSON.stringify({ '95396:2': { count: 4 }, '95396:1': { count: 1 } }));
   app.ctx.renderTable();

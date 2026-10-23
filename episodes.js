@@ -98,11 +98,13 @@ function writeEpisodeListCache(cache) {
 }
 const episodeCacheKey = (tmdbId, seasonNumber) => `${tmdbId}:${seasonNumber}`;
 // A loaded list: its episode ids (the exact list the collapsed count is measured against), with each
-// episode's number and title for the next-unwatched line.
+// episode's number and title for the next-unwatched line, and the last episode's TMDB type and air date
+// (Refresh shows' airing-lifecycle check: a finale that has aired).
 function noteEpisodeList(tmdbId, seasonNumber, episodes) {
-  const cache = readEpisodeListCache();
+  const cache = readEpisodeListCache(), last = episodes[episodes.length - 1];
   cache[episodeCacheKey(tmdbId, seasonNumber)] = { ids: episodes.map(e => e.id), numbers: episodes.map(e => e.number),
-    names: episodes.map(e => e.name.trim().slice(0, 200)) };
+    names: episodes.map(e => e.name.trim().slice(0, 200)),
+    ...(last ? { last: { type: typeof last.type === 'string' ? last.type.slice(0, 40) : null, air: last.air_date || null } } : {}) };
   writeEpisodeListCache(cache);
 }
 // A show's seasons from TMDB's show details (Refresh shows, Add season): a count only, kept unless
@@ -216,7 +218,7 @@ async function loadEpisodeList(row) {
   const episodes = (d && Array.isArray(d.episodes) ? d.episodes : [])
     .filter(e => e && Number.isInteger(e.id) && e.id > 0 && Number.isInteger(e.episode_number) && e.episode_number >= 0 && !seen.has(e.id) && seen.add(e.id))
     .map(e => ({ id: e.id, number: e.episode_number, name: typeof e.name === 'string' ? e.name : '',
-      air_date: /^\d{4}-\d{2}-\d{2}$/.test(e.air_date || '') ? e.air_date : null }))
+      air_date: /^\d{4}-\d{2}-\d{2}$/.test(e.air_date || '') ? e.air_date : null, type: typeof e.episode_type === 'string' ? e.episode_type : null }))
     .sort((a, b) => a.number - b.number || a.id - b.id);
   episodePanel.status = 'ready';
   episodePanel.episodes = episodes;

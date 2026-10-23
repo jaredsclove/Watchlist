@@ -356,6 +356,7 @@ create table public.research_briefs (
   user_id uuid not null default private.current_owner_id() references auth.users (id) on delete restrict,
   exported_at timestamptz not null default now(),
   collections jsonb not null constraint research_briefs_collections_check check (jsonb_typeof(collections) = 'array'),
+  checks jsonb not null default '[]' constraint research_briefs_checks_check check (jsonb_typeof(checks) = 'array'),
   constraint research_briefs_pkey primary key (id),
   constraint research_briefs_id_owner_key unique (id, user_id)
 );
@@ -1087,18 +1088,30 @@ end $$;
 
 -- ── Briefs and imports ──
 -- Registers an exported brief: each collection's current definition version and hashes, as the brief
--- carries them (Follow and Discover collections only).
-create function public.library_cu_register_brief(p_id uuid, p_collections jsonb) returns jsonb
+-- carries them (Follow and Discover collections only), and the checks the brief asks for — the page's
+-- record checks as exported (renewal, dates, cancellation) plus one sweep per rule of each Discover
+-- definition — so an import compares its coverage with what was actually asked.
+create function public.library_cu_register_brief(p_id uuid, p_collections jsonb, p_checks jsonb default '[]') returns jsonb
 language plpgsql security invoker set search_path = '' as $$
 declare
   v_owner uuid := private.current_owner_id();
   v_out jsonb := '[]';
+  v_checks jsonb := '[]';
   v_c uuid;
   d public.collection_definitions;
+  r jsonb;
 begin
-  if p_id is null or jsonb_typeof(p_collections) is distinct from 'array' or jsonb_array_length(p_collections) not between 1 and 50 then
+  if p_id is null or jsonb_typeof(p_collections) is distinct from 'array' or jsonb_array_length(p_collections) not between 1 and 50
+     or jsonb_typeof(coalesce(p_checks, '[]')) is distinct from 'array' or jsonb_array_length(coalesce(p_checks, '[]')) > 5000
+     or exists (select 1 from jsonb_array_elements(coalesce(p_checks, '[]')) c
+                where jsonb_typeof(c) is distinct from 'object'
+                   or coalesce(c ->> 'subject', '') !~ '^rec:(show|season|item):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                   or coalesce(c ->> 'check', '') not in ('renewal', 'dates', 'cancellation')
+                   or (c ? 'title' and not private.cu1_str_ok(c -> 'title', 300))
+                   or exists (select 1 from jsonb_object_keys(c) k where k not in ('subject', 'check', 'title'))) then
     raise exception 'invalid_input: brief' using errcode = '22023';
   end if;
+  v_checks := coalesce(p_checks, '[]');
   perform private.lib_write_on();
   for v_c in select (x #>> '{}')::uuid from jsonb_array_elements(p_collections) x loop
     d := private.cu1_current_definition(v_owner, v_c);
@@ -1107,8 +1120,14 @@ begin
     end if;
     v_out := v_out || jsonb_build_object('collection_id', v_c, 'definition_id', d.id, 'definition_version', d.version, 'mode', d.mode,
       'rule_hashes', d.rule_hashes, 'evidence_hash', d.evidence_hash);
+    if d.mode = 'discover' then
+      for r in select x from jsonb_array_elements(d.rules) x loop
+        v_checks := v_checks || jsonb_build_array(jsonb_build_object('subject', 'rule:' || (r ->> 'id'), 'check', 'sweep',
+          'title', coalesce(nullif(r ->> 'label', ''), r ->> 'id')));
+      end loop;
+    end if;
   end loop;
-  insert into public.research_briefs (id, collections) values (p_id, v_out);
+  insert into public.research_briefs (id, collections, checks) values (p_id, v_out, v_checks);
   return jsonb_build_object('id', p_id, 'collections', v_out);
 end $$;
 
@@ -1469,7 +1488,7 @@ language sql immutable set search_path = '' as $$
     'record_aliases', 'id uuid, show_id uuid, item_id uuid, alias text, match_text text, evidence jsonb, created_at timestamptz',
     'membership_removals', 'id uuid, collection_id uuid, show_id uuid, item_id uuid, removed_at timestamptz',
     'show_update_settings', 'id uuid, show_id uuid, follow_when_skipped boolean, new_season_after_ended_at timestamptz, updated_at timestamptz',
-    'research_briefs', 'id uuid, exported_at timestamptz, collections jsonb',
+    'research_briefs', 'id uuid, exported_at timestamptz, collections jsonb, checks jsonb',
     'research_imports', 'id uuid, brief_id uuid, file_sha256 text, imported_at timestamptz, counts jsonb',
     'update_findings', 'id uuid, fingerprint text, source text, kind text, status text, reason text, collection_id uuid, show_id uuid, item_id uuid, season_id uuid, subject jsonb, proposed jsonb, expected jsonb, evidence jsonb, assessment jsonb, rule_id text, definition_version integer, rule_hash text, evidence_hash text, brief_id uuid, first_seen_at timestamptz, last_seen_at timestamptz, decided_at timestamptz, applied_at timestamptz, result jsonb')
 $$;

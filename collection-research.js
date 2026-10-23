@@ -21,43 +21,54 @@ const CU_FINDING_KINDS = ['new_season', 'date', 'alias', 'new_show', 'new_film',
 const CU_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ── 1. The brief ──
+// A collection's shows and films as the brief lists them, each with the checks research must run.
+function cuBriefItems(collectionId, lib, st, today, protectedIds) {
+  const members = st.memberships.filter(m => m.collection_id === collectionId);
+  const items = [];
+  for (const m of members) {
+    if (m.show_id) {
+      const show = lib.showsById.get(m.show_id);
+      if (!show) continue;
+      const following = !!(st.settings.get(show.id) || {}).follow_when_skipped;
+      const skipped = show.status === 'skipped' && !following;
+      const seasons = lib.rows.filter(r => r.show_id === show.id).map(r => {
+        return { ref: `rec:season:${r.id}`, label: r.season, season_number: r.season_number,
+          state: r.tmdb_id != null ? (r.season_number != null ? 'identified' : 'unidentified') : (show.tmdb_id != null ? 'awaiting_tmdb' : 'unidentified'),
+          display_date: r.display_date, date_sort: r.date_sort, watched: !!r.watched, skipped: !!r.skipped, protected: protectedIds.has(r.id),
+          required_checks: skipped ? [] : cuDateChecks(r, today) };
+      });
+      items.push({ ref: `rec:show:${show.id}`, kind: 'show', title: show.title, aliases: cuAliasesOf(st, show.id, null), tmdb_id: show.tmdb_id,
+        status: show.status, ended: !!show.ended, follow_when_skipped: following, network: show.network || null,
+        required_checks: skipped ? [] : ['renewal'], seasons });
+    } else if (m.item_id) {
+      const r = lib.rows.find(x => x.id === m.item_id);
+      if (!r) continue;
+      items.push({ ref: `rec:item:${r.id}`, kind: 'film', title: r.title, aliases: cuAliasesOf(st, null, r.id), tmdb_id: r.tmdb_id,
+        display_date: r.display_date, date_sort: r.date_sort, protected: protectedIds.has(r.id), required_checks: cuDateChecks(r, today) });
+    }
+  }
+  return { members, items };
+}
 async function cuBuildBrief(collectionIds) {
   const [lib, st, colls] = await Promise.all([readLibrary(), cuReadState(), readPersonalCollections()]);
   const briefId = crypto.randomUUID();
   const today = cuToday();
-  // The brief's record (versions and hashes) is the database's; the file carries the same.
-  const reg = await runWrite('Research brief', () => sbRpc('library_cu_register_brief', { p_id: briefId, p_collections: collectionIds }));
-  if (!reg) throw new Error(LANE_BUSY_TEXT(writeLane ? writeLane.label : 'A change'));
   const protectedIds = new Set(st.holds.filter(h => h.kind === 'protected_value' && h.field === 'display_date').map(h => h.item_id).filter(Boolean));
+  const briefItems = new Map(collectionIds.map(id => [id, cuBriefItems(id, lib, st, today, protectedIds)]));
+  // The checks exactly as exported go with the brief's record, so an import compares its coverage with them.
+  const checks = [];
+  briefItems.forEach(({ items }) => items.forEach(i => {
+    i.required_checks.forEach(check => checks.push({ subject: i.ref, check, title: i.title.slice(0, 300) }));
+    (i.seasons || []).forEach(x => x.required_checks.forEach(check => checks.push({ subject: x.ref, check, title: `${i.title} · ${x.label}`.slice(0, 300) })));
+  }));
+  // The brief's record (versions, hashes and checks) is the database's; the file carries the same.
+  const reg = await runWrite('Research brief', () => sbRpc('library_cu_register_brief', { p_id: briefId, p_collections: collectionIds, p_checks: checks }));
+  if (!reg) throw new Error(LANE_BUSY_TEXT(writeLane ? writeLane.label : 'A change'));
   const collections = [];
   for (const rc of reg.collections) {
     const c = colls.find(x => x.id === rc.collection_id) || {};
     const def = st.allDefinitions.find(d => d.id === rc.definition_id) || {};
-    const members = st.memberships.filter(m => m.collection_id === rc.collection_id);
-    const items = [];
-    for (const m of members) {
-      if (m.show_id) {
-        const show = lib.showsById.get(m.show_id);
-        if (!show) continue;
-        const following = !!(st.settings.get(show.id) || {}).follow_when_skipped;
-        const skipped = show.status === 'skipped' && !following;
-        const seasons = lib.rows.filter(r => r.show_id === show.id).map(r => {
-          const tba = /tba/i.test(r.display_date), future = !tba && r.date_sort > today;
-          return { ref: `rec:season:${r.id}`, label: r.season, season_number: r.season_number,
-            state: r.tmdb_id != null ? (r.season_number != null ? 'identified' : 'unidentified') : (show.tmdb_id != null ? 'awaiting_tmdb' : 'unidentified'),
-            display_date: r.display_date, date_sort: r.date_sort, watched: !!r.watched, skipped: !!r.skipped, protected: protectedIds.has(r.id),
-            required_checks: skipped ? [] : cuDateChecks(r, today) };
-        });
-        items.push({ ref: `rec:show:${show.id}`, kind: 'show', title: show.title, aliases: cuAliasesOf(st, show.id, null), tmdb_id: show.tmdb_id,
-          status: show.status, ended: !!show.ended, follow_when_skipped: following, network: show.network || null,
-          required_checks: skipped ? [] : ['renewal'], seasons });
-      } else if (m.item_id) {
-        const r = lib.rows.find(x => x.id === m.item_id);
-        if (!r) continue;
-        items.push({ ref: `rec:item:${r.id}`, kind: 'film', title: r.title, aliases: cuAliasesOf(st, null, r.id), tmdb_id: r.tmdb_id,
-          display_date: r.display_date, date_sort: r.date_sort, protected: protectedIds.has(r.id), required_checks: cuDateChecks(r, today) });
-      }
-    }
+    const { members, items } = briefItems.get(rc.collection_id);
     const holdItems = st.holds.filter(h => h.collection_id === rc.collection_id
       || members.some(m => (h.show_id && h.show_id === m.show_id) || (h.item_id && (h.item_id === m.item_id || lib.rows.some(r => r.id === h.item_id && r.show_id === m.show_id)))));
     collections.push({
@@ -215,28 +226,6 @@ function cuDateChecks(r, today) {
   const tba = /tba/i.test(r.display_date), future = !tba && r.date_sort > today;
   return tba || future ? ['dates', 'cancellation'] : [];
 }
-// The checks a brief asked for, rebuilt from the library as it was at export (records and memberships created
-// by then): each show's renewal, its seasons' and films' dates and cancellations, and a sweep per Discover rule.
-function cuExpectedChecks(brief, lib, st) {
-  const at = brief.exported_at, today = String(at).slice(0, 10), was = x => !x.created_at || x.created_at <= at, out = [];
-  for (const rc of brief.collections || []) {
-    st.memberships.filter(m => m.collection_id === rc.collection_id && was(m)).forEach(m => {
-      if (m.show_id) {
-        const show = lib.showsById.get(m.show_id);
-        if (!show || (show.status === 'skipped' && !(st.settings.get(show.id) || {}).follow_when_skipped)) return;
-        out.push({ subject: `rec:show:${show.id}`, title: show.title, check: 'renewal' });
-        lib.rows.filter(r => r.show_id === show.id && was(r)).forEach(r => cuDateChecks(r, today)
-          .forEach(check => out.push({ subject: `rec:season:${r.id}`, title: `${show.title} · ${r.season}`, check })));
-      } else if (m.item_id) {
-        const r = lib.rows.find(x => x.id === m.item_id);
-        if (r) cuDateChecks(r, today).forEach(check => out.push({ subject: `rec:item:${r.id}`, title: r.title, check }));
-      }
-    });
-    const def = st.allDefinitions.find(d => d.id === rc.definition_id);
-    if (rc.mode === 'discover' && def) (def.rules || []).forEach(r => out.push({ subject: `rule:${r.id}`, title: r.label || r.id, check: 'sweep' }));
-  }
-  return out;
-}
 function cuExcludes(e, subject) {
   const names = [subject.title, ...(subject.aliases || []), ...(subject.working_titles || [])].map(cuNorm).filter(Boolean);
   if (e.tmdb_id && subject.tmdb_id === e.tmdb_id) return true;
@@ -265,7 +254,7 @@ async function cuImportFindings(text) {
   if (ageDays > 14) results.failed.push(`The brief is ${Math.floor(ageDays)} days old; current values were checked again, but consider a fresh brief.`);
   const reported = (doc.coverage || []).filter(c => c && typeof c === 'object');
   results.coverage = { reported: reported.length, checked: reported.filter(c => c.status === 'checked').length,
-    missing: cuExpectedChecks(brief, lib, st).filter(x => !reported.some(c => c.subject === x.subject && c.check === x.check)) };
+    missing: (Array.isArray(brief.checks) ? brief.checks : []).filter(x => x && !reported.some(c => c.subject === x.subject && c.check === x.check)) };
   results.coverage.missing.forEach(x => results.failed.push(`${x.title} (${x.check}): not in the research file’s coverage, so it may not have been checked`));
   reported.forEach(c => {
     if (c.status === 'failed' || c.status === 'unsupported') results.failed.push(`${c.subject_title || c.subject || c.rule_id || 'A check'}${c.check ? ` (${c.check})` : ''}: ${c.status === 'failed' ? 'couldn’t be checked' : 'not supported by the research'}${c.reason ? ` — ${c.reason}` : ''}`);
@@ -286,7 +275,7 @@ async function cuImportFindings(text) {
     if (rec.status !== 'pending') {
       if (rec.status === 'set_aside') results.setAside.push(`${label}: not applied — ${cuReasonText(f.reason)}`);
       else if (rec.status === 'excluded') results.setAside.push(`${label}: not applied — it is excluded`);
-      else if (CU_OPEN_STATUSES.includes(rec.status)) results.review.push(`${cuFindingSentence(lib, f)}: ${cuReasonText(f.reason) || rec.status.replace(/_/g, ' ')}`);
+      else if (CU_OPEN_STATUSES.includes(rec.status)) (CU_BLOCKED_STATUSES.includes(rec.status) ? results.blocked : results.review).push(`${cuFindingSentence(lib, f)}: ${cuReasonText(f.reason) || rec.status.replace(/_/g, ' ')}`);
       else results.unchanged++; // applied, accepted, dismissed or Not now earlier: the finding stands as decided
       continue;
     }

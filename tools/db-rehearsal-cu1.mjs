@@ -25,6 +25,8 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import os from 'os';
+import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 
@@ -183,6 +185,15 @@ if (inject) {
 }
 
 section('CU: the migration');
+// Release step: a fresh format-6 backup before the migration (here: the admin export as A), validated offline.
+const admDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu1rel-'));
+const adminTool = (...args) => { try { return { ok: true, out: execFileSync(process.execPath, [path.join(ROOT, 'tools/admin-restore.mjs'), ...args], { encoding: 'utf8' }) }; }
+  catch (e) { return { ok: false, out: String(e.stdout || '') + String(e.stderr || '') }; } };
+const backupOfRun = r => r.ok ? r.out.map(q => q.rows && q.rows[0] && q.rows[0].backup).find(Boolean) : null;
+const preText = backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', A, '--format', '6').out));
+fs.writeFileSync(path.join(admDir, 'pre.json'), preText || '');
+const preCheck = adminTool('check', '--file', path.join(admDir, 'pre.json'), '--safety', path.join(admDir, 'pre.json'));
+ok(preText && JSON.parse(preText).formatVersion === 6 && preCheck.ok && /OK/.test(preCheck.out), 'release: the pre-migration format-6 backup validates offline', preCheck.out);
 const run = await tryExec(db, preamble('cu1-rehearsal-1') + CU1);
 if (!ok(run.ok, 'db/cu1_collection_updates.sql commits', run.message)) { console.log('\nFAILED: the migration did not commit; stopping'); process.exit(1); }
 const result = String(run.out.map(r => r.rows && r.rows[0] && r.rows[0].result).find(Boolean));
@@ -195,6 +206,19 @@ ok((await val(db, `select public.stage5_capabilities() ->> 'phase'`)) === 'contr
   'the capability: phase contracted-cu1, backup_format 7');
 ok((await val(db, `select string_agg(run_id || '/' || migration, ',' order by run_id) from private.migration_runs`)) === 'cu1-rehearsal-1/cu1,rehearsal-ep1/ep1,rehearsal-m1/m1',
   'the run record holds this run beside M1’s and EP1’s');
+// Release step: the first format-7 backup after the migration, validated offline, and the pre-migration backup
+// converted to format 7 equals it exactly (nothing changed; the ten new tables still empty before the setup import).
+{
+  const postText = backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', A).out));
+  fs.writeFileSync(path.join(admDir, 'post.json'), postText || '');
+  const postCheck = adminTool('check', '--file', path.join(admDir, 'post.json'), '--safety', path.join(admDir, 'post.json'));
+  ok(postText && JSON.parse(postText).formatVersion === 7 && postCheck.ok, 'release: the first post-migration format-7 backup validates offline', postCheck.out);
+  const conv = adminTool('check', '--file', path.join(admDir, 'pre.json'), '--safety', path.join(admDir, 'post.json'), '--out', path.join(admDir, 'pre7.json'));
+  const same7 = conv.ok && adminTool('verify', '--file', path.join(admDir, 'pre7.json'), '--after', path.join(admDir, 'post.json'));
+  ok(conv.ok && same7 && same7.ok && /VERIFIED/.test(same7.out), 'release: the pre-migration backup, converted to format 7, equals the post-migration backup field by field',
+    conv.out + (same7 ? same7.out : ''));
+  fs.rmSync(admDir, { recursive: true, force: true });
+}
 {
   const c0 = JSON.parse(s0.cat), c1 = JSON.parse(s1.cat);
   const after = k => (c1[k] || []).filter(x => !(c0[k] || []).includes(x)), before = k => (c0[k] || []).filter(x => !(c1[k] || []).includes(x));
@@ -387,8 +411,15 @@ section('res: briefs, imports, routing and application');
   const s3 = await showRow(3);
   await call(db, 'org_add_membership', [coll, s3.id, null]);
   const brief = crypto.randomUUID();
-  const reg = await call(db, 'library_cu_register_brief', [brief, [coll]]);
+  const exported = [{ subject: `rec:show:${s3.id}`, check: 'renewal', title: s3.title }];
+  const reg = await call(db, 'library_cu_register_brief', [brief, [coll], exported]);
   ok(reg.collections[0].definition_version === 1, 'the brief records the definition version and hashes');
+  const stored = (await db.query(`select checks from public.research_briefs where id = $1`, [brief])).rows[0].checks;
+  const flat = a => a.map(c => [c.subject, c.check, c.title].join('|')).join(',');
+  ok(flat(stored) === flat(exported.concat([{ subject: 'rule:person', check: 'sweep', title: 'person' }])),
+    'the brief stores the exported record checks and one sweep per Discover rule');
+  const badCheck = await attempt(() => call(db, 'library_cu_register_brief', [crypto.randomUUID(), [coll], [{ subject: 'rec:show:nope', check: 'renewal' }]]));
+  ok(!badCheck.ok && /invalid_input/.test(badCheck.message), 'a malformed exported check refuses the brief');
   const findings = [
     { fingerprint: fp('new_season', 'res-s3-s4'), kind: 'new_season', collection_id: coll, show_id: s3.id, subject: { title: s3.title, season_number: 4 },
       proposed: { display_date: 'TBA', date_sort: '2099-01-01' }, evidence: official(), assessment: assessed(), routed_status: 'pending' },
@@ -422,6 +453,13 @@ section('res: briefs, imports, routing and application');
     'a satisfied show-level hold doesn’t shadow a stricter season-level one (research finding)', JSON.stringify(r9));
   const weak = await tryCall(db, 'library_cu_accept_finding', [fid(['new_show', 'res-weak']), { action: 'create', show: { title: 'ZZ Rehearsal Weak', seasons: [{ season_number: 1, display_date: 'TBA', date_sort: '2099-01-01' }] } }]);
   ok(!weak.ok && /finding_not_pending/.test(weak.message), 'insufficient evidence: can’t be accepted (no override)', weak.message);
+  // The owner's only route back (Not now, then reopen) doesn't bypass the standard: accepting re-checks the evidence.
+  await call(db, 'library_cu_set_finding_status', [fid(['new_show', 'res-weak']), 'needs_evidence', 'not_now', '']);
+  await call(db, 'library_cu_set_finding_status', [fid(['new_show', 'res-weak']), 'not_now', 'pending', '']);
+  const weak2 = await call(db, 'library_cu_accept_finding', [fid(['new_show', 'res-weak']), { action: 'create', show: { title: 'ZZ Rehearsal Weak', seasons: [{ season_number: 1, display_date: 'TBA', date_sort: '2099-01-01' }] } }]);
+  const weakRow = (await db.query(`select status from public.update_findings where id = $1`, [fid(['new_show', 'res-weak'])])).rows[0];
+  const weakShow = (await db.query(`select count(*)::int n from public.tv_shows where title = 'ZZ Rehearsal Weak'`)).rows[0].n;
+  ok(weakRow.status === 'needs_evidence' && weakShow === 0, 'reopened then accepted: still blocked by the evidence standard, nothing created', JSON.stringify(weak2));
   // Overlapping research (a second file, same fingerprint, a new source): no duplicate; status unchanged.
   const brief2 = crypto.randomUUID();
   await call(db, 'library_cu_register_brief', [brief2, [coll]]);
@@ -583,6 +621,44 @@ section('rst: restore_backup format 7');
   // Put A's full state back for the reverse step.
   const back = await tryCall(db, 'restore_backup', [d7, false]);
   ok(back.ok, 'the format-7 backup restores again', back.message);
+}
+
+section('adm: the admin restore runbook at format 7');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu1adm-'));
+  const tool = (...args) => { try { return { ok: true, out: execFileSync(process.execPath, [path.join(ROOT, 'tools/admin-restore.mjs'), ...args], { encoding: 'utf8' }) }; }
+    catch (e) { return { ok: false, out: String(e.stdout || '') + String(e.stderr || '') }; } };
+  const backupOf = r => r.ok ? r.out.map(q => q.rows && q.rows[0] && q.rows[0].backup).find(Boolean) : null;
+  try {
+    const safetyText = backupOf(await tryExec(db, tool('export-sql', '--owner', A).out));
+    const safety = safetyText && JSON.parse(safetyText);
+    ok(safety && safety.formatVersion === 7 && Object.keys(safety.tables).length === 19 && safety.tables.research_briefs.length > 0
+      && safety.tables.research_briefs.every(b => Array.isArray(b.checks)), 'the member export SQL makes a format-7 backup of all nineteen tables, briefs with their checks',
+      safety ? JSON.stringify(Object.keys(safety.tables).length) : 'no export');
+    fs.writeFileSync(path.join(dir, 'safety.json'), safetyText);
+    fs.writeFileSync(path.join(dir, 'file.json'), safetyText);
+    const good = tool('check', '--file', path.join(dir, 'file.json'), '--safety', path.join(dir, 'safety.json'));
+    ok(good.ok && /OK/.test(good.out), 'check: the format-7 export validates against itself (no identity loss)', good.out);
+    // A format-6 file of the same library (the ten tables removed): converted to format 7 as the page converts it.
+    const six = JSON.parse(safetyText);
+    for (const t of NEW_TABLES) { delete six.tables[t]; delete six.rowCounts[t]; }
+    six.formatVersion = 6;
+    fs.writeFileSync(path.join(dir, 'file6.json'), JSON.stringify(six));
+    const conv = tool('check', '--file', path.join(dir, 'file6.json'), '--safety', path.join(dir, 'safety.json'), '--out', path.join(dir, 'conv7.json'));
+    const conv7 = conv.ok && JSON.parse(fs.readFileSync(path.join(dir, 'conv7.json'), 'utf8'));
+    ok(conv.ok && /converted to format 7/.test(conv.out) && conv7.formatVersion === 7 && NEW_TABLES.every(t => Array.isArray(conv7.tables[t]) && !conv7.tables[t].length),
+      'check converts a format-6 file to format 7 (the ten tables empty)', conv.out);
+    const r = await tryExec(db, tool('restore-sql', '--file', path.join(dir, 'file.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'cu1-adm-1').out);
+    ok(r.ok, 'the restore SQL restores the format-7 file as A', r.message);
+    fs.writeFileSync(path.join(dir, 'after.json'), backupOf(await tryExec(db, tool('export-sql', '--owner', A).out)));
+    const ver = tool('verify', '--file', path.join(dir, 'file.json'), '--after', path.join(dir, 'after.json'));
+    ok(ver.ok && /VERIFIED/.test(ver.out), 'verify: the export after the restore equals the file, every table', ver.out);
+    const owner = JSON.parse(backupOf(await tryExec(db, tool('export-owner-sql', '--user', B).out)) || 'null');
+    ok(owner && owner.formatVersion === 7 && owner.tables.tv_shows.length === doc6.tables.tv_shows.length, 'the owner export of B is format 7 with B’s library');
+    // A format-6 safety backup means an EP1 database: a format-7 file is refused for it.
+    const wrong = tool('check', '--file', path.join(dir, 'file.json'), '--safety', path.join(dir, 'file6.json'));
+    ok(!wrong.ok && /format 7 can’t be restored on this database \(formats 3 to 6\)/.test(wrong.out), 'check refuses a format-7 file for an EP1 (format-6) database', wrong.out);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
 section('rev: the test-environment reverse');

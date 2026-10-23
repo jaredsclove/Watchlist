@@ -176,14 +176,25 @@ Each function verifies before returning that the show's status, priority and End
 
 ### 4.2 Page-side reads and reports (validation pass)
 
-- **Episode lists.** Refresh shows reads TMDB's documented season details (`/tv/{id}/season/{n}`), one request per
-  season, only for a stored season not watched or skipped whose cached list doesn't match the episode count in the
-  show details; other seasons keep that count. It doesn't rely on appending seasons to the show request, which the
-  TMDB documentation doesn't describe.
-- **Import coverage.** The import rebuilds the checks the brief asked for (records and memberships that existed at
-  export, with the brief's rules) and lists any the file's coverage doesn't report, alongside failed and
+- **Episode lists (owner decision: airing lifecycle).** Refresh shows reads TMDB's documented season details
+  (`/tv/{id}/season/{n}`) for every stored season of each checked show (Skipped shows only when followed). A
+  season counts as finished only on TMDB's own evidence: the show's `status` is Ended or Canceled with no
+  `next_episode_to_air`, or the season's cached list ends with an episode whose `episode_type` is `finale` and has
+  aired, with the next episode not in that season. A finished season is read only when this device has no full list
+  for it (or TMDB's count no longer matches the cached list); every other season (upcoming, airing, or completion
+  uncertain) is read on each Refresh. Watched and Skipped never decide it; an unchanged count, a past premiere or
+  all listed episodes having aired never establish completion. Opening an episode list always reads TMDB fresh.
+  Show details are read every time, so new seasons and revivals of Ended shows are still found.
+- **Import coverage.** The brief's record stores the checks it exported (`research_briefs.checks`: the record checks
+  the page sent with `library_cu_register_brief`, plus one sweep per rule of each Discover definition, added by the
+  database). The import lists every stored check the file's coverage doesn't report, alongside failed and
   unsupported checks; the summary gives the reported and completed counts and how many findings were already
   applied or decided (left as they are).
+- **Blocked research.** Findings with insufficient evidence, conflicting sources or a changed rule
+  (`needs_evidence`, `conflict`, `needs_research`) are shown apart, as "Waiting for more research", never as waiting
+  for the owner's decision. Review offers only Not now and Dismiss for them. Nothing in review can apply or add them:
+  every applying function re-checks the evidence against the current definition, so even a finding reopened from
+  Not now stays blocked until a later import brings evidence that meets the standard.
 
 ## 5. Backup format 7
 
