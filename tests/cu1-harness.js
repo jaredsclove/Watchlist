@@ -134,6 +134,28 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
     return null;
   }
   const showOf = sid => shows().find(s => s.id === sid);
+  // update_holds' checks and private.cu1_insert_hold's key list (db/cu1_collection_updates.sql).
+  const HOLD_KEYS = ['kind', 'collection_id', 'show_id', 'item_id', 'subject_label', 'field', 'protected_value', 'decision', 'effect', 'reopen', 'decided_on'];
+  const REOPEN_ON = ['official_date_or_window', 'official_or_two_trades', 'named_source', 'renewal_cast_date_cancellation', 'owner_only', 'new_evidence'];
+  const holdShapeCheck = h => {
+    if (!h || typeof h !== 'object' || Array.isArray(h) || Object.keys(h).some(k => !HOLD_KEYS.includes(k))) invalid('hold');
+    const bad = () => invalid('hold check');
+    if (!['standing_decision', 'protected_value', 'identity_hold'].includes(h.kind)) bad();
+    if (h.subject_label != null && (!String(h.subject_label).trim() || String(h.subject_label).length > 200)) bad();
+    if (h.field != null && !['display_date', 'title', 'season_label'].includes(h.field)) bad();
+    if (h.protected_value != null && String(h.protected_value).length > 200) bad();
+    if (!String(h.decision || '').trim() || String(h.decision).length > 2000) bad();
+    const r = h.reopen;
+    if (!r || typeof r !== 'object' || !REOPEN_ON.includes(r.on) || Object.keys(r).some(k => !['on', 'source_domains', 'source_name'].includes(k))
+      || (r.on === 'named_source' && !(Array.isArray(r.source_domains) && r.source_domains.length >= 1 && r.source_domains.length <= 10))) bad();
+    if (!h.show_id && !h.item_id && !h.subject_label) bad();
+    const target = !!(h.show_id || h.item_id);
+    if (h.kind === 'protected_value' ? !(h.field && target && h.effect === 'keep_value')
+      : h.kind === 'identity_hold' ? !(!h.field && target && ['block_matching', 'block_season_mapping'].includes(h.effect))
+      : !(!h.field && ['keep_value', 'do_not_add', 'require_qualifying_evidence', 'stay_skipped_unmatched'].includes(h.effect))) bad();
+    if ((h.show_id && !showOf(h.show_id)) || (h.item_id && !T('watchlist_items').some(r => r.id === h.item_id))
+      || (h.collection_id && !T('personal_collections').some(c => c.id === h.collection_id))) invalid('a hold names a record or collection that isn\'t yours');
+  };
   const newSeasonRow = (s, lbl, num, identified, display, sort, theme) => ({ id: id(), collection: s.collection, item_key: `${s.show_key}|${lbl.toLowerCase()}`, title: s.title,
     season: lbl, theme: theme || '', display_date: display, date_sort: sort, watched: false, status: 'confirmed', created_at: now(), watch_with: [], collections: [],
     tmdb_collection_id: null, tmdb_collection_name: null, media_type: identified ? 'tv' : null, tmdb_id: identified ? s.tmdb_id : null,
@@ -455,6 +477,7 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
     },
     library_cu_save_hold({ p_hold }) {
       requireOn('library_cu_save_hold');
+      holdShapeCheck(p_hold);
       const h = { id: id(), kind: p_hold.kind, collection_id: p_hold.collection_id || null, show_id: p_hold.show_id || null, item_id: p_hold.item_id || null,
         subject_label: p_hold.subject_label || null, field: p_hold.field || null, protected_value: p_hold.protected_value || null, decision: p_hold.decision,
         effect: p_hold.effect, reopen: clone(p_hold.reopen), decided_on: p_hold.decided_on || null, created_at: now() };

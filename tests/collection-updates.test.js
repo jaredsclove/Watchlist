@@ -571,6 +571,8 @@ test('the setup file: resolved against the library, previewed, imported once; af
     holds: [{ in_collection: { catalog_id: 'disney' }, show_title: 'Cat Show', season_label: 'Season 3', kind: 'standing_decision', decision: 'Keep TBA', effect: 'keep_value',
       reopen: { on: 'official_date_or_window' }, decided_on: '2026-09-28' }, { show_title: 'Missing Show', kind: 'identity_hold', decision: 'x', effect: 'block_matching', reopen: { on: 'owner_only' } }] };
   app.ctx.openSettings(null); await settle();
+  await app.ctx.cuReadState(); await settle();
+  assert.match(text(app.el('settingsCuStatus').textContent), /paused until the collection setup is imported/, 'before: paused');
   await app.ctx.cuPreviewSetup(JSON.stringify(setup)); await settle();
   const box = text(app.el('cuModalBox').innerHTML);
   assert.match(box, /Definitions \(1\)[\s\S]*Disney\+ — Discover additions/);
@@ -579,8 +581,36 @@ test('the setup file: resolved against the library, previewed, imported once; af
   await app.ctx.cuConfirmSetup(); await settle();
   assert.match(text(app.el('cuModalBox').innerHTML), /Imported 1 definition, 1 exclusion and 1 hold/);
   assert.strictEqual(app.store.update_setup.length, 1);
+  assert.ok(!/paused/.test(app.el('settingsCuStatus').textContent), 'right after the import the status shows the confirmed setup');
   const t = await refresh(app);
   assert.match(t, /Cat Show · Season 2: added/);
+});
+
+test('the setup status: a confirmed import shows at once even when the next read fails; a refused import leaves it paused', async () => {
+  const cat = showOf({ collection: 'disney', title: 'Cat Show', show_key: 'cat show', tmdb_id: 10 });
+  const setup = { format: 'watchlist-collection-setup', version: 1, collections: [{ match: { catalog_id: 'disney' }, mode: 'follow', summary: 'x', evidence: EVIDENCE, rules: [], exclusions: [] }], holds: [] };
+  const app = await createApp({ rows: [seasonOf(cat, 1)], tvShows: [cat] });
+  app.ctx.openSettings(null); await settle();
+  await app.ctx.cuReadState(); await settle();
+  await app.ctx.cuPreviewSetup(JSON.stringify(setup)); await settle();
+  const real = app.ctx.cuReadState;
+  app.ctx.cuReadState = async () => { throw new Error('read failed'); };
+  await app.ctx.cuConfirmSetup(); await settle();
+  app.ctx.cuReadState = real;
+  assert.strictEqual(app.store.update_setup.length, 1);
+  assert.ok(!/paused/.test(app.el('settingsCuStatus').textContent), 'confirmed, though the follow-up read failed');
+  // A second import is refused by the database: the error is reported and the status isn't changed by it.
+  await app.ctx.cuPreviewSetup(JSON.stringify(setup)); await settle();
+  await app.ctx.cuConfirmSetup(); await settle();
+  assert.match(text(app.el('cuModalBox').innerHTML), /refused|already|definition/i);
+  assert.ok(!/paused/.test(app.el('settingsCuStatus').textContent));
+  const app2 = await createApp({ rows: [seasonOf(cat, 1)], tvShows: [cat] });
+  app2.ctx.openSettings(null); await settle();
+  await app2.ctx.cuReadState(); await settle();
+  await app2.ctx.cuPreviewSetup(JSON.stringify(setup)); await settle();
+  app2.ctx.sbRpc = async () => { const e = new Error('Supabase error 409: refused'); e.status = 409; throw e; };
+  await app2.ctx.cuConfirmSetup(); await settle();
+  assert.match(text(app2.el('settingsCuStatus').textContent), /paused until the collection setup is imported/, 'a failed import: still paused');
 });
 
 test('the definition editor: forms make the rules, the summary reads them back, Confirm saves a new version; exclusions are added and removed', async () => {
@@ -619,6 +649,111 @@ test('Settings: the card is drawn with no request; the status comes from what th
   assert.strictEqual(b.formatVersion, 7);
   for (const t of app.get('CU1_TABLES')) assert.ok(Array.isArray(b.tables[t]), t);
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(b)), []);
+});
+
+// ═══ The hold editor ═════════════════════════════════════════════════════════
+async function holdLibrary() {
+  const a = showOf({ title: 'ZZ Hold Show', show_key: 'zz hold show', tmdb_id: 70 });
+  const b = showOf({ title: 'ZZ Other Show', show_key: 'zz other show', tmdb_id: 71 });
+  const s1 = seasonOf(a, 1, { display_date: 'Jan 1, 2025', date_sort: '2025-01-01' }), s2 = seasonOf(a, 2, { display_date: 'Jan 2, 2026', date_sort: '2026-01-02', watched: true });
+  const film = { id: uuid('5c000000'), collection: 'movies', item_key: 'zz hold film', title: 'ZZ Hold Film', season: 'Film', theme: 'Drama', display_date: 'Mar 1, 2024',
+    date_sort: '2024-03-01', watched: false, status: 'confirmed', created_at: TS, watch_with: [], collections: [], tmdb_collection_id: null, tmdb_collection_name: null,
+    media_type: 'movie', tmdb_id: 7001, season_number: null, skipped: false };
+  const coll = { id: uuid('0c100000'), name: 'ZZ Holds', legacy_source: null, sort_order: 9, archived_at: null, created_at: TS };
+  const imported = { id: uuid('0f6c0000'), kind: 'standing_decision', collection_id: null, show_id: b.id, item_id: null, subject_label: 'Season 3', field: null, protected_value: null,
+    decision: 'Imported: keep TBA', effect: 'keep_value', reopen: { on: 'official_date_or_window' }, decided_on: '2026-09-28', created_at: TS };
+  const app = await createApp({ rows: [s1, s2, seasonOf(b, 1), film], tvShows: [a, b], personalCollections: [coll],
+    memberships: [{ id: uuid('0d100000'), collection_id: coll.id, show_id: a.id, item_id: null, created_at: TS }], cu1: { update_holds: [imported] } });
+  app.ctx.openSettings(null); await settle();
+  await app.ctx.openCuDialog('collections', null); await settle();
+  app.ctx.cuReadHold = () => {};
+  return { app, a, b, s1, s2, film, coll, imported };
+}
+const libraryOf = app => JSON.stringify(['watchlist_items', 'tv_shows', 'collection_memberships', 'episode_marks'].map(t => app.store[t]));
+async function addHold(app, draft) {
+  app.ctx.cuOpenHoldEditor(); await settle();
+  app.run(`Object.assign(cuModal.hold, ${JSON.stringify(draft)})`);
+  app.ctx.cuRenderModal();
+  const shown = text(app.el('cuModalBox').innerHTML);
+  const n = app.store.update_holds.length;
+  await app.ctx.cuSaveHold(); await settle();
+  return { shown, added: app.store.update_holds.length > n ? app.store.update_holds[app.store.update_holds.length - 1] : null, box: text(app.el('cuModalBox').innerHTML) };
+}
+test('hold editor: every supported shape is saved as the setup import writes it, with the subject named before saving; nothing else changes', async () => {
+  const { app, a, s2, film, coll, imported } = await holdLibrary();
+  const lib0 = libraryOf(app), imp0 = JSON.stringify(imported);
+  const pick = h => [h.kind, h.show_id, h.item_id, h.subject_label, h.field, h.protected_value, h.effect, h.reopen.on, h.collection_id];
+  let r = await addHold(app, { kind: 'standing_decision', target: `show:${a.id}`, season: '', effect: 'do_not_add', reopen: 'official_or_two_trades', decision: 'No new seasons on rumours' });
+  assert.match(r.shown, /This hold applies to ZZ Hold Show \(the whole show\)/);
+  assert.deepStrictEqual(pick(r.added), ['standing_decision', a.id, null, null, null, null, 'do_not_add', 'official_or_two_trades', null]);
+  assert.match(r.box, /Collections and rules[\s\S]*Add hold: saved/, 'back on the list with the confirmation');
+  r = await addHold(app, { kind: 'standing_decision', target: `show:${a.id}`, season: 'label', seasonLabel: 'Season 9', effect: 'keep_value', reopen: 'official_date_or_window', decision: 'Keep TBA', collection_id: coll.id });
+  assert.match(r.shown, /ZZ Hold Show · Season 9/);
+  assert.deepStrictEqual(pick(r.added), ['standing_decision', a.id, null, 'Season 9', null, null, 'keep_value', 'official_date_or_window', coll.id]);
+  r = await addHold(app, { kind: 'standing_decision', target: 'title:', titleLabel: 'ZZ Future Series', effect: 'do_not_add', reopen: 'named_source', sourceDomains: 'https://www.Press.Example.org/news, trade-a.example', sourceName: 'Press', decision: 'Only the studio’s word' });
+  assert.match(r.shown, /ZZ Future Series \(not in your library\)/);
+  assert.deepStrictEqual(pick(r.added), ['standing_decision', null, null, 'ZZ Future Series', null, null, 'do_not_add', 'named_source', null]);
+  assert.deepStrictEqual(out(r.added.reopen), { on: 'named_source', source_domains: ['press.example.org', 'trade-a.example'], source_name: 'Press' });
+  r = await addHold(app, { kind: 'protected_value', target: `show:${a.id}`, season: s2.id, field: 'display_date', reopen: 'new_evidence', decision: 'Owner-approved date' });
+  assert.match(r.shown, /ZZ Hold Show · Season 2 — date kept as “Jan 2, 2026”/);
+  assert.deepStrictEqual(pick(r.added), ['protected_value', null, s2.id, null, 'display_date', 'Jan 2, 2026', 'keep_value', 'new_evidence', null]);
+  r = await addHold(app, { kind: 'protected_value', target: `film:${film.id}`, field: 'title', reopen: 'owner_only', decision: 'Keep the title' });
+  assert.match(r.shown, /ZZ Hold Film \(film\) — title kept as “ZZ Hold Film”/);
+  assert.deepStrictEqual(pick(r.added), ['protected_value', null, film.id, null, 'title', 'ZZ Hold Film', 'keep_value', 'owner_only', null]);
+  r = await addHold(app, { kind: 'identity_hold', target: `show:${a.id}`, season: '', reopen: 'owner_only', decision: 'Don’t match automatically' });
+  assert.match(r.shown, /ZZ Hold Show \(the whole show\) — its TMDB matching held/);
+  assert.deepStrictEqual(pick(r.added), ['identity_hold', a.id, null, null, null, null, 'block_matching', 'owner_only', null]);
+  r = await addHold(app, { kind: 'identity_hold', target: `show:${a.id}`, season: s2.id, reopen: 'owner_only', decision: 'Map Season 2 by hand' });
+  assert.match(r.shown, /ZZ Hold Show · Season 2 — its season mapping held/);
+  assert.deepStrictEqual(pick(r.added), ['identity_hold', a.id, null, 'Season 2', null, null, 'block_season_mapping', 'owner_only', null]);
+  assert.strictEqual(app.store.update_holds.length, 8);
+  assert.strictEqual(JSON.stringify(app.store.update_holds.find(h => h.id === imported.id)), imp0, 'the imported hold is untouched');
+  assert.strictEqual(libraryOf(app), lib0, 'no show, season, date, progress or membership changed');
+});
+
+test('hold editor: an incomplete or impossible hold is explained and nothing is sent', async () => {
+  const { app, a, film } = await holdLibrary();
+  const writes = app.writes().length;
+  for (const [draft, why] of [
+    [{ kind: 'protected_value', target: `show:${a.id}`, season: '', field: 'display_date', decision: 'x' }, /Choose a season in your library/],
+    [{ kind: 'identity_hold', target: `film:${film.id}`, decision: 'x' }, /Identity holds are for shows/],
+    [{ kind: 'standing_decision', target: `show:${a.id}`, season: 'label', seasonLabel: ' ', decision: 'x' }, /Name the season/],
+    [{ kind: 'standing_decision', target: `show:${a.id}`, decision: '  ' }, /Write the decision/],
+    [{ kind: 'standing_decision', target: `show:${a.id}`, reopen: 'named_source', sourceDomains: '', decision: 'x' }, /List the source.s domains/],
+    [{ kind: 'protected_value', target: `film:${film.id}`, field: 'season_label', decision: 'x' }, /A film has no season label/],
+    [{ kind: 'standing_decision', target: '', decision: 'x' }, /Choose what the hold applies to/]]) {
+    const r = await addHold(app, draft);
+    assert.ok(!r.added, JSON.stringify(draft));
+    assert.match(r.box, why);
+  }
+  assert.strictEqual(app.writes().length, writes, 'nothing sent');
+});
+
+test('hold editor: Remove refuses a hold that changed since it was shown and says so; the other holds stay', async () => {
+  const { app, imported } = await holdLibrary();
+  app.store.update_holds[0].decision = 'Changed in another tab';
+  await app.ctx.cuDeleteHold(imported.id); await settle();
+  assert.match(text(app.el('cuModalBox').innerHTML), /Collections and rules[\s\S]*changed since the page showed it/);
+  assert.strictEqual(app.store.update_holds.length, 1, 'kept');
+  await app.ctx.cuDeleteHold(imported.id); await settle();
+  assert.strictEqual(app.store.update_holds.length, 0, 'removed once the list showed the current hold');
+  assert.match(text(app.el('cuModalBox').innerHTML), /Remove hold: saved/);
+});
+
+test('hold editor: holds added in the editor survive a format-7 backup and restore unchanged', async () => {
+  const { app, a, s2 } = await holdLibrary();
+  await addHold(app, { kind: 'protected_value', target: `show:${a.id}`, season: s2.id, field: 'display_date', reopen: 'new_evidence', decision: 'Owner-approved date' });
+  await addHold(app, { kind: 'standing_decision', target: 'title:', titleLabel: 'ZZ Future Series', effect: 'do_not_add', reopen: 'named_source', sourceDomains: 'press.example.org', decision: 'Only the studio’s word' });
+  const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+  const holds = JSON.stringify(app.store.update_holds.slice().sort((x, y) => cmp(x.id, y.id)));
+  const b = await app.ctx.buildBackupObject();
+  assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(b)), []);
+  assert.strictEqual(b.tables.update_holds.length, 3);
+  app.store.update_holds.splice(0);
+  const r = await app.run(`runWrite('r', () => sbRpc('restore_backup', { p_backup: ${JSON.stringify(b)}, p_allow_v1_reset: false })).then(() => 'ok', e => String(e.message))`);
+  assert.strictEqual(r, 'ok');
+  const strip = h => { const { created_at, ...rest } = h; return rest; };
+  assert.deepStrictEqual(app.store.update_holds.map(strip).sort((x, y) => cmp(x.id, y.id)), JSON.parse(holds).map(strip));
 });
 
 T.run();
