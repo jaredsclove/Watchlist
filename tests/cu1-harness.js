@@ -377,7 +377,7 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
       const checks = p_checks == null ? [] : p_checks;
       if (!p_id || !Array.isArray(p_collections) || !p_collections.length || !Array.isArray(checks) || checks.length > 5000
         || checks.some(c => !c || typeof c !== 'object' || Array.isArray(c) || !/^rec:(show|season|item):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c.subject || '')
-          || !['renewal', 'dates', 'cancellation'].includes(c.check) || ('title' in c && (typeof c.title !== 'string' || c.title.length > 300))
+          || !['renewal', 'dates', 'cancellation'].includes(c.check) || ('title' in c && (typeof c.title !== 'string' || !c.title.trim() || c.title.length > 300))
           || Object.keys(c).some(k => !['subject', 'check', 'title'].includes(k)))) invalid('brief');
       const sweeps = [];
       const out = p_collections.map(c => {

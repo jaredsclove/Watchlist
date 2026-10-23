@@ -655,6 +655,14 @@ section('adm: the admin restore runbook at format 7');
     ok(ver.ok && /VERIFIED/.test(ver.out), 'verify: the export after the restore equals the file, every table', ver.out);
     const owner = JSON.parse(backupOf(await tryExec(db, tool('export-owner-sql', '--user', B).out)) || 'null');
     ok(owner && owner.formatVersion === 7 && owner.tables.tv_shows.length === doc6.tables.tv_shows.length, 'the owner export of B is format 7 with B’s library');
+    // The database names its format: a format-6 export or restore SQL is refused on the CU1 database.
+    const six6 = await tryExec(db, tool('export-sql', '--owner', A, '--format', '6').out);
+    ok(!six6.ok && /writes backup format 7, not 6/.test(six6.message), 'export-sql --format 6 is refused on a format-7 database', six6.message || 'exported');
+    const own6 = await tryExec(db, tool('export-owner-sql', '--user', B, '--format', '6').out);
+    ok(!own6.ok && /writes backup format 7, not 6/.test(own6.message), 'export-owner-sql --format 6 is refused too', own6.message || 'exported');
+    const before6 = await rows(db);
+    const r6 = await tryExec(db, tool('restore-sql', '--file', path.join(dir, 'file6.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'cu1-adm-6').out);
+    ok(!r6.ok && /writes backup format 7, not 6/.test(r6.message) && same(before6, await rows(db)), 'restore-sql of a format-6 file names the mismatch first; nothing changes', r6.message || 'restored');
     // A format-6 safety backup means an EP1 database: a format-7 file is refused for it.
     const wrong = tool('check', '--file', path.join(dir, 'file.json'), '--safety', path.join(dir, 'file6.json'));
     ok(!wrong.ok && /format 7 can’t be restored on this database \(formats 3 to 6\)/.test(wrong.out), 'check refuses a format-7 file for an EP1 (format-6) database', wrong.out);

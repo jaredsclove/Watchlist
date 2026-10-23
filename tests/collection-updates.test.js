@@ -471,6 +471,8 @@ test('the brief’s checks are validated by the database: a malformed check refu
   const { app, coll } = await researchLibrary();
   const r = await app.run(`runWrite('b', () => sbRpc('library_cu_register_brief', { p_id: crypto.randomUUID(), p_collections: [${JSON.stringify(coll.id)}], p_checks: [{ subject: 'rec:show:nope', check: 'renewal' }] })).then(() => 'ok', e => String(e && (e.message || e.code)))`);
   assert.match(String(r), /invalid_input|brief/);
+  const blank = await app.run(`runWrite('b', () => sbRpc('library_cu_register_brief', { p_id: crypto.randomUUID(), p_collections: [${JSON.stringify(coll.id)}], p_checks: [{ subject: 'rec:show:${'0'.repeat(8)}-0000-4000-8000-${'0'.repeat(12)}', check: 'renewal', title: '  ' }] })).then(() => 'ok', e => String(e && (e.message || e.code)))`);
+  assert.match(String(blank), /invalid_input|brief/, 'a blank title is refused, as the database refuses it');
   assert.strictEqual(app.store.research_briefs.length, 0);
 });
 
