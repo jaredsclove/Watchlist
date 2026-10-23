@@ -408,6 +408,18 @@ section('res: briefs, imports, routing and application');
   const s3rows = await seasonsOf(s3.id);
   ok(ap.result && ap.result.outcome === 'created' && ap.result.identified === false && s3rows.some(r => r.season === 'Season 4' && r.tmdb_id === null && r.display_date === 'TBA'),
     'an official renewal: "Season 4 · TBA" created unidentified (awaiting TMDB)', JSON.stringify(ap));
+  // Shadowing: a show-level "qualifying evidence" hold that this evidence satisfies must not hide a stricter
+  // season-level "do not add" hold (every applicable decision is consulted).
+  await call(db, 'library_cu_save_hold', [{ kind: 'standing_decision', show_id: s3.id, decision: 'Qualifying evidence only', effect: 'require_qualifying_evidence', reopen: { on: 'official_or_two_trades' }, decided_on: '2026-01-01' }]);
+  await call(db, 'library_cu_save_hold', [{ kind: 'standing_decision', show_id: s3.id, subject_label: 'Season 9', decision: 'Do not add Season 9', effect: 'do_not_add', reopen: { on: 'owner_only' }, decided_on: '2026-01-02' }]);
+  const b9 = crypto.randomUUID();
+  await call(db, 'library_cu_register_brief', [b9, [coll]]);
+  const f9 = [{ fingerprint: fp('new_season', 'res-s3-s9'), kind: 'new_season', collection_id: coll, show_id: s3.id, subject: { title: s3.title, season_number: 9 },
+    proposed: { display_date: 'TBA', date_sort: '2099-01-01' }, evidence: official('2026-10-11'), assessment: assessed(), routed_status: 'pending' }];
+  const i9 = await call(db, 'library_cu_record_findings', [b9, sha('s9'), f9]);
+  const r9 = await call(db, 'library_cu_reconcile_season', [s3.id, exp(s3), { season_number: 9 }, { id: i9.findings[0].id }]);
+  ok(r9.status === 'pending' && r9.reason === 'standing_decision' && !(await seasonsOf(s3.id)).some(r => r.season === 'Season 9'),
+    'a satisfied show-level hold doesn’t shadow a stricter season-level one (research finding)', JSON.stringify(r9));
   const weak = await tryCall(db, 'library_cu_accept_finding', [fid(['new_show', 'res-weak']), { action: 'create', show: { title: 'ZZ Rehearsal Weak', seasons: [{ season_number: 1, display_date: 'TBA', date_sort: '2099-01-01' }] } }]);
   ok(!weak.ok && /finding_not_pending/.test(weak.message), 'insufficient evidence: can’t be accepted (no override)', weak.message);
   // Overlapping research (a second file, same fingerprint, a new source): no duplicate; status unchanged.
