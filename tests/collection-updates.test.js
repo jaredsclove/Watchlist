@@ -34,16 +34,14 @@ const seasonOf = (sh, num, o = {}) => ({ id: uuid('5b000000'), collection: sh.co
   display_date: 'Jan 1, 2020', date_sort: '2020-01-01', item_key: `${sh.show_key}|season ${num}`, watch_with: [], collections: [], created_at: TS,
   tmdb_collection_id: null, tmdb_collection_name: null, ...o });
 const memoryStorage = () => { const map = new Map(); return { map, getItem: k => (map.has(k) ? map.get(k) : null), setItem: (k, v) => map.set(k, String(v)), removeItem: k => map.delete(k) }; };
-// TMDB: details by id, appended season lists, searches.
+// TMDB: details by id, season details (episode lists), searches.
 function tmdbOf({ shows = {}, lists = {}, search = {}, fail = () => false } = {}) {
   return p => {
     if (fail(p)) return { __status: 500 };
-    const m = /^\/tv\/(\d+)(\?append_to_response=(.*))?$/.exec(p);
-    if (m) {
-      if (!shows[m[1]]) return undefined;
-      if (!m[2]) return { id: +m[1], networks: [{ id: 1, name: 'Net' }], created_by: [], ...shows[m[1]] };
-      return Object.fromEntries(m[3].split(',').filter(k => lists[`${m[1]}/${k.split('/')[1]}`]).map(k => [k, { episodes: lists[`${m[1]}/${k.split('/')[1]}`] }]));
-    }
+    const m = /^\/tv\/(\d+)$/.exec(p);
+    if (m) return shows[m[1]] ? { id: +m[1], networks: [{ id: 1, name: 'Net' }], created_by: [], ...shows[m[1]] } : undefined;
+    const sn = /^\/tv\/(\d+)\/season\/(\d+)$/.exec(p);
+    if (sn) return lists[`${sn[1]}/${sn[2]}`] ? { season_number: +sn[2], episodes: lists[`${sn[1]}/${sn[2]}`] } : { __status: 404 };
     const s = /^\/search\/tv\?query=(.*)$/.exec(p);
     if (s) return { results: search[decodeURIComponent(s[1])] || [] };
     return undefined;
@@ -129,20 +127,24 @@ test('dates: a TBA season gets TMDB’s date and a future date follows TMDB; an 
   assert.ok(app.store.show_update_settings.some(s => s.show_id === sh.id && s.new_season_after_ended_at));
 });
 
-test('episode lists: every identified season’s full list is fetched (20 per request) and cached on this device; new episodes are reported; marks untouched', async () => {
+test('episode lists: TMDB’s season details are read only for a stored season still to watch whose cached list differs from TMDB’s count; new episodes are reported; marks untouched', async () => {
   const sh = showOf({ title: 'Eps', show_key: 'eps', tmdb_id: 60 });
-  const s1 = seasonOf(sh, 1), s2 = seasonOf(sh, 2, { watched: true });
+  const s1 = seasonOf(sh, 1), s2 = seasonOf(sh, 2, { watched: true }), s3 = seasonOf(sh, 3), s4 = seasonOf(sh, 4, { skipped: true });
   const storage = memoryStorage();
-  const app = await createApp({ rows: [s1, s2], tvShows: [sh], storage, episodeMarks: [{ id: uuid('0e100000'), season_id: s1.id, tmdb_episode_id: 601, episode_number: 1 }],
-    tmdb: tmdbOf({ shows: { 60: { seasons: [{ season_number: 1 }, { season_number: 2 }] } }, lists: { '60/1': EPS(601, 602, 603), '60/2': EPS(611, 612) } }) });
-  // This device had season 1's list with two episodes.
-  app.run(`writeEpisodeListCache({ '60:1': { ids: [601, 602], numbers: [1, 2], names: ['', ''] } })`);
+  const app = await createApp({ rows: [s1, s2, s3, s4], tvShows: [sh], storage, episodeMarks: [{ id: uuid('0e100000'), season_id: s1.id, tmdb_episode_id: 601, episode_number: 1 }],
+    tmdb: tmdbOf({ shows: { 60: { seasons: [{ season_number: 1, episode_count: 3 }, { season_number: 2, episode_count: 2 }, { season_number: 3, episode_count: 2 }, { season_number: 4, episode_count: 5 }] } },
+      lists: { '60/1': EPS(601, 602, 603), '60/2': EPS(611, 612), '60/3': EPS(621, 622) } }) });
+  // This device had season 1's list with two episodes and season 3's complete list.
+  app.run(`writeEpisodeListCache({ '60:1': { ids: [601, 602], numbers: [1, 2], names: ['', ''] }, '60:3': { ids: [621, 622], numbers: [1, 2], names: ['', ''] } })`);
   const t = await refresh(app);
-  assert.ok(app.requests.some(r => r.url.includes('/tv/60?append_to_response=season/1,season/2')), 'one request for both lists');
+  const seasonReads = app.requests.filter(r => /\/tv\/60\/season\//.test(r.url)).map(r => r.url.replace(/^.*\/tv\/60/, '').replace(/\?.*$/, ''));
+  assert.deepStrictEqual(seasonReads, ['/season/1'], 'only season 1: season 2 is watched, season 3’s list matches, season 4 is skipped');
+  assert.ok(!app.requests.some(r => r.url.includes('append_to_response')), 'no appended season requests');
   assert.match(t, /Eps · Season 1: 1 new episode listed \(this device\)/);
   const cache = out(app.get('readEpisodeListCache()'));
   assert.deepStrictEqual(cache['60:1'].ids, [601, 602, 603]);
-  assert.deepStrictEqual(cache['60:2'].ids, [611, 612]);
+  assert.deepStrictEqual(cache['60:2'], { count: 2 }, 'a season not read keeps TMDB’s count');
+  assert.deepStrictEqual(cache['60:3'].ids, [621, 622]);
   assert.strictEqual(app.store.episode_marks.length, 1, 'marks untouched');
 });
 

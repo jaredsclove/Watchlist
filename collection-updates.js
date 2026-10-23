@@ -253,23 +253,26 @@ async function cuCheckMatchedShow(show, lib, plan, results) {
   noteShowRating(show.tmdb_id, details); // item 2 (show-ratings.js)
   const seasons = (details.seasons || []).filter(s => s && Number.isInteger(s.season_number) && (tmdbShowSpecials || s.season_number !== 0));
   const rows = lib.rows.filter(r => r.show_id === show.id);
-  // Full episode lists, up to 20 seasons per request (this device's cache; marks are never touched).
+  // Full episode lists from TMDB's season details (one documented request per season), only for a stored
+  // season still to watch whose cached list doesn't match TMDB's episode count (marks are never touched).
   const lists = new Map();
-  for (let i = 0; i < seasons.length; i += 20) {
-    const batch = seasons.slice(i, i + 20);
-    try {
-      const d = await tmdbFetch(`/tv/${show.tmdb_id}?append_to_response=${batch.map(s => `season/${s.season_number}`).join(',')}`);
-      batch.forEach(s => { const sd = d && d[`season/${s.season_number}`]; if (sd) lists.set(s.season_number, sd); });
-    } catch (e) { results.failed.push(`${show.title}: TMDB’s episode lists didn’t load, so they weren’t refreshed`); }
+  for (const s of seasons) {
+    const stored = rows.find(r => r.media_type === 'tv' && r.tmdb_id === show.tmdb_id && r.season_number === s.season_number);
+    if (!stored || stored.watched || stored.skipped) continue;
+    const cached = cachedEpisodeList(stored) || {};
+    if (Array.isArray(cached.ids) && Number.isInteger(s.episode_count) && cached.ids.length === s.episode_count) continue;
+    try { const sd = await tmdbFetch(`/tv/${show.tmdb_id}/season/${s.season_number}`); if (sd) lists.set(s.season_number, { sd, before: cached }); }
+    catch (e) { results.failed.push(`${show.title} · ${stored.season}: TMDB’s episode list didn’t load, so it wasn’t refreshed`); }
   }
+  noteSeasonEpisodeCounts(show.tmdb_id, seasons); // the other seasons' counts, from the show details
   const today = cuToday();
   for (const s of seasons) {
-    const sd = lists.get(s.season_number);
+    const got = lists.get(s.season_number), sd = got && got.sd;
     const air = cuDate(s.air_date) || cuDate(sd && sd.air_date);
     const stored = rows.find(r => r.media_type === 'tv' && r.tmdb_id === show.tmdb_id && r.season_number === s.season_number);
     if (sd) {
       const episodes = cuEpisodes(sd.episodes);
-      const before = stored ? (cachedEpisodeList(stored) || {}) : {};
+      const before = got.before;
       noteEpisodeList(show.tmdb_id, s.season_number, episodes);
       if (stored && Array.isArray(before.ids)) {
         const added = episodes.filter(e => !before.ids.includes(e.id)).length;
@@ -294,7 +297,7 @@ async function cuCheckMatchedShow(show, lib, plan, results) {
       continue;
     }
     const season = { season_number: s.season_number, display_date: air ? formatDisplayDate(air) : 'TBA', date_sort: air || CU_TBA_SORT,
-      episode_count: Number.isInteger(s.episode_count) ? s.episode_count : (sd ? cuEpisodes(sd.episodes).length : 0) };
+      episode_count: Number.isInteger(s.episode_count) ? s.episode_count : 0 };
     plan.push({ type: 'season', fn: 'library_cu_reconcile_season', what: `${show.title} · ${label}`,
       args: { p_show_id: show.id, p_expected: { tmdb_id: show.tmdb_id, show_key: show.show_key }, p_season: season,
         p_finding: { source: 'tmdb', kind: 'new_season', fingerprint: await cuFingerprint('new_season', ['new_season', show.id, show.tmdb_id, s.season_number]),
