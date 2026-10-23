@@ -887,3 +887,36 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
   .ep-check input { width: 22px; height: 22px; }
   .ep-title, .ep-toggle, .ep-through-select, .ep-through-apply, .settings-check { min-height: 44px; }
 }
+
+/* Item 4: collection updates (results, review, rules and setup dialogs) */
+.state-tag.cu-flag-tag { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
+.cu-results { margin-top: 10px; }
+.cu-coverage { color: var(--text2); font-size: 13px; margin: 0 0 8px; }
+.cu-results-head { font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+.cu-none { color: var(--text3); font-size: 13px; margin: 0; }
+.cu-list { margin: 0; padding: 0 0 0 18px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.cu-review-list { list-style: none; margin: 0 0 12px; padding: 0; }
+.cu-item { padding: 10px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.cu-item:last-child { border-bottom: none; }
+.cu-item-text { font-weight: 600; }
+.cu-item-why { color: var(--text2); font-size: 13px; margin-top: 2px; }
+.cu-evidence { color: var(--text2); font-size: 12px; margin-top: 4px; }
+.cu-evidence a, .cu-results a { color: var(--blue); }
+.cu-item-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.cu-item-actions select, .cu-exclude-kind { max-width: 100%; }
+.cu-rule { min-width: 0; border: 1px solid var(--border2); border-radius: var(--radius); padding: 8px 10px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.cu-rule legend { font-weight: 600; padding: 0 4px; }
+.cu-rule .ww-option, #cuModalBox .ww-option { white-space: normal; max-width: 100%; }
+.cu-field { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--text2); }
+.cu-field input, .cu-field textarea, .cu-field select { max-width: 100%; }
+.cu-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.cu-mode { display: block; font-size: 13px; margin: 4px 0; }
+#cuModalBox { max-height: 88vh; overflow-y: auto; }
+#cuModalBox input[type="text"], #cuModalBox select, #cuModalBox textarea { max-width: 100%; box-sizing: border-box; }
+#cuModalBox .settings-actions { flex-wrap: wrap; }
+@media (max-width: 700px) {
+  .cu-item-actions .btn, .cu-item-actions select, .cu-mode, .cu-rule .ww-option, #cuModalBox .modal-actions .btn,
+  #cuModalBox .settings-actions .btn, #cuModalBox select, #cuModalBox input[type="text"] { min-height: 44px; }
+  #cuModalBox input[type="text"], #cuModalBox select { width: 100%; }
+  .cu-mode { display: flex; align-items: center; gap: 6px; }
+}

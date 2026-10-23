@@ -102,7 +102,7 @@ async function allTv(app) { app.ctx.switchView('alltv'); await settle(); }
 const reached = gate => Promise.race([gate.reached, new Promise((_, no) => setTimeout(() => no(new Error('the held request was never sent')), 3000))]);
 
 // ─── No sources on the page ───────────────────────────────────────────────────
-test('the tab bars hold only the views; Settings offers Catalog updates (S1); no Source filter or storage badge in any view', async () => {
+test('the tab bars hold only the views; Settings offers Collection updates (S1, item 4); no Source filter or storage badge in any view', async () => {
   const app = await boot();
   // B9: Movies has a single view (All Movies), so its secondary row is hidden and empty.
   for (const [media, views, tabs] of [['tv', ['watching', 'alltv', 'comingsoon'], ['watching', 'alltv', 'comingsoon']], ['movie', ['allmovies'], []]]) {
@@ -111,9 +111,10 @@ test('the tab bars hold only the views; Settings offers Catalog updates (S1); no
     assert.deepStrictEqual([...bar.matchAll(/switchView\('([^']+)'\)/g)].map(m => m[1]), tabs);
     assert.strictEqual(app.el('tabBar').hidden, media === 'movie');
     assert.ok(!bar.includes('switchTab(') && !bar.includes('legacy'));
-    assert.ok(!app.el('browseBar').innerHTML.includes('openCatalogChooser('), 'S1: not in the Browse bar');
+    assert.ok(!app.el('browseBar').innerHTML.includes('openCatalogChooser(') && !app.el('browseBar').innerHTML.includes('openCuReview('), 'S1: not in the Browse bar');
     app.ctx.openSettings(null);
-    assert.ok(app.el('settingsScreen').innerHTML.includes('onclick="openCatalogChooser(this)"'), 'S1: Catalog updates is on Settings');
+    assert.ok(app.el('settingsScreen').innerHTML.includes('onclick="openCuReview(this)"') && !app.el('settingsScreen').innerHTML.includes('openCatalogChooser'),
+      'item 4: Collection updates is on Settings; the retired Catalog updates isn’t');
     app.ctx.switchMediaType(media); await settle();
     for (const v of views) {
       app.ctx.switchView(v); await settle();
@@ -127,7 +128,7 @@ test('the tab bars hold only the views; Settings offers Catalog updates (S1); no
   assert.deepStrictEqual(app.writes(), []);
 });
 
-test('opening every view, the + Add panel in each mode and the Catalog updates chooser only reads', async () => {
+test('opening every view, the + Add panel in each mode and the collection-updates dialogs only reads', async () => {
   const app = await boot();
   for (const v of ['watching', 'alltv', 'comingsoon']) {
     app.ctx.switchView(v); await settle();
@@ -135,10 +136,11 @@ test('opening every view, the + Add panel in each mode and the Catalog updates c
   }
   app.ctx.switchMediaType('movie'); await settle();
   for (const m of ['search', 'manual', 'tools']) await openPanel(app, 'movie', m);
-  app.ctx.openCatalogChooser(null); await settle();
-  assert.match(app.el('catalogModalBox').innerHTML, /Disney\+ catalog[\s\S]*90 Day catalog[\s\S]*Sheridan catalog/);
-  assert.match(app.el('catalogModalBox').innerHTML, /entries not in your list yet|Nothing waiting/);
-  app.ctx.closeCatalogChooser(); await settle();
+  for (const open of [() => app.ctx.openCuReview(null), () => app.ctx.openCuDialog('collections', null), () => app.ctx.openCuDialog('brief', null)]) {
+    await open(); await settle();
+    assert.match(app.el('cuModalBox').innerHTML, /Review collection updates|Collections and rules|Download research brief/);
+    app.ctx.closeCuModal(); await settle();
+  }
   assert.deepStrictEqual(app.writes(), [], 'GET only');
 });
 
@@ -160,11 +162,12 @@ test('editing rules and add kinds follow catalog governance (Stage 5): catalog e
   const base = { media_type: null, tmdb_id: null, season_number: null };
   assert.strictEqual(P({ ...base, id: 'r1', show_id: 'gx', item_key: defSeason.k, season: defSeason.s }).deleteEffect, 'skip');
   assert.strictEqual(P({ ...base, id: 'gf', show_id: null, item_key: defFilm.k, season: 'Film' }).deleteEffect, 'skip-film');
-  assert.strictEqual(P({ ...base, id: 'r2', show_id: 'gx', item_key: 'not in the catalog|season 1', season: 'Season 1' }).deleteEffect, 'delete', 'governed alone is not a catalog entry');
+  // Item 4 retired the catalog lists: every record a catalog governs is a catalog entry.
+  assert.strictEqual(P({ ...base, id: 'r2', show_id: 'gx', item_key: 'not in the catalog|season 1', season: 'Season 1' }).deleteEffect, 'skip', 'governed: a catalog entry');
   assert.strictEqual(P({ ...base, id: 'r3', show_id: 'gx', item_key: 'x|season 1', season: 'Season 1' }).matchable, false, 'no Match into or out of a governed show');
   assert.strictEqual(P({ ...base, id: 'r4', show_id: 'ungoverned', item_key: 'x|season 1', season: 'Season 1' }).matchable, true);
   assert.strictEqual(P({ ...base, id: 'r5', show_id: 'ungoverned', item_key: defSeason.k, season: defSeason.s }).deleteEffect, 'delete', 'a catalog key outside a governed show is no catalog entry');
-  assert.strictEqual(app.ctx.catalogListingOf({ id: 'gx', show_key: 'zz not in any catalog' }), null, 'governed but not listed');
+  assert.strictEqual(app.ctx.catalogListingOf({ id: 'gx', show_key: 'zz not in any catalog' }), 'Disney+', 'governed (item 4: no list to consult)');
   assert.strictEqual(app.ctx.catalogListingOf({ id: 'ungoverned', show_key: listed }), null, 'no catalog governs it');
   assert.strictEqual(app.ctx.catalogListingOf({ id: 'gx', show_key: listed }), 'Disney+');
 });
@@ -452,48 +455,6 @@ test('a show by hand is created without an identity (library_create_show_b45); a
 });
 
 // ─── Refresh shows ────────────────────────────────────────────────────────────
-test('Refresh shows checks every identified show that takes TMDB seasons, one protected call per show; a refusal is scoped to its show and earlier results are kept', async () => {
-  const app = await boot();
-  await allTv(app); await openPanel(app, 'tv', 'refresh');
-  await app.ctx.libraryRefreshShows(); await settle();
-  assert.match(preview(app), /Severance[\s\S]*Season 3[\s\S]*The Bear[\s\S]*Season 9/);
-  assert.ok(!preview(app).includes('Tulsa King'), 'a built-in TMDB-matched show isn’t refreshed from TMDB');
-  const found = app.get('libraryPanel.refresh.found').map(f => f.show.title);
-  const bearIdx = found.indexOf('The Bear'), sevIdx = found.indexOf('Severance');
-  app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = [
-    { checked: true, dataset: { showIdx: String(sevIdx), season: '3' } }, { checked: true, dataset: { showIdx: String(bearIdx), season: '9' } }];
-  app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [];
-  // The Bear (whichever record comes first) is deleted while the calls are out: refused, the next call still runs.
-  const target = app.get('libraryPanel.refresh.found')[bearIdx].show.id;
-  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons_b45') && r.body.p_show_id === target);
-  const done = app.ctx.libraryApplyRefresh();
-  await reached(gate);
-  app.store.watchlist_items = app.store.watchlist_items.filter(r => r.show_id !== target);
-  app.store.tv_shows = app.store.tv_shows.filter(s => s.id !== target);
-  gate.release(); await done; await settle();
-  const calls = rpc(app, 'library_add_seasons_b45');
-  assert.strictEqual(calls.length, 2);
-  assert.match(outcome(app), /Added “Season 3” to “Severance”\./);
-  assert.match(outcome(app), /“The Bear”: This show is no longer on your list, so nothing was added\./);
-  assert.ok(!app.store.tv_shows.some(s => s.id === target), 'not recreated');
-});
-
-test('Refresh shows: an unclear answer stops sending; earlier results stay reported', async () => {
-  const app = await boot();
-  await allTv(app); await openPanel(app, 'tv', 'refresh');
-  await app.ctx.libraryRefreshShows(); await settle();
-  const found = app.get('libraryPanel.refresh.found');
-  app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = found.map((f, i) => ({ checked: true, dataset: { showIdx: String(i), season: String(f.fresh[0].season_number) } }));
-  app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [];
-  let k = 0;
-  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons_b45') && ++k === 2);
-  const done = app.ctx.libraryApplyRefresh();
-  await reached(gate); gate.fail(); await done; await settle();
-  assert.strictEqual(rpc(app, 'library_add_seasons_b45').length, 2, `no call after the unclear one (of ${found.length})`);
-  assert.match(outcome(app), /Added “Season/);
-  assert.match(outcome(app), /no clear answer came back[\s\S]*Nothing more was sent\./);
-});
-
 // ─── Restore and navigation while a request is out ────────────────────────────
 test('leaving the view while a request is out: the panel closes, nothing is painted into the next view, the result is still reported', async () => {
   const app = await boot();
@@ -657,29 +618,9 @@ test('no duplicate marker or storage name in All TV (Stage 5: one record per TMD
 });
 
 // ─── Catalog updates from the Browse bar ──────────────────────────────────────
-test('Catalog updates from the Browse bar: hints by GET, Review opens the dialog for that catalog, and an apply reads the open view again', async () => {
-  const app = await boot();
-  await allTv(app);
-  const before = app.requests.length;
-  app.ctx.openCatalogChooser(null); await settle();
-  assert.ok(app.requests.slice(before).some(r => r.method === 'GET' && r.url.includes('/library_catalog_shows?')), 'hints from the governance views');
-  assert.ok(app.requests.slice(before).every(r => r.method === 'GET' && !r.url.includes('collection=')));
-  app.ctx.catalogChooserReview('sheridan');
-  for (let i = 0; i < 20 && app.get('catalogDialog.phase') !== 'preview'; i++) await settle();
-  assert.strictEqual(app.get('catalogChooser'), null);
-  assert.strictEqual(app.get('catalogDialog.catalogId'), 'sheridan');
-  assert.match(app.el('catalogModalBox').innerHTML, /Catalog updates — Sheridan/);
-  const gets = app.requests.length;
-  await app.ctx.catalogApply(); await settle();
-  assert.deepStrictEqual(rpc(app, 'library_catalog_apply_b45').length, 2, 'preview, then apply');
-  assert.strictEqual(rpc(app, 'catalog_apply').length, 0, 'never the Stage 4a function');
-  assert.ok(app.requests.slice(gets).some(r => r.method === 'GET' && r.url.includes('is_film=eq.false')), 'All TV read again');
-  assert.ok(app.html().includes(app.get("COLLECTIONS.find(c => c.id === 'sheridan').defaults.find(d => d.s !== 'Film').t")), 'the applied shows are listed');
-});
-
 // ─── Review fixes (2026-10-08) ────────────────────────────────────────────────
 test('a show by hand named like an unmatched show: pointed out first, nothing sent; "Add as a new show" sends the ids shown (distinct_from); adding a season is the checked alternative', async () => {
-  for (const phase of ['contracted-ep1']) { // (since EP1 the page writes only to the EP1 database)
+  for (const phase of ['contracted-cu1']) { // (since CU1 the page writes only to the CU1 database)
     const app = await boot(library(), { stage5: phase });
     await allTv(app); await openPanel(app, 'tv', 'manual');
     const local = showOf(app, 'Local Show');
@@ -737,39 +678,6 @@ test('a new show whose name or identity is taken while the request is out: refus
   }
 });
 
-test('Refresh shows: a date that changed between the check and Apply is reported as out of date, not saved; nothing is overwritten', async () => {
-  const data = all(show({ title: 'Severance', tmdb_id: 95396 }, [{ num: 1 }, { num: 2, display: 'TBA', date: '2099-01-01' }]));
-  const app = await boot(data);
-  await allTv(app); await openPanel(app, 'tv', 'refresh');
-  await app.ctx.libraryRefreshShows(); await settle();
-  assert.strictEqual(app.get('libraryPanel.refresh.updates.length'), 1);
-  app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = [];
-  app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [{ checked: true, dataset: { updateIdx: '0' } }];
-  const s2 = app.store.watchlist_items.find(r => r.title === 'Severance' && r.season_number === 2);
-  Object.assign(s2, { display_date: 'Feb 1, 2025', date_sort: '2025-02-01' }); // dated elsewhere after the check
-  let saved = 0; app.ctx.showSaved = () => { saved++; };
-  await app.ctx.libraryApplyRefresh(); await settle();
-  const patch = app.writes().find(r => r.method === 'PATCH');
-  assert.ok(patch && /return=representation/.test(patch.headers.Prefer), 'asks for the changed rows');
-  assert.strictEqual(s2.display_date, 'Feb 1, 2025', 'the newer date is kept');
-  assert.strictEqual(saved, 0, 'not counted as saved');
-  assert.match(app.el('libraryOutcome').innerHTML, /error-banner[\s\S]*not changed — its date is no longer TBA \(it changed after the check\), so this part of the preview is out of date/);
-});
-
-test('Refresh shows: a date that still matched is confirmed from the rows the update returned', async () => {
-  const data = all(show({ title: 'Severance', tmdb_id: 95396 }, [{ num: 1 }, { num: 2, display: 'TBA', date: '2099-01-01' }]));
-  const app = await boot(data);
-  await allTv(app); await openPanel(app, 'tv', 'refresh');
-  await app.ctx.libraryRefreshShows(); await settle();
-  app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = [];
-  app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [{ checked: true, dataset: { updateIdx: '0' } }];
-  let saved = 0; app.ctx.showSaved = () => { saved++; };
-  await app.ctx.libraryApplyRefresh(); await settle();
-  assert.strictEqual(app.store.watchlist_items.find(r => r.title === 'Severance' && r.season_number === 2).date_sort, '2025-01-17');
-  assert.strictEqual(saved, 1);
-  assert.match(outcome(app), /Severance · Season 2: date set to Jan 17, 2025\./);
-});
-
 test('Movie tools in All Movies check identities across the whole library: a franchise film stored under Disney+ is "Already added" and not imported again', async () => {
   const data = library();
   data.rows.push(film({ id: 'f-dune2', title: 'Dune: Part Two', collection: 'disney', tmdb_id: 693134, date_sort: '2024-02-27' }));
@@ -806,21 +714,6 @@ test('Movie tools: a person collection tags only films stored with the films; on
   assert.deepStrictEqual(patches.map(r => r.url.split('?')[1]), ['id=eq.f-dune'], 'only the film stored with the films gets the tag');
   assert.ok(!(app.store.watchlist_items.find(r => r.id === 'f-dune2').collections || []).includes('Denis'));
   assert.match(preview(app), /Dune: Part Two[\s\S]*Already added/);
-});
-
-test('Refresh shows whose only call has no clear answer: no "Saved"; reported as unconfirmed', async () => {
-  const data = all(show({ title: 'Severance', tmdb_id: 95396 }, [{ num: 1 }, { num: 2 }]));
-  const app = await boot(data);
-  await allTv(app); await openPanel(app, 'tv', 'refresh');
-  await app.ctx.libraryRefreshShows(); await settle();
-  app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = [{ checked: true, dataset: { showIdx: '0', season: '3' } }];
-  app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [];
-  let saved = 0; app.ctx.showSaved = () => { saved++; };
-  const gate = app.hold(r => r.url.endsWith('/rpc/library_add_seasons_b45'));
-  const done = app.ctx.libraryApplyRefresh();
-  await reached(gate); gate.fail(); await done; await settle();
-  assert.strictEqual(saved, 0);
-  assert.match(app.el('libraryOutcome').innerHTML, /error-banner[\s\S]*no clear answer came back[\s\S]*Nothing more was sent/);
 });
 
 T.run();

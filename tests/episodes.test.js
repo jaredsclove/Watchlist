@@ -4,7 +4,7 @@
 // EP2); marks set and cleared one change at a time through library_set_episode_marks (refusals put back
 // what was shown; no answer is never resent); the one "Mark watched through" control (EP2);
 // the explicit Mark season watched suggestion (never automatic); watched and skipped seasons locked, their
-// marks kept; unmatched seasons untouched; the guarded delete; backup format 6 and its restore; the same
+// marks kept; unmatched seasons untouched; the guarded delete; backup formats 6 and 7 and their restore; the same
 // controls in a collection; and a page from before EP1 (the released files, from git) against the
 // migrated database: backups and restores refused, ordinary writes continuing, a marked season's delete
 // refused by the database.
@@ -404,10 +404,10 @@ test('delete: the dialog names the marks; the count shown goes with the request;
 });
 
 // ── Backup and restore ──
-test('backup: format 6 with every mark (id, season, TMDB episode, number; never user_id); a round trip restores them; the preview warns when the file has fewer', async () => {
+test('backup: format 7 with every mark (id, season, TMDB episode, number; never user_id); a round trip restores them; the preview warns when the file has fewer', async () => {
   const { app, lib } = await boot({ marks: l => [mark(l.s2, 9001, 1), mark(l.s3, 5, 1)] });
   const b = JSON.parse(JSON.stringify(await app.ctx.buildBackupObject()));
-  assert.strictEqual(b.formatVersion, 6);
+  assert.strictEqual(b.formatVersion, 7);
   assert.deepStrictEqual(b.tables.episode_marks.map(r => Object.keys(r)), [['id', 'season_id', 'tmdb_episode_id', 'episode_number'], ['id', 'season_id', 'tmdb_episode_id', 'episode_number']]);
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(b)), []);
   const bad = JSON.parse(JSON.stringify(b)); bad.tables.episode_marks[0].season_id = lib.l1.id;
@@ -426,27 +426,27 @@ test('backup: format 6 with every mark (id, season, TMDB episode, number; never 
   assert.deepStrictEqual(app.store.episode_marks.map(m => m.tmdb_episode_id), [9001]);
 });
 
-test('restore: a format-5 file is converted to format 6 with no marks (its own conversion record), previewed, and the marks it removes are named', async () => {
+test('restore: a format-5 file is converted to format 6, then 7, with no marks (its own conversion record), previewed, and the marks it removes are named', async () => {
   const { app } = await boot({ marks: l => [mark(l.s2, 9001, 1)] });
-  const b6 = JSON.parse(JSON.stringify(await app.ctx.buildBackupObject()));
-  const b5 = { ...b6, formatVersion: 5, tables: { ...b6.tables }, rowCounts: { ...b6.rowCounts } };
-  delete b5.tables.episode_marks; delete b5.rowCounts.episode_marks;
+  const b7 = JSON.parse(JSON.stringify(await app.ctx.buildBackupObject()));
+  const b5 = { ...b7, formatVersion: 5, tables: { ...b7.tables }, rowCounts: { ...b7.rowCounts } };
+  for (const t of ['episode_marks', ...app.get('CU1_TABLES')]) { delete b5.tables[t]; delete b5.rowCounts[t]; }
   app.ctx.openSettings(null);
   const textOf = JSON.stringify(b5);
   await app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => textOf }], value: 'x' } }); await settle();
   const doc = JSON.parse(JSON.stringify(app.get('pendingRestoreData')));
-  assert.strictEqual(doc.formatVersion, 6);
+  assert.strictEqual(doc.formatVersion, 7);
   assert.deepStrictEqual(doc.tables.episode_marks, []);
   assert.deepStrictEqual(Object.keys(doc.conversion).sort(), ['converter_version', 'source_exported_at', 'source_format', 'source_sha256']);
   assert.strictEqual(doc.conversion.source_format, 5);
-  assert.strictEqual(doc.conversion.converter_version, 'ep1.1');
+  assert.strictEqual(doc.conversion.converter_version, 'ep1.1+cu1.1');
   const m = text(app.el('restoreModalBox').innerHTML);
   assert.match(m, /This backup is converted to format 6 before restoring/);
   assert.match(m, /Your library has 1 episode mark now; this backup has 0\./);
   await app.ctx.executeRestore(); await settle();
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
-  assert.strictEqual(rpcs(app, 'restore_backup')[0].body.p_backup.formatVersion, 6, 'only the converted document is sent');
+  assert.strictEqual(rpcs(app, 'restore_backup')[0].body.p_backup.formatVersion, 7, 'only the converted document is sent');
   assert.deepStrictEqual(app.store.episode_marks, []);
 });
 

@@ -149,13 +149,12 @@ function closeDialogsForTraversal() {
   if (detailsDialog && !detailsDialog.saving && typeof closeDetails === 'function') closeDetails(); // the draft is discarded
   if (typeof addPickerOnNavigate === 'function') addPickerOnNavigate();
   if (manage && !manageHasPending()) closeManage();
-  if (catalogDialog && !catalogBusy()) closeCatalogUpdates();
-  if (catalogChooser && !catalogDialog && typeof closeCatalogChooser === 'function') closeCatalogChooser();
+  if (cuModal && typeof closeCuModal === 'function' && !writeLane) closeCuModal();
   if (typeof invalidateRestorePreparation === 'function') invalidateRestorePreparation(); // a restore already sent is never interrupted
 }
 
 function anyDialogOpen() {
-  return ['manageModalOverlay', 'catalogModalOverlay', 'restoreModalOverlay', 'detailsModalOverlay', 'effectModalOverlay', 'addPickerOverlay']
+  return ['manageModalOverlay', 'cuModalOverlay', 'restoreModalOverlay', 'detailsModalOverlay', 'effectModalOverlay', 'addPickerOverlay']
     .some(id => { const el = document.getElementById(id); return !!el && el.style && el.style.display === 'flex'; });
 }
 

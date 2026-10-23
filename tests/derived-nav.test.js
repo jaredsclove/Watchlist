@@ -71,7 +71,9 @@ test('startup: Currently Watching opens with one paginated GET of the TV rows, o
   assert.ok(app.requests.some(r => r.method === 'GET' && r.url.endsWith('/rpc/stage5_capabilities')));
   // EP1: the owner's episode marks are read with the rows.
   assert.strictEqual(app.requests.filter(r => /\/rest\/v1\/episode_marks\?/.test(r.url)).length, 1);
-  assert.strictEqual(app.requests.length, 11, 'no per-storage loads, no seeding reads');
+  // Item 4: the per-show update settings (the "New season" flag) are read with the rows.
+  assert.strictEqual(app.requests.filter(r => /\/rest\/v1\/show_update_settings\?/.test(r.url)).length, 1);
+  assert.strictEqual(app.requests.length, 12, 'no per-storage loads, no seeding reads');
   assert.ok(reads[0].url.includes('is_film=eq.false') && !reads[0].url.includes('collection='), 'TV rows by kind, never by storage');
   assert.strictEqual(reads[0].headers['Prefer'], 'count=exact');
   noStorage(app);
@@ -133,27 +135,6 @@ test('Movies → TV always lands on Currently Watching; Movies opens on All Movi
   assert.strictEqual(app.get('typeof activeTabId'), 'undefined', 'no storage tab state (Stage 5)');
 });
 
-test('catalog entries reach the views only through Catalog updates: navigation never writes; after an explicit application its shows are listed in All TV and governed by the catalog', async () => {
-  const app = await createApp();
-  const defaults = app.get("COLLECTIONS.find(c => c.id === 'disney').defaults");
-  for (const v of ['alltv', 'comingsoon', 'watching']) { app.ctx.switchView(v); await settle(); }
-  assert.deepStrictEqual(app.writes(), [], 'no view writes');
-  await app.applyCatalog('disney');
-  const seeded = app.store.watchlist_items.filter(r => r.collection === 'disney');
-  assert.strictEqual(seeded.length, defaults.length, 'every entry lands once');
-  assert.ok(seeded.every(r => (r.season === 'Film') === (r.show_id == null)));
-  const byKey = new Map(defaults.map(d => [d.k, d]));
-  // B4/B5: every record a catalog creates is To Watch / Normal / New from catalog (the defaults' p no longer decides).
-  assert.ok(byKey.size === defaults.length && seeded.every(r => r.status === 'confirmed'));
-  assert.ok(seeded.filter(r => r.season === 'Film').every(r => r.catalog_new === true && r.priority === 'normal'));
-  assert.ok(seeded.filter(r => r.season !== 'Film').every(r => r.catalog_new === null && r.priority === null), 'seasons carry no film values');
-  assert.ok(app.store.tv_shows.filter(sh => sh.collection === 'disney').every(sh => sh.status === 'confirmed' && sh.catalog_new === true && sh.priority === 'normal'));
-  app.ctx.switchView('alltv'); app.run("document.getElementById('fStatus') && (document.getElementById('fStatus').value = 'all')"); await settle();
-  const show = app.store.tv_shows.find(sh => sh.collection === 'disney');
-  assert.strictEqual(app.get(`showCatalogOf(tvShowsById.get(${JSON.stringify(show.id)}))`), 'disney', 'governed by its catalog, read from library_catalog_shows');
-  noStorage(app);
-});
-
 test('a late derived-view response never redraws after leaving the view', async () => {
   const app = await createApp({ rows: [tv({ status: 'watching' })] });
   const g = app.hold(isDerivedRead);
@@ -190,8 +171,8 @@ test('restore reload re-reads the active view (no loadTab(null))', async () => {
   const after = app.requests.slice(before);
   // Stage 3b-1: the restored collections and watch-with choices are read again too (GET only).
   assert.deepStrictEqual(after.map(r => new URL(r.url).pathname.split('/').pop()).sort(),
-    ['episode_marks', 'library_catalog_films', 'library_catalog_shows', 'library_collection_catalogs', 'library_collection_presentation', 'library_film_theme_kinds', 'personal_collections', 'tv_shows', 'watch_with_choices', 'watchlist_items'],
-    'the TV rows, the shows, the episode marks (EP1), the governance and the organization');
+    ['episode_marks', 'library_catalog_films', 'library_catalog_shows', 'library_collection_catalogs', 'library_collection_presentation', 'library_film_theme_kinds', 'personal_collections', 'show_update_settings', 'tv_shows', 'watch_with_choices', 'watchlist_items'],
+    'the TV rows, the shows, the episode marks (EP1), the show settings (item 4), the governance and the organization');
   assert.ok(after.every(r => r.method === 'GET'));
   assert.ok(after.some(isDerivedRead) && after.some(r => r.url.includes('/rest/v1/tv_shows')));
   assertViewIntact(app);
@@ -259,27 +240,6 @@ const tmdbTv = p => {
   const m = /^\/tv\/(\d+)/.exec(p);
   return m ? { id: +m[1], name: 'New Show', networks: [{ name: 'HBO' }], seasons: [{ season_number: 1, air_date: '2026-01-01', episode_count: 8 }, { season_number: 2, air_date: '2027-01-01', episode_count: 8 }] } : undefined;
 };
-
-test('guard: Refresh shows → another view mid-call: the season goes to that show by id (library_add_seasons_b45), nothing redrawn', async () => {
-  const app = await createApp({ rows: [tv({ id: 'ex1', title: 'New Show', item_key: 'new show|season 1', tmdb_id: 55 })], tmdb: tmdbTv });
-  app.ctx.switchView('alltv'); await settle();
-  app.ctx.openLibraryPanel('tv', 'refresh'); await settle();
-  await app.ctx.libraryRefreshShows(); await settle();
-  app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = [{ checked: true, dataset: { showIdx: '0', season: '2' } }];
-  app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [];
-  const g = app.hold(r => r.method === 'POST' && r.url.endsWith('/rpc/library_add_seasons_b45'));
-  const done = app.ctx.libraryApplyRefresh();
-  await g.reached;
-  app.ctx.switchView('watching'); await settle();
-  g.release(); await done; await settle();
-  const post = app.writes().find(r => r.url.endsWith('/rpc/library_add_seasons_b45'));
-  const showId = app.store.watchlist_items.find(r => r.id === 'ex1').show_id;
-  assert.strictEqual(post.body.p_show_id, showId);
-  assert.deepStrictEqual(copyOut(post.body.p_expected), { tmdb_id: 55, show_key: 'new show', catalog: null, network: 'HBO' });
-  assert.ok(app.store.watchlist_items.some(r => r.show_id === showId && r.season_number === 2), 'Season 2 joined that show');
-  noStorage(app);
-  assertViewIntact(app);
-});
 
 test('guard: a TMDB search add → another view mid-call: one library_create_show_b45 call, the new show and its seasons, nothing redrawn', async () => {
   const app = await createApp({ tmdb: tmdbTv });

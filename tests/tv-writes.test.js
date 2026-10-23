@@ -39,17 +39,17 @@ async function addSeasonByHand(app, showId, season, date = 'Jan 1, 2027') {
   app.el('nSeason').value = season; app.el('nDate').value = date; app.el('nTheme').value = 'HBO';
   await app.ctx.librarySubmitSeason(); await settle();
 }
+// Refresh shows (item 4): library-wide, TMDB only, automatic (collection-updates.js cuRefreshShows).
 async function refreshShows(app) {
   app.ctx.openLibraryPanel('tv', 'refresh'); await settle();
-  await app.ctx.libraryRefreshShows(); await settle();
+  await app.ctx.cuRefreshShows(); await settle();
 }
-const pick = (app, picks) => {
-  app.selectors['#tmdbPreview input[type="checkbox"][data-show-idx]'] = picks.map(([idx, season]) => ({ checked: true, dataset: { showIdx: String(idx), season: String(season) } }));
-  app.selectors['#tmdbPreview input[type="checkbox"][data-update-idx]'] = [];
-};
+const results = app => app.el('tmdbPreview').innerHTML.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/’/g, "'").replace(/\s+/g, ' ').trim();
+// TMDB show details by id; the appended season lists answer empty.
 const tmdbShows = shows => p => {
-  const m = /^\/tv\/(\d+)$/.exec(p);
-  return m && shows[m[1]] ? { id: +m[1], networks: [{ name: 'HBO' }], ...shows[m[1]] } : undefined;
+  const m = /^\/tv\/(\d+)(\?append_to_response=.*)?$/.exec(p);
+  if (!m || !shows[m[1]]) return undefined;
+  return m[2] ? {} : { id: +m[1], networks: [{ name: 'HBO' }], ...shows[m[1]] };
 };
 
 // ── New shows and seasons by hand ──
@@ -75,8 +75,10 @@ test('a new show by hand → library_create_show_b45 (no identity, the season li
 });
 
 test('a season added by hand to the catalog’s "The Clone Wars" joins that show (its overridden show key), never a second show', async () => {
-  const app = await createApp();
-  await app.applyCatalog('disney'); // the owner applied the Disney+ catalog
+  // The governed show as an earlier catalog application left it (the config-based lists are retired since item 4).
+  const app = await createApp({ rows: [tv({ id: 'cw1', collection: 'disney', title: 'Star Wars: The Clone Wars', item_key: 'the clone wars|season 7', season: 'Season 7',
+    media_type: null, tmdb_id: null, season_number: null, show_id: 'scw', theme: 'Star Wars' })],
+    tvShows: [{ id: 'scw', collection: 'disney', title: 'Star Wars: The Clone Wars', show_key: 'star wars: the clone wars (2008)', tmdb_id: null, status: 'confirmed' }] });
   await allTv(app);
   const cw = app.store.tv_shows.filter(s => s.show_key === 'star wars: the clone wars (2008)');
   assert.strictEqual(cw.length, 1);
@@ -127,7 +129,7 @@ test('deleting a TV season that isn’t a catalog entry → delete_tv_season; th
   assert.strictEqual(banner(app), '');
   const tmdbBefore = app.requests.filter(r => !r.url.includes('/rest/v1/')).length;
   await refreshShows(app);
-  assert.ok(app.el('tmdbPreview').innerHTML.includes('nothing to refresh'), 'Refresh finds no show to check');
+  assert.ok(results(app).includes('Checked 0 shows'), 'Refresh finds no show to check');
   assert.strictEqual(app.requests.filter(r => !r.url.includes('/rest/v1/')).length, tmdbBefore, 'no TMDB lookup for the deleted show');
 });
 
@@ -151,9 +153,11 @@ test('deleting a film is a plain DELETE; × on a catalog season skips it (set_se
   app.ctx.confirm = () => true;
   await app.ctx.delRowInView('m'); await settle();
   assert.deepStrictEqual(writes(app), ['DELETE watchlist_items']);
-  const app0 = await createApp();
-  await app0.applyCatalog('disney');
-  const app2 = await createApp({ rows: app0.store.watchlist_items, tvShows: app0.store.tv_shows });
+  // Governed records as an earlier catalog application left them (the lists are retired since item 4).
+  const app2 = await createApp({ rows: [tv({ id: 'cs1', collection: 'disney', title: 'ZZ Catalog Alpha', item_key: 'zz catalog alpha|season 1', show_id: 'sca',
+      media_type: null, tmdb_id: null, season_number: null, theme: 'Star Wars' }),
+    tv({ id: 'cf1', collection: 'disney', title: 'ZZ Catalog Film One', item_key: 'zz catalog film one|film', season: 'Film', media_type: null, tmdb_id: null, season_number: null, show_id: null, theme: 'Star Wars' })],
+    tvShows: [{ id: 'sca', collection: 'disney', title: 'ZZ Catalog Alpha', show_key: 'zz catalog alpha', tmdb_id: null, status: 'confirmed' }] });
   app2.ctx.confirm = () => true;
   const def = app2.store.watchlist_items.find(r => r.season !== 'Film' && !r.skipped);
   const defFilm = app2.store.watchlist_items.find(r => r.season === 'Film' && r.status !== 'skipped');
@@ -166,64 +170,63 @@ test('deleting a film is a plain DELETE; × on a catalog season skips it (set_se
   const stored = id => app2.store.watchlist_items.find(r => r.id === id);
   assert.strictEqual(stored(def.id).skipped, true, 'the season is skipped, nothing deleted');
   assert.strictEqual(stored(defFilm.id).status, 'skipped');
-  assert.strictEqual(app2.store.watchlist_items.length, app2.get("COLLECTIONS.find(c => c.id === 'disney').defaults.length"));
+  assert.strictEqual(app2.store.watchlist_items.length, 2, 'nothing deleted');
 });
 
-// ── Refresh shows ──
-test('Refresh shows → one library_add_seasons_b45 per show; new seasons link to the existing show; statuses untouched', async () => {
+// ── Refresh shows (item 4: automatic, through library_cu_reconcile_season) ──
+test('Refresh shows → one library_cu_reconcile_season per new season; new seasons link to the existing show; statuses untouched', async () => {
   const app = await createApp({
     rows: [tv({ id: 'a', status: 'watching' }), tv({ id: 'o', title: 'Other', tmdb_id: 200, item_key: 'other|season 1', show_id: 's200' })],
     tvShows: [show({ status: 'watching' }), show({ id: 's200', title: 'Other', show_key: 'other', tmdb_id: 200 })],
-    tmdb: tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-01-01' }, { season_number: 3, air_date: null }] },
-      200: { name: 'Other', networks: [], seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2026-01-01' }] } }) });
+    tmdb: tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-01-01', episode_count: 8 }, { season_number: 3, air_date: null, episode_count: 0 }] },
+      200: { name: 'Other', networks: [], seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2026-01-01', episode_count: 6 }] } }) });
   await allTv(app);
   await refreshShows(app);
-  const found = app.get('libraryPanel.refresh.found').map(f => f.show.id);
-  pick(app, [[found.indexOf('s100'), 2], [found.indexOf('s100'), 3], [found.indexOf('s200'), 2]]);
-  await app.ctx.libraryApplyRefresh(); await settle();
-  assert.deepStrictEqual(writes(app), ['POST rpc/library_add_seasons_b45', 'POST rpc/library_add_seasons_b45']);
-  const byShow = Object.fromEntries(app.writes().map(r => [r.body.p_show_id, r.body]));
-  assert.deepStrictEqual(Array.from(byShow.s100.p_seasons, s => [s.item_key, s.season_number, s.date_sort]),
-    [['show|season 2', 2, '2027-01-01'], ['show|season 3', 3, '2099-01-01']]);
-  assert.deepStrictEqual(out(byShow.s200.p_expected), { tmdb_id: 200, show_key: 'other', catalog: null, network: 'Unknown' });
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_cu_reconcile_season', 'POST rpc/library_cu_reconcile_season', 'POST rpc/library_cu_reconcile_season']);
+  const calls = app.writes().map(r => r.body);
+  assert.deepStrictEqual(calls.map(b => [b.p_show_id, b.p_season.season_number, b.p_season.date_sort]),
+    [['s200', 2, '2026-01-01'], ['s100', 2, '2027-01-01'], ['s100', 3, '2099-01-01']]);
+  assert.deepStrictEqual(out(calls[0].p_expected), { tmdb_id: 200, show_key: 'other' });
   const rows = app.store.watchlist_items;
-  assert.ok(rows.filter(r => r.tmdb_id === 100).every(r => r.show_id === 's100'));
+  assert.ok(rows.some(r => r.show_id === 's100' && r.season_number === 2 && r.tmdb_id === 100), 'Season 2 added to the show, identified');
+  assert.ok(!rows.some(r => r.show_id === 's100' && r.season_number === 3), 'an undated season with no episodes waits for announcement evidence');
+  assert.match(results(app), /Show · Season 3: TMDB lists it without a date or episodes/);
   assert.strictEqual(rows.find(r => r.id === 'a').status, 'watching', 'the existing season keeps its status');
   assert.strictEqual(app.store.tv_shows.find(s => s.id === 's100').status, 'watching', 'no reopen, no status change');
   assert.strictEqual(banner(app), '');
   noStorage(app);
 });
 
-test('Refresh shows with a season added elsewhere meanwhile → the others are added; the one already there is reported, never added twice', async () => {
+test('Refresh shows with a season added elsewhere meanwhile → the database finds it; never added twice', async () => {
   const app = await createApp({ rows: [tv({ id: 'a' })], tvShows: [show()],
-    tmdb: tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-01-01' }, { season_number: 3, air_date: '2028-01-01' }] } }) });
+    tmdb: tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-01-01', episode_count: 8 }, { season_number: 3, air_date: '2028-01-01', episode_count: 8 }] } }) });
   await allTv(app);
-  await refreshShows(app);
-  pick(app, [[0, 2], [0, 3]]);
+  // The season appears while the check reads TMDB (another page saved it).
+  const g = app.hold(r => r.url.includes('/rpc/library_cu_reconcile_season'));
+  const done = refreshShows(app);
+  await g.reached;
   app.store.watchlist_items.push(tv({ id: 'z', season_number: 2, season: 'Season 2', item_key: 'show|season 2' }));
-  await app.ctx.libraryApplyRefresh(); await settle();
-  assert.match(outcome(app), /already on your list/);
+  g.release();
+  await done; await settle();
+  assert.match(results(app), /Show · Season 3: added/);
   assert.strictEqual(app.store.watchlist_items.filter(r => r.season_number === 3).length, 1);
   assert.strictEqual(app.store.watchlist_items.filter(r => r.season_number === 2).length, 1, 'no duplicate');
 });
 
-test('Refresh shows checks the identified shows no catalog governs, from the library read (never the old tracking table); shows without an identity are skipped', async () => {
-  const legacyShow = { id: 's200', collection: 'othertv', title: 'Legacy', show_key: 'legacy', tmdb_id: null, status: 'confirmed' };
-  const app = await createApp({ rows: [tv({ id: 'a' }), legacy({ id: 'l', title: 'Legacy', item_key: 'legacy|season 1', show_id: 's200' })],
+test('Refresh shows checks every show, catalog shows included, from the library read (never the old tracking table); an unmatched show is looked up by title', async () => {
+  const legacyShow = { id: 's200', collection: 'disney', title: 'Legacy', show_key: 'legacy', tmdb_id: null, status: 'confirmed' };
+  const app = await createApp({ rows: [tv({ id: 'a' }), legacy({ id: 'l', collection: 'disney', title: 'Legacy', item_key: 'legacy|season 1', show_id: 's200' })],
     tvShows: [show(), legacyShow], othertvShows: [],
-    tmdb: tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-01-01' }] } }) });
+    tmdb: p => p.startsWith('/search/tv') ? { results: [] } : tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-01-01', episode_count: 8 }] } })(p) });
   await allTv(app);
   const before = app.requests.length;
   await refreshShows(app);
   const reads = app.requests.slice(before).filter(r => r.method === 'GET').map(r => r.url.split('/rest/v1/')[1] || r.url);
   assert.ok(!reads.some(u => u.startsWith('othertv_shows')), 'the old tracking table is not read');
   const tmdbCalls = app.requests.slice(before).filter(r => !r.url.includes('/rest/v1/')).map(r => r.url);
-  assert.ok(tmdbCalls.length === 1 && tmdbCalls[0].includes('/tv/100'), 'only the identified show is looked up');
-  const found = app.get('libraryPanel.refresh.found');
-  assert.strictEqual(found.length, 1);
-  assert.deepStrictEqual(Array.from(found[0].fresh, s => s.season_number), [2]);
-  assert.strictEqual(found[0].show.title, 'Show');
-  assert.deepStrictEqual(app.writes(), [], 'the preview writes nothing');
+  assert.ok(tmdbCalls.some(u => u.includes('/tv/100')) && tmdbCalls.some(u => u.includes('/search/tv?query=Legacy')), 'the matched show and the unmatched catalog show are both checked');
+  assert.match(results(app), /Checked 2 shows \(1 matched to TMDB, 1 not yet matched\)/);
+  assert.ok(app.store.watchlist_items.some(r => r.show_id === 's100' && r.season_number === 2));
 });
 
 // ── TMDB search add ──
@@ -251,67 +254,24 @@ test('TMDB search: a film goes through library_add_films_b45; a series through l
   noStorage(app);
 });
 
-// ── Catalog entries arrive only through an explicit application ──
-test('no view seeds; an explicit catalog application adds only the entries missing by the old rule; a key held by an identified row is not re-added', async () => {
-  const app0 = await createApp();
-  const defaults = app0.get("COLLECTIONS.find(c => c.id === '90day').defaults");
-  const [d0, d1] = defaults;
-  const app = await createApp({ rows: [
-    legacy({ id: 'l0', collection: '90day', item_key: d0.k, title: d0.t, season: d0.s, show_id: null }),
-    tv({ id: 'i1', collection: '90day', item_key: d1.k, title: d1.t, tmdb_id: 4242, season_number: Number(/\d+/.exec(d1.s)[0]), season: d1.s, show_id: null })
-  ] });
-  for (const v of ['alltv', 'comingsoon', 'watching']) { app.ctx.switchView(v); await settle(); }
-  app.ctx.openBrowseCollection(app.browseId('90day')); await settle();
-  assert.deepStrictEqual(app.writes(), [], 'no view wrote anything');
-  const a = await app.applyCatalog('90day');
-  assert.strictEqual(a.document.entries.filter(e => e.kind === 'insert_season' || e.kind === 'insert_film').length, defaults.length - 2);
-  assert.ok(!a.document.entries.some(e => (e.kind === 'insert_season' || e.kind === 'insert_film') && (e.item_key === d0.k || e.item_key === d1.k)));
-  assert.strictEqual(app.store.watchlist_items.filter(r => r.collection === '90day').length, defaults.length);
-  assert.strictEqual(app.store.watchlist_items.filter(r => r.item_key === d1.k).length, 1, 'no legacy twin of the identified row');
-});
-
 // ── Enriched (TMDB-matched) catalog shows ──
-// An applied Sheridan catalog where Landman and Mayor of Kingstown have been
-// matched to TMDB (identity only) and one catalog season of each is missing again.
+// A Sheridan-governed show matched to TMDB (identity only), as an earlier catalog application and the
+// admin matching left it (the config-based lists are retired since item 4).
 async function enrichedSheridan() {
-  const app0 = await createApp();
-  await app0.applyCatalog('sheridan');
-  const rows = app0.store.watchlist_items, shows = app0.store.tv_shows;
-  const enrich = (key, tmdb) => {
-    const s = shows.find(x => x.show_key === key);
-    s.tmdb_id = tmdb;
-    for (const r of rows.filter(x => x.show_id === s.id)) {
-      const m = /^Season (\d+)$/.exec(r.season);
-      if (m) Object.assign(r, { media_type: 'tv', tmdb_id: tmdb, season_number: Number(m[1]) });
-    }
-    return s;
-  };
-  const landman = enrich('landman', 157741), mayor = enrich('mayor of kingstown', 97951);
-  const drop = new Set([rows.find(r => r.item_key === 'landman|season 3').id, rows.find(r => r.show_id === mayor.id && r.media_type == null).id]);
-  const app = await createApp({ rows: rows.filter(r => !drop.has(r.id)), tvShows: shows });
-  return { app, landman, mayor, showCount: shows.length };
+  const landman = { id: 'sland', collection: 'sheridan', title: 'ZZ Catalog Landman', show_key: 'zz catalog landman', tmdb_id: 157741, status: 'confirmed' };
+  const rows = [1, 2].map(n => tv({ id: `land${n}`, collection: 'sheridan', title: landman.title, item_key: `zz catalog landman|season ${n}`, season: `Season ${n}`,
+    tmdb_id: 157741, season_number: n, show_id: 'sland', theme: 'Landman' }));
+  const app = await createApp({ rows, tvShows: [landman] });
+  return { app, landman, showCount: 1 };
 }
-test('a missing catalog season of a TMDB-matched show rejoins it as that TMDB season; a non-"Season N" one is excluded for review', async () => {
-  const { app, landman, mayor, showCount } = await enrichedSheridan();
-  await allTv(app);
-  assert.deepStrictEqual(app.writes(), [], 'the view wrote nothing');
-  const a = await app.applyCatalog('sheridan');
-  const back = app.store.watchlist_items.find(r => r.item_key === 'landman|season 3');
-  assert.ok(back && back.show_id === landman.id && back.tmdb_id === 157741 && back.season_number === 3 && back.media_type === 'tv', JSON.stringify(back));
-  assert.ok(!app.store.watchlist_items.some(r => r.show_id === mayor.id && /Final/.test(r.season)), '"Season 5 (Final)" not added');
-  assert.strictEqual(app.store.tv_shows.length, showCount, 'no second show');
-  const excluded = a.document.entries.filter(e => e.kind === 'excluded_conflict');
-  assert.ok(excluded.some(e => e.reason === 'enriched_show_label' && /^mayor of kingstown\|/.test(e.item_key)), JSON.stringify(excluded));
-});
 test('a season added by hand to a governed TMDB-matched show: a plain "Season N" joins it as that TMDB season; "Season 4 (Part 1)" is held for review', async () => {
   const { app, landman, showCount } = await enrichedSheridan();
-  await app.applyCatalog('sheridan');
   await allTv(app);
   await addSeasonByHand(app, landman.id, 'Season 4');
-  const s4 = app.store.watchlist_items.find(r => r.item_key === 'landman|season 4');
+  const s4 = app.store.watchlist_items.find(r => r.item_key === 'zz catalog landman|season 4');
   assert.ok(s4 && s4.show_id === landman.id && s4.tmdb_id === 157741 && s4.season_number === 4, JSON.stringify(s4));
   await addSeasonByHand(app, landman.id, 'Season 4 (Part 1)');
-  assert.ok(!app.store.watchlist_items.some(r => r.item_key === 'landman|season 4 (part 1)'));
+  assert.ok(!app.store.watchlist_items.some(r => r.item_key === 'zz catalog landman|season 4 (part 1)'));
   assert.match(outcome(app), /needs review/);
   assert.strictEqual(app.store.tv_shows.length, showCount, 'no second show');
 });
@@ -342,54 +302,34 @@ test('show status, Watched and Skip go through their functions; films go through
 
 // ── Complete-show reopen and add outcomes ──
 // ── B4/B5: an addition never changes a show's status, priority or Show ended ──
-test('Refresh adding a genuinely new season to a show marked ended keeps its status and Show ended, and says so', async () => {
+test('Refresh adding a genuinely new season to a show marked ended keeps its status and Show ended, flags it, and says so', async () => {
   const app = await createApp({ rows: [tv({ id: 'a', watched: true })], tvShows: [show({ status: 'watching', ended: true })],
-    tmdb: tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-01-01' }] } }) });
+    tmdb: tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-01-01', episode_count: 8 }] } }) });
   await allTv(app);
   await refreshShows(app);
-  pick(app, [[0, 2]]);
-  await app.ctx.libraryApplyRefresh(); await settle();
   assert.deepStrictEqual([app.store.tv_shows[0].status, app.store.tv_shows[0].ended], ['watching', true]);
   assert.ok(app.store.watchlist_items.some(r => r.season_number === 2), 'the season was added');
-  const call = app.writes().find(r => r.url.endsWith('/rpc/library_add_seasons_b45'));
-  assert.ok(call, 'one protected call');
-  assert.match(outcome(app), /marked ended/i);
-  assert.ok(!/back On List|reopen/i.test(outcome(app)));
+  assert.ok(app.store.show_update_settings.some(x => x.show_id === 's100' && x.new_season_after_ended_at), 'flagged: New season after Ended');
+  assert.match(results(app), /stays marked ended; flagged/i);
+  assert.ok(!/back On List|reopen/i.test(results(app)));
+  assert.match(app.html(), /cu-flag-tag/, 'the flag shows on the show');
   assert.strictEqual(banner(app), '');
 });
 
-test('a season that is already listed by the time it is sent: reported; nothing changes on the show', async () => {
+test('a season that is already listed by the time it is sent: a no-op; nothing changes on the show (Ended kept, not flagged)', async () => {
   const app = await createApp({ rows: [tv({ id: 'a' })], tvShows: [show({ status: 'watching', ended: true })],
-    tmdb: tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 3, air_date: '2028-01-01' }] } }) });
+    tmdb: tmdbShows({ 100: { name: 'Show', seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 3, air_date: '2028-01-01', episode_count: 8 }] } }) });
   await allTv(app);
-  // A request racing with another page: Season 3 arrives elsewhere after the preview.
-  await refreshShows(app);
-  pick(app, [[0, 3]]);
+  // A request racing with another page: Season 3 arrives elsewhere after the check.
+  const g = app.hold(r => r.url.includes('/rpc/library_cu_reconcile_season'));
+  const done = refreshShows(app);
+  await g.reached;
   app.store.watchlist_items.push(tv({ id: 'z3', season_number: 3, season: 'Season 3', item_key: 'show|season 3' }));
-  await app.ctx.libraryApplyRefresh(); await settle();
-  assert.match(outcome(app), /already on your list/);
+  g.release();
+  await done; await settle();
+  assert.strictEqual(app.store.watchlist_items.filter(r => r.season_number === 3).length, 1, 'no duplicate');
   assert.deepStrictEqual([app.store.tv_shows[0].status, app.store.tv_shows[0].ended], ['watching', true], 'a duplicate is a no-op');
-});
-
-test('applying a catalog with a new catalog season keeps a show marked ended as it is (ended_kept, never a reopen); a Skipped show stays Skipped', async () => {
-  const app0 = await createApp();
-  await app0.applyCatalog('90day');
-  const all = app0.store.watchlist_items, shows = app0.store.tv_shows;
-  // Two multi-season shows: drop one season of each, mark one show Complete and the other Skipped.
-  const multi = shows.filter(s => all.filter(r => r.show_id === s.id).length > 1).slice(0, 2);
-  const [c, k] = multi;
-  Object.assign(c, { status: 'watching', ended: true }); k.status = 'skipped';
-  const gone = [all.find(r => r.show_id === c.id), all.find(r => r.show_id === k.id)].map(r => r.id);
-  const app = await createApp({ rows: all.filter(r => !gone.includes(r.id)), tvShows: shows });
-  await allTv(app);
-  assert.strictEqual(app.store.tv_shows.find(s => s.id === c.id).status, 'watching', 'opening the view changed nothing');
-  const a = await app.applyCatalog('90day');
-  const cs = app.store.tv_shows.find(s => s.id === c.id);
-  assert.deepStrictEqual([cs.status, cs.ended, cs.priority], ['watching', true, 'normal']);
-  assert.strictEqual(app.store.tv_shows.find(s => s.id === k.id).status, 'skipped');
-  assert.deepStrictEqual(a.document.entries.filter(e => e.kind === 'reopen'), []);
-  assert.deepStrictEqual(a.document.entries.filter(e => e.kind === 'ended_kept').map(e => e.show_id), [c.id]);
-  assert.strictEqual(a.document.version, 'b45.1');
+  assert.ok(!app.store.show_update_settings.some(x => x.new_season_after_ended_at), 'nothing was added, so nothing is flagged');
 });
 
 T.run();

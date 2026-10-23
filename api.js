@@ -1,10 +1,10 @@
 // The page writes only to a database whose phase it has read (stage5_capabilities):
-// PAGE_PHASE (EP1: B4/B5 with M1 access and episode marks). Any other phase (an older one,
-// contracted-b45 from before EP1 included, an unknown one, none)
+// PAGE_PHASE (CU1: B4/B5 with M1 access, episode marks and collection updates). Any other phase (an
+// older one, contracted-ep1 from before CU1 included, an unknown one, none)
 // authorizes nothing; a phase not read yet is read again (GET) once before a write. The refusal is raised before anything is
 // sent and is formatted as a database refusal (code update_required), so every caller
 // reports that nothing was changed.
-const PAGE_PHASE = 'contracted-ep1';
+const PAGE_PHASE = 'contracted-cu1';
 const STATE_MISMATCH_TEXT = 'This page and the database don’t match (the database may have been updated or rolled back), so nothing was changed. Reload the page.';
 // Once a B4/B5 function is missing or a read lacks the B4/B5 columns, this page stops writing
 // (and makes no backup or restore) until it is reloaded. A later capability read that still
@@ -106,7 +106,7 @@ async function sbRequest(method, path, body, headers, onAnswer = () => {}) {
     // A B4/B5 function that doesn't exist, or an EP1 one (the marks function, or delete_tv_season with
     // its mark count): the database isn't (or is no longer) in this page's phase. Nothing ran; the
     // page stops writing until it is reloaded.
-    if (res.status === 404 && /^rpc\/([a-z0-9_]+_b45|library_set_episode_marks|delete_tv_season)$/.test(path) && /PGRST202/.test(err)) {
+    if (res.status === 404 && /^rpc\/([a-z0-9_]+_b45|library_set_episode_marks|delete_tv_season|library_cu_[a-z_]+)$/.test(path) && /PGRST202/.test(err)) {
       stopB45Writes();
       throw stage5Refusal(STATE_MISMATCH_TEXT);
     }

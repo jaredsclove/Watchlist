@@ -12,11 +12,20 @@ function compareRowFields(expected, restored, columnTypes = {}) {
     // (watch_with, collections) it correctly catches real order/content
     // differences, which are genuine data differences, not false positives.
     if (JSON.stringify(a) !== JSON.stringify(b) &&
-        !(/^timestamp\??$/.test(columnTypes[key] || '') && sameTimestampInstant(a, b))) {
+        !(/^timestamp\??$/.test(columnTypes[key] || '') && sameTimestampInstant(a, b)) &&
+        !(/^json\??$/.test(columnTypes[key] || '') && jsonCanonical(a) === jsonCanonical(b))) {
       diffFields.push(key);
     }
   }
   return diffFields;
+}
+// A JSON value with every object's keys in one order (a jsonb column comes back with the database's
+// key order, which a file needn't share): the same content compares equal.
+function jsonCanonical(v) {
+  if (v === null || v === undefined) return 'null';
+  if (Array.isArray(v)) return `[${v.map(jsonCanonical).join(',')}]`;
+  if (typeof v === 'object') return `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${jsonCanonical(v[k])}`).join(',')}}`;
+  return JSON.stringify(v);
 }
 
 // The instant of an ISO timestamp with an explicit offset (Z, ±HH, ±HHMM, ±HH:MM),
@@ -58,15 +67,15 @@ async function stage5Capabilities() {
   }
 }
 
-// Which backup format this page makes and restores: 6, and only on a database in the
-// page's phase (EP1). Any other phase (an older one, none, unknown) is refused,
-// never guessed: this page makes no format 5 (it would leave out every episode mark).
+// Which backup format this page makes and restores: 7, and only on a database in the
+// page's phase (CU1). Any other phase (an older one, none, unknown) is refused,
+// never guessed: this page makes no format 6 (it would leave out collection updates' data).
 async function detectBackupFormat() {
   const cap = await stage5Capabilities();
   if (b45Stopped) throw new Error(STATE_MISMATCH_TEXT + ' No file was made.');
   if (cap && cap.access === 'members' && cap.member !== true) throw new Error(NOT_A_MEMBER_TEXT + ' No file was made.');
-  if (pageMayWrite(cap)) return 6;
-  throw new Error('This page makes backups only of a database in its own state (format 6), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
+  if (pageMayWrite(cap)) return 7;
+  throw new Error('This page makes backups only of a database in its own state (format 7), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
 }
 
 // At boot (doesn't hold up the first view): which phase this database is in. A database
@@ -272,6 +281,31 @@ const RESTORE_COLUMNS_V6 = {
   episode_marks: { id: 'uuid', season_id: 'uuid', tmdb_episode_id: 'int', episode_number: 'int' }
 };
 const BACKUP_FORMAT_V6 = { tables: Object.keys(RESTORE_COLUMNS_V6), columns: RESTORE_COLUMNS_V6 };
+// Format 7 (CU1, item 4): format 6 plus collection updates' ten tables — the setup row, versioned
+// collection definitions, exclusions, holds, aliases, remembered membership removals, per-show update
+// settings, findings, and research briefs and imports (db/cu1_collection_updates.sql). 'json': any JSON value.
+const CU1_TABLES = ['update_setup', 'collection_definitions', 'collection_exclusions', 'update_holds', 'record_aliases',
+  'membership_removals', 'show_update_settings', 'research_briefs', 'research_imports', 'update_findings'];
+const RESTORE_COLUMNS_V7 = {
+  ...RESTORE_COLUMNS_V6,
+  update_setup: { id: 'uuid', setup_confirmed_at: 'timestamp', source: 'text' },
+  collection_definitions: { id: 'uuid', collection_id: 'uuid', version: 'int', mode: 'text', rules: 'json', evidence: 'json', summary: 'text',
+    rule_hashes: 'json', evidence_hash: 'text', confirmed_at: 'timestamp' },
+  collection_exclusions: { id: 'uuid', collection_id: 'uuid', kind: 'text', title: 'text', match_text: 'text', tmdb_id: 'int?', media: 'text', note: 'text', created_at: 'timestamp' },
+  update_holds: { id: 'uuid', kind: 'text', collection_id: 'uuid?', show_id: 'uuid?', item_id: 'uuid?', subject_label: 'text?', field: 'text?', protected_value: 'text?',
+    decision: 'text', effect: 'text', reopen: 'json', decided_on: 'date?', created_at: 'timestamp' },
+  record_aliases: { id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', alias: 'text', match_text: 'text', evidence: 'json', created_at: 'timestamp' },
+  membership_removals: { id: 'uuid', collection_id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', removed_at: 'timestamp' },
+  show_update_settings: { id: 'uuid', show_id: 'uuid', follow_when_skipped: 'bool', new_season_after_ended_at: 'timestamp?', updated_at: 'timestamp' },
+  research_briefs: { id: 'uuid', exported_at: 'timestamp', collections: 'json' },
+  research_imports: { id: 'uuid', brief_id: 'uuid', file_sha256: 'text', imported_at: 'timestamp', counts: 'json' },
+  update_findings: { id: 'uuid', fingerprint: 'text', source: 'text', kind: 'text', status: 'text', reason: 'text', collection_id: 'uuid?', show_id: 'uuid?',
+    item_id: 'uuid?', season_id: 'uuid?', subject: 'json', proposed: 'json', expected: 'json', evidence: 'json', assessment: 'json', rule_id: 'text?',
+    definition_version: 'int?', rule_hash: 'text?', evidence_hash: 'text?', brief_id: 'uuid?', first_seen_at: 'timestamp', last_seen_at: 'timestamp',
+    decided_at: 'timestamp?', applied_at: 'timestamp?', result: 'json?' }
+};
+const BACKUP_FORMAT_V7 = { tables: Object.keys(RESTORE_COLUMNS_V7), columns: RESTORE_COLUMNS_V7 };
+const FORMAT6_CONVERTER_VERSION = 'cu1.1';
 const FORMAT5_CONVERTER_VERSION = 'ep1.1';
 const CATALOG_GOVERNANCE_IDS = ['disney', '90day', 'sheridan'];
 const PRESENTATION_KEYS = ['disney', '90day', 'sheridan', 'truecrime'];
@@ -279,7 +313,7 @@ const FORMAT4_CONVERTER_VERSION = 'b45.1';
 
 // The tables and columns of a format (4–6 here; 1–3 in backup-format3.js).
 function backupSpec(formatVersion) {
-  return formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : formatVersion === 4 ? BACKUP_FORMAT_V4 : legacyBackupSpec(formatVersion);
+  return formatVersion === 7 ? BACKUP_FORMAT_V7 : formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : formatVersion === 4 ? BACKUP_FORMAT_V4 : legacyBackupSpec(formatVersion);
 }
 
 const TV_SHOW_STATUSES = ['confirmed', 'highpriority', 'watching', 'complete', 'pending', 'maybe', 'skipped'];
@@ -298,6 +332,7 @@ function restoreValueProblem(type, v) {
     case 'bool': return typeof v === 'boolean' ? null : 'is not true/false';
     case 'int': return Number.isInteger(v) && v >= -2147483648 && v <= 2147483647 ? null : 'is not a whole number';
     case 'text[]': return Array.isArray(v) && v.every(x => typeof x === 'string') ? null : 'is not a list of text';
+    case 'json': return v !== undefined ? null : 'is missing';
   }
   return 'has an unknown type';
 }
@@ -359,10 +394,11 @@ function validateBackupRows(tables, formatVersion = 1) {
   report('watchlist_items identity shape (must be movie, TV season, or legacy with all three empty)', shapeProblems);
   report('custom_collections duplicate name', findDuplicates(tables.custom_collections.filter(r => r && typeof r === 'object'),
     r => typeof r.name === 'string' ? r.name : null, r => `"${r.name}"`));
-  if (formatVersion === 5 || formatVersion === 6) {
+  if (formatVersion >= 5) {
     validateFormat4Rows(tables, items, report, rowLabel, findDuplicates, TV_SHOW_STATUSES_V5);
     validateFormat5Rows(tables, items, report, rowLabel);
-    if (formatVersion === 6) validateFormat6Rows(tables, items, report, rowLabel, findDuplicates);
+    if (formatVersion >= 6) validateFormat6Rows(tables, items, report, rowLabel, findDuplicates);
+    if (formatVersion === 7) validateFormat7Rows(tables, items, report);
   } else if (formatVersion === 4) validateFormat4Rows(tables, items, report, rowLabel, findDuplicates);
   else validateLegacyBackupRows(tables, formatVersion, report, rowLabel, findDuplicates);
   return errors;
@@ -422,6 +458,49 @@ function validateFormat6Rows(tables, items, report, rowLabel, findDuplicates) {
   });
   report('episode_marks', problems);
   report('episode_marks duplicate episode of a season', findDuplicates(marks, m => `${m.season_id}|${m.tmdb_episode_id}`, m => `(season ${m.season_id}, TMDB episode ${m.tmdb_episode_id})`));
+}
+
+// Format 7: what the database's CU1 constraints enforce on references, before anything is sent
+// (the database checks every rule again, in one transaction). A row names only collections, shows
+// and rows in the backup; at most one setup row; one settings row per show.
+function validateFormat7Rows(tables, items, report) {
+  const colls = new Set(tables.personal_collections.map(c => c && c.id)), shows = new Set(tables.tv_shows.map(s => s && s.id));
+  const rowIds = new Set(items.map(r => r.id)), briefs = new Set((tables.research_briefs || []).map(b => b && b.id));
+  const problems = [];
+  const check = (t, r, i, col, set) => { if (r && r[col] != null && !set.has(r[col])) problems.push(`${t} row ${i + 1} names a ${col.replace('_id', '')} that isn’t in the backup`); };
+  for (const t of ['collection_definitions', 'collection_exclusions', 'membership_removals']) (tables[t] || []).forEach((r, i) => check(t, r, i, 'collection_id', colls));
+  for (const t of ['update_holds']) (tables[t] || []).forEach((r, i) => { check(t, r, i, 'collection_id', colls); check(t, r, i, 'show_id', shows); check(t, r, i, 'item_id', rowIds); });
+  for (const t of ['record_aliases', 'membership_removals']) (tables[t] || []).forEach((r, i) => { check(t, r, i, 'show_id', shows); check(t, r, i, 'item_id', rowIds); });
+  (tables.show_update_settings || []).forEach((r, i) => check('show_update_settings', r, i, 'show_id', shows));
+  (tables.research_imports || []).forEach((r, i) => check('research_imports', r, i, 'brief_id', briefs));
+  if ((tables.update_setup || []).length > 1) problems.push('update_setup has more than one row');
+  const seen = new Set();
+  (tables.show_update_settings || []).forEach((r, i) => { if (r && seen.has(r.show_id)) problems.push(`show_update_settings row ${i + 1} repeats a show`); seen.add(r && r.show_id); });
+  report('collection updates (format 7) references', problems);
+}
+
+// ─── Converting a format-6 document to format 7 ───────────────────────────────
+// Format 7 adds collection updates' ten tables, which a format-6 file can't have: the converted
+// document has them empty, and every other table is kept as it is. Restoring it therefore removes the
+// current definitions, exclusions, holds, aliases, removals, show settings, findings and the setup row;
+// automatic updates for catalog shows then wait until the setup file is imported again.
+function convertFormat6To7(doc6, { sourceSha256 } = {}) {
+  const tables = { ...doc6.tables };
+  CU1_TABLES.forEach(t => { tables[t] = []; });
+  const doc = { format: doc6.format, formatVersion: 7, exportedAt: doc6.exportedAt,
+    rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
+  doc.conversion = doc6.conversion
+    ? { ...doc6.conversion, converter_version: `${doc6.conversion.converter_version}+${FORMAT6_CONVERTER_VERSION}` }
+    : { source_format: 6, source_exported_at: doc6.exportedAt, source_sha256: sourceSha256, converter_version: FORMAT6_CONVERTER_VERSION };
+  if (doc6.recovery) doc.recovery = doc6.recovery;
+  return { doc };
+}
+function format6ConversionHtml(currentCounts) {
+  const lost = CU1_TABLES.reduce((n, t) => n + (currentCounts[t] || 0), 0);
+  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 7 before restoring</div><ul class="manage-list">
+    <li>Format 7 adds collection updates: collection definitions, exclusions, holds, aliases, remembered removals, show update settings and findings. This backup was made before them, so it has none.</li>
+    ${lost ? `<li>Restoring it removes the ${lost} collection-update record${lost === 1 ? '' : 's'} you have now (the safety backup keeps them). Automatic updates for catalog shows then pause until you import the collection setup file again (Settings → Collection updates).</li>` : ''}
+    <li>The file itself isn’t changed.</li></ul></div>`;
 }
 
 // ─── Converting a format-5 document to format 6 ───────────────────────────────
@@ -774,7 +853,7 @@ async function handleRestoreFileSelected(event) {
     const text = await file.text();
     if (!restoreSessionLive(session)) return;
     parsed = JSON.parse(text);
-    sourceSha256 = await catalogSha256(text);
+    sourceSha256 = await cuSha256(text);
     if (!restoreSessionLive(session)) return;
   } catch(e) {
     if (!restoreSessionLive(session)) return;
@@ -808,14 +887,14 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
   let currentItems = [];
   let dbFormat;
   try {
-    // A restore needs a database in this page's phase (format 6); formats 3, 4 and 5 are
+    // A restore needs a database in this page's phase (format 7); formats 3, 4, 5 and 6 are
     // converted here first. Never a fallback to another format.
     const phaseCap = await stage5Capabilities();
     if (!restoreSessionLive(session)) return;
     if (!pageMayWrite(phaseCap)) {
       showRestoreModal(`<div class="modal-title">Restore isn't available</div>
         <div class="modal-error">${b45Stopped ? esc(STATE_MISMATCH_TEXT) : phaseCap
-          ? 'This page restores only into a database in its own state (format 6), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
+          ? 'This page restores only into a database in its own state (format 7), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
           : 'This page needs a database update that hasn’t been made yet, so it can’t restore here. Nothing was changed.'}</div>
         <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
       pendingRestoreData = null;
@@ -839,22 +918,27 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
 
   // Formats 3, 4 and 5 into the EP1 database: an explicit, previewed conversion (3 → 4 with
   // the retained converter, 4 → 5, then 5 → 6). Only the converted document is ever sent.
-  let conversion = null, conversion5 = null, conversion6 = false;
+  let conversion = null, conversion5 = null, conversion6 = false, conversion7 = false;
   const refuseConversion = (lines) => {
     showRestoreModal(`<div class="modal-title">This format ${backup.formatVersion} backup can't be converted</div>
       <div class="modal-error">${lines.map(esc).join('\n')}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
     pendingRestoreData = null;
   };
-  if (dbFormat === 6 && [3, 4, 5].includes(backup.formatVersion)) {
+  if (dbFormat === 7 && [3, 4, 5, 6].includes(backup.formatVersion)) {
     let cap;
     try { cap = await stage5Capabilities(); } catch (e) { cap = null; }
     if (!restoreSessionLive(session)) return;
     if (!cap) { refuseConversion(['Couldn’t read whether the recovery archive is active, so nothing was changed.']); return; }
     // The conversion record names the file it came from (its SHA-256, computed when the file was read).
     if (!/^[0-9a-f]{64}$/.test(sourceSha256 || '')) { refuseConversion(['The file’s fingerprint couldn’t be computed, so nothing was changed. Choose the file again.']); return; }
-    let doc5 = backup;
-    if (backup.formatVersion === 3 || backup.formatVersion === 4) {
+    let doc5 = backup, doc6 = backup;
+    if (backup.formatVersion === 6) {
+      if (backup.conversion !== undefined || backup.recovery !== undefined) {
+        const problems = sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4', '5']);
+        if (problems.length) { refuseConversion(['Nothing was changed:'].concat(problems)); return; }
+      }
+    } else if (backup.formatVersion === 3 || backup.formatVersion === 4) {
       let doc4 = backup;
       if (backup.formatVersion === 3) {
         const conv = convertFormat3To4(backup, { includeRecovery: cap.recovery_archive === 'active', sourceSha256 });
@@ -875,24 +959,28 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
       const problems = sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4']);
       if (problems.length) { refuseConversion(['Nothing was changed:'].concat(problems)); return; }
     }
-    const conv6 = convertFormat5To6(doc5, { sourceSha256 });
-    const docErrors = validateBackupObject(conv6.doc);
+    if (backup.formatVersion !== 6) {
+      doc6 = convertFormat5To6(doc5, { sourceSha256 }).doc;
+      conversion6 = true;
+    }
+    const conv7 = convertFormat6To7(doc6, { sourceSha256 });
+    const docErrors = validateBackupObject(conv7.doc);
     if (docErrors.length) { refuseConversion(['The converted backup doesn’t pass validation, so nothing was changed:'].concat(docErrors)); return; }
-    if (conv6.doc.recovery !== undefined) {
-      const rp = recoverySectionProblems(conv6.doc);
+    if (conv7.doc.recovery !== undefined) {
+      const rp = recoverySectionProblems(conv7.doc);
       if (rp.length) { refuseConversion(['Nothing was changed:'].concat(rp)); return; }
     }
-    conversion6 = true;
-    backup = conv6.doc;
+    conversion7 = true;
+    backup = conv7.doc;
     pendingRestoreData = backup;
   }
-  // A format-6 file carrying a conversion record or a recovery section (possible only by hand
+  // A format-7 file carrying a conversion record or a recovery section (possible only by hand
   // or from a converted document saved elsewhere): checked as the database checks them first.
-  if (dbFormat === 6 && backup.formatVersion === 6 && !conversion6 && (backup.conversion !== undefined || backup.recovery !== undefined)) {
+  if (dbFormat === 7 && backup.formatVersion === 7 && !conversion7 && (backup.conversion !== undefined || backup.recovery !== undefined)) {
     let cap;
     try { cap = await stage5Capabilities(); } catch (e) { cap = null; }
     if (!restoreSessionLive(session)) return;
-    const problems = cap ? sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4', '5'])
+    const problems = cap ? sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4', '5', '6'])
       : ['Couldn’t read whether the recovery archive is active, so nothing was changed.'];
     if (problems.length) {
       showRestoreModal(`<div class="modal-title">This file can't be used for restore</div>
@@ -947,6 +1035,7 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
     ${conversion ? format3ConversionHtml(conversion) : ''}
     ${conversion5 ? format4ConversionHtml(conversion5) : ''}
     ${conversion6 ? format5ConversionHtml() : ''}
+    ${conversion7 ? format6ConversionHtml(currentCounts) : ''}
     <div class="modal-section">
       <div class="modal-label">Rows: current → backup</div>
       ${rows}
@@ -1083,12 +1172,12 @@ async function sendRestore(preRestoreFilename) {
   // atomically: if anything fails, the database rolls back to exactly what it was.
   const restoredTables = backupSpec(backup.formatVersion).tables;
   // The phase is read again right before sending: it must still be this page's, and only
-  // a format-6 document is ever sent (formats 3, 4 and 5 were converted in the preview).
+  // a format-7 document is ever sent (formats 3, 4, 5 and 6 were converted in the preview).
   // Nothing is sent otherwise.
   let sendCap = null;
   try { sendCap = await stage5Capabilities(); } catch (e) { sendCap = null; }
   if (!restoreSessionLive(session) || pendingRestoreData !== backup) return;
-  if (!pageMayWrite(sendCap) || backup.formatVersion !== 6 || !pendingRestoreData) {
+  if (!pageMayWrite(sendCap) || backup.formatVersion !== 7 || !pendingRestoreData) {
     showRestoreModal(`<div class="modal-title">Restore not sent</div>
       <div class="modal-error">The database’s update state ${sendCap ? 'changed after this restore was prepared' : 'couldn’t be confirmed'}, so nothing was sent and nothing was changed. Choose the file again to see what restoring it would do now.</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);

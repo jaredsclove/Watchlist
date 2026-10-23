@@ -82,13 +82,18 @@ function filmThemeKindOf(r) {
   return r ? libraryGovernance.kinds.get(r.id) || null : null;
 }
 
-// ─── Editing rules (exactly the old storage rules, by governance) ─────────────
-// A catalog entry: governed, and its key is in that catalog's current list (this
-// page's config.js). × skips it (a TV season: the season's skip flag; a film: its
-// status) and never deletes it; anything else is deleted after a confirmation.
+// ─── Editing rules (by governance) ────────────────────────────────────────────
+// A catalog entry: a record a built-in catalog governs (since item 4 the config-based lists are
+// retired, so every governed record counts, as the lists' entries did). × skips it (a TV season:
+// the season's skip flag; a film: its status) and never deletes it; anything else is deleted after
+// a confirmation.
 function isCatalogEntry(r) {
-  const c = rowCatalogOf(r);
-  return !!c && catalogDefaultsOf(c).some(d => d.k === r.item_key);
+  return !!rowCatalogOf(r);
+}
+// The built-in catalogs' names (their governance stays on the records they hold).
+const CATALOG_LABELS = { disney: 'Disney+', '90day': '90 Day', sheridan: 'Sheridan' };
+function catalogLabel(catalogId) {
+  return CATALOG_LABELS[catalogId] || catalogId;
 }
 
 function editPolicyOf(r) {
@@ -106,13 +111,10 @@ function showAddKind(show) {
   return show.tmdb_id != null && !showCatalogOf(show) ? 'tmdb' : 'label';
 }
 
-// A hint only: the governing catalog's current list has an entry for this show.
-// Being governed doesn't mean the catalog will supply more seasons.
+// A hint only: a built-in catalog governs this show.
 function catalogListingOf(show) {
   const c = showCatalogOf(show);
-  if (!c) return null;
-  const listed = catalogDefaultsOf(c).some(d => d.s !== 'Film' && catalogShowKey(c, d.k) === show.show_key);
-  return listed ? catalogLabel(c) : null;
+  return c ? catalogLabel(c) : null;
 }
 
 // The show as the page shows it: the database refuses if it no longer matches.
@@ -376,8 +378,8 @@ function renderLibraryBody() {
   if (p.mode === 'search') el.innerHTML = searchRow + results;
   else if (p.mode === 'match' || p.mode === 'pull') el.innerHTML = results;
   else if (p.mode === 'manual') el.innerHTML = p.media === 'movie' ? libraryManualFilmHtml() : libraryManualShowHtml();
-  else if (p.mode === 'refresh') el.innerHTML = `<div class="tmdb-search-row"><button class="btn" onclick="libraryRefreshShows()">↻ Check for new seasons</button>
-      <span class="tmdb-refresh-summary">Shows matched to TMDB whose seasons come from TMDB.</span></div>${results}`;
+  else if (p.mode === 'refresh') el.innerHTML = `<div class="tmdb-search-row"><button class="btn" onclick="cuRefreshShows()">↻ Check every show with TMDB</button>
+      <span class="tmdb-refresh-summary">Every show in your library, catalog and collection shows included (Skipped shows only when you keep checking them). New seasons, TBA and future dates, episode lists and matches are updated automatically; anything uncertain waits for your review. TMDB only: announcements come from research briefs (Settings → Collection updates).</span></div>${results}`;
   else if (p.mode === 'tools') el.innerHTML = `<div class="tmdb-search-row">
         <button class="btn" onclick="libraryMovieTool('collections')" title="Check your tracked collections/franchises for films you haven't added yet">↻ Refresh collections</button>
       </div>
@@ -458,7 +460,7 @@ function libraryRenderPreview() {
   if (route.kind === 'existing' && showAddKind(route.show) === 'label') {
     p.bound = null;
     const s = route.show, listed = catalogListingOf(s);
-    previewEl.innerHTML = `<div class="tmdb-preview">${header(network)}<div class="tmdb-refresh-summary">“${esc(s.title)}” is already on your list. TMDB seasons can’t be added to it here; you can add a season to it by hand (a plain “Season N” becomes TMDB season N; any other label is held for review).${listed ? ` The ${esc(listed)} catalog lists this show.` : ''}</div>
+    previewEl.innerHTML = `<div class="tmdb-preview">${header(network)}<div class="tmdb-refresh-summary">“${esc(s.title)}” is already on your list. TMDB seasons can’t be added to it here; you can add a season to it by hand (a plain “Season N” becomes TMDB season N; any other label is held for review).${listed ? ` The ${esc(listed)} catalog governs this show.` : ''}</div>
       <div class="tmdb-preview-actions"><button class="btn btn-accent" onclick="openAddSeason('${esc(s.id)}')">Add a season by hand</button><button class="btn" onclick="cancelTMDBPreview()">Cancel</button></div></div>`;
     return;
   }
@@ -867,7 +869,7 @@ function librarySeasonHtml() {
   p.bound = { kind: 'season-label', showId: show.id, expected: libraryExpected(show, '') };
   const theme = seasons.length ? seasons[seasons.length - 1].theme : '';
   return `<div class="tmdb-preview"><div class="tmdb-preview-title">${esc(show.title)}</div>${have}
-    <div class="tmdb-refresh-summary">${show.tmdb_id != null ? 'This show is matched to TMDB: a plain “Season N” becomes its TMDB season N; any other label is held for review.' : 'This show isn’t matched to TMDB; the season is added by its label.'}${listed ? ` The ${esc(listed)} catalog lists this show.` : ''}</div>
+    <div class="tmdb-refresh-summary">${show.tmdb_id != null ? 'This show is matched to TMDB: a plain “Season N” becomes its TMDB season N; any other label is held for review.' : 'This show isn’t matched to TMDB; the season is added by its label.'}${listed ? ` The ${esc(listed)} catalog governs this show.` : ''}</div>
     <div class="add-form-grid">
       <div><label>Season</label><input id="nSeason" type="text" placeholder="e.g. Season 2"></div>
       <div><label>Premiere date</label><input id="nDate" type="text" placeholder="e.g. Jan 12, 2027 or TBA 2027"></div>
@@ -928,161 +930,7 @@ async function librarySubmitSeason() {
 }
 
 // ─── Refresh shows ────────────────────────────────────────────────────────────
-// New TMDB seasons for every identified show that takes TMDB seasons (showAddKind),
-// and TBA → date updates on their stored seasons. Read only until Apply.
-async function libraryRefreshShows() {
-  const p = libraryPanel;
-  if (!p || p.mode !== 'refresh') return;
-  const session = p.session;
-  cancelTMDBPreview();
-  const previewEl = document.getElementById('tmdbPreview');
-  if (previewEl) previewEl.innerHTML = '<div class="tmdb-loading">Checking for new seasons…</div>';
-  let lib;
-  try { lib = await readLibrary(); }
-  catch (e) { if (libraryLive(session) && previewEl) previewEl.innerHTML = `<div class="tmdb-no-results">Couldn’t read your whole list (${esc(e.message)}). Nothing was checked.</div>`; return; }
-  if (!libraryLive(session)) return;
-  p.lib = lib;
-  const shows = lib.shows.filter(s => showAddKind(s) === 'tmdb').sort((a, b) => compareTitles(a.title, b.title) || cmpStr(a.id, b.id));
-  if (!shows.length) { previewEl.innerHTML = '<div class="tmdb-no-results">No shows matched to TMDB — nothing to refresh.</div>'; return; }
-  const found = [], updates = [], failed = [];
-  for (const show of shows) {
-    let details;
-    try { details = await tmdbFetch(`/tv/${show.tmdb_id}`); } catch (e) { failed.push(show.title); continue; }
-    noteSeasonEpisodeCounts(show.tmdb_id, details && details.seasons); // EP1: totals for collapsed seasons (episodes.js)
-    noteShowRating(show.tmdb_id, details); // item 2: the show's TMDB score (show-ratings.js)
-    if (!libraryLive(session)) return;
-    const rows = lib.rows.filter(r => r.show_id === show.id);
-    const fresh = [];
-    for (const s of (details.seasons || []).filter(x => tmdbShowSpecials || x.season_number !== 0)) {
-      const stored = rows.find(r => r.season_number === s.season_number);
-      if (!stored) { fresh.push(s); continue; }
-      const update = stored.tmdb_id === show.tmdb_id ? tmdbSeasonDateUpdate(stored, s) : null;
-      if (update) updates.push({ row: stored, update, title: show.title });
-    }
-    if (fresh.length) found.push({ show, details, fresh });
-  }
-  if (!libraryLive(session)) return;
-  const note = tmdbLookupFailureNote(shows.length, failed, 'show');
-  if (note?.total) { previewEl.innerHTML = `<div class="tmdb-no-results">${esc(note.message)}</div>`; return; }
-  p.refresh = { found, updates };
-  const warn = note ? `<div class="tmdb-refresh-summary">⚠️ ${esc(note.message)}</div>` : '';
-  if (!found.length && !updates.length) { previewEl.innerHTML = `${warn}<div class="tmdb-no-results">${note ? 'Nothing new among the shows that could be checked.' : 'Everything’s up to date.'}</div>`; return; }
-  previewEl.innerHTML = `<div class="tmdb-preview">${warn}
-    ${found.map((f, i) => `<div class="tmdb-preview-title" style="margin-top:8px">${esc(f.show.title)}</div>${f.fresh.map(s => `<label class="tmdb-season-row">
-      <input type="checkbox" checked data-show-idx="${i}" data-season="${s.season_number}">
-      <span class="tmdb-season-name">${esc(librarySeasonLabel(s.season_number))}</span>
-      <span class="tmdb-season-meta">${s.episode_count || 0} episodes · ${esc(s.air_date ? formatDisplayDate(s.air_date) : 'TBA')}</span></label>`).join('')}`).join('')}
-    ${updates.length ? `<div class="tmdb-preview-title" style="margin-top:8px">Confirmed dates</div>${updates.map((u, i) => `<label class="tmdb-season-row">
-      <input type="checkbox" checked data-update-idx="${i}"><span class="tmdb-season-name">${esc(u.title)} · ${esc(u.row.season)}</span>
-      <span class="tmdb-season-meta">${esc(u.row.display_date)} → ${esc(u.update.display_date)}</span></label>`).join('')}` : ''}
-    <div class="tmdb-preview-actions"><button class="btn btn-accent" onclick="libraryApplyRefresh()">Apply selected</button><button class="btn" onclick="cancelTMDBPreview()">Cancel</button></div></div>`;
-}
-
-// One protected call per show. A refusal ("nothing was added" for that show only)
-// moves on to the next show; an answer that isn't clear stops sending anything
-// more. Earlier results stay reported.
-async function libraryApplyRefresh() {
-  const p = libraryPanel;
-  if (!p || !p.refresh || p.busy) return;
-  const { found, updates } = p.refresh;
-  const ctx = libraryContext();
-  const picks = new Map(), dates = [];
-  document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-show-idx]').forEach(cb => {
-    if (!cb.checked) return;
-    const i = parseInt(cb.dataset.showIdx, 10);
-    if (!picks.has(i)) picks.set(i, []);
-    picks.get(i).push(parseInt(cb.dataset.season, 10));
-  });
-  document.querySelectorAll('#tmdbPreview input[type="checkbox"][data-update-idx]').forEach(cb => { if (cb.checked) dates.push(updates[parseInt(cb.dataset.updateIdx, 10)]); });
-  if (!picks.size && !dates.length) return;
-  const lane = beginWrite('Refresh shows');
-  if (!lane) return;
-  p.busy = true;
-  const lines = [];
-  let stopped = false, confirmed = 0; // confirmed: answers that saved something (the only reason to say "Saved")
-  try {
-    let lib;
-    try { lib = await readLibrary(); }
-    catch (e) { libraryReport(ctx, `Couldn’t read your whole list (${e.message}), so nothing was added.`, true); return; }
-    if (!libraryLive(ctx.session)) return;
-    for (const [i, nums] of picks) {
-      const f = found[i];
-      const show = lib.showsById.get(f.show.id);
-      const network = (f.details.networks && f.details.networks[0]?.name) || 'Unknown';
-      if (!show || JSON.stringify(libraryExpected(show, network)) !== JSON.stringify(libraryExpected(f.show, network))) {
-        lines.push(`“${f.show.title}”: it changed or is gone since the check, so nothing was sent for it.`);
-        continue;
-      }
-      const byNum = new Map(f.fresh.map(s => [s.season_number, s]));
-      let res;
-      try {
-        res = await sbRpc('library_add_seasons_b45', { p_show_id: show.id, p_expected: libraryExpected(show, network),
-          p_seasons: nums.filter(n => byNum.has(n)).map(n => libraryTmdbSeason(show, byNum.get(n), network)) });
-      } catch (e) {
-        const fl = libraryFailure(e, `“${show.title}”`);
-        lines.push(fl.unknown ? fl.text : `“${show.title}”: ${fl.text}`);
-        if (fl.unknown) { stopped = true; break; }
-        continue;
-      }
-      if (!res || res.show_id !== show.id || res.show_created) { lines.push(`“${show.title}”: the answer named a different show, so it isn’t reported as added. Check it.`); continue; }
-      if ((res.inserted || []).length) confirmed++;
-      lines.push(libraryAddText(res, show.title));
-    }
-    // Confirmed dates: only the two date fields, only while the row still holds the previewed value.
-    for (const u of stopped ? [] : dates) {
-      try {
-        const changed = await libraryPatchReturning(`${TABLE}?id=eq.${encodeURIComponent(u.row.id)}&media_type=eq.tv&tmdb_id=eq.${u.row.tmdb_id}&season_number=eq.${u.row.season_number}&display_date=eq.${encodeURIComponent(u.row.display_date)}`, u.update);
-        if (changed.length === 1 && changed[0].id === u.row.id && changed[0].display_date === u.update.display_date) {
-          confirmed++;
-          lines.push(`${u.title} · ${u.row.season}: date set to ${u.update.display_date}.`);
-        } else {
-          lines.push(`${u.title} · ${u.row.season}: not changed — its date is no longer ${u.row.display_date} (it changed after the check), so this part of the preview is out of date. Check again.`);
-        }
-      } catch (e) {
-        const fl = libraryFailure(e, `${u.title} · ${u.row.season} date`);
-        lines.push(fl.text);
-        if (fl.unknown) { stopped = true; break; }
-      }
-    }
-    if (stopped) lines.push('Nothing more was sent.');
-    if (confirmed) showSaved();
-    await libraryAfterWrite(ctx);
-    libraryReport(ctx, lines.join(' '), !confirmed);
-  } finally {
-    if (libraryPanel === p) { p.busy = false; p.refresh = null; }
-    endWrite(lane);
-  }
-}
-
-// A guarded PATCH that answers with the rows it changed (PostgREST
-// return=representation), so "no row matched" is told apart from a change.
-// Errors as sbFetch reports them.
-// Sent from inside the write lane, like every change (api.js sbFetch).
-async function libraryPatchReturning(path, body) {
-  if (!writeLane) throw new Error('This change was not started through the write lane, so nothing was sent.');
-  await requireWritablePhase();
-  const headers = await authHeaders({ 'Content-Type': 'application/json', 'Prefer': 'return=representation' });
-  const note = savePendingNote(writeLane.label);
-  writeSent();
-  let answered = false;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { method: 'PATCH', headers, body: JSON.stringify(body) });
-    if (!res.ok) {
-      const err = await res.text();
-      if (confirmedAnswer(res.status, err)) answered = true;
-      if (res.status === 401) sessionLost();
-      if (/not_a_member/.test(err)) membershipEnded();
-      throw new Error(`Supabase error ${res.status}: ${err}`);
-    }
-    answered = true;
-    const text = await res.text();
-    const rows = text ? JSON.parse(text) : [];
-    return Array.isArray(rows) ? rows : [];
-  } finally {
-    if (answered) clearPendingNote(note); else keepPendingNote(note);
-    writeSettled();
-  }
-}
+// Library-wide and TMDB only since item 4: collection-updates.js cuRefreshShows.
 
 // ─── Movie tools (Refresh collections, MCU, person collections, Pull rest) ────
 // The tools add films (genre themes, theme_kind 'genre') and run in All Movies on a

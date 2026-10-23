@@ -143,6 +143,7 @@ function priorityMarkHtml(priority, after = false) {
 // The markers: Ended (shows), New from catalog, Needs status review.
 function stateTagsHtml(rec, kind) {
   return (kind === 'show' && rec.ended ? ' <span class="state-tag ended-tag" title="You marked this show as ended">Ended</span>' : '')
+    + (kind === 'show' && typeof cuEndedFlagHtml === 'function' ? cuEndedFlagHtml(rec) : '')
     + (rec.catalog_new ? ' <span class="state-tag new-tag" title="Added by a catalog update">New</span>' : '')
     + (rec.status_review ? ' <span class="state-tag review-tag-b45" title="Restored from an older backup whose status couldn’t be carried over: choose a status or keep this one">Review status</span>' : '');
 }
