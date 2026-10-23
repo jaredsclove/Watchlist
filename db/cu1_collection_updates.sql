@@ -457,7 +457,8 @@ language sql stable set search_path = '' as $$
   select exists (
     select 1 from public.collection_exclusions e
     where e.user_id = p_owner and e.collection_id = p_collection and (
-      (e.tmdb_id is not null and jsonb_typeof(p_subject -> 'tmdb_id') = 'number' and e.tmdb_id = (p_subject ->> 'tmdb_id')::integer)
+      (e.tmdb_id is not null and jsonb_typeof(p_subject -> 'tmdb_id') = 'number' and (p_subject ->> 'tmdb_id') ~ '^[1-9][0-9]{0,8}$'
+       and e.tmdb_id = (p_subject ->> 'tmdb_id')::integer)
       or (e.kind = 'title' and e.match_text in (select n from t))
       or (e.kind = 'every_version' and exists (select 1 from t where (' ' || t.n || ' ') like ('% ' || e.match_text || ' %')))
       or (e.kind = 'series_and_spinoffs' and (e.match_text in (select n from t)
@@ -514,6 +515,14 @@ begin
     exception when invalid_text_representation then raise exception 'invalid_input: TMDB finding ids' using errcode = '22023';
     end;
     select * into f from public.update_findings where user_id = p_owner and fingerprint = p_finding ->> 'fingerprint' for update;
+    -- A TMDB finding a policy outcome parked (needs_evidence, set_aside) and the owner hasn't decided is
+    -- checked again with what TMDB says now (a later date and episodes, a show no longer Skipped);
+    -- owner decisions (Not now, Dismiss) and final outcomes stand.
+    if f.source = 'tmdb' and f.status in ('needs_evidence', 'set_aside') and f.decided_at is null then
+      update public.update_findings set status = 'pending', reason = '', subject = coalesce(p_finding -> 'subject', subject),
+        proposed = coalesce(p_finding -> 'proposed', proposed), expected = coalesce(p_finding -> 'expected', expected), last_seen_at = now()
+      where id = f.id returning * into f;
+    end if;
   end if;
   if not (f.kind = any(p_kinds)) then raise exception 'invalid_input: a % finding can''t be applied here', f.kind using errcode = '22023'; end if;
   return f;
@@ -590,15 +599,22 @@ begin
     h := private.cu1_hold_for(p_owner, array['identity_hold'], p_show, p_item, p_label);
     if h.id is not null then return 'pending:identity_hold'; end if;
   end if;
-  h := private.cu1_hold_for(p_owner, array['standing_decision'], p_show, p_item, p_label);
-  if h.id is null then return null; end if;
-  if h.effect = 'stay_skipped_unmatched' and not p_identity then return null; end if;
-  if h.effect = 'require_qualifying_evidence' and f.source = 'research' and private.cu1_reopen_met(h, f, v_settings, false) then return null; end if;
-  if p_review then
-    if private.cu1_reopen_met(h, f, v_settings, true) then return null; end if;
-    return 'refuse:reopen_condition_not_met';
-  end if;
-  return 'pending:standing_decision';
+  -- Every standing decision that applies is consulted; the most restrictive outcome wins.
+  for h in select x.* from public.update_holds x
+           where x.user_id = p_owner and x.kind = 'standing_decision'
+             and ((p_item is not null and x.item_id = p_item)
+               or (p_show is not null and x.show_id = p_show and x.item_id is null
+                   and (x.subject_label is null or (p_label is not null and private.cu1_norm(x.subject_label) = private.cu1_norm(p_label)))))
+           order by x.created_at, x.id loop
+    continue when h.effect = 'stay_skipped_unmatched' and not p_identity;
+    continue when h.effect = 'require_qualifying_evidence' and f.source = 'research' and private.cu1_reopen_met(h, f, v_settings, false);
+    if p_review then
+      continue when private.cu1_reopen_met(h, f, v_settings, true);
+      return 'refuse:reopen_condition_not_met';
+    end if;
+    return 'pending:standing_decision';
+  end loop;
+  return null;
 end $$;
 
 create function private.cu1_label(n integer) returns text
@@ -700,6 +716,10 @@ begin
 
   if v_row is not null then
     if f.source = 'tmdb' then
+      -- An identity hold on the chosen row's own label (a review may pick a "Part" or "Final" row) is never overridden.
+      if (private.cu1_hold_for(v_owner, array['identity_hold'], s.id, v_row, (select season from public.watchlist_items where id = v_row))).id is not null then
+        return private.cu1_finish(f.id, 'policy', 'pending', 'identity_hold', jsonb_build_object('row_id', v_row));
+      end if;
       update public.watchlist_items set media_type = 'tv', tmdb_id = s.tmdb_id, season_number = v_n where id = v_row and user_id = v_owner and tmdb_id is null;
       return private.cu1_finish(f.id, 'applied', 'applied', '', jsonb_build_object('outcome', 'mapped', 'row_id', v_row));
     end if;
@@ -850,7 +870,7 @@ begin
     v_n := private.tv_plain_season_number(w.season);
     if v_n is not null and p_listed @> to_jsonb(v_n)
        and not exists (select 1 from public.watchlist_items x where x.user_id = v_owner and x.media_type = 'tv' and x.tmdb_id = p_tmdb_id and x.season_number = v_n)
-       and private.cu1_hold_for(v_owner, array['identity_hold'], s.id, null, w.season) is null then
+       and (private.cu1_hold_for(v_owner, array['identity_hold'], s.id, null, w.season)).id is null then
       update public.watchlist_items set media_type = 'tv', tmdb_id = p_tmdb_id, season_number = v_n where id = w.id;
       v_mapped := v_mapped || w.id;
     else
@@ -1039,7 +1059,7 @@ declare
   v_owner uuid := private.current_owner_id();
   f public.update_findings;
 begin
-  if p_id is null or p_status not in ('not_now', 'dismissed', 'excluded', 'pending') or char_length(coalesce(p_note, '')) > 200 then
+  if p_id is null or coalesce(p_status, '') not in ('not_now', 'dismissed', 'excluded', 'pending') or char_length(coalesce(p_note, '')) > 200 then
     raise exception 'invalid_input: finding status' using errcode = '22023';
   end if;
   perform private.lib_write_on();
@@ -1120,10 +1140,10 @@ begin
     perform private.lib_refuse('already_imported', 'This findings file was already imported, so nothing changed.');
   end if;
   for x in select * from jsonb_array_elements(p_findings) loop
-    v_routed := x ->> 'routed_status';
+    v_routed := coalesce(x ->> 'routed_status', '');
     if jsonb_typeof(x) is distinct from 'object' or coalesce(x ->> 'fingerprint', '') !~ '^[a-z_]+:[0-9a-f]{64}$'
        or v_routed not in ('pending', 'needs_evidence', 'conflict', 'needs_research', 'set_aside')
-       or x ->> 'kind' not in ('new_season', 'date', 'alias', 'new_show', 'new_film', 'cancellation', 'renewal_none')
+       or coalesce(x ->> 'kind', '') not in ('new_season', 'date', 'alias', 'new_show', 'new_film', 'cancellation', 'renewal_none')
        or jsonb_typeof(x -> 'evidence') is distinct from 'array' or jsonb_typeof(x -> 'assessment') is distinct from 'object'
        or jsonb_typeof(x -> 'subject') is distinct from 'object' or (x ? 'rule_id' and coalesce(x ->> 'rule_id', '') !~ '^[a-z0-9_-]{1,40}$') then
       raise exception 'invalid_input: finding %', x ->> 'fingerprint' using errcode = '22023';
@@ -1204,7 +1224,8 @@ declare
   v_owner uuid := private.current_owner_id();
   v_id uuid;
 begin
-  if p_collection_id is null or p_op not in ('add', 'remove') or jsonb_typeof(p_exclusion) is distinct from 'object' then
+  if p_collection_id is null or coalesce(p_op, '') not in ('add', 'remove') or jsonb_typeof(p_exclusion) is distinct from 'object'
+     or (p_op = 'add' and coalesce(p_exclusion ->> 'kind', '') not in ('title', 'every_version', 'series_and_spinoffs')) then
     raise exception 'invalid_input: exclusion' using errcode = '22023';
   end if;
   perform private.lib_write_on();

@@ -24,7 +24,7 @@ functions below or restore. Grants are explicit and verified, as in EP1.
 
 | Table | Purpose | Key columns and constraints |
 |---|---|---|
-| `update_setup` | One row per owner: whether the holds and definitions for catalog-governed records are in place (section 3.2) | `user_id` primary key; `setup_confirmed_at`; `source` ∈ setup_file / no_catalog_records |
+| `update_setup` | One row per owner: whether the holds and definitions for catalog-governed records are in place (section 3.2) | `user_id` primary key; `setup_confirmed_at`; `source` = setup_file |
 | `collection_definitions` | Versioned definitions, one row per confirmed version; rows never change | `collection_id` → `personal_collections` (cascade); `version` > 0, unique per collection; `mode` ∈ manual / follow / discover; `rules` (validated JSON list, below); `evidence` (official domains, trade outlets with their domains, standard `official_or_two_trades`); `summary`; `confirmed_at`; computed by the database on insert: `rule_hashes` (per rule, over its eligibility fields only) and `evidence_hash` |
 | `collection_exclusions` | Current exclusions (not versioned; always applied as they stand) | `collection_id` (cascade); `kind` ∈ title / every_version / series_and_spinoffs; `title`, normalized `match_text`, optional `tmdb_id`, `media`; unique (collection, kind, match_text) |
 | `update_holds` | Standing decisions, protected values, identity holds | `kind`; optional `collection_id`, `show_id`, `item_id` (cascade) and `subject_label` (a season label or a title not yet in the library); for protected values `field` ∈ display_date / title / season_label and `protected_value`; `decision`, `effect`, `reopen` (typed condition), `decided_on`. Identity holds need a show or item |
@@ -66,11 +66,14 @@ and changing nothing on refusal. Each takes the expected values the page showed.
      show's own (from its latest season). An Ended show keeps Ended and gets `new_season_after_ended_at`.
   Status, priority, Ended, markers, titles, labels, memberships and marks are never changed.
 - **Identity — `library_cu_attach_identity(show, expected, tmdb_id, listed_season_numbers, basis)`.** Refuses an
-  identity hold, a TMDB id another show has, a show already matched, or any season label that isn't a plain
-  `Season N`. Sets the show's `tmdb_id` (title and key unchanged) and maps each plain `Season N` that TMDB lists
-  and no other row holds; the rest stay unidentified (awaiting TMDB). `library_cu_map_season` maps one season
-  after review, under the same rules. Unidentified seasons have no marks, and EP1's identity guard still
-  protects every marked season.
+  identity hold, a TMDB id another show has and a show already matched; without an owner review decision it
+  also refuses a TMDB title that isn't the show's title or an evidenced alias, and any season label that isn't a
+  plain `Season N` (with review, those rows stay unidentified). Sets the show's `tmdb_id` (title and key
+  unchanged) and maps each plain `Season N` that TMDB lists, that no other row holds and that no identity hold
+  names; the rest stay unidentified (awaiting TMDB). A season the review screen maps after an ambiguous
+  correspondence goes through `library_cu_reconcile_season` with the owner's chosen row, under the same rules
+  (an identity hold on that row's own label refuses it). Unidentified seasons have no marks, and EP1's identity
+  guard still protects every marked season.
 - **Dates — `library_cu_set_season_date(row, expected, new, basis)`.** The only new path that sets
   `watchlist.catalog_date_write`, and only inside its own call. Allowed: a stored date containing `TBA` → an exact
   date; a future exact date → another future exact date, with TMDB or evidence basis; any other change only with
@@ -113,8 +116,8 @@ the moment of the write, so a caller-supplied `basis` or an old brief can't stan
   every applying function refuses basis `tmdb` or `research` for such a record with `setup_required` (the
   finding is kept as pending, reason "waiting for collection setup"); research imports are refused for
   collections without a confirmed definition.
-- The row appears when the setup file is imported (`source` setup_file), or, for an owner with no
-  catalog-governed records, automatically on first use (`no_catalog_records`). It is part of backup format 7.
+- The row appears when the setup file is imported (`source` setup_file). An owner with no catalog-governed
+  records needs none: the gate applies only to catalog-governed records. It is part of backup format 7.
 - After the migration, and after restoring a format 3–6 backup, there is no row, so the gate is on. Settings,
   Refresh shows' results and the review screen say "Automatic updates for catalog shows are paused until the
   collection setup is imported", with the import button. Importing the setup file (or restoring a format-7
@@ -123,6 +126,11 @@ the moment of the write, so a caller-supplied `basis` or an old brief can't stan
   and all existing functions (Add season, Match, marks, statuses, collections, backup).
 
 ### 3.3 Findings and application are one transaction
+
+A TMDB finding that a policy outcome parked (`needs_evidence`, `set_aside`) and the owner hasn't decided is
+checked again the next time Refresh shows sends it, with what TMDB says then (a date and episodes listed later, a
+Skipped show now followed). Every standing decision that applies to a record is consulted; the most restrictive
+outcome wins.
 
 - Every automatic change (season, mapping, identity, date, alias) and every acceptance goes through a
   function that takes the finding (for TMDB checks the page sends the finding's fingerprint and content; the

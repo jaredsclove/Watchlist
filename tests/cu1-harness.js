@@ -83,6 +83,10 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
           expected: clone(p.expected || {}), evidence: [], assessment: {}, rule_id: null, definition_version: null, rule_hash: null, evidence_hash: null, brief_id: null,
           first_seen_at: now(), last_seen_at: now(), decided_at: null, applied_at: null, result: null };
         T('update_findings').push(f);
+      } else if (['needs_evidence', 'set_aside'].includes(f.status) && !f.decided_at) {
+        // A parked TMDB finding the owner hasn't decided is checked again with what TMDB says now.
+        Object.assign(f, { status: 'pending', reason: '', subject: clone(p.subject || f.subject), proposed: clone(p.proposed || f.proposed),
+          expected: clone(p.expected || f.expected), last_seen_at: now() });
       }
     }
     if (!kinds.includes(f.kind)) invalid(`a ${f.kind} finding can't be applied here`);
@@ -118,12 +122,16 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
   };
   function holdGate(f, showId, itemId, lbl, review, identity) {
     if (identity && holdFor(['identity_hold'], showId, itemId, lbl)) return 'pending:identity_hold';
-    const h = holdFor(['standing_decision'], showId, itemId, lbl);
-    if (!h) return null;
-    if (h.effect === 'stay_skipped_unmatched' && !identity) return null;
-    if (h.effect === 'require_qualifying_evidence' && f.source === 'research' && reopenMet(h, f, false)) return null;
-    if (review) { if (reopenMet(h, f, true)) return null; return 'refuse:reopen_condition_not_met'; }
-    return 'pending:standing_decision';
+    // Every standing decision that applies is consulted; the most restrictive outcome wins.
+    const all = T('update_holds').filter(h => h.kind === 'standing_decision' && ((itemId && h.item_id === itemId)
+      || (showId && h.show_id === showId && !h.item_id && (!h.subject_label || (lbl && cuNorm(h.subject_label) === cuNorm(lbl))))));
+    for (const h of all) {
+      if (h.effect === 'stay_skipped_unmatched' && !identity) continue;
+      if (h.effect === 'require_qualifying_evidence' && f.source === 'research' && reopenMet(h, f, false)) continue;
+      if (review) { if (reopenMet(h, f, true)) continue; return 'refuse:reopen_condition_not_met'; }
+      return 'pending:standing_decision';
+    }
+    return null;
   }
   const showOf = sid => shows().find(s => s.id === sid);
   const newSeasonRow = (s, lbl, num, identified, display, sort, theme) => ({ id: id(), collection: s.collection, item_key: `${s.show_key}|${lbl.toLowerCase()}`, title: s.title,
@@ -175,7 +183,9 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
       else if (plain.length + named.length > 0) return finish(f, 'policy', 'pending', 'ambiguous_correspondence', { candidates: plain.concat(named) });
       if (rowId) {
         if (f.source === 'tmdb') {
-          Object.assign(items().find(r => r.id === rowId), { media_type: 'tv', tmdb_id: s.tmdb_id, season_number: num });
+          const chosen = items().find(r => r.id === rowId);
+          if (holdFor(['identity_hold'], s.id, rowId, chosen.season)) return finish(f, 'policy', 'pending', 'identity_hold', { row_id: rowId });
+          Object.assign(chosen, { media_type: 'tv', tmdb_id: s.tmdb_id, season_number: num });
           return finish(f, 'applied', 'applied', '', { outcome: 'mapped', row_id: rowId });
         }
         return finish(f, 'already', 'applied', 'existing', { outcome: 'existing', row_id: rowId });

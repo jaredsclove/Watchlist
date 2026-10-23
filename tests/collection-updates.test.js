@@ -176,6 +176,43 @@ test('an unclear answer stops sending anything more; nothing is resent; what cam
   assert.match(t, /no clear answer came back[\s\S]*Nothing more was sent/);
 });
 
+test('a parked TMDB finding is checked again: an undated season waits, then is added once TMDB lists its date; a Skipped show’s season is added once it is followed', async () => {
+  const sh = showOf({ title: 'Later', show_key: 'later', tmdb_id: 95 });
+  const sk = showOf({ title: 'Paused', show_key: 'paused', tmdb_id: 96, status: 'skipped' });
+  const app = await createApp({ rows: [seasonOf(sh, 1), seasonOf(sk, 1)], tvShows: [sh, sk],
+    cu1: { show_update_settings: [] },
+    tmdb: tmdbOf({ shows: { 95: { seasons: [{ season_number: 1 }, { season_number: 2, air_date: null, episode_count: 0 }] }, 96: { seasons: [{ season_number: 1 }] } } }) });
+  let t = await refresh(app);
+  assert.match(t, /Later · Season 2: TMDB lists it without a date or episodes/);
+  app.setTmdb(tmdbOf({ shows: { 95: { seasons: [{ season_number: 1 }, { season_number: 2, air_date: '2027-08-01', episode_count: 10 }] },
+    96: { seasons: [{ season_number: 1 }, { season_number: 2, air_date: '2027-09-01', episode_count: 6 }] } } }));
+  t = await refresh(app);
+  assert.match(t, /Later · Season 2: added/, 'the same finding, checked again with what TMDB says now');
+  assert.strictEqual(app.store.update_findings.filter(f => f.show_id === sh.id).length, 1, 'one finding, not a second');
+  // The Skipped show isn't checked; once followed, its season is added.
+  app.store.show_update_settings.push({ id: uuid('0f2c0000'), show_id: sk.id, follow_when_skipped: true, new_season_after_ended_at: null, updated_at: TS });
+  t = await refresh(app);
+  assert.match(t, /Paused · Season 2: added/);
+});
+
+test('import: a new season that names a film (not a show) is refused before anything is recorded', async () => {
+  const film = { id: uuid('f0000000'), collection: 'movies', title: 'ZZ Film', theme: 'Drama', status: 'confirmed', watched: false, skipped: false, show_id: null,
+    media_type: 'movie', tmdb_id: 931, season_number: null, season: 'Film', display_date: 'Jan 1, 2020', date_sort: '2020-01-01', item_key: 'zz film|film',
+    watch_with: [], collections: [], created_at: TS, tmdb_collection_id: null, tmdb_collection_name: null };
+  const coll = { id: uuid('0c100000'), name: 'ZZ Films', legacy_source: null, sort_order: 9, archived_at: null, created_at: TS };
+  const app = await createApp({ rows: [film], personalCollections: [coll], memberships: [{ id: uuid('0d100000'), collection_id: coll.id, show_id: null, item_id: film.id, created_at: TS }] });
+  await app.run(`runWrite('d', () => sbRpc('library_cu_save_definition', { p_collection_id: ${JSON.stringify(coll.id)}, p_expected_version: 0, p_mode: 'follow',
+    p_rules: [], p_evidence: ${JSON.stringify({ standard: 'official_or_two_trades', official_domains: ['press.example.org'], trades: [] })}, p_summary: 'x' }))`);
+  let brief; app.ctx.downloadJSON = o => { brief = JSON.parse(JSON.stringify(o)); };
+  await app.ctx.cuDownloadBrief([coll.id]); await settle();
+  const res = await app.ctx.cuImportFindings(JSON.stringify({ format: 'watchlist-research-findings', version: 1, brief_id: brief.brief_id, coverage: [], findings: [
+    { kind: 'new_season', collection_id: coll.id, ref: `rec:item:${film.id}`, subject: { title: 'ZZ Film', season_number: 2 },
+      evidence: [{ url: 'https://press.example.org/f', source_type: 'official', published_on: '2026-10-10', excerpt: 'x' }],
+      assessment: { standard: 'official', researched_on: '2026-10-20', conflict: false } }] })); await settle();
+  assert.match(Array.from(res.problems).join(' '), /Finding 1 \(a new season\) doesn’t name a show/);
+  assert.strictEqual(app.store.research_imports.length, 0, 'nothing recorded');
+});
+
 // ═══ Review ══════════════════════════════════════════════════════════════════
 test('review: the ambiguous season’s row is chosen; a date is applied; Not now and Exclude are recorded; New season flags are cleared', async () => {
   const sh = showOf({ title: 'Rev', show_key: 'rev', tmdb_id: 90, ended: true });
