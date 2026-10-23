@@ -178,9 +178,13 @@ Each function verifies before returning that the show's status, priority and End
 
 - **Episode lists (owner decision: airing lifecycle).** Refresh shows reads TMDB's documented season details
   (`/tv/{id}/season/{n}`) for every stored season of each checked show (Skipped shows only when followed). A
-  season counts as finished only on TMDB's own evidence: the show's `status` is Ended or Canceled with no
-  `next_episode_to_air`, or the season's cached list ends with an episode whose `episode_type` is `finale` and has
-  aired, with the next episode not in that season. A finished season is read only when this device has no full list
+  season counts as finished for routine refreshes when the show's `status` is Ended or Canceled with no
+  `next_episode_to_air`; when the season's cached list ends with an episode whose `episode_type` is `finale` and has
+  aired; or, as an owner-accepted practical inference (not proof of completion), when a later regular season has
+  started airing (`last_episode_to_air` in a later season, or a later season's `air_date` reached). In every case
+  the next scheduled episode isn't in that season; Specials are never finished by, and never count as, a later
+  season. These signals are contributor-maintained TMDB metadata: they can be missing, late or wrong, and a cached
+  list can go stale. A finished season is read only when this device has no full list
   for it (or TMDB's count no longer matches the cached list); every other season (upcoming, airing, or completion
   uncertain) is read on each Refresh. Watched and Skipped never decide it; an unchanged count, a past premiere or
   all listed episodes having aired never establish completion. Opening an episode list always reads TMDB fresh.

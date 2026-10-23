@@ -176,6 +176,36 @@ test('episode lists: an aired finale finishes a season; without TMDB evidence (n
   assert.deepStrictEqual(seasonReads(app, 62), [2, 3], 'season 1 (aired finale) is finished; season 2 (no finale, all aired) is uncertain; season 3 (upcoming) is read');
 });
 
+test('episode lists: once a later regular season has started airing, an earlier season counts as finished (an accepted inference): cached lists are reused, a missing list or a changed count is still read', async () => {
+  const sh = showOf({ title: 'Long', show_key: 'long', tmdb_id: 65 });
+  const s1 = seasonOf(sh, 1), s2 = seasonOf(sh, 2), s3 = seasonOf(sh, 3), s4 = seasonOf(sh, 4, { display_date: 'Oct 1, 2026', date_sort: '2026-10-01' });
+  const app = await createApp({ rows: [s1, s2, s3, s4], tvShows: [sh], storage: memoryStorage(),
+    tmdb: tmdbOf({ shows: { 65: { status: 'Returning Series', next_episode_to_air: { season_number: 4, episode_number: 3, air_date: '2099-01-01' },
+      last_episode_to_air: { season_number: 4, episode_number: 2, air_date: '2026-10-08' },
+      seasons: [1, 2, 3].map(n => ({ season_number: n, episode_count: 2, air_date: `202${n}-01-01` })).concat([{ season_number: 4, episode_count: 3, air_date: '2026-10-01' }]) } },
+      lists: { '65/1': EPT(691, 2), '65/2': EPT(701, 2), '65/3': EPT(711, 2), '65/4': EPT(721, 3) } }) });
+  // Season 1: cached, count unchanged (no finale tag). Season 2: nothing cached. Season 3: cached, but TMDB's count changed.
+  app.run(`writeEpisodeListCache({ '65:1': { ids: [691, 692], numbers: [1, 2], names: ['', ''] }, '65:3': { ids: [711], numbers: [1], names: [''] } })`);
+  await refresh(app);
+  assert.deepStrictEqual(seasonReads(app, 65), [2, 3, 4], 'season 1 reused; season 2 (no list) and 3 (count changed) read; season 4 (airing) read');
+  app.requests.length = 0;
+  await refresh(app);
+  assert.deepStrictEqual(seasonReads(app, 65), [4], 'only the airing season again');
+});
+
+test('episode lists: the later-season inference leaves Specials out, and the next scheduled episode keeps its season open', async () => {
+  const app = await createApp({ rows: [], tvShows: [] });
+  const cached = { ids: [1], last: { type: 'standard', air: '2020-01-01' } };
+  const fin = (details, n) => app.get(`cuSeasonFinished(${JSON.stringify(details)}, ${n}, ${JSON.stringify(cached)}, '2026-10-23')`);
+  const later = { status: 'Returning Series', seasons: [{ season_number: 0, air_date: '2026-01-01' }, { season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2026-05-01' }] };
+  assert.strictEqual(fin(later, 1), true, 'season 2 has started: season 1 is finished');
+  assert.strictEqual(fin(later, 0), false, 'Specials are never finished by a later season');
+  assert.strictEqual(fin({ status: 'Returning Series', seasons: [{ season_number: 0, air_date: '2026-01-01' }, { season_number: 1, air_date: '2020-01-01' }] }, 1), false, 'Specials don’t count as a later season');
+  assert.strictEqual(fin({ ...later, seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2099-01-01' }] }, 1), false, 'a later season dated in the future hasn’t started');
+  assert.strictEqual(fin({ status: 'Returning Series', seasons: [], last_episode_to_air: { season_number: 2 } }, 1), true, 'the last aired episode is in a later season');
+  assert.strictEqual(fin({ ...later, next_episode_to_air: { season_number: 1 } }, 1), false, 'the next scheduled episode is in this season');
+});
+
 test('episode lists: Watched or Skipped on a season doesn’t change whether its list is read', async () => {
   const decide = async o => {
     const sh = showOf({ title: 'Same', show_key: 'same', tmdb_id: 63 });
