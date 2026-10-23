@@ -484,6 +484,21 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
       T('update_holds').push(h);
       return clone(h);
     },
+    // db/cu1b_hold_edit.sql: in place (same id and created_at), every editable value as expected, update_holds' checks.
+    library_cu_update_hold({ p_id, p_expected, p_hold }) {
+      requireOn('library_cu_update_hold');
+      const obj = x => x && typeof x === 'object' && !Array.isArray(x);
+      if (!p_id || !obj(p_expected) || !obj(p_hold) || Object.keys(p_hold).some(k => !HOLD_KEYS.includes(k))
+        || Object.keys(p_expected).some(k => !HOLD_KEYS.includes(k)) || HOLD_KEYS.some(k => !(k in p_expected))) invalid('hold');
+      const h = T('update_holds').find(x => x.id === p_id);
+      if (!h) changed();
+      if (HOLD_KEYS.some(k => jsonbText(h[k] === undefined ? null : h[k]) !== jsonbText(p_expected[k] === undefined ? null : p_expected[k]))) changed();
+      holdShapeCheck(p_hold);
+      Object.assign(h, { kind: p_hold.kind, collection_id: p_hold.collection_id || null, show_id: p_hold.show_id || null, item_id: p_hold.item_id || null,
+        subject_label: p_hold.subject_label ? String(p_hold.subject_label).trim() : null, field: p_hold.field || null, protected_value: p_hold.protected_value == null ? null : p_hold.protected_value,
+        decision: String(p_hold.decision).trim(), effect: p_hold.effect, reopen: clone(p_hold.reopen), decided_on: p_hold.decided_on || null });
+      return clone(h);
+    },
     library_cu_delete_hold({ p_id, p_expected_decision }) {
       requireOn('library_cu_delete_hold');
       const i = T('update_holds').findIndex(h => h.id === p_id && h.decision === p_expected_decision);
