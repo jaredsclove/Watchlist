@@ -200,6 +200,19 @@ Each function verifies before returning that the show's status, priority and End
   every applying function re-checks the evidence against the current definition, so even a finding reopened from
   Not now stays blocked until a later import brings evidence that meets the standard.
 
+### 4.3 Adding and editing holds (CU1b)
+
+- **Add** (Settings → Collections and rules → Add a hold): a form for a standing decision (effect and reopening
+  condition), a protected value (one field of a season or film, kept at its current value) or an identity hold
+  (a whole show's matching, or one season's mapping). It writes the shapes the setup import writes, through
+  `library_cu_save_hold`, and names the show, season or field (and the value kept) before saving.
+- **Edit** opens the same form on the stored hold and saves through `library_cu_update_hold`
+  (`db/cu1b_hold_edit.sql`): in place (same id and created_at, so the hold keeps its identity and its order),
+  only if every stored editable value is still as the page showed it, under `update_holds`' own checks. The form
+  keeps the stored shape (a season named by its row stays a row, one named by a label keeps that exact label) and
+  a protected value's stored value unless its record or field is changed; an unchanged form sends nothing.
+- Neither changes any show, season, date, progress, membership or other hold. Backups are unchanged (format 7).
+
 ## 5. Backup format 7
 
 - Tables: format 6's nine plus the ten above (nineteen), no `user_id`.
