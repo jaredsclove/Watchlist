@@ -216,8 +216,9 @@ test('show details the page already reads (Refresh shows) leave scores in the ca
   assert.match(html(app), /data-action="rating"[^>]*>8\.5<\/button>/);
   assert.match(html(app), /data-action="rating"[^>]*>6\.2\*<\/button>/);
   assert.deepStrictEqual(ratingReads(app), []);
-  const src = fs.readFileSync(path.join(ROOT, 'library.js'), 'utf8');
-  assert.strictEqual((src.match(/noteShowRating\(show\.tmdb_id, (?:d|details)\)/g) || []).length, 2, 'Refresh shows and Add season both record the score');
+  const src = fs.readFileSync(path.join(ROOT, 'library.js'), 'utf8'), cu = fs.readFileSync(path.join(ROOT, 'collection-updates.js'), 'utf8');
+  assert.strictEqual((src.match(/noteShowRating\(show\.tmdb_id, (?:d|details)\)/g) || []).length, 1, 'Add season records the score');
+  assert.strictEqual((cu.match(/noteShowRating\(show\.tmdb_id, details\)/g) || []).length, 1, 'Refresh shows (item 4: collection-updates.js) records the score');
   assert.match(fs.readFileSync(path.join(ROOT, 'tmdb-search.js'), 'utf8'), /if \(tmdbSelectedShow\.mediaType === 'tv'\) noteShowRating\(tmdbId, details\)/);
   assert.match(fs.readFileSync(path.join(ROOT, 'tmdb-match.js'), 'utf8'), /if \(picked\.mediaType === 'tv'\) noteShowRating\(picked\.id, details\)/);
 });

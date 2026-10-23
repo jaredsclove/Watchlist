@@ -62,7 +62,8 @@ test('N1 the labelled gear opens Settings: the gear is the current page, no area
   assert.strictEqual(app.el('settingsScreen').style.display, '');
   assert.match(screen(app), /id="settingsTitle"[^>]*>⚙ Settings &amp; Management</);
   assert.match(screen(app), /settingsBack\(\)">← Back to library</);
-  for (const t of ['Library management', 'Catalog updates', 'Backup &amp; Restore']) assert.ok(screen(app).includes(`>${t}</h3>`), t);
+  for (const t of ['Library management', 'Collection updates', 'Backup &amp; Restore']) assert.ok(screen(app).includes(`>${t}</h3>`), t);
+  assert.ok(!screen(app).includes('>Catalog updates</h3>'), 'item 4: the retired Catalog updates card is gone');
   app.ctx.switchMediaType('tv'); await settle();
   assert.strictEqual(app.el('settingsScreen').style.display, 'none', 'hidden again on leaving');
   assert.strictEqual(app.el('desktopTable').style.display, '');
@@ -88,17 +89,17 @@ test('N3 each Settings button calls the same function with the same arguments as
   const html = screen(app);
   assert.ok(html.includes(`onclick="openManage('collections', null, this)">Manage collections…`));
   assert.ok(html.includes(`onclick="openManage('choices', null, this)">Manage watch-with choices…`));
-  assert.ok(html.includes('onclick="openCatalogChooser(this)">Review catalog updates…'));
+  assert.ok(html.includes('onclick="openCuReview(this)">Review findings…') && html.includes(`onclick="openCuDialog('collections', this)">Collections and rules…`));
   assert.ok(html.includes('id="settingsBackupBtn" onclick="handleBackupClick(this)">⬇ Download backup'));
   assert.ok(html.includes('onclick="handleRestoreClick()">⬆ Restore from a backup file…'));
   const calls = [];
   app.ctx.openManage = (...a) => calls.push(['openManage', ...a.map(x => (x && typeof x === 'object' ? 'opener' : x))]);
-  app.ctx.openCatalogChooser = o => calls.push(['openCatalogChooser', o ? 'opener' : o]);
-  for (const m of html.matchAll(/onclick="((?:openManage|openCatalogChooser)\([^"]*\))"/g)) app.run(`(function () { ${m[1]}; }).call({ id: 'x' })`.replace(/this/g, '{ id: "x" }'));
-  assert.deepStrictEqual(calls, [['openManage', 'collections', null, 'opener'], ['openManage', 'choices', null, 'opener'], ['openCatalogChooser', 'opener']]);
+  app.ctx.openCuReview = o => calls.push(['openCuReview', o ? 'opener' : o]);
+  for (const m of html.matchAll(/onclick="((?:openManage|openCuReview)\([^"]*\))"/g)) app.run(`(function () { ${m[1]}; }).call({ id: 'x' })`.replace(/this/g, '{ id: "x" }'));
+  assert.deepStrictEqual(calls, [['openManage', 'collections', null, 'opener'], ['openManage', 'choices', null, 'opener'], ['openCuReview', 'opener']]);
 });
 
-test('N4 closing Manage or the catalog chooser / dialog returns focus to its Settings button, or to the redrawn equivalent', async () => {
+test('N4 closing Manage or a collection-updates dialog returns focus to its Settings button, or to the redrawn equivalent', async () => {
   const app = await boot();
   app.ctx.openSettings(null);
   const focused = [];
@@ -108,14 +109,14 @@ test('N4 closing Manage or the catalog chooser / dialog returns focus to its Set
   app.ctx.closeManage(); await settle();
   app.ctx.openManage('choices', null, opener('.settings-manage-choices', false)); await settle();
   app.ctx.closeManage(); await settle();
-  app.ctx.openCatalogChooser(opener('.settings-catalog-btn', true)); await settle();
-  app.ctx.closeCatalogChooser(); await settle();
-  app.ctx.openCatalogChooser({ isConnected: false }); await settle();
-  app.ctx.closeCatalogChooser(); await settle();
-  app.ctx.openCatalogUpdates('sheridan', { isConnected: false }); await settle();
-  app.ctx.closeCatalogUpdates(); await settle();
-  assert.deepStrictEqual(focused, ['.settings-manage-collections (opener)', '.settings-manage-choices (redrawn)', '.settings-catalog-btn (opener)',
-    '#settingsScreen .settings-catalog-btn (redrawn)', '#settingsScreen .settings-catalog-btn (redrawn)']);
+  await app.ctx.openCuReview(opener('.settings-cu-review', true)); await settle();
+  app.ctx.closeCuModal(); await settle();
+  await app.ctx.openCuReview({ isConnected: false }); await settle();
+  app.ctx.closeCuModal(); await settle();
+  await app.ctx.openCuDialog('collections', { isConnected: false }); await settle();
+  app.ctx.closeCuModal(); await settle();
+  assert.deepStrictEqual(focused, ['.settings-manage-collections (opener)', '.settings-manage-choices (redrawn)', '.settings-cu-review (opener)',
+    '#settingsScreen .settings-cu-review (redrawn)', '#settingsScreen .settings-cu-collections (redrawn)']);
 });
 
 // ─── N5, N6: Back to library and the primary buttons ────────────────────────────
@@ -203,10 +204,10 @@ test('N7 rule R: every restore entry point runs only on Settings (Currently Watc
     await app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => text }], value: 'x' } }); await settle();
     assert.strictEqual(modalOpen(app) && app.el('restoreModalBox').innerHTML.includes('executeRestore()'), allowed, `${v[0]}: handleRestoreFileSelected`);
     app.ctx.__b = JSON.parse(text);
-    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 6');
+    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 7');
     await app.ctx.executeRestore(); await settle();
     assert.strictEqual(app.downloads, allowed ? 1 : 0, `${v[0]}: executeRestore (safety backup)`);
-    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 6');
+    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 7');
     await app.ctx.continueRestoreAfterSafetyConfirm('safety.json'); await settle();
     const sent = app.requests.filter(r => r.url.endsWith('/rpc/restore_backup')).length;
     assert.strictEqual(sent, allowed ? 1 : 0, `${v[0]}: continueRestoreAfterSafetyConfirm`);
@@ -265,7 +266,7 @@ test('N9 after submission navigation does not abandon the restore; it verifies a
     const { text } = await backupFile(app);
     app.ctx.openSettings(null);
     app.ctx.__b = JSON.parse(text);
-    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 6');
+    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 7');
     const g = app.hold(r => r.url.endsWith('/rpc/restore_backup'));
     const sent = app.ctx.continueRestoreAfterSafetyConfirm('safety.json');
     await g.reached;

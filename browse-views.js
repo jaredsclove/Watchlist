@@ -706,8 +706,8 @@ async function loadBrowseView() {
   const showsRead = startShowsRead();
   try {
     const orgRead = orgReadStart();
-    const [rows, shows, gov, marks, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
-      readGovernance(), readEpisodeMarks(true), ...(isCollection ? [readPersonalCollections(), fetchAllRowsStrict('collection_memberships')] : [])]);
+    const [rows, shows, gov, marks, cuSettings, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
+      readGovernance(), readEpisodeMarks(true), readShowUpdateSettings(true), ...(isCollection ? [readPersonalCollections(), fetchAllRowsStrict('collection_memberships')] : [])]);
     requireB45Shape(shows, 'priority');
     requireB45Shape(rows, 'priority');
     publishAllTvShows(showsRead, shows);
@@ -715,6 +715,7 @@ async function loadBrowseView() {
     if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === browseLoadSeq && activeViewId === viewId) loadBrowseView(); }); return null; }
     publishGovernance(governanceCovers(gov, rows, shows));
     publishEpisodeMarks(marks); // EP1 (episodes.js)
+    cuPublishShowSettings(cuSettings); // item 4 (collection-updates.js)
     let dest = null, members = null, memberRows = null;
     if (isCollection) {
       const hadFocus = chooserHasFocus();

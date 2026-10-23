@@ -267,11 +267,7 @@ function renderSettings() {
         <p class="settings-text" id="settingsChoicesText">${esc(settingsChoicesText())}</p>
         <div class="settings-actions"><button class="btn settings-manage-choices" onclick="openManage('choices', null, this)">Manage watch-with choices…</button></div>
       </section>
-      <section class="settings-card" aria-labelledby="settingsCatalogTitle">
-        <h3 id="settingsCatalogTitle">Catalog updates</h3>
-        <p class="settings-text">The built-in catalogs add shows, seasons and films to your list only when you review and apply them.</p>
-        <div class="settings-actions"><button class="btn settings-catalog-btn" onclick="openCatalogChooser(this)">Review catalog updates…</button></div>
-      </section>
+      ${cuSettingsSectionHtml()}
       <section class="settings-card" aria-labelledby="settingsBackupTitle">
         <h3 id="settingsBackupTitle" tabindex="-1">Backup &amp; Restore</h3>
         <p class="settings-status${status.cls ? ' ' + status.cls : ''}" id="settingsBackupStatus">${esc(status.text)}</p>
@@ -283,4 +279,5 @@ function renderSettings() {
       </section>
       ${creditsSectionHtml()}
     </div>`;
+  updateCuSettingsStatus(); // item 4 (collection-settings.js): a read only
 }

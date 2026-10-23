@@ -306,7 +306,8 @@ async function loadDerivedView() {
   }
   const showsRead = startShowsRead();
   try {
-    const [rows, shows, gov, marks] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows'), readGovernance(), readEpisodeMarks(false)]);
+    const [rows, shows, gov, marks, cuSettings] = await Promise.all([fetchAllRows(TABLE, tvRowsFilter()), fetchAllRows('tv_shows'), readGovernance(), readEpisodeMarks(false),
+      readShowUpdateSettings(false)]);
     requireB45Shape(shows, 'priority');
     requireB45Shape(rows, 'priority');
     publishAllTvShows(showsRead, shows);
@@ -314,6 +315,7 @@ async function loadDerivedView() {
     if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === derivedLoadSeq && activeViewId === viewId) loadDerivedView(); }); return null; }
     publishGovernance(governanceCovers(gov, rows, shows));
     publishEpisodeMarks(marks); // EP1 (episodes.js)
+    cuPublishShowSettings(cuSettings); // item 4 (collection-updates.js)
     derivedData = { rows: rows.filter(isTvViewRow), loaded: true };
     endListReread(true);
     renderFilters();

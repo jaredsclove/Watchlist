@@ -30,7 +30,7 @@ const linked = (name, o = {}) => row(name, { show_id: uuid('5' + name), skipped:
 async function setup() {
   const src = await createApp({ rows: [linked('b7', { title: 'Restored' })], tvShows: [show('b7')] });
   const backup = JSON.parse(JSON.stringify(await src.run('buildBackupObject()'))); // a plain copy, as a file would be
-  assert.strictEqual(backup.formatVersion, 6);
+  assert.strictEqual(backup.formatVersion, 7);
   const app = await createApp({ rows: [linked('a1'), linked('a2')], tvShows: [show('a1'), show('a2')] });
   assert.deepStrictEqual(Array.from(app.get('validateBackupObject')(backup)), []);
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings

@@ -187,7 +187,9 @@ async function withCatalog() {
   L.data.rows.push(...cat.rows); L.data.shows.push(cat.show);
   return L;
 }
-test('G2 V3.3: a catalog season has Skip / Keep and no Delete…; a governed non-catalog season has Delete…; neither is Match-eligible', async () => {
+// Item 4 retired the config-based catalog lists: every season of a show a catalog governs is a catalog
+// entry now (Skip, never Delete), including one added by hand.
+test('G2 V3.3: a catalog season has Skip / Keep and no Delete…; so has a governed season added by hand (item 4); neither is Match-eligible', async () => {
   const L = await withCatalog();
   const app = await boot(L);
   app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
@@ -195,7 +197,7 @@ test('G2 V3.3: a catalog season has Skip / Keep and no Delete…; a governed non
   expandAll(app, [L.cat.show.id]);
   const [catRow, own] = L.cat.rows;
   assert.ok(html(app).includes(`setSeasonSkipped('${catRow.id}', true)`) && !html(app).includes(`delRow('${catRow.id}')`), 'catalog: Skip, no Delete');
-  assert.ok(html(app).includes(`delRow('${own.id}')`), 'non-catalog: Delete…');
+  assert.ok(html(app).includes(`setSeasonSkipped('${own.id}', true)`) && !html(app).includes(`delRow('${own.id}')`), 'governed, added by hand: Skip, no Delete (item 4)');
   assert.ok(!html(app).includes(`openTmdbMatch('${catRow.id}')`) && !html(app).includes(`openTmdbMatch('${own.id}')`), 'governed: no Match');
   await app.ctx.delRow(catRow.id); await settle();
   assert.deepStrictEqual(writes(app).map(path), ['rpc/set_season_skipped'], 'the catalog × skips, never deletes');

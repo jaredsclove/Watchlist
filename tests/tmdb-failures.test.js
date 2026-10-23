@@ -10,7 +10,7 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const FILES = ['config.js', 'identity.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'refresh-shows.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'library.js'];
+const FILES = ['config.js', 'identity.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'library.js'];
 const { createApp, settle } = require('./app-harness');
 
 // A fresh sandbox per test, as All Movies' "+ Add" panel with its tools prepared
@@ -96,45 +96,55 @@ test('add note: partial and total', () => {
   assert.ok(env.ctx.tmdbAddFailureNote(1, ['A'], 'film').includes('the selected film, so nothing was added'));
 });
 
-// ── Refresh shows (whole page: All TV's "+ Add" panel) ──
+// ── Refresh shows (whole page: All TV's "+ Add" panel; item 4: library-wide, TMDB only) ──
 function libraryOf(rows) {
   const tvShows = shows.map(sh => ({ id: `show-${sh.tmdb_id}`, collection: 'othertv', title: sh.title, show_key: sh.title.toLowerCase(), tmdb_id: sh.tmdb_id, status: 'confirmed' }));
   return { tvShows, rows: rows.map(r => ({ theme: 'Net', status: 'confirmed', watched: false, skipped: false, watch_with: [], collections: [], ...r, show_id: `show-${r.tmdb_id}` })) };
 }
+// The TMDB path's show id (details, or details with appended season lists).
+const tvId = p => parseInt(p.split('/')[2], 10);
 async function refreshShows({ rows = showRows, tmdb }) {
   const app = await createApp({ ...libraryOf(rows), tmdb: p => p.startsWith('/tv/') ? tmdb(p) : undefined });
   app.ctx.switchView('alltv'); await settle();
   app.ctx.openLibraryPanel('tv', 'refresh'); await settle();
-  await app.ctx.libraryRefreshShows(); await settle();
-  assert.deepStrictEqual(app.writes(), [], 'checking writes nothing');
-  return app.el('tmdbPreview').innerHTML.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/’/g, "'").replace(/\s+/g, ' ').trim();
+  await app.ctx.cuRefreshShows(); await settle();
+  assert.ok(app.writes().every(w => /rpc\/library_cu_/.test(w.url)), 'only collection-update functions are called');
+  return { app, text: app.el('tmdbPreview').innerHTML.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/’/g, "'").replace(/\s+/g, ' ').trim() };
 }
 const status = code => ({ __status: code });
-test('Refresh shows: all lookups succeed, nothing new → true "up to date"', async () => {
-  const p = await refreshShows({ tmdb: p => tvDetails(+p.split('/')[2]) });
-  assert.ok(p.startsWith("Everything's up to date"), p);
+test('Refresh shows: all lookups succeed, nothing new → no updates, nothing couldn\'t be checked, TMDB-only coverage stated', async () => {
+  const { app, text } = await refreshShows({ tmdb: p => tvDetails(tvId(p)) });
+  assert.ok(text.includes("TMDB only: announcements weren't checked. Checked 3 shows (3 matched to TMDB, 0 not yet matched)"), text);
+  assert.ok(text.includes('Automatic updates (0)') && text.includes("Couldn't check or apply (0)"), text);
+  assert.deepStrictEqual(app.writes(), []);
 });
-test('Refresh shows: every lookup fails (HTTP 500) → outage message, no "up to date"', async () => {
-  assert.strictEqual(await refreshShows({ tmdb: () => status(500) }), "Couldn't check TMDB right now. 3 of 3 show lookups failed. Nothing was changed.");
+test('Refresh shows: every lookup fails (HTTP 500) → each show listed as not checked, nothing written', async () => {
+  const { app, text } = await refreshShows({ tmdb: () => status(500) });
+  assert.ok(text.includes("Couldn't check or apply (3)") && ['Alpha', 'Bravo', 'Charlie'].every(t => text.includes(`${t}: TMDB didn't answer, so it wasn't checked`)), text);
+  assert.ok(text.includes('Automatic updates (0)'), text);
+  assert.deepStrictEqual(app.writes(), []);
 });
-test('Refresh shows: network down → outage message', async () => {
-  const p = await refreshShows({ tmdb: () => down() });
-  assert.ok(p.startsWith("Couldn't check TMDB right now."), p);
+test('Refresh shows: network down → each show listed as not checked', async () => {
+  const { text } = await refreshShows({ tmdb: () => down() });
+  assert.ok(text.includes("Couldn't check or apply (3)"), text);
 });
-test('Refresh shows: partial failure, nothing new → incomplete warning, no "up to date"', async () => {
-  const p = await refreshShows({ tmdb: p => p === '/tv/2' ? status(503) : tvDetails(+p.split('/')[2]) });
-  assert.ok(!p.includes('Everything'), p);
-  assert.ok(p.includes('Checked 2 of 3 shows. 1 TMDB lookup failed (Bravo)'), p);
+test('Refresh shows: partial failure, nothing new → the failed show listed; never presented as nothing new', async () => {
+  const { text } = await refreshShows({ tmdb: p => tvId(p) === 2 && !p.includes('append') ? status(503) : tvDetails(tvId(p)) });
+  assert.ok(text.includes("Couldn't check or apply (1)") && text.includes("Bravo: TMDB didn't answer"), text);
 });
-test('Refresh shows: partial failure still shows new seasons and TBA→date updates from shows that loaded', async () => {
+test('Refresh shows: partial failure still applies new seasons and TBA→date updates from shows that loaded', async () => {
   const rows = [seasonRow(1, 'Alpha'), seasonRow(2, 'Bravo'), { ...seasonRow(3, 'Charlie'), display_date: 'TBA', date_sort: '2099-01-01' }];
-  const p = await refreshShows({ rows, tmdb: p => {
-    if (p === '/tv/2') return status(500);
-    if (p === '/tv/1') return { id: 1, seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-05-01', episode_count: 6 }] };
+  const { app, text } = await refreshShows({ rows, tmdb: p => {
+    if (tvId(p) === 2) return status(500);
+    if (p.includes('append')) return {};
+    if (tvId(p) === 1) return { id: 1, seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2027-05-01', episode_count: 6 }] };
     return { id: 3, seasons: [{ season_number: 1, air_date: '2026-11-26' }] };
   } });
-  assert.ok(p.includes('Checked 2 of 3 shows') && p.includes('Alpha') && p.includes('Season 2'), p);
-  assert.ok(p.includes('Charlie · Season 1 TBA → Nov 26, 2026'), p);
+  assert.ok(text.includes('Alpha · Season 2: added'), text);
+  assert.ok(text.includes('Charlie · Season 1: date set to Nov 26, 2026'), text);
+  assert.ok(text.includes("Bravo: TMDB didn't answer"), text);
+  assert.ok(app.store.watchlist_items.some(r => r.show_id === 'show-1' && r.season_number === 2 && r.tmdb_id === 1), 'Season 2 created, identified');
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === 'r3').display_date, 'Nov 26, 2026');
 });
 
 // ── Refresh collections ──

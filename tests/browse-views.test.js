@@ -191,9 +191,9 @@ for (const [id, label, from] of [[B['disney'], 'Disney+', 'tv'], [B['sheridan'],
     // Stage 3b-1: members come from the stored collections and memberships, read with everything else.
     assert.deepStrictEqual([...new Set(reqs.map(r => new URL(r.url).pathname.split('/').pop()))].sort(),
       // Stage 5: catalog governance comes from the read views; storage never names a collection.
-      // EP1: the episode marks are read with the rows.
+      // EP1: the episode marks are read with the rows; item 4: so are the per-show update settings.
       ['collection_memberships', 'episode_marks', 'library_catalog_films', 'library_catalog_shows', 'library_collection_catalogs', 'library_collection_presentation', 'library_film_theme_kinds',
-        'personal_collections', 'tv_shows', 'watchlist_items']);
+        'personal_collections', 'show_update_settings', 'tv_shows', 'watchlist_items']);
     assert.ok(reqs.every(r => !r.url.includes('collection=')), 'a destination id is never sent as a collection');
     assert.strictEqual(mutating(app).length, 0);
     assert.strictEqual(app.get('Object.keys(tabData).filter(k => tabData[k] && tabData[k].loaded).length'), 0, 'no storage-tab cache was filled');

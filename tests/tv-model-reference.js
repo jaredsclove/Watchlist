@@ -19,10 +19,11 @@ for (const f of ['config.js', 'derived-views.js']) {
 }
 // Top-level const/let in a vm script aren't properties of the context; copy the
 // ones the model needs across explicitly.
-vm.runInContext(`this.COLLECTIONS = COLLECTIONS;
-  if (typeof SHOW_KEY_OVERRIDES !== 'undefined') this.SHOW_KEY_OVERRIDES = SHOW_KEY_OVERRIDES;`, app);
+vm.runInContext(`if (typeof SHOW_KEY_OVERRIDES !== 'undefined') this.SHOW_KEY_OVERRIDES = SHOW_KEY_OVERRIDES;`, app);
 const { compareSeasons, isSpecialRow, isReleasedRow, isTvViewRow } = app;
-const TV_COLLECTIONS = app.COLLECTIONS.filter(c => c.mediaType === 'tv').map(c => c.id);
+// The historical storage collections that held TV rows (config.js listed them until item 4 retired
+// the catalog lists).
+const TV_COLLECTIONS = ['disney', '90day', 'sheridan', 'othertv', 'truecrime'];
 
 // Reviewed show-key overrides (collection|item_key prefix → show key). Must equal
 // SHOW_KEY_OVERRIDES in config.js once it ships, and private.tv_show_key_override
