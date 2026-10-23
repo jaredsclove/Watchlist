@@ -372,15 +372,21 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
       Object.assign(f, { status: p_status, reason: p_note || '', decided_at: now(), last_seen_at: now() });
       return clone(f);
     },
-    library_cu_register_brief({ p_id, p_collections }) {
+    library_cu_register_brief({ p_id, p_collections, p_checks = [] }) {
       requireOn('library_cu_register_brief');
-      if (!p_id || !Array.isArray(p_collections) || !p_collections.length) invalid('brief');
+      const checks = p_checks == null ? [] : p_checks;
+      if (!p_id || !Array.isArray(p_collections) || !p_collections.length || !Array.isArray(checks) || checks.length > 5000
+        || checks.some(c => !c || typeof c !== 'object' || Array.isArray(c) || !/^rec:(show|season|item):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c.subject || '')
+          || !['renewal', 'dates', 'cancellation'].includes(c.check) || ('title' in c && (typeof c.title !== 'string' || c.title.length > 300))
+          || Object.keys(c).some(k => !['subject', 'check', 'title'].includes(k)))) invalid('brief');
+      const sweeps = [];
       const out = p_collections.map(c => {
         const d = currentDef(c);
         if (!d || d.mode === 'manual') refuse('no_definition', 'A chosen collection has no confirmed Follow or Discover definition, so no brief was made.');
+        if (d.mode === 'discover') (d.rules || []).forEach(r => sweeps.push({ subject: `rule:${r.id}`, check: 'sweep', title: r.label || r.id }));
         return { collection_id: c, definition_id: d.id, definition_version: d.version, mode: d.mode, rule_hashes: clone(d.rule_hashes), evidence_hash: d.evidence_hash };
       });
-      T('research_briefs').push({ id: p_id, exported_at: now(), collections: out });
+      T('research_briefs').push({ id: p_id, exported_at: now(), collections: out, checks: clone(checks).concat(sweeps) });
       return { id: p_id, collections: clone(out) };
     },
     library_cu_record_findings({ p_brief_id, p_file_sha256, p_findings }) {

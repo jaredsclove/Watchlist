@@ -1,7 +1,9 @@
 // A synthetic library as a format-5 backup, for hosted test environments (plan §8: synthetic data
 // only). Every record is invented ("ZZ Synthetic …", made-up TMDB ids); it is built and exported by the
 // page's own code in the offline harness, so it is exactly what the page would back up and restore.
-//   node tools/m1-synthetic-library.mjs --seed <1-9> --out <file.json>
+//   node tools/m1-synthetic-library.mjs --seed <1-9> --out <file.json> [--format 5|6|7]
+// The page writes format 7 (CU1); --format 6 drops collection updates' ten tables and --format 5 also the
+// episode marks (each format is the next one's subset). Default 5, as before.
 // Different seeds give disjoint ids and TMDB ids (one library per test user).
 import fs from 'fs';
 import { createRequire } from 'module';
@@ -10,8 +12,8 @@ const { createApp } = require('../tests/app-harness.js');
 
 const argv = process.argv.slice(2);
 const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
-const seed = Number(opt('--seed') || 1), out = opt('--out');
-if (!out || !(seed >= 1 && seed <= 9)) { console.error('usage: node tools/m1-synthetic-library.mjs --seed <1-9> --out <file.json>'); process.exit(2); }
+const seed = Number(opt('--seed') || 1), out = opt('--out'), format = Number(opt('--format') || 5);
+if (!out || !(seed >= 1 && seed <= 9) || ![5, 6, 7].includes(format)) { console.error('usage: node tools/m1-synthetic-library.mjs --seed <1-9> --out <file.json> [--format 5|6|7]'); process.exit(2); }
 
 const id = n => `5${seed}000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const tmdb = n => 9000000 + seed * 10000 + n;
@@ -48,6 +50,10 @@ const doc = JSON.parse(JSON.stringify(await app.run('buildBackupObject()')), (k,
   if (!prefixes.has(p)) prefixes.set(p, `${'6789abcdef'[prefixes.size]}${seed}`);
   return prefixes.get(p) + v.slice(2);
 });
+if (doc.formatVersion !== 7) { console.error(`the page wrote format ${doc.formatVersion}; expected 7`); process.exit(1); }
+const drop = format === 7 ? [] : Array.from(app.get('CU1_TABLES')).concat(format === 5 ? ['episode_marks'] : []);
+drop.forEach(t => { delete doc.tables[t]; delete doc.rowCounts[t]; });
+doc.formatVersion = format;
 const errors = Array.from(app.get('validateBackupObject')(doc));
 if (errors.length) { console.error(`invalid: ${errors.join('; ')}`); process.exit(1); }
 fs.writeFileSync(out, JSON.stringify(doc));

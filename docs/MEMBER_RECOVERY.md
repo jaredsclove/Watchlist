@@ -54,7 +54,7 @@ rows remain inaccessible through the application while membership is disabled, a
 administrative access.
 
 1. **Disable membership** (step 1 above) and **end their sessions** (steps 2–3 above).
-2. **Export their library as the owner:** `node tools/admin-restore.mjs export-owner-sql --user <id>` prints a
+2. **Export their library as the owner:** `node tools/admin-restore.mjs export-owner-sql --user <id>` (`--format 6` on an EP1 database) prints a
    read-only query that reads only that account's rows, all in one snapshot. It needs no membership, so access is
    never reopened for the account. Run it and save the value as a `.json` file.
    - Never use the member export for this: it refuses a non-member, because a non-member reads no rows.
@@ -67,6 +67,6 @@ administrative access.
 
 - The owner is a member like any other and recovers the same way, using the dashboard.
 - Losing the Supabase account itself (its sign-in, its MFA) is Supabase account recovery, outside the app. The
-  format-6 backups (format 5 before EP1) remain the library's safety net.
+  format-7 backups (format 6 before CU1, format 5 before EP1) remain the library's safety net.
 - Self-service "forgot password" by email is not offered. It would need email delivery (custom SMTP) and could be
   added later without other changes.

@@ -96,7 +96,7 @@ async function asRole(db, role, sub, s, p) {
 const asAnon = (db, s, p) => asRole(db, 'anon', null, s, p);
 const asUser = (db, sub, s, p) => asRole(db, 'authenticated', sub, s, p);
 async function attempt(fn) { try { return { ok: true, rows: await fn() }; } catch (e) { return { ok: false, message: e.message, code: e.code }; } }
-const val = async (db, s, p) => Object.values((await db.query(s, p)).rows[0])[0];
+const val = async (db, s, p) => { const r = (await db.query(s, p)).rows[0]; return r ? Object.values(r)[0] : undefined; };
 const idMap = new Map();
 const remap = v => { if (typeof v !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v)) return v; if (!idMap.has(v)) idMap.set(v, crypto.randomUUID()); return idMap.get(v); };
 const docB = JSON.parse(JSON.stringify(doc5), (k, v) => (typeof v === 'string' ? remap(v) : v));
@@ -461,7 +461,7 @@ section('adm: the admin restore runbook at format 6');
   const tool = (...args) => { try { return { ok: true, out: execFileSync(process.execPath, [path.join(ROOT, 'tools/admin-restore.mjs'), ...args], { encoding: 'utf8' }) }; }
     catch (e) { return { ok: false, out: String(e.stdout || '') + String(e.stderr || '') }; } };
   const exportAs = async owner => {
-    const r = await tryExec(db, tool('export-sql', '--owner', owner).out);
+    const r = await tryExec(db, tool('export-sql', '--owner', owner, '--format', '6').out);
     return r.ok ? r.out.map(q => q.rows && q.rows[0] && q.rows[0].backup).find(Boolean) : null;
   };
   try {
@@ -482,7 +482,7 @@ section('adm: the admin restore runbook at format 6');
     fs.writeFileSync(path.join(dir, 'after.json'), await exportAs(A));
     const ver = tool('verify', '--file', path.join(dir, 'file.json'), '--after', path.join(dir, 'after.json'));
     ok(ver.ok && /VERIFIED/.test(ver.out), 'verify: the export after the restore equals the file, marks included', ver.out);
-    const ownerText = await (async () => { const q = await tryExec(db, tool('export-owner-sql', '--user', B).out); return q.ok ? q.out.map(z => z.rows && z.rows[0] && z.rows[0].backup).find(Boolean) : null; })();
+    const ownerText = await (async () => { const q = await tryExec(db, tool('export-owner-sql', '--user', B, '--format', '6').out); return q.ok ? q.out.map(z => z.rows && z.rows[0] && z.rows[0].backup).find(Boolean) : null; })();
     const owner = ownerText && JSON.parse(ownerText);
     ok(owner && owner.formatVersion === 6 && owner.tables.episode_marks.length === 1 && validate(owner).length === 0, 'the owner export of B is format 6 with B’s one mark',
       owner ? validate(owner).join('; ') : 'no export');

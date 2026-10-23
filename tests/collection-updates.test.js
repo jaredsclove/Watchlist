@@ -82,7 +82,7 @@ test('setup gate: a catalog show’s new season waits for the collection setup (
       20: { seasons: [{ season_number: 1 }, { season_number: 2, air_date: '2027-03-01', episode_count: 8 }] } } }) });
   const t = await refresh(app);
   assert.match(t, /Own · Season 2: added/);
-  assert.match(t, /Needs review \(1\)[\s\S]*Cat · Season 2: automatic updates for catalog shows wait for the collection setup/);
+  assert.match(t, /Needs your review \(1\)[\s\S]*Cat · Season 2: automatic updates for catalog shows wait for the collection setup/);
   assert.ok(!app.store.watchlist_items.some(r => r.show_id === cat.id && r.season_number === 2));
   assert.strictEqual(finding(app, f => f.show_id === cat.id).status, 'pending');
   app.store.update_setup.push({ id: uuid('0f2c0000'), setup_confirmed_at: TS, source: 'setup_file' });
@@ -127,25 +127,84 @@ test('dates: a TBA season gets TMDB’s date and a future date follows TMDB; an 
   assert.ok(app.store.show_update_settings.some(s => s.show_id === sh.id && s.new_season_after_ended_at));
 });
 
-test('episode lists: TMDB’s season details are read only for a stored season still to watch whose cached list differs from TMDB’s count; new episodes are reported; marks untouched', async () => {
-  const sh = showOf({ title: 'Eps', show_key: 'eps', tmdb_id: 60 });
-  const s1 = seasonOf(sh, 1), s2 = seasonOf(sh, 2, { watched: true }), s3 = seasonOf(sh, 3), s4 = seasonOf(sh, 4, { skipped: true });
+// Airing lifecycle (owner decision): a season's episode list is read on every Refresh unless TMDB's own evidence
+// says the season has finished (Ended/Canceled with nothing scheduled, or an aired finale); a finished season
+// is read only when this device has no full list. Watched and Skipped never decide it.
+const EPT = (base, n, o = {}) => Array.from({ length: n }, (_, i) => ({ id: base + i, episode_number: i + 1, name: o.name ? o.name(i) : `Ep ${i + 1}`,
+  air_date: o.air || '2020-01-0' + (i + 1), episode_type: i === n - 1 && o.last ? o.last : 'standard' }));
+const seasonReads = (app, id) => app.requests.filter(r => new RegExp(`/tv/${id}/season/`).test(r.url)).map(r => +/season\/(\d+)/.exec(r.url)[1]).sort();
+test('episode lists: an airing season is read even when its count is unchanged, and changed episode details replace the cache; marks untouched', async () => {
+  const sh = showOf({ title: 'Airing', show_key: 'airing', tmdb_id: 60 });
+  const s2 = seasonOf(sh, 2, { display_date: 'Oct 1, 2026', date_sort: '2026-10-01' });
   const storage = memoryStorage();
-  const app = await createApp({ rows: [s1, s2, s3, s4], tvShows: [sh], storage, episodeMarks: [{ id: uuid('0e100000'), season_id: s1.id, tmdb_episode_id: 601, episode_number: 1 }],
-    tmdb: tmdbOf({ shows: { 60: { seasons: [{ season_number: 1, episode_count: 3 }, { season_number: 2, episode_count: 2 }, { season_number: 3, episode_count: 2 }, { season_number: 4, episode_count: 5 }] } },
-      lists: { '60/1': EPS(601, 602, 603), '60/2': EPS(611, 612), '60/3': EPS(621, 622) } }) });
-  // This device had season 1's list with two episodes and season 3's complete list.
-  app.run(`writeEpisodeListCache({ '60:1': { ids: [601, 602], numbers: [1, 2], names: ['', ''] }, '60:3': { ids: [621, 622], numbers: [1, 2], names: ['', ''] } })`);
-  const t = await refresh(app);
-  const seasonReads = app.requests.filter(r => /\/tv\/60\/season\//.test(r.url)).map(r => r.url.replace(/^.*\/tv\/60/, '').replace(/\?.*$/, ''));
-  assert.deepStrictEqual(seasonReads, ['/season/1'], 'only season 1: season 2 is watched, season 3’s list matches, season 4 is skipped');
-  assert.ok(!app.requests.some(r => r.url.includes('append_to_response')), 'no appended season requests');
-  assert.match(t, /Eps · Season 1: 1 new episode listed \(this device\)/);
-  const cache = out(app.get('readEpisodeListCache()'));
-  assert.deepStrictEqual(cache['60:1'].ids, [601, 602, 603]);
-  assert.deepStrictEqual(cache['60:2'], { count: 2 }, 'a season not read keeps TMDB’s count');
-  assert.deepStrictEqual(cache['60:3'].ids, [621, 622]);
+  const app = await createApp({ rows: [s2], tvShows: [sh], storage, episodeMarks: [{ id: uuid('0e100000'), season_id: s2.id, tmdb_episode_id: 601, episode_number: 1 }],
+    tmdb: tmdbOf({ shows: { 60: { status: 'Returning Series', next_episode_to_air: { season_number: 2, episode_number: 3, air_date: '2099-01-01' },
+      seasons: [{ season_number: 2, episode_count: 3 }] } }, lists: { '60/2': EPT(601, 3, { name: i => `Renamed ${i + 1}` }) } }) });
+  app.run(`writeEpisodeListCache({ '60:2': { ids: [601, 602, 603], numbers: [1, 2, 3], names: ['Ep 1', 'Ep 2', 'Ep 3'] } })`);
+  await refresh(app);
+  assert.deepStrictEqual(seasonReads(app, 60), [2], 'read although the count is unchanged');
+  assert.deepStrictEqual(out(app.get('readEpisodeListCache()'))['60:2'].names, ['Renamed 1', 'Renamed 2', 'Renamed 3'], 'the new titles are cached');
   assert.strictEqual(app.store.episode_marks.length, 1, 'marks untouched');
+});
+
+test('episode lists: a finished season (TMDB says Ended, nothing scheduled) is read only when this device has no full list; a stale count reads it again', async () => {
+  const sh = showOf({ title: 'Done', show_key: 'done', tmdb_id: 61, ended: true });
+  const s1 = seasonOf(sh, 1), s2 = seasonOf(sh, 2), s3 = seasonOf(sh, 3);
+  const app = await createApp({ rows: [s1, s2, s3], tvShows: [sh], storage: memoryStorage(),
+    tmdb: tmdbOf({ shows: { 61: { status: 'Ended', next_episode_to_air: null, seasons: [1, 2, 3].map(n => ({ season_number: n, episode_count: 2 })) } },
+      lists: { '61/1': EPT(611, 2), '61/2': EPT(621, 2), '61/3': EPT(631, 2) } }) });
+  // Season 1: a full list cached. Season 2: only a count. Season 3: a full list that no longer matches TMDB's count.
+  app.run(`writeEpisodeListCache({ '61:1': { ids: [611, 612], numbers: [1, 2], names: ['', ''] }, '61:2': { count: 2 }, '61:3': { ids: [631], numbers: [1], names: [''] } })`);
+  await refresh(app);
+  assert.deepStrictEqual(seasonReads(app, 61), [2, 3], 'season 1 reuses its cached list');
+  app.requests.length = 0;
+  await refresh(app);
+  assert.deepStrictEqual(seasonReads(app, 61), [], 'all three now have full lists: none is read again');
+});
+
+test('episode lists: an aired finale finishes a season; without TMDB evidence (no finale, all episodes aired, nothing scheduled) completion is uncertain and the season keeps being read', async () => {
+  const sh = showOf({ title: 'Running', show_key: 'running', tmdb_id: 62 });
+  const s1 = seasonOf(sh, 1), s2 = seasonOf(sh, 2), s3 = seasonOf(sh, 3, { display_date: 'TBA', date_sort: '2099-01-01' });
+  const app = await createApp({ rows: [s1, s2, s3], tvShows: [sh], storage: memoryStorage(),
+    tmdb: tmdbOf({ shows: { 62: { status: 'Returning Series', next_episode_to_air: null, seasons: [1, 2, 3].map(n => ({ season_number: n, episode_count: n === 3 ? 0 : 2 })) } },
+      lists: { '62/1': EPT(641, 2, { last: 'finale' }), '62/2': EPT(651, 2), '62/3': [] } }) });
+  await refresh(app);
+  assert.deepStrictEqual(seasonReads(app, 62), [1, 2, 3], 'nothing cached: every season is read once');
+  assert.deepStrictEqual(out(app.get('readEpisodeListCache()'))['62:1'].last, { type: 'finale', air: '2020-01-02' });
+  app.requests.length = 0;
+  await refresh(app);
+  assert.deepStrictEqual(seasonReads(app, 62), [2, 3], 'season 1 (aired finale) is finished; season 2 (no finale, all aired) is uncertain; season 3 (upcoming) is read');
+});
+
+test('episode lists: Watched or Skipped on a season doesn’t change whether its list is read', async () => {
+  const decide = async o => {
+    const sh = showOf({ title: 'Same', show_key: 'same', tmdb_id: 63 });
+    const s1 = seasonOf(sh, 1, o), s2 = seasonOf(sh, 2, o);
+    const app = await createApp({ rows: [s1, s2], tvShows: [sh], storage: memoryStorage(),
+      tmdb: tmdbOf({ shows: { 63: { status: 'Returning Series', next_episode_to_air: null, seasons: [1, 2].map(n => ({ season_number: n, episode_count: 2 })) } },
+        lists: { '63/1': EPT(661, 2, { last: 'finale' }), '63/2': EPT(671, 2) } }) });
+    app.run(`writeEpisodeListCache({ '63:1': { ids: [661, 662], numbers: [1, 2], names: ['', ''], last: { type: 'finale', air: '2020-01-02' } }, '63:2': { ids: [671, 672], numbers: [1, 2], names: ['', ''], last: { type: 'standard', air: '2020-01-02' } } })`);
+    await refresh(app);
+    return seasonReads(app, 63);
+  };
+  const unwatched = await decide({}), watched = await decide({ watched: true }), skipped = await decide({ skipped: true });
+  assert.deepStrictEqual(unwatched, [2]);
+  assert.deepStrictEqual(watched, unwatched);
+  assert.deepStrictEqual(skipped, unwatched);
+});
+
+test('episode lists: opening a finished season’s list still reads TMDB fresh and keeps saved marks', async () => {
+  const sh = showOf({ title: 'Open', show_key: 'open', tmdb_id: 64, status: 'watching' });
+  const s1 = seasonOf(sh, 1);
+  const app = await createApp({ rows: [s1], tvShows: [sh], storage: memoryStorage(), episodeMarks: [{ id: uuid('0e100000'), season_id: s1.id, tmdb_episode_id: 681, episode_number: 1 }],
+    tmdb: tmdbOf({ shows: { 64: { status: 'Ended', seasons: [{ season_number: 1, episode_count: 2 }] } }, lists: { '64/1': EPT(681, 2, { last: 'finale', name: i => `Fixed ${i + 1}` }) } }) });
+  app.run(`writeEpisodeListCache({ '64:1': { ids: [681, 682], numbers: [1, 2], names: ['Old 1', 'Old 2'], last: { type: 'finale', air: '2020-01-02' } } })`);
+  app.ctx.switchView('alltv'); await settle();
+  await app.ctx.loadEpisodeList(app.ctx.actionRows().find(r => r.id === s1.id)); await settle();
+  assert.deepStrictEqual(seasonReads(app, 64), [1], 'opened: read fresh');
+  assert.deepStrictEqual(out(app.get('readEpisodeListCache()'))['64:1'].names, ['Fixed 1', 'Fixed 2']);
+  assert.deepStrictEqual(app.store.episode_marks.map(m => m.tmdb_episode_id), [681], 'marks unchanged');
+  assert.ok(!app.writes().length, 'nothing written');
 });
 
 test('matching: an unmatched show is matched only when exactly one TMDB result has its title (or an evidenced alias), its year and an anchor; otherwise held for review', async () => {
@@ -333,8 +392,14 @@ test('import: an Ended show’s official renewal adds "Season 2 · TBA" automati
   assert.ok(app.store.show_update_settings.some(x => x.show_id === ended.id && x.new_season_after_ended_at), 'flagged');
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === tba.id).display_date, 'Jun 5, 2027', 'TBA window → the confirmed date');
   assert.match(t, /From the imported research file: 4 findings\. Evidence was assessed in Claude research/);
-  assert.match(t, /New show: ZZ Weak: the evidence doesn't meet the standard/);
-  assert.match(t, /New show: ZZ Contested: the sources conflict/);
+  assert.match(t, /Waiting for more research \(2\) Blocked by the evidence standard: they can't be applied or added from review\.[\s\S]*New show: ZZ Weak: the evidence doesn't meet the standard[\s\S]*New show: ZZ Contested: the sources conflict/);
+  assert.ok(!/Needs your review \(\d+\)[^W]*ZZ Weak/.test(t), 'blocked findings aren’t listed as waiting for a decision');
+  await app.ctx.openCuReview(null); await settle();
+  const box = text(app.el('cuModalBox').innerHTML);
+  assert.match(box, /Waiting for more research \(2\) Blocked by the evidence standard[\s\S]*ZZ Weak[\s\S]*ZZ Contested/);
+  const weak = finding(app, f => f.subject.title === 'ZZ Weak');
+  const html = app.el('cuModalBox').innerHTML, li = html.slice(html.indexOf(`data-finding="${weak.id}"`), html.indexOf('</li>', html.indexOf(`data-finding="${weak.id}"`)));
+  assert.ok(/Not now/.test(li) && /Dismiss/.test(li) && !/cuAccept|Add|Apply/.test(li), 'a blocked finding offers only Not now and Dismiss');
   assert.match(t, /Live \(cancellation\): couldn't be checked — the source didn't load/);
   assert.strictEqual(finding(app, f => f.subject.title === 'ZZ Weak').status, 'needs_evidence');
   assert.strictEqual(finding(app, f => f.subject.title === 'ZZ Contested').status, 'conflict');
@@ -351,17 +416,32 @@ test('import: an Ended show’s official renewal adds "Season 2 · TBA" automati
   assert.deepStrictEqual([app.store.watchlist_items.length, app.store.update_findings.length], [rows, found], 'no new rows or findings');
 });
 
-test('import coverage: a file that reports every check the brief asked for lists none as missing; records added after the brief aren’t expected', async () => {
+test('import coverage compares with the checks the brief exported (stored with it), not with today’s library', async () => {
   const { app, coll, ended, live, tba } = await researchLibrary();
   const b = await briefOf(app, [coll.id]);
-  const later = showOf({ title: 'Later', show_key: 'later', tmdb_id: 113, created_at: '2099-01-01T00:00:00+00:00' });
+  const exported = [[`rec:show:${ended.id}`, 'renewal'], [`rec:show:${live.id}`, 'renewal'], [`rec:season:${tba.id}`, 'dates'], [`rec:season:${tba.id}`, 'cancellation'], ['rule:person', 'sweep']];
+  assert.deepStrictEqual(app.store.research_briefs[0].checks.map(c => [c.subject, c.check]).sort(), exported.slice().sort(), 'the brief’s checks are stored as exported');
+  const fileChecks = b.collections[0].items.flatMap(i => i.required_checks.map(c => [i.ref, c]).concat((i.seasons || []).flatMap(x => x.required_checks.map(c => [x.ref, c]))));
+  assert.deepStrictEqual(fileChecks.concat([['rule:person', 'sweep']]).sort(), exported.slice().sort(), 'the stored checks are the file’s');
+  // After export: the TBA season gets an aired date (a rebuild would no longer ask for it) and a new show joins.
+  app.store.watchlist_items.find(r => r.id === tba.id).display_date = 'Jan 1, 2020';
+  app.store.watchlist_items.find(r => r.id === tba.id).date_sort = '2020-01-01';
+  const later = showOf({ title: 'Later', show_key: 'later', tmdb_id: 113 });
   app.store.tv_shows.push(later);
-  app.store.collection_memberships.push({ id: uuid('0d100000'), collection_id: coll.id, show_id: later.id, item_id: null, created_at: '2099-01-01T00:00:00+00:00' });
-  const all = [[`rec:show:${ended.id}`, 'renewal'], [`rec:show:${live.id}`, 'renewal'], [`rec:season:${tba.id}`, 'dates'], [`rec:season:${tba.id}`, 'cancellation'], ['rule:person', 'sweep']];
+  app.store.collection_memberships.push({ id: uuid('0d100000'), collection_id: coll.id, show_id: later.id, item_id: null, created_at: TS });
+  const partial = exported.filter(([, c]) => c !== 'dates');
   const { text: t } = await importFile(app, { format: 'watchlist-research-findings', version: 1, brief_id: b.brief_id, findings: [],
-    coverage: all.map(([subject, check]) => ({ subject, subject_title: subject, check, status: 'checked' })) });
-  assert.match(t, /Coverage: 5 of 5 reported checks completed\./);
-  assert.ok(!/not in the research file/.test(t));
+    coverage: partial.map(([subject, check]) => ({ subject, subject_title: subject, check, status: 'checked' })) });
+  assert.match(t, /Coverage: 4 of 4 reported checks completed; 1 the brief asked for isn't reported\./);
+  assert.ok(t.includes("Live · Season 2 (dates): not in the research file's coverage"), 'the exported dates check is still expected');
+  assert.ok(!/Later \(renewal\)/.test(t), 'a show added after export isn’t expected');
+});
+
+test('the brief’s checks are validated by the database: a malformed check refuses the brief', async () => {
+  const { app, coll } = await researchLibrary();
+  const r = await app.run(`runWrite('b', () => sbRpc('library_cu_register_brief', { p_id: crypto.randomUUID(), p_collections: [${JSON.stringify(coll.id)}], p_checks: [{ subject: 'rec:show:nope', check: 'renewal' }] })).then(() => 'ok', e => String(e && (e.message || e.code)))`);
+  assert.match(String(r), /invalid_input|brief/);
+  assert.strictEqual(app.store.research_briefs.length, 0);
 });
 
 test('import re-checks the current state: a collection switched to Manual sets findings aside; a changed rule sends new titles to fresh research; a label-only edit doesn’t', async () => {
