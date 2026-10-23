@@ -756,4 +756,71 @@ test('hold editor: holds added in the editor survive a format-7 backup and resto
   assert.deepStrictEqual(app.store.update_holds.map(strip).sort((x, y) => cmp(x.id, y.id)), JSON.parse(holds).map(strip));
 });
 
+async function editHold(app, id, change) {
+  app.ctx.cuOpenHoldEditor(id); await settle();
+  const form = text(app.el('cuModalBox').innerHTML);
+  if (change) app.run(`Object.assign(cuModal.hold, ${JSON.stringify(change)})`);
+  app.ctx.cuRenderModal();
+  const shown = text(app.el('cuModalBox').innerHTML);
+  const writes = app.writes().length;
+  await app.ctx.cuSaveHold(); await settle();
+  return { form, shown, box: text(app.el('cuModalBox').innerHTML), sent: app.writes().slice(writes) };
+}
+test('hold editor, edit: the form opens on the stored hold; saving updates it in place (same id and created_at, same shape); nothing else changes', async () => {
+  const { app, b, imported } = await holdLibrary();
+  const lib0 = libraryOf(app);
+  const r = await editHold(app, imported.id, { effect: 'do_not_add', reopen: 'official_or_two_trades', decision: 'Edited: no new seasons on rumours' });
+  assert.match(r.form, /Edit hold[\s\S]*ZZ Other Show · Season 3/, 'the stored target, by its exact label');
+  assert.match(r.form, /Imported: keep TBA/);
+  assert.match(r.shown, /Saving changes only this hold, in place/);
+  assert.strictEqual(r.sent.length, 1);
+  assert.ok(r.sent[0].url.endsWith('/rpc/library_cu_update_hold'));
+  assert.deepStrictEqual(out(r.sent[0].body.p_expected), out(Object.fromEntries(['kind', 'collection_id', 'show_id', 'item_id', 'subject_label', 'field', 'protected_value', 'decision', 'effect', 'reopen', 'decided_on'].map(k => [k, imported[k]]))));
+  const h = app.store.update_holds.find(x => x.id === imported.id);
+  assert.deepStrictEqual([app.store.update_holds.length, h.id, h.created_at, h.show_id, h.item_id, h.subject_label, h.effect, h.reopen.on, h.decision, h.decided_on],
+    [1, imported.id, imported.created_at, b.id, null, 'Season 3', 'do_not_add', 'official_or_two_trades', 'Edited: no new seasons on rumours', '2026-09-28']);
+  assert.match(r.box, /Collections and rules[\s\S]*Edit hold: saved/);
+  assert.strictEqual(libraryOf(app), lib0, 'no show, season, date, progress or membership changed');
+});
+
+test('hold editor, edit: a protected value keeps the value it stored (shown beside the current one); a season named by its row stays a row', async () => {
+  const { app, a, s2 } = await holdLibrary();
+  await addHold(app, { kind: 'protected_value', target: `show:${a.id}`, season: s2.id, field: 'display_date', reopen: 'new_evidence', decision: 'Owner-approved date' });
+  const p = app.store.update_holds.find(h => h.kind === 'protected_value');
+  app.store.watchlist_items.find(r => r.id === s2.id).display_date = 'Feb 1, 2026';
+  await app.ctx.openCuDialog('collections', null); await settle();
+  app.ctx.cuReadHold = () => {};
+  const r = await editHold(app, p.id, { decision: 'Owner-approved date, confirmed again' });
+  assert.match(r.shown, /ZZ Hold Show · Season 2 — date kept as “Jan 2, 2026” \(it shows “Feb 1, 2026” now\)/);
+  const h = app.store.update_holds.find(x => x.id === p.id);
+  assert.deepStrictEqual([h.item_id, h.field, h.protected_value, h.decision], [s2.id, 'display_date', 'Jan 2, 2026', 'Owner-approved date, confirmed again']);
+  // An identity hold stored on a season row keeps that shape when only its decision changes.
+  app.store.update_holds.push({ id: uuid('0f6c0000'), kind: 'identity_hold', collection_id: null, show_id: null, item_id: s2.id, subject_label: null, field: null, protected_value: null,
+    decision: 'Row-shaped identity hold', effect: 'block_season_mapping', reopen: { on: 'owner_only' }, decided_on: null, created_at: TS });
+  const idh = app.store.update_holds[app.store.update_holds.length - 1];
+  await app.ctx.openCuDialog('collections', null); await settle();
+  app.ctx.cuReadHold = () => {};
+  await editHold(app, idh.id, { decision: 'Row-shaped identity hold, edited' });
+  assert.deepStrictEqual([idh.item_id, idh.show_id, idh.subject_label, idh.effect, idh.decision], [s2.id, null, null, 'block_season_mapping', 'Row-shaped identity hold, edited']);
+});
+
+test('hold editor, edit: an unchanged form sends nothing; an invalid one stays open; a hold changed meanwhile is refused and the list shows it as it is now', async () => {
+  const { app, imported } = await holdLibrary();
+  let r = await editHold(app, imported.id, null);
+  assert.strictEqual(r.sent.length, 0);
+  assert.match(r.box, /Edit hold[\s\S]*Nothing to save: the hold is unchanged/);
+  await app.ctx.openCuDialog('collections', null); await settle(); app.ctx.cuReadHold = () => {};
+  r = await editHold(app, imported.id, { decision: '  ' });
+  assert.strictEqual(r.sent.length, 0);
+  assert.match(r.box, /Edit hold[\s\S]*Write the decision/);
+  await app.ctx.openCuDialog('collections', null); await settle(); app.ctx.cuReadHold = () => {};
+  app.ctx.cuOpenHoldEditor(imported.id); await settle();
+  app.store.update_holds[0].decision = 'Changed in another tab';
+  app.run(`Object.assign(cuModal.hold, { decision: 'My edit' })`);
+  await app.ctx.cuSaveHold(); await settle();
+  const box = text(app.el('cuModalBox').innerHTML);
+  assert.match(box, /Collections and rules[\s\S]*changed since the page showed it[\s\S]*Changed in another tab/);
+  assert.strictEqual(app.store.update_holds[0].decision, 'Changed in another tab', 'the other change stands');
+});
+
 T.run();

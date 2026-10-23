@@ -3,6 +3,7 @@
 // under new ids as member B, and a non-member C:
 //   pre    refusals before anything changes (no run id, a recorded run id); the state is unchanged;
 //   fail   failure injection after every statement of the migration: state unchanged, no run record;
+//   cu1b   db/cu1b_hold_edit.sql: refusals, failure injection, install, editing a hold in place, a backup round trip, the test reverse;
 //   CU     the migration: every existing row unchanged; only the intended catalog changes; the run record;
 //          a replay refused;
 //   anon   nothing on the new tables or functions; a non-member is refused;
@@ -690,6 +691,94 @@ section('adm: the admin restore runbook at format 7');
     const wrong = tool('check', '--file', path.join(dir, 'file.json'), '--safety', path.join(dir, 'file6.json'));
     ok(!wrong.ok && /format 7 can’t be restored on this database \(formats 3 to 6\)/.test(wrong.out), 'check refuses a format-7 file for an EP1 (format-6) database', wrong.out);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+section('cu1b: editing a hold in place (db/cu1b_hold_edit.sql)');
+{
+  const CU1B = sql('db/cu1b_hold_edit.sql');
+  const pre1b = run => `select set_config('watchlist.cu1b_run', '${run}', false);\n`;
+  const EDIT = ['kind', 'collection_id', 'show_id', 'item_id', 'subject_label', 'field', 'protected_value', 'decision', 'effect', 'reopen', 'decided_on'];
+  const pickH = h => Object.fromEntries(EDIT.map(k => [k, h[k] === undefined ? null : h[k]]));
+  const sh = await showRow(2), seasons = await seasonsOf(sh.id);
+  const hA = await call(db, 'library_cu_save_hold', [{ kind: 'standing_decision', show_id: sh.id, subject_label: 'Season 9', decision: 'Hold to edit', effect: 'keep_value', reopen: { on: 'official_date_or_window' }, decided_on: '2026-10-01' }]);
+  const hA2 = await call(db, 'library_cu_save_hold', [{ kind: 'identity_hold', show_id: sh.id, decision: 'Another hold', effect: 'block_matching', reopen: { on: 'owner_only' } }]);
+  const s1b0 = await state(db);
+  for (const [label, run, re] of [['no run id', '', /set watchlist\.cu1b_run/], ['a recorded run id', 'cu1-rehearsal-1', /already recorded/]]) {
+    const x = await tryExec(db, pre1b(run) + CU1B);
+    ok(!x.ok && re.test(x.message) && same(s1b0, await state(db)), `${label}: refused, state unchanged`, x.message || 'committed');
+  }
+  if (inject) {
+    const st = statements(CU1B);
+    const bi = st.findIndex(x => /^begin\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim())), ci = st.findIndex(x => /^commit\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim()));
+    const bad = [];
+    for (let k = bi; k < ci; k++) {
+      const text = pre1b(`inject1b-${k}`) + st.slice(0, k + 1).join('') + `\ndo $zz$ begin raise exception 'zz injected after %', ${k}; end $zz$;\n` + st.slice(k + 1).join('');
+      const x = await tryExec(db, text);
+      if (x.ok || !/zz injected/.test(x.message) || !same(s1b0, await state(db))) bad.push(`${k}: ${stmtHead(st[k])} ${x.message || 'committed'}`);
+    }
+    ok(bad.length === 0, `a failure after each of CU1b's ${ci - bi} statements leaves the state unchanged and no run record`, bad.join('\n'));
+  }
+  const inst = await tryExec(db, pre1b('cu1b-rehearsal-1') + CU1B);
+  ok(inst.ok && /CU1B\|cu1b-rehearsal-1/.test(JSON.stringify(inst.out)), 'db/cu1b_hold_edit.sql commits', inst.message);
+  const s1b1 = await state(db);
+  ok(same(s1b0.rows, s1b1.rows), 'every table, the holds included, is unchanged by the install');
+  const cd = catDiff(s1b0.cat, s1b1.cat);
+  ok(cd.length === 2 && cd.some(x => /^functions: only before \[\] only after \["public\.library_cu_update_hold\(p_id uuid, p_expected jsonb, p_hold jsonb\)/.test(x)) && cd.some(x => /^runs:/.test(x)),
+    'the catalog gains only the function (and the run record)', cd.join('\n'));
+  ok((await val(db, `select public.stage5_capabilities() ->> 'phase'`)) === 'contracted-cu1', 'the phase is unchanged (contracted-cu1)');
+  const replay = await tryExec(db, pre1b('cu1b-rehearsal-2') + CU1B);
+  ok(!replay.ok && /already installed/.test(replay.message) && same(s1b1, await state(db)), 'a replay is refused, state unchanged', replay.message || 'committed');
+  // Behaviour.
+  const rowsBefore = await rows(db);
+  const other = JSON.stringify((await asUser(db, A, `select to_jsonb(h) j from public.update_holds h where id <> $1 order by id`, [hA.id])).map(x => x.j));
+  const edited = { ...pickH(hA), decision: 'Edited decision', effect: 'do_not_add', reopen: { on: 'named_source', source_domains: ['press.example.org'] }, subject_label: 'Season 10' };
+  const e1 = await tryCall(db, 'library_cu_update_hold', [hA.id, pickH(hA), edited]);
+  const now = (await asUser(db, A, `select to_jsonb(h) - 'user_id' j from public.update_holds h where id = $1`, [hA.id]))[0].j;
+  ok(e1.ok && now.id === hA.id && now.created_at === hA.created_at && same(pickH(now), pickH({ ...edited, decided_on: '2026-10-01' })),
+    'an edit updates the hold in place: same id and created_at, the new values', JSON.stringify([e1.message, now]));
+  const after = await rows(db);
+  ok(same(Object.keys(rowsBefore).filter(k => k !== 'update_holds' && rowsBefore[k] !== after[k]), []), 'no other table changes');
+  ok(JSON.stringify((await asUser(db, A, `select to_jsonb(h) j from public.update_holds h where id <> $1 order by id`, [hA.id])).map(x => x.j)) === other, 'the other holds are untouched');
+  const s2 = await rows(db);
+  const stale = await tryCall(db, 'library_cu_update_hold', [hA.id, pickH(hA), { ...edited, decision: 'Stale edit' }]);
+  ok(!stale.ok && /target_changed/.test(stale.message) && same(s2, await rows(db)), 'an edit from an outdated view is refused (target_changed); nothing changes', stale.message);
+  const { decided_on, ...partial } = pickH(now);
+  const missing = await tryCall(db, 'library_cu_update_hold', [hA.id, partial, edited]);
+  ok(!missing.ok && /invalid_input/.test(missing.message) && same(s2, await rows(db)), 'expected values missing a field: refused as invalid input', missing.message);
+  const extra = await tryCall(db, 'library_cu_update_hold', [hA.id, pickH(now), { ...edited, created_at: '2020-01-01T00:00:00Z' }]);
+  ok(!extra.ok && /invalid_input/.test(extra.message) && same(s2, await rows(db)), 'a value outside the editable fields (created_at) is refused', extra.message);
+  const shape = await tryCall(db, 'library_cu_update_hold', [hA.id, pickH(now), { ...pickH(now), kind: 'protected_value' }]);
+  ok(!shape.ok && /invalid_input: hold/.test(shape.message) && same(s2, await rows(db)), 'an edit breaking the hold checks (protected value without a field) is refused', shape.message);
+  const bRow = (await asUser(db, B, `select id from public.watchlist_items order by id limit 1`))[0].id;
+  const foreign = await tryCall(db, 'library_cu_update_hold', [hA.id, pickH(now), { ...pickH(now), show_id: null, item_id: bRow }]);
+  ok(!foreign.ok && /isn't yours|invalid_input/.test(foreign.message) && same(s2, await rows(db)), 'pointing a hold at another member’s record is refused', foreign.message);
+  const asB = await tryCall(db, 'library_cu_update_hold', [hA.id, pickH(now), { ...pickH(now), decision: 'B was here' }], B);
+  ok(!asB.ok && /target_changed/.test(asB.message) && same(s2, await rows(db)), 'another member can’t edit A’s hold (it isn’t theirs to see)', asB.message);
+  const anon = await attempt(() => asAnon(db, `select public.library_cu_update_hold($1, $2, $3)`, [hA.id, pickH(now), pickH(now)]));
+  ok(!anon.ok && /permission denied/.test(anon.message), 'signed out: no access', anon.message);
+  const kind = await tryCall(db, 'library_cu_update_hold', [hA.id, pickH(now), { ...pickH(now), kind: 'identity_hold', effect: 'block_season_mapping', reopen: { on: 'owner_only' }, subject_label: seasons[0].season }]);
+  ok(kind.ok && kind.rows.id === hA.id && kind.rows.kind === 'identity_hold', 'a valid change of kind is kept in place too', kind.message);
+  const direct = await attempt(() => asUser(db, A, `update public.update_holds set decision = 'direct' where id = $1`, [hA.id]));
+  ok(!direct.ok, 'a direct table update is still refused (write guard)', direct.message || 'updated');
+  // Backup: the edited hold round-trips through the admin runbook (format 7, unchanged spec).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu1b-'));
+  try {
+    const exp1 = backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', A).out));
+    fs.writeFileSync(path.join(dir, 'file.json'), exp1);
+    const r = await tryExec(db, adminTool('restore-sql', '--file', path.join(dir, 'file.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'cu1b-adm-1').out);
+    fs.writeFileSync(path.join(dir, 'after.json'), backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', A).out)));
+    const ver = adminTool('verify', '--file', path.join(dir, 'file.json'), '--after', path.join(dir, 'after.json'));
+    ok(r.ok && ver.ok && /VERIFIED/.test(ver.out) && JSON.parse(exp1).tables.update_holds.some(h => h.id === hA.id && h.kind === 'identity_hold'),
+      'a backup with the edited hold restores and verifies field by field', [r.message, ver.out].join(' '));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // Test-only reverse, then the install applies again; the holds go back to what CU1 alone left.
+  const rv = await tryExec(db, sql('db/test/cu1b_reverse.sql'));
+  ok(rv.ok && (await val(db, `select to_regprocedure('public.library_cu_update_hold(uuid, jsonb, jsonb)') is null`)) === true, 'the test-only reverse removes the function and its run record', rv.message);
+  const again = await tryExec(db, pre1b('cu1b-rehearsal-3') + CU1B);
+  ok(again.ok, 'CU1b applies again after the reverse', again.message);
+  await tryExec(db, sql('db/test/cu1b_reverse.sql'));
+  await call(db, 'library_cu_delete_hold', [hA.id, (await asUser(db, A, `select decision from public.update_holds where id = $1`, [hA.id]))[0].decision]);
+  await call(db, 'library_cu_delete_hold', [hA2.id, hA2.decision]);
 }
 
 section('rev: the test-environment reverse');
