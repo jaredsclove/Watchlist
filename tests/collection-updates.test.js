@@ -339,6 +339,29 @@ test('import: an Ended show’s official renewal adds "Season 2 · TBA" automati
   assert.strictEqual(finding(app, f => f.subject.title === 'ZZ Weak').status, 'needs_evidence');
   assert.strictEqual(finding(app, f => f.subject.title === 'ZZ Contested').status, 'conflict');
   assert.ok(results);
+  // Coverage: the file reported one check (failed); every other check the brief asked for is named as not reported.
+  assert.match(t, /Coverage: 0 of 1 reported check completed; 5 the brief asked for aren't reported\./);
+  for (const want of ['Old Hit (renewal)', 'Live (renewal)', 'Live · Season 2 (dates)', 'Live · Season 2 (cancellation)', 'person (sweep)']) assert.ok(t.includes(`${want}: not in the research file's coverage`), want);
+  assert.ok(!/Dropped \(renewal\)/.test(t), 'a Skipped show has no checks to report');
+  // The same findings in another file: nothing is applied again or duplicated; the applied ones are counted.
+  const rows = app.store.watchlist_items.length, found = app.store.update_findings.length;
+  const again = await importFile(app, { ...doc, researched_at: '2026-10-21T10:00:00Z' });
+  assert.match(again.text, /From the imported research file: 4 findings \(2 already applied or decided earlier, left as they are\)/);
+  assert.match(again.text, /Automatic updates \(0\)/);
+  assert.deepStrictEqual([app.store.watchlist_items.length, app.store.update_findings.length], [rows, found], 'no new rows or findings');
+});
+
+test('import coverage: a file that reports every check the brief asked for lists none as missing; records added after the brief aren’t expected', async () => {
+  const { app, coll, ended, live, tba } = await researchLibrary();
+  const b = await briefOf(app, [coll.id]);
+  const later = showOf({ title: 'Later', show_key: 'later', tmdb_id: 113, created_at: '2099-01-01T00:00:00+00:00' });
+  app.store.tv_shows.push(later);
+  app.store.collection_memberships.push({ id: uuid('0d100000'), collection_id: coll.id, show_id: later.id, item_id: null, created_at: '2099-01-01T00:00:00+00:00' });
+  const all = [[`rec:show:${ended.id}`, 'renewal'], [`rec:show:${live.id}`, 'renewal'], [`rec:season:${tba.id}`, 'dates'], [`rec:season:${tba.id}`, 'cancellation'], ['rule:person', 'sweep']];
+  const { text: t } = await importFile(app, { format: 'watchlist-research-findings', version: 1, brief_id: b.brief_id, findings: [],
+    coverage: all.map(([subject, check]) => ({ subject, subject_title: subject, check, status: 'checked' })) });
+  assert.match(t, /Coverage: 5 of 5 reported checks completed\./);
+  assert.ok(!/not in the research file/.test(t));
 });
 
 test('import re-checks the current state: a collection switched to Manual sets findings aside; a changed rule sends new titles to fresh research; a label-only edit doesn’t', async () => {

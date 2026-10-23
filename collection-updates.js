@@ -154,7 +154,8 @@ function cuResultsHtml(r) {
   const li = items => items.map(x => `<li>${esc(x)}</li>`).join('');
   const coverage = r.source === 'tmdb'
     ? `TMDB only: announcements weren’t checked. Checked ${r.checked} show${r.checked === 1 ? '' : 's'} (${r.matched} matched to TMDB, ${r.unmatched} not yet matched)${r.skipped ? `; ${r.skipped} Skipped show${r.skipped === 1 ? '' : 's'} not checked` : ''}.`
-    : `From the imported research file: ${r.checked} finding${r.checked === 1 ? '' : 's'}. Evidence was assessed in Claude research; links are kept with each finding.`;
+    : `From the imported research file: ${r.checked} finding${r.checked === 1 ? '' : 's'}${r.unchanged ? ` (${r.unchanged} already applied or decided earlier, left as they are)` : ''}. Evidence was assessed in Claude research; links are kept with each finding.`
+      + (r.coverage ? ` Coverage: ${r.coverage.checked} of ${r.coverage.reported} reported check${r.coverage.reported === 1 ? '' : 's'} completed${r.coverage.missing.length ? `; ${r.coverage.missing.length} the brief asked for ${r.coverage.missing.length === 1 ? 'isn’t' : 'aren’t'} reported` : ''}.` : '');
   const episodes = r.episodes.map(e => `${e.title} · ${e.season}: ${e.added} new episode${e.added === 1 ? '' : 's'} listed (this device)`);
   const auto = r.applied.concat(episodes);
   const notChecked = r.failed.concat(r.setAside);
