@@ -693,7 +693,7 @@ test('hold editor: every supported shape is saved as the setup import writes it,
   r = await addHold(app, { kind: 'standing_decision', target: 'title:', titleLabel: 'ZZ Future Series', effect: 'do_not_add', reopen: 'named_source', sourceDomains: 'https://www.Press.Example.org/news, trade-a.example', sourceName: 'Press', decision: 'Only the studio’s word' });
   assert.match(r.shown, /ZZ Future Series \(not in your library\)/);
   assert.deepStrictEqual(pick(r.added), ['standing_decision', null, null, 'ZZ Future Series', null, null, 'do_not_add', 'named_source', null]);
-  assert.deepStrictEqual(out(r.added.reopen), { on: 'named_source', source_domains: ['press.example.org', 'trade-a.example'], source_name: 'Press' });
+  assert.deepStrictEqual(out(r.added.reopen), { on: 'named_source', source_domains: ['www.press.example.org', 'trade-a.example'], source_name: 'Press' }, 'scheme and path dropped; the host kept as typed (lowercased)');
   r = await addHold(app, { kind: 'protected_value', target: `show:${a.id}`, season: s2.id, field: 'display_date', reopen: 'new_evidence', decision: 'Owner-approved date' });
   assert.match(r.shown, /ZZ Hold Show · Season 2 — date kept as “Jan 2, 2026”/);
   assert.deepStrictEqual(pick(r.added), ['protected_value', null, s2.id, null, 'display_date', 'Jan 2, 2026', 'keep_value', 'new_evidence', null]);
@@ -715,7 +715,7 @@ test('hold editor: an incomplete or impossible hold is explained and nothing is 
   const { app, a, film } = await holdLibrary();
   const writes = app.writes().length;
   for (const [draft, why] of [
-    [{ kind: 'protected_value', target: `show:${a.id}`, season: '', field: 'display_date', decision: 'x' }, /Choose a season in your library/],
+    [{ kind: 'protected_value', target: `show:${a.id}`, season: 'label', seasonLabel: '', field: 'display_date', decision: 'x' }, /Name the season/],
     [{ kind: 'identity_hold', target: `film:${film.id}`, decision: 'x' }, /Identity holds are for shows/],
     [{ kind: 'standing_decision', target: `show:${a.id}`, season: 'label', seasonLabel: ' ', decision: 'x' }, /Name the season/],
     [{ kind: 'standing_decision', target: `show:${a.id}`, decision: '  ' }, /Write the decision/],
@@ -821,6 +821,40 @@ test('hold editor, edit: an unchanged form sends nothing; an invalid one stays o
   const box = text(app.el('cuModalBox').innerHTML);
   assert.match(box, /Collections and rules[\s\S]*changed since the page showed it[\s\S]*Changed in another tab/);
   assert.strictEqual(app.store.update_holds[0].decision, 'Changed in another tab', 'the other change stands');
+});
+
+test('hold editor (review fixes): show-wide protected values, a named source with a name, an archived collection and a stored identity effect all survive an edit', async () => {
+  const { app, a, b, coll } = await holdLibrary();
+  // A show-wide protected value, as the setup import writes it (no single value): added, then edited.
+  let r = await addHold(app, { kind: 'protected_value', target: `show:${a.id}`, season: '', field: 'title', reopen: 'new_evidence', decision: 'Keep every season’s title' });
+  assert.match(r.shown, /ZZ Hold Show \(the whole show\) — every season.s title kept as it is/);
+  const pv = r.added;
+  assert.deepStrictEqual([pv.show_id, pv.item_id, pv.subject_label, pv.field, pv.protected_value, pv.effect], [a.id, null, null, 'title', null, 'keep_value']);
+  await app.ctx.openCuDialog('collections', null); await settle(); app.ctx.cuReadHold = () => {};
+  r = await editHold(app, pv.id, null);
+  assert.strictEqual(r.sent.length, 0, 'opened and saved unchanged: nothing sent');
+  await app.ctx.openCuDialog('collections', null); await settle(); app.ctx.cuReadHold = () => {};
+  await editHold(app, pv.id, { decision: 'Keep every season’s title (confirmed)' });
+  assert.deepStrictEqual([pv.show_id, pv.item_id, pv.subject_label, pv.field, pv.protected_value], [a.id, null, null, 'title', null], 'still show-wide, no value invented');
+  // A named source with a name, in an archived collection; the database answers its jsonb keys in its own order.
+  const ns = { id: uuid('0f6c0000'), kind: 'standing_decision', collection_id: coll.id, show_id: b.id, item_id: null, subject_label: 'Season 4', field: null, protected_value: null,
+    decision: 'Only the studio', effect: 'do_not_add', reopen: { on: 'named_source', source_name: 'Studio', source_domains: ['www.studio.example'] }, decided_on: '2026-09-01', created_at: TS };
+  const idh = { id: uuid('0f6c0000'), kind: 'identity_hold', collection_id: null, show_id: b.id, item_id: null, subject_label: null, field: null, protected_value: null,
+    decision: 'Odd stored effect', effect: 'block_season_mapping', reopen: { on: 'owner_only' }, decided_on: null, created_at: TS };
+  app.store.update_holds.push(ns, idh);
+  app.store.personal_collections.find(c => c.id === coll.id).archived_at = TS;
+  await app.ctx.openCuDialog('collections', null); await settle(); app.ctx.cuReadHold = () => {};
+  r = await editHold(app, ns.id, null);
+  assert.strictEqual(r.sent.length, 0, 'unchanged despite key order: nothing sent');
+  assert.match(r.form, /ZZ Holds \(archived\)/);
+  await app.ctx.openCuDialog('collections', null); await settle(); app.ctx.cuReadHold = () => {};
+  r = await editHold(app, ns.id, { decision: 'Only the studio (edited)' });
+  assert.match(r.box, /Edit hold: saved/);
+  assert.ok(!/list shows it differently/.test(r.box), 'no false alarm');
+  assert.deepStrictEqual([ns.collection_id, ns.subject_label, ns.reopen.source_name, out(ns.reopen.source_domains)], [coll.id, 'Season 4', 'Studio', ['www.studio.example']]);
+  await app.ctx.openCuDialog('collections', null); await settle(); app.ctx.cuReadHold = () => {};
+  await editHold(app, idh.id, { decision: 'Odd stored effect, edited' });
+  assert.deepStrictEqual([idh.show_id, idh.subject_label, idh.effect], [b.id, null, 'block_season_mapping'], 'the stored effect stands while the target is unchanged');
 });
 
 T.run();
