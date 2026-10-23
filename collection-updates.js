@@ -151,15 +151,23 @@ function cuEpisodes(list) {
       air_date: /^\d{4}-\d{2}-\d{2}$/.test(e.air_date || '') ? e.air_date : null, type: typeof e.episode_type === 'string' ? e.episode_type : null }))
     .sort((a, b) => a.number - b.number || a.id - b.id);
 }
-// Airing lifecycle (owner decision): a season counts as finished only on TMDB's own evidence — the show's status
-// is Ended or Canceled with no next episode scheduled, or the season's cached list ends with an episode TMDB
-// types "finale" that has aired and the next episode isn't in this season. Anything else (upcoming, airing,
-// or no such evidence) is treated as not finished. Viewing progress (Watched, Skipped) never decides this.
+// Airing lifecycle (owner decision): a season counts as finished for routine refreshes when the show's status is
+// Ended or Canceled with no next episode scheduled; when the season's cached list ends with an episode TMDB types
+// "finale" that has aired; or (an accepted practical inference, not proof) when a later regular season has started
+// airing. In every case the next scheduled episode mustn't be in this season. Specials (season 0) are never
+// finished by a later season, and never count as one. Anything else (upcoming, airing, or no such evidence) is
+// treated as not finished. Viewing progress (Watched, Skipped) never decides this.
 function cuSeasonFinished(details, seasonNumber, cached, today) {
   const next = details && details.next_episode_to_air && typeof details.next_episode_to_air === 'object' ? details.next_episode_to_air : null;
+  if (next && next.season_number === seasonNumber) return false;
   if (/^(ended|canceled|cancelled)$/i.test(String(details && details.status || '')) && !next) return true;
   const last = cached && cached.last;
-  return !!(last && last.type === 'finale' && cuDate(last.air) && last.air <= today && !(next && next.season_number === seasonNumber));
+  if (last && last.type === 'finale' && cuDate(last.air) && last.air <= today) return true;
+  if (seasonNumber < 1) return false;
+  const lastAired = details && details.last_episode_to_air && typeof details.last_episode_to_air === 'object' ? details.last_episode_to_air : null;
+  if (lastAired && Number.isInteger(lastAired.season_number) && lastAired.season_number > seasonNumber) return true;
+  return (details && Array.isArray(details.seasons) ? details.seasons : []).some(s => s && Number.isInteger(s.season_number)
+    && s.season_number > seasonNumber && cuDate(s.air_date) && s.air_date <= today);
 }
 
 // ── Results ──
