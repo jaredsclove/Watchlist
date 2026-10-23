@@ -268,19 +268,32 @@ section('season: reconciliation with the stored rows');
   ok(amb.outcome === 'policy' && amb.reason === 'ambiguous_correspondence' && (await seasonsOf(s4.id)).length === before,
     'Season 6 with a "Season 6 (Final)" row: review, nothing created', JSON.stringify(amb));
   const chosen = (await seasonsOf(s4.id)).find(r => r.season === 'Season 6 (Final)');
+  // An identity hold on the chosen row's own label stops even the owner's review mapping.
+  const held = await call(db, 'library_cu_save_hold', [{ kind: 'identity_hold', show_id: s4.id, subject_label: 'Season 6 (Final)', decision: 'Needs explicit mapping review', effect: 'block_season_mapping', reopen: { on: 'owner_only' } }]);
+  const blocked = await call(db, 'library_cu_reconcile_season', [s4.id, exp(s4), tmdbSeason(6), { id: amb.finding_id }, true, chosen.id]);
+  ok(blocked.reason === 'identity_hold' && (await seasonsOf(s4.id)).find(r => r.id === chosen.id).season_number === null, 'a held label: the review mapping is refused', JSON.stringify(blocked));
+  await call(db, 'library_cu_delete_hold', [held.id, held.decision]);
   const rv = await call(db, 'library_cu_reconcile_season', [s4.id, exp(s4), tmdbSeason(6), { id: amb.finding_id }, true, chosen.id]);
   const after6 = (await seasonsOf(s4.id)).find(r => r.id === chosen.id);
   ok(rv.result && rv.result.outcome === 'mapped' && after6.season_number === 6 && after6.season === 'Season 6 (Final)', 'the owner’s review maps the chosen row (label kept)', JSON.stringify(rv));
   const undated = await call(db, 'library_cu_reconcile_season', [s4.id, exp(s4), tmdbSeason(7, { display_date: 'TBA', date_sort: '2099-01-01', episode_count: 0 }),
     tf('new_season', 's4-s7', { show_id: s4.id })]);
   ok(undated.status === 'needs_evidence' && undated.reason === 'tmdb_undated_empty', 'an undated TMDB season with no episodes needs announcement evidence', JSON.stringify(undated));
+  const dated = await call(db, 'library_cu_reconcile_season', [s4.id, exp(s4), tmdbSeason(7), tf('new_season', 's4-s7', { show_id: s4.id })]);
+  ok(dated.result && dated.result.outcome === 'created', 'the same finding, once TMDB lists a date and episodes: checked again and the season added', JSON.stringify(dated));
+  // Every standing decision is consulted: a permissive one doesn't shadow a stricter one.
+  await call(db, 'library_cu_save_hold', [{ kind: 'standing_decision', show_id: s4.id, decision: 'Show-level: qualifying evidence only', effect: 'require_qualifying_evidence', reopen: { on: 'official_or_two_trades' }, decided_on: '2026-01-01' }]);
+  await call(db, 'library_cu_save_hold', [{ kind: 'standing_decision', show_id: s4.id, subject_label: 'Season 8', decision: 'Do not add Season 8', effect: 'do_not_add', reopen: { on: 'owner_only' }, decided_on: '2026-01-02' }]);
+  const s8 = await call(db, 'library_cu_reconcile_season', [s4.id, exp(s4), tmdbSeason(8), tf('new_season', 's4-s8', { show_id: s4.id })]);
+  ok(s8.status === 'pending' && s8.reason === 'standing_decision' && !(await seasonsOf(s4.id)).some(r => r.season === 'Season 8'), 'two standing decisions: the stricter one holds the season', JSON.stringify(s8));
   // Skipped / follow / Ended
   const s5 = await showRow(5);
   await asSuper(db, `update public.tv_shows set status = 'skipped' where id = '${s5.id}'`);
   const sk = await call(db, 'library_cu_reconcile_season', [s5.id, exp(s5), tmdbSeason(4), tf('new_season', 's5-s4', { show_id: s5.id })]);
   ok(sk.status === 'set_aside' && sk.reason === 'skipped' && (await seasonsOf(s5.id)).length === 3, 'a Skipped show: nothing added', JSON.stringify(sk));
   await call(db, 'library_cu_set_show_settings', [s5.id, { follow_when_skipped: false, flagged: false }, true, false]);
-  const fo = await call(db, 'library_cu_reconcile_season', [s5.id, exp(s5), tmdbSeason(4), tf('new_season', 's5-s4-follow', { show_id: s5.id })]);
+  // The same fingerprint the page sends again (a parked finding is checked again once the show is followed).
+  const fo = await call(db, 'library_cu_reconcile_season', [s5.id, exp(s5), tmdbSeason(4), tf('new_season', 's5-s4', { show_id: s5.id })]);
   ok(fo.result && fo.result.outcome === 'created' && (await showRow(5)).status === 'skipped', 'following a Skipped show: the season is added, the show stays Skipped', JSON.stringify(fo));
   await asSuper(db, `update public.tv_shows set ended = true where id = '${ids.show(2)}'`);
   const s2 = await showRow(2);

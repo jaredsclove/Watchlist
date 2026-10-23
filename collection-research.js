@@ -176,7 +176,8 @@ async function cuPrepareFindings(doc, brief, lib, st) {
       fingerprint = prior.fingerprint; showId = prior.show_id; itemId = prior.item_id; seasonId = prior.season_id;
     }
     if (f.kind === 'date' && !(seasonId || itemId)) { problems.push(`${at} (a date) doesn’t name a season or film.`); continue; }
-    if (['new_season', 'alias', 'cancellation'].includes(f.kind) && !(showId || itemId)) { problems.push(`${at} doesn’t name the record it’s about.`); continue; }
+    if (f.kind === 'new_season' && !showId) { problems.push(`${at} (a new season) doesn’t name a show.`); continue; }
+    if (['alias', 'cancellation'].includes(f.kind) && !(showId || itemId)) { problems.push(`${at} doesn’t name the record it’s about.`); continue; }
     const subject = { ...f.subject, title: f.subject.title.trim() };
     if (!fingerprint) {
       const key = showId || itemId || seasonId ? [showId, itemId, seasonId] : [cuNorm(subject.title)];
@@ -259,11 +260,13 @@ async function cuImportFindings(text) {
     }
     if (f.kind === 'new_season') {
       const show = lib.showsById.get(f.show_id);
+      if (!show) { results.failed.push(`${label}: the show it names is no longer in your library`); continue; }
       plan.push({ type: 'season', fn: 'library_cu_reconcile_season', what: `${show.title} · Season ${f.subject.season_number}`,
         args: { p_show_id: show.id, p_expected: { tmdb_id: show.tmdb_id, show_key: show.show_key }, p_season: { season_number: f.subject.season_number },
           p_finding: { id: rec.id }, p_review: false, p_row_id: null } });
     } else if (f.kind === 'date') {
       const row = lib.rows.find(r => r.id === (f.season_id || f.item_id));
+      if (!row) { results.failed.push(`${label}: the season or film it names is no longer in your library`); continue; }
       plan.push({ type: 'date', fn: 'library_cu_set_season_date', what: `${row.title}${row.show_id ? ` · ${row.season}` : ''}`, newDate: f.proposed,
         args: { p_row_id: row.id, p_expected: { display_date: row.display_date, date_sort: row.date_sort },
           p_new: { display_date: f.proposed.display_date, date_sort: f.proposed.date_sort }, p_finding: { id: rec.id }, p_review: false } });
