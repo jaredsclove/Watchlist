@@ -161,6 +161,19 @@ Reconciliation and identity attachment only ever set `tmdb_id` / `season_number`
 new rows. Nothing deletes a row, changes a title, label, status, priority, Ended, marker, membership or mark.
 Each function verifies before returning that the show's status, priority and Ended are unchanged.
 
+### 4.1 Deleting seasons (owner-approved)
+
+- **Catalog-governed entries are skip-only.** Every season and film of a catalog-governed record, including a
+  season the owner added by hand, offers Skip instead of Delete: it is marked Skipped and stays in the library, so
+  the collection's history and later research still see it. This is the existing catalog-entry rule, extended to
+  every governed row.
+- **Other TMDB-matched shows.** Deleting a season removes it, but Refresh shows reconciles each matched show
+  against TMDB's season list and adds any listed season the library lacks. While TMDB still lists the deleted
+  season, the next Refresh shows adds it again (a new unwatched, unskipped season row, without the deleted row's episode marks). Skip
+  keeps the season in the library without it counting as something to watch, and Refresh leaves it as it is. The
+  delete dialog says this for a matched season that isn't the show's last; deleting the last season deletes the
+  show, which Refresh then no longer checks. An unmatched season isn't re-added.
+
 ## 5. Backup format 7
 
 - Tables: format 6's nine plus the ten above (nineteen), no `user_id`.

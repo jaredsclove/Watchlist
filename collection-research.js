@@ -98,7 +98,7 @@ async function cuTmdbCandidates(rules, lib) {
       } else if (r.type === 'platform_premiere' && r.platform_tmdb_network_id && (r.media || 'series') !== 'films') {
         const d = await tmdbFetch(`/discover/tv?with_networks=${Number(r.platform_tmdb_network_id)}&sort_by=first_air_date.desc`);
         (d && d.results || []).filter(c => !have.has(c.id)).slice(0, 20).forEach(c => out.push({ rule_id: r.id, media: 'tv', tmdb_id: c.id, title: c.name, first_air_or_release: c.first_air_date || null,
-          note: 'TMDB lists the platform as an original network; the premiere region needs confirming' }));
+          note: `Candidate only: TMDB lists ${r.platform || 'the platform'} as a network; research must confirm the title premiered on ${r.platform || 'the platform'} in ${r.region || 'the region'}` }));
       }
     } catch (e) { out.push({ rule_id: r.id, unavailable: 'TMDB didn’t answer for this rule' }); }
   }
