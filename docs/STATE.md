@@ -19,7 +19,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 - **Views:** TV (Currently Watching, All TV, Coming Soon), Movies (All Movies), Collections
   (personal collections: shows, seasons and, since S4, films editable there; Remove from a
   collection with Undo; Add to <collection>…, S5), Settings (Manage collections and watch-with
-  choices, Catalog updates, Backup & Restore). ⬇ Backup is also in the header. Since S6 every view
+  choices, Collection updates, Backup & Restore). ⬇ Backup is also in the header. Since S6 every view
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
 - **Film collections (TMDB):** a film TMDB places in a collection keeps that identity. Its ⋯ menu offers Check
   collection while the collection's contents are unknown on this page, then Pull rest only when another film can be
@@ -49,18 +49,30 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   season, a TMDB preview, Match) and by one read when a show is expanded whose score is missing or over 7 days old;
   views never fetch to display. Settings ends with Credits (TMDB's logo and notice). Season and episode scores aren't
   shown.
+- **Collection updates (item 4, CU1; design `docs/ITEM4_DESIGN.md`):** TV → + Add → Refresh shows checks every show
+  with TMDB (Skipped shows only when followed): new seasons, guarded dates, later matching and per-device episode
+  lists, which refresh by airing lifecycle (a season counts as finished on TMDB's Ended/Canceled status, an aired
+  finale, or a later regular season having started; a finished season is read again only without a cached list or
+  when its count changes; opening a list always reads fresh). Announcements come from a research brief (Settings →
+  Collection updates) researched with the private `/refresh-catalogs` skill; its findings file is imported, checked
+  and applied under each collection's definition (Manual / Follow / Discover), exclusions and holds. Coverage is
+  compared with the checks stored with the brief; insufficient or conflicting evidence stays blocked ("waiting for
+  more research"); new titles always wait for the owner. Catalog-governed entries are skip-only; deleting another
+  TMDB-matched season lets Refresh shows add it back while TMDB lists it.
 - **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
-  `catalog_film_links`, `episode_marks` (watched episodes of TMDB-matched seasons; no dates or titles).
+  `catalog_film_links`, `episode_marks` (watched episodes of TMDB-matched seasons; no dates or titles), and since
+  CU1 `update_setup`, `collection_definitions`, `collection_exclusions`, `update_holds`, `record_aliases`,
+  `membership_removals`, `show_update_settings`, `update_findings`, `research_briefs`, `research_imports`.
   Rows are owner-scoped: `user_id` is the signed-in member (`auth.uid()`), never sent
   by the client; membership is `private.library_members`.
 - **Writes** go mainly through database functions (the `library_*_b45` family, `org_*`,
   `set_season_watched` / `set_season_skipped`, `library_set_episode_marks`, `delete_tv_season`, `restore_backup`).
   Some take `p_expected` values and refuse a stale write; not every path does, so check each one before relying
   on it. `delete_tv_season` takes the mark count the page showed: a page from before EP1 can't delete a marked season.
-- **Backup** is format 6 (nine tables: format 5's eight plus `episode_marks`; no `user_id`). **Restore**
-  converts a format-3, -4 or -5 file to format 6 first (a format-5 file has no marks; the preview says how many
-  marks a restore removes), validates the file, checks for identity loss, makes and validates a safety backup,
+- **Backup** is format 7 (nineteen tables: format 6's nine plus collection updates' ten; no `user_id`). **Restore**
+  converts a format-3 to -6 file to format 7 first (a format-5 file has no marks, a format-6 file no collection
+  updates; the preview says what a restore removes), validates the file, checks for identity loss, makes and validates a safety backup,
   then replaces the owner's rows in one database transaction and verifies field by field.
 
 ## Code map (classic globals; mutable page state is in `watchlist.html`)
@@ -73,26 +85,48 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Episode progress | `episodes.js` (marks read with each view, the list cache, progress text, the inline list, mark writes); its rows in `render.js` (`seasonSubRowHtml` / `seasonSubCardHtml`) |
 | TMDB show ratings | `show-ratings.js` (item 2: the show-level score and its per-device cache, filled on expansion and from the show details other paths read); shown with the categories in `derived-views.js` `derivedShowHtml`; Settings' Credits in `tabs.js` with `assets/tmdb-logo.svg` |
 | Organization | `organization.js` (reads), `organization-manage.js` (Manage dialog; the membership request, answer and Undo rules both UIs use), `collection-members.js` (Remove / Undo and the Add picker from a collection view) |
-| TMDB | `tmdb-match.js`, `tmdb-search.js`, `refresh-shows.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
-| Catalogs | `catalog-apply.js` (Catalog updates); catalog definitions in `config.js` |
-| Backup / restore | `backup-restore.js` (formats 4–6; 4 → 5 and 5 → 6 converters), `backup-format3.js` (format-3 → 4 converter) |
+| TMDB | `tmdb-match.js`, `tmdb-search.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
+| Collection updates | `collection-updates.js` (Refresh shows, results, review), `collection-research.js` (briefs, findings import, the setup file), `collection-settings.js` (Settings section, definitions editor, dialogs) |
+| Backup / restore | `backup-restore.js` (formats 4–7; 4 → 5, 5 → 6 and 6 → 7 converters), `backup-format3.js` (format-3 → 4 converter) |
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261022-rnote`). The tests
-check only that all 28 versioned files share one token; before releasing, check that it differs from
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261023-cu1`). The tests
+check only that all 29 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
-## Where things stand (2026-10-22)
+## Where things stand (2026-10-23)
 
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
-TMDB show ratings [#18], rating beside the title [#20] and [#21].
+TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23].
 
-- **App release:** `8baebb1`, the show rating directly after the title (PR #20, `4d850b5`, and its correction PR
+- **Release:** `4e858c1`, collection updates (item 4, CU1; PR #23, the branch's ten commits rebased, same tree as
+  the reviewed head), released 2026-10-23 UTC with database migration `db/cu1_collection_updates.sql` (backup
+  format 7). Before release: offline 1167/1167; the CU1 rehearsal on PGlite with a failure injected after each of
+  its 89 statements, the admin runbook at format 7 and the release's backup checks; the EP1 rehearsal with the
+  runbook at format 6; local browser checks with synthetic data (research round trip through the real file picker,
+  re-import refused, review, Disney+ preview, delete dialog, lifecycle refresh decisions, light mode, 375 and 300
+  px); one bounded real research run against a synthetic library; Fable reviews of the implementation and of the
+  recovery and backup work (findings closed). Release: a pre-migration format-6 backup validated offline; the
+  migration applied once (a read-only preflight first; the SQL Editor's contents checked against the file's hash;
+  run as written, without the editor's RLS rewrite, since the migration enables and verifies RLS itself) and its
+  run record confirmed by a separate read (phase `contracted-cu1`, backup format 7, RLS on the ten new tables);
+  merged and deployed promptly. Verified after deployment: Pages built `4e858c1`; the application files are
+  byte-identical to the commit and carry `20261023-cu1`; the retired scripts are gone; the reloaded page runs
+  in `contracted-cu1`. The first format-7 backup validated, and the pre-migration backup converted to format 7
+  equalled it field by field (no library change; the migration's own preservation checks passed). The collection
+  setup file was then imported (3 definitions, 8 exclusions, 23 holds; one hold's show reference corrected in the
+  private file to the show's current title, owner-approved), read back from a new backup (every hold matches the
+  file, the protected Season 3 date included; the library's own tables unchanged), and that backup validated.
+  Refresh shows and research findings were not run in production. Limits: the TMDB completion signals and network
+  results are contributor data and can be missing, late or wrong, and cached episode lists can go stale; three of
+  the four trade outlets refuse automated reading, so research leans on official sources.
+
+- **Earlier app release:** `8baebb1`, the show rating directly after the title (PR #20, `4d850b5`, and its correction PR
   #21, `8baebb1`, which keeps the score beside the title when its explanation opens), released 2026-10-22 UTC
   (interface only; no database, backup or saved-data change; fetching, cache and Credits unchanged). Before release:
   offline 1238/1238, and local browser checks with synthetic data and every explanation open (desktop rows and a
@@ -139,12 +173,14 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21].
   only): verified deployed, with the owner's phone checks and an owner-operated write smoke test. `45f12d9`, EP1
   episode progress (PR #9, 2026-10-21): `db/ep1_episode_marks.sql` applied once, original tables preserved in the
   first format-6 backup, signed-out access refused, a desktop mark / clear smoke test. Each PR holds the details.
-- **Database (as last recorded, not freshly observed):** phase `contracted-ep1` (B4/B5 with M1 owner-only
-  access, `access = members`, and episode marks), backup format 6, recovery archive active. G9 (archive
-  retirement) is paused. The API exposes only `public` and `graphql_public`; the format-5 restore is kept as
-  `private.restore_backup_v5`, reachable only through `restore_backup`. **Repairs are fix-forward:** the B4/B5
-  and D2 rollbacks are retired, EP1 has none, and reopening anonymous access is never a recovery step. Data
-  recovery is a format-6 restore through the signed-in page, or `docs/ADMIN_RESTORE.md`; accounts,
+- **Database (as observed at the CU1 release, 2026-10-23):** phase `contracted-cu1` (B4/B5 with M1 owner-only
+  access, `access = members`, episode marks and collection updates), backup format 7, recovery archive active, the
+  collection setup imported. G9 (archive retirement) is paused. The API exposes only `public` and `graphql_public`;
+  the format-5 and format-6 restores are kept as `private.restore_backup_v5` and `private.restore_backup_v6`,
+  reachable only through `restore_backup`. **Repairs are fix-forward:** the B4/B5 and D2 rollbacks are retired,
+  EP1 and CU1 have none (`db/test/cu1_reverse.sql` is for test environments only), and reopening anonymous access
+  is never a recovery step. Data recovery is a format-7 restore through the signed-in page, or
+  `docs/ADMIN_RESTORE.md` (its tool exports and checks the database's own format); accounts,
   `docs/MEMBER_RECOVERY.md`.
 - **Admin enrichment extensions** (PR #11; database only, not an app release): `db/admin/tv_enrich_partial.sql`
   installed in production on 2026-10-21, with its run record confirmed by a separate read. It adds
@@ -165,6 +201,8 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21].
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - CU1: not revertible by a code revert. Pages from before CU1 stop against the CU1 database (phase mismatch);
+    repairs are fix-forward.
   - Rating beside the title: no saved-data effect; a code revert of `8baebb1` and `4d850b5`, newest first.
   - TMDB show ratings: no database or saved-data effect; a code revert of `acc8262` and `3a1026c`, newest first
     (the device cache key is then ignored).
@@ -196,6 +234,7 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21].
 [#18]: https://github.com/jaredsclove/Watchlist/pull/18
 [#20]: https://github.com/jaredsclove/Watchlist/pull/20
 [#21]: https://github.com/jaredsclove/Watchlist/pull/21
+[#23]: https://github.com/jaredsclove/Watchlist/pull/23
 
 ## How we work
 
@@ -242,7 +281,8 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21].
     temporary ids at creation, change and delete only those ids, and prove production is back to
     baseline. Restore is not a cleanup path once a test row has a TMDB identity. A live test that
     writes needs approval first.
-- Built-in catalog dates change only through Catalog updates. `db/rpc.sql` can't reinstall
+- Built-in catalog dates change only through the collection-update date functions (Refresh shows, an imported
+  finding or a review decision). `db/rpc.sql` can't reinstall
   functions on the current database. Storage (`collection`) is internal; interface code reaches it
   only through `library.js`.
 - **Browser:** never use the built-in preview pane. Browser work, when authorized, uses Claude in
@@ -286,6 +326,11 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21].
   M1 granted `anon` broad access, which M1 removes). Default privileges owned by `supabase_admin` can't
   be changed by `postgres`, so every later migration revokes from `anon` explicitly and verifies before
   commit. Deleting a removed member's library is deferred (`docs/MEMBER_RECOVERY.md`).
+- **Collection updates (CU1), remaining gaps:** there is no editor for an individual hold (holds come from the setup
+  file, which imports once, and can only be removed in Collections and rules); a gap against the item 4 plan. After
+  the setup import, Settings' status line keeps saying updates are paused until the next read of the collection state
+  (opening Collections and rules or Review findings); display only. The first production Refresh shows and research
+  import are owner-driven and haven't run yet.
 - **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip); on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
   instead of a sentence (polish, not a blocker).
