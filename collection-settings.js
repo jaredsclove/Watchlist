@@ -343,13 +343,13 @@ async function cuSaveHold() {
     // the outcome and the hold as it is now. Invalid input stays in the form.
     if (!m.messageError || /changed since|no longer/i.test(m.message) || !now) {
       if (!m.messageError && now && JSON.stringify(cuHoldValues(now)) !== JSON.stringify(full)) { m.message = 'The hold was saved, but the list shows it differently; look at it again.'; m.messageError = true; }
-      m.kind = 'collections'; m.hold = null; m.holdEdit = null; cuRenderModal();
+      m.kind = 'collections'; m.hold = null; m.holdEdit = null; cuRenderModal(); cuShowMessage();
     }
     return;
   }
   const before = new Set(m.st.holds.map(h => h.id));
   await cuDialogWrite('Add hold', () => sbRpc('library_cu_save_hold', { p_hold: plan.hold }));
-  if (cuModal === m && !m.messageError && m.st.holds.some(h => !before.has(h.id))) { m.kind = 'collections'; m.hold = null; cuRenderModal(); }
+  if (cuModal === m && !m.messageError && m.st.holds.some(h => !before.has(h.id))) { m.kind = 'collections'; m.hold = null; cuRenderModal(); cuShowMessage(); }
 }
 function cuDeleteHold(id) {
   const h = cuModal && cuModal.st.holds.find(x => x.id === id);
@@ -376,7 +376,13 @@ async function cuDialogWrite(label, fn) {
   if (ran && !failure) showSaved();
   try { const st = await cuReadState(); if (cuModal && cuModal.session === session) cuModal.st = st; } catch (e) { /* message stands */ }
   cuRenderModal();
+  cuShowMessage();
   return res;
+}
+// The outcome is at the top of the dialog: bring it into view (a long list may be scrolled to the hold).
+function cuShowMessage() {
+  const b = document.getElementById('cuModalBox');
+  if (b) b.scrollTop = 0;
 }
 
 // ── The definition editor ──
