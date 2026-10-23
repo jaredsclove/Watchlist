@@ -262,7 +262,7 @@ function cuSummary(draft, exclusions) {
       case 'person_role': return [r.series_roles && r.series_roles.length ? `series ${r.person || 'the person'} is credited on as ${roleList(r.series_roles, CU_SERIES_ROLES)}` : '',
         r.film_roles && r.film_roles.length ? `films ${r.person || 'the person'} is credited on as ${roleList(r.film_roles, CU_FILM_ROLES)}` : ''].filter(Boolean).join('; ');
       case 'franchise': return `the named ${r.root_title || 'franchise'} titles${(r.title_roots || []).length ? ` (${r.title_roots.join(', ')})` : ''}${r.official_spinoffs !== false ? `, plus series an official source identifies as a ${(r.relations || ['spinoff']).join(', ').replace('spinoff', 'spin-off')} of ${r.root_title || 'it'}` : ''}`;
-      case 'platform_premiere': return `${(r.media || 'series') === 'series' ? 'series' : r.media} that premiered on ${r.platform || 'the platform'} in ${r.region || 'US'}${Array.isArray(r.genres) ? ` (${r.genres.join(', ')})` : ', any genre'}; not titles that premiered elsewhere and later stream there`;
+      case 'platform_premiere': return `${(r.media || 'series') === 'series' ? 'series' : r.media} that premiered on ${r.platform || 'the platform'} in ${(r.region || 'US') === 'US' ? 'the US' : r.region}${Array.isArray(r.genres) ? ` (${r.genres.join(', ')})` : ', any genre'}; not titles that premiered elsewhere and later stream there`;
       case 'explicit_list': return `only the listed titles (${(r.titles || []).length})`;
       case 'written': return `as written: “${r.text || ''}”`;
     }
