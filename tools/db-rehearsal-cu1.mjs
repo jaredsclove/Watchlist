@@ -556,6 +556,29 @@ section('acc: accepting new titles');
     'the collection switched to Manual: an older brief’s renewal is set aside, nothing added', JSON.stringify(rm));
 }
 
+section('hold: the hold editor’s shapes, as the page builds them');
+{
+  const sh = await showRow(2), seasons = await seasonsOf(sh.id);
+  const film = (await asUser(db, A, `select id, title, display_date from public.watchlist_items where is_film order by id limit 1`))[0];
+  const before = await rows(db);
+  const shapes = [
+    { kind: 'standing_decision', collection_id: null, decision: 'Whole show', decided_on: '2026-10-23', reopen: { on: 'official_or_two_trades' }, show_id: sh.id, subject_label: null, effect: 'do_not_add' },
+    { kind: 'standing_decision', collection_id: null, decision: 'Unlisted season', decided_on: '2026-10-23', reopen: { on: 'official_date_or_window' }, show_id: sh.id, subject_label: 'Season 9', effect: 'keep_value' },
+    { kind: 'standing_decision', collection_id: null, decision: 'Title not in the library', decided_on: null, reopen: { on: 'named_source', source_domains: ['press.example.org'], source_name: 'Press' }, subject_label: 'ZZ Future Series', effect: 'do_not_add' },
+    { kind: 'standing_decision', collection_id: null, decision: 'A film', decided_on: null, reopen: { on: 'new_evidence' }, item_id: film.id, effect: 'require_qualifying_evidence' },
+    { kind: 'protected_value', collection_id: null, decision: 'Season date', decided_on: null, reopen: { on: 'new_evidence' }, item_id: seasons[0].id, field: 'display_date', protected_value: seasons[0].display_date, effect: 'keep_value' },
+    { kind: 'protected_value', collection_id: null, decision: 'Film title', decided_on: null, reopen: { on: 'owner_only' }, item_id: film.id, field: 'title', protected_value: film.title, effect: 'keep_value' },
+    { kind: 'identity_hold', collection_id: null, decision: 'Show matching', decided_on: null, reopen: { on: 'owner_only' }, show_id: sh.id, subject_label: null, effect: 'block_matching' },
+    { kind: 'identity_hold', collection_id: null, decision: 'Season mapping', decided_on: null, reopen: { on: 'owner_only' }, show_id: sh.id, subject_label: seasons[0].season, effect: 'block_season_mapping' }];
+  const saved = [];
+  for (const h of shapes) { const r = await tryCall(db, 'library_cu_save_hold', [h]); saved.push(r.ok ? r.rows.id : `refused: ${r.message}`); }
+  ok(saved.every(x => /^[0-9a-f-]{36}$/.test(x)), 'every shape the hold editor builds is accepted by the database', JSON.stringify(saved));
+  const after = await rows(db);
+  ok(same(Object.keys(before).filter(k => k !== 'update_holds' && before[k] !== after[k]), []), 'saving holds changes no other table');
+  for (const id of saved) { const h = (await asUser(db, A, `select decision from public.update_holds where id = $1`, [id]))[0]; await call(db, 'library_cu_delete_hold', [id, h.decision]); }
+  ok(same(before, await rows(db)), 'removing them leaves every table as before');
+}
+
 section('org: retirement');
 {
   const r = await tryCall(db, 'library_catalog_apply_b45', ['disney', [], null]);
