@@ -913,7 +913,8 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .cu-mode { display: block; font-size: 13px; margin: 4px 0; }
 #cuModalBox { max-height: 88vh; overflow-y: auto; }
 #cuModalBox input[type="text"], #cuModalBox select, #cuModalBox textarea { max-width: 100%; box-sizing: border-box; }
-#cuModalBox .settings-actions { flex-wrap: wrap; }
+#cuModalBox .settings-actions, #cuModalBox .modal-actions { flex-wrap: wrap; }
+#cuModalBox .modal-label { margin-top: 12px; }
 @media (max-width: 700px) {
   .cu-item-actions .btn, .cu-item-actions select, .cu-mode, .cu-rule .ww-option, #cuModalBox .modal-actions .btn,
   #cuModalBox .settings-actions .btn, #cuModalBox select, #cuModalBox input[type="text"] { min-height: 44px; }
