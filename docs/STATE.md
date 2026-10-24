@@ -58,7 +58,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   and applied under each collection's definition (Manual / Follow / Discover), exclusions and holds. Coverage is
   compared with the checks stored with the brief; insufficient or conflicting evidence stays blocked ("waiting for
   more research"); new titles always wait for the owner. Catalog-governed entries are skip-only; deleting another
-  TMDB-matched season lets Refresh shows add it back while TMDB lists it.
+  TMDB-matched season lets Refresh shows add it back while TMDB lists it. Holds (standing decisions, protected values,
+  identity holds) come from the setup file or are added and edited in Settings → Collections and rules (edits in
+  place through `library_cu_update_hold`, CU1b; a hold changed meanwhile is refused).
 - **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
   `catalog_film_links`, `episode_marks` (watched episodes of TMDB-matched seasons; no dates or titles), and since
@@ -91,7 +93,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261023-cu1`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261023-holds`). The tests
 check only that all 29 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
@@ -102,9 +104,32 @@ GitHub `main` is the source of truth; check it with `git ls-remote origin main` 
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
-TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23].
+TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
+(CU1b) [#25].
 
-- **Release:** `4e858c1`, collection updates (item 4, CU1; PR #23, the branch's ten commits rebased, same tree as
+- **Release:** `21c3707`, the hold editor and setup-status fix (item 4; PR #25, the branch's seven commits rebased,
+  same tree as the reviewed head), released 2026-10-24 UTC with database migration `db/cu1b_hold_edit.sql` (one
+  function, `library_cu_update_hold`; no table, capability or backup-format change). Adds and edits holds in
+  Collections and rules (in place: same id and created_at; stored shape, value and collection kept unless changed;
+  an unchanged form sends nothing; a stale edit is refused); a confirmed setup import updates Settings' status at
+  once. Before release: offline 1176/1176; the CU1 rehearsal followed by CU1b on PGlite with a failure injected after
+  each of CU1b's 13 statements (and CU1's 89), editing, refusals (stale, invalid, another member, signed out), the
+  write guard and a backup round trip; local browser checks with synthetic data (add and edit through the real
+  controls, stale remove and edit refused with a visible message, the status right after a real import, 375 and 300
+  px); a Fable review of the contract and editor (findings fixed and confirmed closed, including show-wide protected
+  values, which five production holds use); a local check that every production hold opens in the editor and saves
+  unchanged. Release: a pre-release format-7 backup validated (identical to the post-setup one); the quiet window
+  held; a read-only preflight (phase `contracted-cu1`, format 7, CU1's run record, the function absent, 23 holds);
+  the SQL Editor's contents checked against the file's hash and run as written (its RLS prompt concerned the
+  migration's own temp table); the run record confirmed by a separate read (function present, members only, the
+  holds' fingerprint unchanged); merged and deployed. Verified after deployment: Pages built `21c3707`; the 34
+  application files are byte-identical and carry `20261023-holds`; the reloaded page runs in `contracted-cu1`; the
+  post-release backup validated and equals the pre-release one field by field; Collections and rules lists the 23
+  holds, each with Edit, and one opened in the editor showed its stored values and was closed without saving (no
+  write request sent). No production hold was added, edited or removed; Refresh shows and research findings were
+  not run.
+
+- **Earlier release:** `4e858c1`, collection updates (item 4, CU1; PR #23, the branch's ten commits rebased, same tree as
   the reviewed head), released 2026-10-23 UTC with database migration `db/cu1_collection_updates.sql` (backup
   format 7). Before release: offline 1167/1167; the CU1 rehearsal on PGlite with a failure injected after each of
   its 89 statements, the admin runbook at format 7 and the release's backup checks; the EP1 rehearsal with the
@@ -173,12 +198,13 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   only): verified deployed, with the owner's phone checks and an owner-operated write smoke test. `45f12d9`, EP1
   episode progress (PR #9, 2026-10-21): `db/ep1_episode_marks.sql` applied once, original tables preserved in the
   first format-6 backup, signed-out access refused, a desktop mark / clear smoke test. Each PR holds the details.
-- **Database (as observed at the CU1 release, 2026-10-23):** phase `contracted-cu1` (B4/B5 with M1 owner-only
+- **Database (as observed at the CU1b release, 2026-10-24):** phase `contracted-cu1` (B4/B5 with M1 owner-only
   access, `access = members`, episode marks and collection updates), backup format 7, recovery archive active, the
   collection setup imported. G9 (archive retirement) is paused. The API exposes only `public` and `graphql_public`;
   the format-5 and format-6 restores are kept as `private.restore_backup_v5` and `private.restore_backup_v6`,
   reachable only through `restore_backup`. **Repairs are fix-forward:** the B4/B5 and D2 rollbacks are retired,
-  EP1 and CU1 have none (`db/test/cu1_reverse.sql` is for test environments only), and reopening anonymous access
+  EP1, CU1 and CU1b have none (`db/test/cu1_reverse.sql` and `cu1b_reverse.sql` are for test environments only;
+  CU1b's run record confirmed 2026-10-24), and reopening anonymous access
   is never a recovery step. Data recovery is a format-7 restore through the signed-in page, or
   `docs/ADMIN_RESTORE.md` (its tool exports and checks the database's own format); accounts,
   `docs/MEMBER_RECOVERY.md`.
@@ -201,6 +227,8 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - Hold editor (CU1b): the page can be reverted by a code revert of its seven commits, newest first (holds added or
+    edited with it stay as saved); `library_cu_update_hold` stays (fix-forward), unused by older pages.
   - CU1: not revertible by a code revert. Pages from before CU1 stop against the CU1 database (phase mismatch);
     repairs are fix-forward.
   - Rating beside the title: no saved-data effect; a code revert of `8baebb1` and `4d850b5`, newest first.
@@ -235,6 +263,7 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
 [#20]: https://github.com/jaredsclove/Watchlist/pull/20
 [#21]: https://github.com/jaredsclove/Watchlist/pull/21
 [#23]: https://github.com/jaredsclove/Watchlist/pull/23
+[#25]: https://github.com/jaredsclove/Watchlist/pull/25
 
 ## How we work
 
@@ -326,11 +355,10 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   M1 granted `anon` broad access, which M1 removes). Default privileges owned by `supabase_admin` can't
   be changed by `postgres`, so every later migration revokes from `anon` explicitly and verifies before
   commit. Deleting a removed member's library is deferred (`docs/MEMBER_RECOVERY.md`).
-- **Collection updates (CU1), remaining gaps:** there is no editor for an individual hold (holds come from the setup
-  file, which imports once, and can only be removed in Collections and rules); a gap against the item 4 plan. After
-  the setup import, Settings' status line keeps saying updates are paused until the next read of the collection state
-  (opening Collections and rules or Review findings); display only. The first production Refresh shows and research
-  import are owner-driven and haven't run yet.
+- **Collection updates (CU1):** the individual-hold editor gap and the stale setup-status line after import are
+  resolved (PR #25, CU1b). Still open: the first production Refresh shows and research import are owner-driven and
+  haven't run yet; a page can't detect CU1b before calling it (a page deployed before its migration stops its
+  writes on Edit until reloaded).
 - **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip); on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
   instead of a sentence (polish, not a blocker).
