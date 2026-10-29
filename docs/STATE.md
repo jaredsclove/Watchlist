@@ -98,16 +98,47 @@ check only that all 29 versioned files share one token; before releasing, check 
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
-## Where things stand (2026-10-23)
+## Where things stand (2026-10-29)
 
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
-(CU1b) [#25].
+(CU1b) [#25], date equivalence (CU1c) [#27].
 
-- **Release:** `21c3707`, the hold editor and setup-status fix (item 4; PR #25, the branch's seven commits rebased,
+- **Release:** `697d123`, date equivalence (item 4; PR #27, the branch's five commits rebased, same tree as the
+  reviewed head), released 2026-10-29 UTC with database migration `db/cu1c_date_equivalence.sql` (replaces
+  `library_cu_set_season_date`, adds `private.cu1c_exact_date`; no table, status, capability or backup-format
+  change). Behaviour (design §4.4): an exact date is a full display date whose `date_sort` is that same real date;
+  two exact dates within one calendar day are the same date (the stored date kept, the finding set aside by the
+  rule as `same_date_within_one_day`, TMDB and research alike, review included; Refresh doesn't send them, imports
+  record research ones set aside, an older pending one shows Keep your date); TMDB never changes a stored exact
+  date without an owner review (two or more days wait as `tmdb_date_differs`); qualified research still moves a
+  future exact date to another future date; only an exact new date is automatic. Preserved: TBA is filled as
+  before; a hand-typed window (no "TBA") is filled only while its date is still to come and a passed one isn't
+  re-checked (as CU1); "today counts as aired" (strictly after today is future) on both paths; aired dates,
+  protected values and holds need review; exact → window or TBA goes to review; TMDB without a date never blanks a
+  date. Before release: offline 1182/1182; the CU1 → CU1b → CU1c rehearsal on PGlite (189 checks, a failure
+  injected after each of CU1c's 14 statements, every rule through the real SQL, one-day findings non-actionable
+  across repeated TMDB sends, repeated imports and older-page calls, the test reverse and a reinstall); a local
+  browser check with synthetic data; a Fable review of the guarded date function (every CU1 check preserved in
+  order; a non-exact research value auto-applying, the widened hand-window rule and the helper's grants fixed and
+  confirmed in a follow-up). Release: a pre-release format-7 backup validated; the quiet window held; a read-only
+  preflight (phase `contracted-cu1`, format 7, CU1's run record, CU1c absent, the date function exactly CU1's
+  source, 22 holds, 21 findings, no pending date finding); the SQL Editor's contents checked against the file's
+  hash and run as written (its RLS prompt concerned the migration's own temp table); the run record confirmed by
+  a separate read (function replaced, members only; helper not executable by anon). Verified after deployment:
+  the post-migration backup validated and equals the pre-release one field by field; Pages built `697d123`; the
+  33 application files are byte-identical and carry `20261028-dates`; the reloaded page loads the new code without
+  console errors and its review opens unchanged (nothing waiting, six waiting for research). No production date,
+  hold or finding was changed (the two dates named in the release approval included); Refresh shows and research
+  imports were not run. Limits: a set-aside one-day finding stays set aside if the stored date is later
+  hand-edited; the page's "today" is UTC and the database's its session time zone, so near midnight a fill can
+  become a review item (never the reverse); an older page's import reopens a one-day research finding briefly
+  before the same import sets it aside again.
+
+- **Earlier release:** `21c3707`, the hold editor and setup-status fix (item 4; PR #25, the branch's seven commits rebased,
   same tree as the reviewed head), released 2026-10-24 UTC with database migration `db/cu1b_hold_edit.sql` (one
   function, `library_cu_update_hold`; no table, capability or backup-format change). Adds and edits holds in
   Collections and rules (in place: same id and created_at; stored shape, value and collection kept unless changed;
@@ -198,13 +229,13 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   only): verified deployed, with the owner's phone checks and an owner-operated write smoke test. `45f12d9`, EP1
   episode progress (PR #9, 2026-10-21): `db/ep1_episode_marks.sql` applied once, original tables preserved in the
   first format-6 backup, signed-out access refused, a desktop mark / clear smoke test. Each PR holds the details.
-- **Database (as observed at the CU1b release, 2026-10-24):** phase `contracted-cu1` (B4/B5 with M1 owner-only
+- **Database (as observed at the CU1c release, 2026-10-29):** phase `contracted-cu1` (B4/B5 with M1 owner-only
   access, `access = members`, episode marks and collection updates), backup format 7, recovery archive active, the
   collection setup imported. G9 (archive retirement) is paused. The API exposes only `public` and `graphql_public`;
   the format-5 and format-6 restores are kept as `private.restore_backup_v5` and `private.restore_backup_v6`,
   reachable only through `restore_backup`. **Repairs are fix-forward:** the B4/B5 and D2 rollbacks are retired,
-  EP1, CU1 and CU1b have none (`db/test/cu1_reverse.sql` and `cu1b_reverse.sql` are for test environments only;
-  CU1b's run record confirmed 2026-10-24), and reopening anonymous access
+  EP1, CU1, CU1b and CU1c have none (`db/test/cu1_reverse.sql`, `cu1b_reverse.sql` and `cu1c_reverse.sql` are for
+  test environments only; CU1c's run record confirmed 2026-10-29), and reopening anonymous access
   is never a recovery step. Data recovery is a format-7 restore through the signed-in page, or
   `docs/ADMIN_RESTORE.md` (its tool exports and checks the database's own format); accounts,
   `docs/MEMBER_RECOVERY.md`.
@@ -227,6 +258,9 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - Date equivalence (CU1c): the page can be reverted by a code revert of its five commits, newest first; the
+    CU1c function stays (fix-forward) and keeps its rules for any page (an older page's TMDB differences on exact
+    dates then wait in review instead of applying).
   - Hold editor (CU1b): the page can be reverted by a code revert of its seven commits, newest first (holds added or
     edited with it stay as saved); `library_cu_update_hold` stays (fix-forward), unused by older pages.
   - CU1: not revertible by a code revert. Pages from before CU1 stop against the CU1 database (phase mismatch);
@@ -264,6 +298,7 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
 [#21]: https://github.com/jaredsclove/Watchlist/pull/21
 [#23]: https://github.com/jaredsclove/Watchlist/pull/23
 [#25]: https://github.com/jaredsclove/Watchlist/pull/25
+[#27]: https://github.com/jaredsclove/Watchlist/pull/27
 
 ## How we work
 
@@ -356,8 +391,8 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   be changed by `postgres`, so every later migration revokes from `anon` explicitly and verifies before
   commit. Deleting a removed member's library is deferred (`docs/MEMBER_RECOVERY.md`).
 - **Collection updates (CU1):** the individual-hold editor gap and the stale setup-status line after import are
-  resolved (PR #25, CU1b). Still open: the first production Refresh shows and research import are owner-driven and
-  haven't run yet; a page can't detect CU1b before calling it (a page deployed before its migration stops its
+  resolved (PR #25, CU1b); dates within a day are the same date (PR #27, CU1c). The owner ran the first production
+  Refresh shows and research import before CU1c. Still open: a page can't detect CU1b before calling it (a page deployed before its migration stops its
   writes on Edit until reloaded).
 - **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip); on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
