@@ -207,6 +207,7 @@ async function cuPrepareFindings(doc, brief, lib, st) {
     else if (hashChanged) { routed = 'needs_research'; reason = def.evidence_hash !== bc.evidence_hash ? 'evidence_rules_changed' : 'rule_changed'; }
     else if (!newTitle && (showId || itemId) && st.removals.some(r => r.collection_id === f.collection_id && (r.show_id === showId || r.item_id === itemId))) { routed = 'set_aside'; reason = 'removed_from_collection'; }
     else if (st.exclusions.some(e => e.collection_id === f.collection_id && cuExcludes(e, subject))) { routed = 'set_aside'; reason = 'excluded'; }
+    else if (f.kind === 'date' && cuSameDay(lib.rows.find(r => r.id === (seasonId || itemId)), f.proposed)) { routed = 'set_aside'; reason = 'same_date_within_one_day'; }
     else {
       const p = cuEvidenceProblem(f.evidence, f.assessment, def.evidence);
       if (p === 'conflict') { routed = 'conflict'; reason = 'conflict'; }
@@ -267,13 +268,14 @@ async function cuImportFindings(text) {
   endWrite(lane);
   // Automatic application: new seasons, dates and aliases whose finding is pending.
   const byFp = new Map((recorded.findings || []).map(x => [x.fingerprint, x]));
-  const plan = cuSameDayPlan(lib, st).filter(x => !prepared.findings.some(f => f.fingerprint && (st.findings.find(y => y.id === x.args.p_finding.id) || {}).fingerprint === f.fingerprint));
+  const plan = cuSameDayPlan(lib, st);
   for (const f of prepared.findings) {
     const rec = byFp.get(f.fingerprint);
     if (!rec) continue;
     const label = cuRecordTitle(lib, f);
     if (rec.status !== 'pending') {
-      if (rec.status === 'set_aside') results.setAside.push(`${label}: not applied — ${cuReasonText(f.reason)}`);
+      const row = f.kind === 'date' && lib.rows.find(r => r.id === (f.season_id || f.item_id));
+      if (rec.status === 'set_aside') results.setAside.push(`${row && row.show_id ? `${label} · ${row.season}` : label}: not applied — ${cuReasonText(f.reason)}`);
       else if (rec.status === 'excluded') results.setAside.push(`${label}: not applied — it is excluded`);
       else if (CU_OPEN_STATUSES.includes(rec.status)) (CU_BLOCKED_STATUSES.includes(rec.status) ? results.blocked : results.review).push(`${cuFindingSentence(lib, f)}: ${cuReasonText(f.reason) || rec.status.replace(/_/g, ' ')}`);
       else results.unchanged++; // applied, accepted, dismissed or Not now earlier: the finding stands as decided
