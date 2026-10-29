@@ -218,7 +218,9 @@ Each function verifies before returning that the show's status, priority and End
 - **Exact date:** a full display date ("Jan 15, 2027") whose `date_sort` is that same, real calendar date
   (`private.cu1c_exact_date`; the page's `cuExactDate`). TBA and every window are not exact, and their guessed
   `date_sort` is never compared.
-- **TBA or window → exact:** filled automatically, as before (TMDB and research alike).
+- **TBA or window → exact:** filled automatically, as before (TMDB and research alike): a stored TBA always; a
+  hand-typed window (no "TBA") while its date is still to come, as CU1 (a passed one isn't re-checked by Refresh and
+  needs review). Only an exact new date is automatic: a window, TBA or a display and sort that disagree go to review.
 - **Within one calendar day** (either way, across month, year and leap-day boundaries): the same date. The stored
   date stays. The finding is set aside with reason `same_date_within_one_day` by the rule (`decided_at` stays
   empty: not an owner decision), for TMDB and research, on review too. Refresh shows doesn't send these; an import
@@ -231,7 +233,9 @@ Each function verifies before returning that the show's status, priority and End
   research still moves a future exact date to another future date automatically.
 - **Unchanged:** the future boundary (strictly after today: a date of today counts as aired); aired dates, protected
   values and standing decisions need review; an exact date → a window or TBA goes to review; TMDB without a date
-  never changes a stored date; the finding, expected-value and evidence checks. Dismissing a TMDB difference stops
+  never changes a stored date; the finding, expected-value and evidence checks. (Labels: a TMDB proposal of TBA
+  against an exact date, which only an older page sends, is pending as `tmdb_date_differs`; an older page's import
+  checks evidence before the one-day rule, so a weakly evidenced one-day finding waits as `needs_evidence` first.) Dismissing a TMDB difference stops
   that same difference (the fingerprint names both dates); a different later date is a new finding.
 - Enforced in `library_cu_set_season_date` (`db/cu1c_date_equivalence.sql`), so older pages get the same rules. No
   table, status, capability or backup-format change.

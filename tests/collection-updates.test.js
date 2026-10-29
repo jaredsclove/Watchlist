@@ -369,16 +369,19 @@ test('date equivalence: two or more days from TMDB go to review (a leap year cou
     ['TBA', '2099-01-01', '2030-05-05'],         // TBA: filled
     [displayOf(today), today, isoPlus(today, 5)], // equal to today: treated as aired, not re-checked
     ['Jan 1, 2020', '2020-01-01', '2020-03-01'], // aired: not re-checked
-    ['Jun 1, 2030', '2030-06-01', null]]);       // TMDB without a date: nothing
+    ['Jun 1, 2030', '2030-06-01', null],         // TMDB without a date: nothing
+    ['Fall 2030', '2030-11-30', '2030-10-02'],   // a hand-typed window still to come: filled
+    ['Fall 2019', '2019-11-30', '2019-10-02']]); // a hand-typed window that has passed: aired, not re-checked
   const t = await refresh(app);
   const row = i => app.store.watchlist_items.find(r => r.id === rows[i].id);
   assert.strictEqual(row(0).display_date, 'Feb 28, 2032', 'not overwritten');
   assert.strictEqual(finding(app, f => f.season_id === rows[0].id).reason, 'tmdb_date_differs');
   assert.match(t, /Needs your review \(1\)[\s\S]*Eq · Season 1: TMDB lists a date two or more days from yours/);
   assert.deepStrictEqual([row(1).display_date, row(2).display_date], ['Jan 1, 2031', 'May 5, 2030'], 'window and TBA filled');
-  assert.deepStrictEqual([row(3).display_date, row(4).display_date, row(5).display_date], [displayOf(today), 'Jan 1, 2020', 'Jun 1, 2030']);
+  assert.deepStrictEqual([row(3).display_date, row(4).display_date, row(5).display_date, row(6).display_date, row(7).display_date],
+    [displayOf(today), 'Jan 1, 2020', 'Jun 1, 2030', 'Oct 2, 2030', 'Fall 2019']);
   const sent = rpcs(app, 'library_cu_set_season_date').map(r => r.body.p_row_id);
-  assert.ok(![rows[3].id, rows[4].id, rows[5].id].some(id => sent.includes(id)), 'today, aired and undated: nothing sent');
+  assert.ok(![rows[3].id, rows[4].id, rows[5].id, rows[7].id].some(id => sent.includes(id)), 'today, aired, undated and a passed window: nothing sent');
   // Review: Apply takes TMDB's date only on the owner's decision.
   await app.ctx.openCuReview(null); await settle();
   const f = finding(app, x => x.season_id === rows[0].id);
@@ -485,6 +488,11 @@ test('date equivalence, research: one day is set aside (stored date kept); two o
   const b2 = await briefOf(app, [coll.id]);
   await importFile(app, { format: 'watchlist-research-findings', version: 1, brief_id: b2.brief_id, coverage: [], findings: [dateF({ ...futA, display_date: 'Sep 10, 2030', date_sort: '2030-09-10' }, 'Sep 20, 2030', '2030-09-20')] });
   assert.strictEqual(row(futA), 'Sep 20, 2030');
+  // A value that isn't an exact date (a window without "TBA") never replaces an exact date automatically.
+  const b3 = await briefOf(app, [coll.id]);
+  await importFile(app, { format: 'watchlist-research-findings', version: 1, brief_id: b3.brief_id, coverage: [], findings: [dateF({ ...futA, display_date: 'Sep 20, 2030', date_sort: '2030-09-20' }, 'Late 2030', '2030-12-31')] });
+  assert.strictEqual(row(futA), 'Sep 20, 2030');
+  assert.deepStrictEqual((({ status, reason }) => [status, reason])(finding(app, f => f.season_id === futA.id && (f.proposed || {}).display_date === 'Late 2030')), ['pending', 'date_needs_review']);
   assert.strictEqual(JSON.stringify(app.store.tv_shows) + JSON.stringify(app.store.collection_memberships), other, 'unrelated data unchanged');
 });
 

@@ -916,6 +916,16 @@ section('cu1c: date equivalence (db/cu1c_date_equivalence.sql)');
     await setRow(t4, { display_date: 'TBA', date_sort: '2099-01-01' });
     const t = await tmdbAt(t4, 'tba', ex('2098-12-31'), false);
     ok(t.ok && t.rows.outcome === 'applied', 'TBA → an exact date a day from 2099-01-01: filled', JSON.stringify(t));
+    // A hand-typed window (no "TBA") as CU1: filled while still to come; a passed one waits for review.
+    await setRow(t4, { display_date: 'Fall 2021', date_sort: '2021-11-30' });
+    const passed = await tmdbAt(t4, 'hand-passed', ex('2021-10-01'), false);
+    ok(passed.ok && passed.rows.reason === 'date_needs_review' && (await rowNow(t4)).display_date === 'Fall 2021', 'a passed hand-typed window: review, unchanged', JSON.stringify(passed));
+    await setRow(t4, { display_date: 'Fall 2031', date_sort: '2031-11-30' });
+    const hand = await tmdbAt(t4, 'hand-future', ex('2031-10-01'), false);
+    ok(hand.ok && hand.rows.outcome === 'applied', 'a hand-typed window still to come: filled', JSON.stringify(hand));
+    await setRow(t4, { display_date: 'TBA', date_sort: '2099-01-01' });
+    const tbaPast = await tmdbAt(t4, 'tba-past', ex('2025-03-01'), false);
+    ok(tbaPast.ok && tbaPast.rows.outcome === 'applied', 'TBA → an exact date already past: filled (as CU1)', JSON.stringify(tbaPast));
     const stale = await tryCall(db, 'library_cu_set_season_date', [t4.id, { display_date: 'TBA', date_sort: '2099-01-01' }, ex('2098-12-30'), tf('date', 'stale1c', { show_id: sh.id, season_id: t4.id })]);
     ok(!stale.ok && /target_changed/.test(stale.message) && (await fRow(fp('date', 'stale1c'))).length === 0, 'a stale expected value: refused, nothing written', stale.message);
   }
@@ -949,6 +959,11 @@ section('cu1c: date equivalence (db/cu1c_date_equivalence.sql)');
       'imported again by an older page (routed pending): reopened, then set aside again by the rule in the same import', JSON.stringify(old));
     const two = await research(r1, 'r-two', ex(plus(today, 40)));
     ok(two.applied.ok && two.applied.rows.outcome === 'applied' && same(await rowNow(r1), ex(plus(today, 40))), 'research two or more days, future → future: applied under the evidence rules', JSON.stringify(two));
+    for (const [key, d, label] of [['r-late', { display_date: 'Late 2031', date_sort: '2031-12-31' }, 'a window without "TBA"'],
+      ['r-mismatch', { display_date: ex(plus(today, 50)).display_date, date_sort: plus(today, 52) }, 'a display and sort that disagree']]) {
+      const x = await research(r1, key, d);
+      ok(x.applied.ok && x.applied.rows.reason === 'date_needs_review' && same(await rowNow(r1), ex(plus(today, 40))), `research proposing ${label} over a future exact date: review`, JSON.stringify(x));
+    }
     await setRow(r2, ex(today));
     const tdy = await research(r2, 'r-today', ex(plus(today, 10)));
     ok(tdy.applied.ok && tdy.applied.rows.reason === 'date_needs_review' && same(await rowNow(r2), ex(today)), 'research from an exact date of today: review (today counts as aired)', JSON.stringify(tdy));

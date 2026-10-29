@@ -266,7 +266,8 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
       }
       const today = new Date().toISOString().slice(0, 10);
       if (f.source === 'tmdb' && oldExact && !p_review) return finish(f, 'policy', 'pending', 'tmdb_date_differs');
-      const auto = !/tba/i.test(p_new.display_date) && (!oldExact || (oldExact > today && p_new.date_sort > today));
+      const oldSort = isDate(w.date_sort) && new Date(`${w.date_sort}T00:00:00Z`).toISOString().slice(0, 10) === w.date_sort ? w.date_sort : null; // as cu1_date: a real date
+      const auto = !!newExact && (/tba/i.test(w.display_date || '') || (!!oldSort && oldSort > today && newExact > today));
       if (!auto && !p_review) return finish(f, 'policy', 'pending', 'date_needs_review');
       const from = { display_date: w.display_date, date_sort: w.date_sort };
       Object.assign(w, { display_date: p_new.display_date, date_sort: p_new.date_sort });
