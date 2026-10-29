@@ -81,13 +81,18 @@ function cuDayDiff(a, b) {
   const day = s => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
   return Math.abs(day(a) - day(b));
 }
+// Whether a proposed date is the same date as a row's: both exact and within one calendar day (CU1c's rule).
+function cuSameDay(row, proposed) {
+  const stored = row && cuExactDate(row.display_date, row.date_sort), p = proposed || {};
+  const next = cuExactDate(p.display_date, p.date_sort);
+  return !!(stored && next && cuDayDiff(stored, next) <= 1);
+}
 // Open date findings (TMDB or research) whose proposed exact date is within a day of the stored exact date: sent
 // once so the database resolves them as the same date (set aside, the stored date kept), never applied.
 function cuSameDayPlan(lib, st) {
   return st.findings.filter(f => f.kind === 'date' && f.status === 'pending').map(f => {
     const row = lib.rows.find(r => r.id === (f.season_id || f.item_id)), p = f.proposed || {};
-    const stored = row && cuExactDate(row.display_date, row.date_sort), proposed = cuExactDate(p.display_date, p.date_sort);
-    if (!stored || !proposed || cuDayDiff(stored, proposed) > 1) return null;
+    if (!cuSameDay(row, p)) return null;
     return { type: 'date', fn: 'library_cu_set_season_date', what: `${row.title}${row.show_id ? ` · ${row.season}` : ''}`, newDate: p,
       args: { p_row_id: row.id, p_expected: { display_date: row.display_date, date_sort: row.date_sort }, p_new: { display_date: p.display_date, date_sort: p.date_sort },
         p_finding: { id: f.id }, p_review: false } };
@@ -492,9 +497,7 @@ function cuReviewActionsHtml(m, f) {
     return (cands.length ? cands.map(r => btn(`It’s “${r.season}”`, `cuReviewSeason('${id}', '${esc(r.id)}')`)).join('') : btn('Apply', `cuReviewSeason('${id}', null)`)) + decide;
   }
   if (f.kind === 'date') {
-    const row = m.lib.rows.find(r => r.id === (f.season_id || f.item_id)), p = f.proposed || {};
-    const stored = row && cuExactDate(row.display_date, row.date_sort), proposed = cuExactDate(p.display_date, p.date_sort);
-    if (stored && proposed && cuDayDiff(stored, proposed) <= 1) return btn('Keep your date', `cuKeepDate('${id}')`) + decide;
+    if (cuSameDay(m.lib.rows.find(r => r.id === (f.season_id || f.item_id)), f.proposed)) return btn('Keep your date', `cuKeepDate('${id}')`) + decide;
     return btn('Apply this date', `cuReviewDate('${id}')`) + decide;
   }
   if (f.kind === 'identity') {

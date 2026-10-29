@@ -471,6 +471,15 @@ test('date equivalence, research: one day is set aside (stored date kept); two o
   assert.match(t, /Needs your review[\s\S]*this date is protected[\s\S]*already aired/);
   const fA = finding(app, f => f.season_id === futA.id);
   assert.deepStrictEqual([fA.status, fA.reason], ['set_aside', 'same_date_within_one_day']);
+  // Imported again from a newer brief: recorded as set aside again (never reopened to pending), nothing applied.
+  const bAgain = await briefOf(app, [coll.id]);
+  const sent = rpcs(app, 'library_cu_set_season_date').length;
+  const { text: tAgain } = await importFile(app, { format: 'watchlist-research-findings', version: 1, brief_id: bAgain.brief_id, coverage: [], findings: [dateF(futA, 'Sep 11, 2030', '2030-09-11')] });
+  const fAgain = app.store.update_findings.filter(f => f.season_id === futA.id);
+  assert.deepStrictEqual(fAgain.map(f => [f.status, f.reason]), [['set_aside', 'same_date_within_one_day']], 'one finding, still set aside');
+  assert.strictEqual(rpcs(app, 'library_cu_set_season_date').length, sent, 'nothing sent to the date function');
+  assert.match(tAgain, /Live · Season 3: not applied/);
+  assert.strictEqual(row(futA), 'Sep 10, 2030');
   // Two or more days on a future exact date: applied automatically under the evidence rules.
   const b2 = await briefOf(app, [coll.id]);
   await importFile(app, { format: 'watchlist-research-findings', version: 1, brief_id: b2.brief_id, coverage: [], findings: [dateF({ ...futA, display_date: 'Sep 10, 2030', date_sort: '2030-09-10' }, 'Sep 20, 2030', '2030-09-20')] });
