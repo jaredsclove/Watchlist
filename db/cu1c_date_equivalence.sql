@@ -10,8 +10,8 @@
 --     same_date_within_one_day and the row keeps its date (TMDB and research, review included);
 --   * a TMDB finding never changes a stored exact date without an owner review decision: it stays pending with
 --     reason tmdb_date_differs (an owner's Apply in review still changes it when two or more days apart);
---   * everything else is unchanged: TBA or window to an exact date is filled automatically; qualified research
---     moves a future exact date (strictly after today) to another future date; the finding, expected-value,
+--   * only an exact new date is automatic: a stored TBA is filled; qualified research moves a future exact date
+--     (strictly after today) to another future date; a hand-typed window as CU1 (by its date_sort); the finding, expected-value,
 --     research-gate, setup, hold and protected-value checks and the aired rule stay as they were.
 -- No table, column, status, capability or backup-format change.
 --
@@ -57,7 +57,7 @@ end $$;
 -- The date of an exact stored date, or null: the display is "Mon D, YYYY" (as the page writes it) and date_sort is
 -- that same real calendar date (so "Feb 29, 2027" or a mismatched pair is not exact). TBA and windows are null.
 create function private.cu1c_exact_date(p_display text, p_sort text) returns date
-language plpgsql immutable set search_path = '' as $$
+language plpgsql stable set search_path = '' as $$
 declare v date;
 begin
   if coalesce(p_display, '') !~ '^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [1-9][0-9]?, [0-9]{4}$' or coalesce(p_sort, '') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
@@ -67,7 +67,7 @@ begin
   if to_char(v, 'YYYY-MM-DD') <> p_sort or to_char(v, 'Mon') || ' ' || extract(day from v)::int || ', ' || to_char(v, 'YYYY') <> p_display then return null; end if;
   return v;
 end $$;
--- The date function is security invoker, so the signed-in member executes this pure helper too (as CU1's helpers).
+-- The date function is security invoker, so the signed-in member executes this pure helper too; nobody else does.
 revoke all on function private.cu1c_exact_date(text, text) from public, anon;
 grant execute on function private.cu1c_exact_date(text, text) to authenticated;
 
@@ -135,10 +135,11 @@ begin
   end if;
   -- CU1c: TMDB never changes a stored exact date without an owner review decision.
   if f.source = 'tmdb' and v_old is not null and not p_review then return private.cu1_finish(f.id, 'policy', 'pending', 'tmdb_date_differs', null); end if;
-  -- A stored TBA or window (not an exact date) is filled; an exact date still to come (strictly after today) follows
-  -- qualified research to another future date. A window's date_sort is a guess and isn't compared.
-  v_auto := (p_new ->> 'display_date') !~* 'tba' and (v_old is null
-    or (v_old > v_today and private.cu1_date(p_new ->> 'date_sort') > v_today));
+  -- Only an exact new date is automatic: a stored TBA is filled (as CU1); an exact date still to come (strictly after
+  -- today) follows qualified research to another future date; any other stored value (a hand-typed window) as CU1,
+  -- by its date_sort. Anything else (a window or TBA proposed, an aired date) waits for review.
+  v_auto := v_new is not null and (w.display_date ~* 'tba'
+    or (private.cu1_date(w.date_sort) > v_today and v_new > v_today));
   if not v_auto and not p_review then return private.cu1_finish(f.id, 'policy', 'pending', 'date_needs_review', null); end if;
   perform set_config('watchlist.catalog_date_write', 'on', true);
   update public.watchlist_items set display_date = p_new ->> 'display_date', date_sort = p_new ->> 'date_sort' where id = w.id and user_id = v_owner;

@@ -343,11 +343,13 @@ async function cuCheckMatchedShow(show, lib, plan, results) {
     }
     const label = s.season_number === 0 ? 'Specials' : `Season ${s.season_number}`;
     if (stored) {
-      // TBA or a window → TMDB's exact date: filled. A stored exact date only while it's still to come (strictly
-      // after today; aired dates aren't re-checked): TMDB two or more days apart goes to review (the database
-      // doesn't overwrite an exact date from TMDB); within a day it's the same date and nothing is sent.
+      // TBA → TMDB's exact date: filled; a hand-typed window too while it's still to come (as before: aired dates
+      // aren't re-checked routinely). A stored exact date only while it's still to come (strictly after today): TMDB
+      // two or more days apart goes to review (the database doesn't overwrite an exact date from TMDB); within a day
+      // it's the same date and nothing is sent.
       const exact = cuExactDate(stored.display_date, stored.date_sort);
-      const fill = !exact, differs = !!exact && exact > today && !!air && air > today && cuDayDiff(exact, air) >= 2;
+      const fill = /tba/i.test(stored.display_date) || (!exact && !!cuDate(stored.date_sort) && stored.date_sort > today && !!air && air > today);
+      const differs = !!exact && exact > today && !!air && air > today && cuDayDiff(exact, air) >= 2;
       if (air && (fill || differs) && (stored.date_sort !== air || stored.display_date !== formatDisplayDate(air))) {
         const newDate = { display_date: formatDisplayDate(air), date_sort: air };
         plan.push({ type: 'date', fn: 'library_cu_set_season_date', what: `${show.title} · ${stored.season}`, newDate,
