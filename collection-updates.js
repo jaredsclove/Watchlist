@@ -23,6 +23,8 @@ const CU_REASON_TEXT = {
   tmdb_season_elsewhere: 'TMDB’s season is already on another show in your list',
   tmdb_undated_empty: 'TMDB lists it without a date or episodes, so it waits for announcement evidence',
   date_needs_review: 'it changes a date that has already aired, or a window',
+  tmdb_date_differs: 'TMDB lists a date two or more days from yours; apply it only if it’s right',
+  same_date_within_one_day: 'the same date within a day; your stored date stays',
   protected_value: 'this date is protected',
   standing_decision: 'a standing decision covers it',
   identity_hold: 'a matching hold covers this show',
@@ -66,6 +68,30 @@ function cuHost(url) {
 }
 function cuHostIn(host, domains) {
   return !!host && (domains || []).some(d => host === d || host.endsWith(`.${d}`));
+}
+// An exact stored date ("Jan 15, 2027" with its own date_sort), as YYYY-MM-DD; null for TBA and every window
+// ("TBA 2027", "TBA Late 2026"), whose date_sort is only a guess for ordering and is never compared as a date.
+function cuExactDate(display, sort) {
+  if (!/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/.test(String(display || '')) || !cuDate(sort) || formatDisplayDate(sort) !== display) return null;
+  const [y, m, d] = sort.split('-').map(Number), real = new Date(Date.UTC(y, m - 1, d));
+  return real.getUTCMonth() === m - 1 && real.getUTCDate() === d ? sort : null; // no "Feb 29" in a common year
+}
+// Whole calendar days between two YYYY-MM-DD dates (no clock time or time zone involved).
+function cuDayDiff(a, b) {
+  const day = s => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
+  return Math.abs(day(a) - day(b));
+}
+// Open date findings (TMDB or research) whose proposed exact date is within a day of the stored exact date: sent
+// once so the database resolves them as the same date (set aside, the stored date kept), never applied.
+function cuSameDayPlan(lib, st) {
+  return st.findings.filter(f => f.kind === 'date' && f.status === 'pending').map(f => {
+    const row = lib.rows.find(r => r.id === (f.season_id || f.item_id)), p = f.proposed || {};
+    const stored = row && cuExactDate(row.display_date, row.date_sort), proposed = cuExactDate(p.display_date, p.date_sort);
+    if (!stored || !proposed || cuDayDiff(stored, proposed) > 1) return null;
+    return { type: 'date', fn: 'library_cu_set_season_date', what: `${row.title}${row.show_id ? ` · ${row.season}` : ''}`, newDate: p,
+      args: { p_row_id: row.id, p_expected: { display_date: row.display_date, date_sort: row.date_sort }, p_new: { display_date: p.display_date, date_sort: p.date_sort },
+        p_finding: { id: f.id }, p_review: false } };
+  }).filter(Boolean);
 }
 function cuDate(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s || '') && !isNaN(Date.parse(`${s}T00:00:00Z`)) ? s : null;
@@ -255,7 +281,7 @@ async function cuRefreshShows() {
   if (!libraryLive(session)) return;
   p.lib = lib;
   const results = cuEmptyResults('tmdb');
-  const plan = [];
+  const plan = cuSameDayPlan(lib, st);
   const shows = lib.shows.slice().sort((a, b) => compareTitles(a.title, b.title) || cmpStr(a.id, b.id));
   for (const show of shows) {
     if (show.status === 'skipped' && !(st.settings.get(show.id) || {}).follow_when_skipped) { results.skipped++; continue; }
@@ -312,10 +338,12 @@ async function cuCheckMatchedShow(show, lib, plan, results) {
     }
     const label = s.season_number === 0 ? 'Specials' : `Season ${s.season_number}`;
     if (stored) {
-      // Only a TBA or a future date is checked; aired dates aren't re-checked routinely.
-      const tba = /tba/i.test(stored.display_date);
-      const future = !tba && cuDate(stored.date_sort) && stored.date_sort > today;
-      if (air && (tba || (future && air > today)) && (stored.date_sort !== air || stored.display_date !== formatDisplayDate(air))) {
+      // TBA or a window → TMDB's exact date: filled. A stored exact date only while it's still to come (strictly
+      // after today; aired dates aren't re-checked): TMDB two or more days apart goes to review (the database
+      // doesn't overwrite an exact date from TMDB); within a day it's the same date and nothing is sent.
+      const exact = cuExactDate(stored.display_date, stored.date_sort);
+      const fill = !exact, differs = !!exact && exact > today && !!air && air > today && cuDayDiff(exact, air) >= 2;
+      if (air && (fill || differs) && (stored.date_sort !== air || stored.display_date !== formatDisplayDate(air))) {
         const newDate = { display_date: formatDisplayDate(air), date_sort: air };
         plan.push({ type: 'date', fn: 'library_cu_set_season_date', what: `${show.title} · ${stored.season}`, newDate,
           args: { p_row_id: stored.id, p_expected: { display_date: stored.display_date, date_sort: stored.date_sort }, p_new: newDate,
@@ -463,7 +491,12 @@ function cuReviewActionsHtml(m, f) {
     const cands = ((f.result || {}).candidates || []).map(rid => m.lib.rows.find(r => r.id === rid)).filter(Boolean);
     return (cands.length ? cands.map(r => btn(`It’s “${r.season}”`, `cuReviewSeason('${id}', '${esc(r.id)}')`)).join('') : btn('Apply', `cuReviewSeason('${id}', null)`)) + decide;
   }
-  if (f.kind === 'date') return btn('Apply this date', `cuReviewDate('${id}')`) + decide;
+  if (f.kind === 'date') {
+    const row = m.lib.rows.find(r => r.id === (f.season_id || f.item_id)), p = f.proposed || {};
+    const stored = row && cuExactDate(row.display_date, row.date_sort), proposed = cuExactDate(p.display_date, p.date_sort);
+    if (stored && proposed && cuDayDiff(stored, proposed) <= 1) return btn('Keep your date', `cuKeepDate('${id}')`) + decide;
+    return btn('Apply this date', `cuReviewDate('${id}')`) + decide;
+  }
   if (f.kind === 'identity') {
     const s = f.subject || {};
     if (s.tmdb_id) return btn('Match to this TMDB show', `cuReviewIdentity('${id}', ${Number(s.tmdb_id)})`) + decide;
@@ -523,6 +556,15 @@ function cuReviewSeason(id, rowId) {
   const season = { season_number: f.subject.season_number, ...(f.proposed || {}) };
   return cuReviewWrite(`${show.title} · season`, () => sbRpc('library_cu_reconcile_season', { p_show_id: show.id,
     p_expected: { tmdb_id: show.tmdb_id, show_key: show.show_key }, p_season: season, p_finding: { id }, p_review: true, p_row_id: rowId }));
+}
+// A one-day finding: resolved as the same date (the database sets it aside and keeps the stored date).
+function cuKeepDate(id) {
+  const f = cuFind(id);
+  const row = f && cuModal.lib.rows.find(r => r.id === (f.season_id || f.item_id));
+  if (!row) return;
+  return cuReviewWrite(`${row.title} · date`, () => sbRpc('library_cu_set_season_date', { p_row_id: row.id,
+    p_expected: { display_date: row.display_date, date_sort: row.date_sort }, p_new: { display_date: f.proposed.display_date, date_sort: f.proposed.date_sort },
+    p_finding: { id }, p_review: false }));
 }
 function cuReviewDate(id) {
   const f = cuFind(id);

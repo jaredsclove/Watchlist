@@ -267,7 +267,7 @@ async function cuImportFindings(text) {
   endWrite(lane);
   // Automatic application: new seasons, dates and aliases whose finding is pending.
   const byFp = new Map((recorded.findings || []).map(x => [x.fingerprint, x]));
-  const plan = [];
+  const plan = cuSameDayPlan(lib, st).filter(x => !prepared.findings.some(f => f.fingerprint && (st.findings.find(y => y.id === x.args.p_finding.id) || {}).fingerprint === f.fingerprint));
   for (const f of prepared.findings) {
     const rec = byFp.get(f.fingerprint);
     if (!rec) continue;

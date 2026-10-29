@@ -134,6 +134,15 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
     return null;
   }
   const showOf = sid => shows().find(s => s.id === sid);
+  // private.cu1c_exact_date / the calendar-day difference (CU1c).
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const exactDate = (display, sort) => {
+    if (!/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/.test(String(display || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(sort || ''))) return null;
+    const [y, m, d] = sort.split('-').map(Number), real = new Date(Date.UTC(y, m - 1, d));
+    if (real.getUTCMonth() !== m - 1 || real.getUTCDate() !== d) return null;
+    return `${MON[m - 1]} ${d}, ${y}` === display ? sort : null;
+  };
+  const dayDiff = (a, b) => { const n = s => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; }; return Math.abs(n(a) - n(b)); };
   // update_holds' checks and private.cu1_insert_hold's key list (db/cu1_collection_updates.sql).
   const HOLD_KEYS = ['kind', 'collection_id', 'show_id', 'item_id', 'subject_label', 'field', 'protected_value', 'decision', 'effect', 'reopen', 'decided_on'];
   const REOPEN_ON = ['official_date_or_window', 'official_or_two_trades', 'named_source', 'renewal_cast_date_cancellation', 'owner_only', 'new_evidence'];
@@ -242,6 +251,12 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
       if (w.display_date === p_new.display_date && w.date_sort === p_new.date_sort) return finish(f, 'already', 'applied', 'existing', { outcome: 'existing', row_id: w.id });
       if (f.source === 'tmdb') { if (w.media_type !== 'tv' || w.tmdb_id == null) invalid('a TMDB date needs an identified season'); }
       else { const g = researchGate(f, false); if (g) return gateFinish(f, g); }
+      // CU1c (db/cu1c_date_equivalence.sql): two exact dates within a calendar day are the same date (set aside,
+      // the stored date kept, on review too); TMDB never overwrites an exact date without an owner review.
+      const oldExact = exactDate(w.display_date, w.date_sort), newExact = exactDate(p_new.display_date, p_new.date_sort);
+      if (oldExact && newExact && dayDiff(oldExact, newExact) <= 1) {
+        return finish(f, 'policy', 'set_aside', 'same_date_within_one_day', { outcome: 'kept', row_id: w.id, stored: { display_date: w.display_date, date_sort: w.date_sort } });
+      }
       if (!p_review && !setupOk(w.show_id, w.id)) return finish(f, 'policy', 'pending', 'setup_required');
       const g = holdGate(f, w.show_id, w.id, w.season, p_review, false);
       if (g && g.startsWith('refuse:')) refuse('reopen_condition_not_met', 'The decision held for this date isn\'t reopened by this evidence, so nothing was changed.');
@@ -250,7 +265,8 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
         return finish(f, 'policy', 'pending', 'protected_value');
       }
       const today = new Date().toISOString().slice(0, 10);
-      const auto = !/tba/i.test(p_new.display_date) && (/tba/i.test(w.display_date) || (isDate(w.date_sort) && w.date_sort > today && p_new.date_sort > today));
+      if (f.source === 'tmdb' && oldExact && !p_review) return finish(f, 'policy', 'pending', 'tmdb_date_differs');
+      const auto = !/tba/i.test(p_new.display_date) && (!oldExact || (oldExact > today && p_new.date_sort > today));
       if (!auto && !p_review) return finish(f, 'policy', 'pending', 'date_needs_review');
       const from = { display_date: w.display_date, date_sort: w.date_sort };
       Object.assign(w, { display_date: p_new.display_date, date_sort: p_new.date_sort });
