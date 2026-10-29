@@ -4,6 +4,8 @@
 //   pre    refusals before anything changes (no run id, a recorded run id); the state is unchanged;
 //   fail   failure injection after every statement of the migration: state unchanged, no run record;
 //   cu1b   db/cu1b_hold_edit.sql: refusals, failure injection, install, editing a hold in place, a backup round trip, the test reverse;
+//   cu1c   db/cu1c_date_equivalence.sql: refusals, failure injection, install, the date rules (one day, two or more days, windows, today,
+//          aired, protected, standing decisions) for TMDB and research, repeated sends and imports, the test reverse;
 //   CU     the migration: every existing row unchanged; only the intended catalog changes; the run record;
 //          a replay refused;
 //   anon   nothing on the new tables or functions; a non-member is refused;
@@ -780,6 +782,204 @@ section('cu1b: editing a hold in place (db/cu1b_hold_edit.sql)');
   await tryExec(db, sql('db/test/cu1b_reverse.sql'));
   await call(db, 'library_cu_delete_hold', [hA.id, (await asUser(db, A, `select decision from public.update_holds where id = $1`, [hA.id]))[0].decision]);
   await call(db, 'library_cu_delete_hold', [hA2.id, hA2.decision]);
+}
+
+section('cu1c: date equivalence (db/cu1c_date_equivalence.sql)');
+{
+  const CU1C = sql('db/cu1c_date_equivalence.sql');
+  const pre1c = run => `select set_config('watchlist.cu1c_run', '${run}', false);\n`;
+  const FN = `'public.library_cu_set_season_date(uuid, jsonb, jsonb, jsonb, boolean)'::regprocedure`;
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const iso = d => d.toISOString().slice(0, 10);
+  const plus = (s, n) => iso(new Date(Date.parse(`${s}T00:00:00Z`) + n * 86400000));
+  const ex = s => { const [y, m, d] = s.split('-').map(Number); return { display_date: `${MON[m - 1]} ${d}, ${y}`, date_sort: s }; };
+  const today = await val(db, `select to_char(current_date, 'YYYY-MM-DD')`);
+  const s1c0 = await state(db);
+  for (const [label, run, re] of [['no run id', '', /set watchlist\.cu1c_run/], ['a recorded run id', 'cu1-rehearsal-1', /already recorded/]]) {
+    const x = await tryExec(db, pre1c(run) + CU1C);
+    ok(!x.ok && re.test(x.message) && same(s1c0, await state(db)), `${label}: refused, state unchanged`, x.message || 'committed');
+  }
+  {
+    // A date function that isn't CU1's exact version: refused (then CU1's is put back exactly).
+    const def = await val(db, `select pg_get_functiondef(${FN})`);
+    await db.exec(def.replace('v_auto boolean;', 'v_auto boolean; v_zz int;'));
+    const x = await tryExec(db, pre1c('cu1c-wrong-src') + CU1C);
+    await db.exec(def);
+    ok(!x.ok && /isn't CU1's version/.test(x.message) && same(s1c0, await state(db)), 'a changed date function: refused, state unchanged', x.message || 'committed');
+  }
+  if (inject) {
+    const st = statements(CU1C);
+    const bi = st.findIndex(x => /^begin\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim())), ci = st.findIndex(x => /^commit\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim()));
+    const bad = [];
+    for (let k = bi; k < ci; k++) {
+      const text = pre1c(`inject1c-${k}`) + st.slice(0, k + 1).join('') + `\ndo $zz$ begin raise exception 'zz injected after %', ${k}; end $zz$;\n` + st.slice(k + 1).join('');
+      const x = await tryExec(db, text);
+      if (x.ok || !/zz injected/.test(x.message) || !same(s1c0, await state(db))) bad.push(`${k}: ${stmtHead(st[k])} ${x.message || 'committed'}`);
+    }
+    ok(bad.length === 0, `a failure after each of CU1c's ${ci - bi} statements leaves the state unchanged and no run record`, bad.join('\n'));
+  }
+  const inst = await tryExec(db, pre1c('cu1c-rehearsal-1') + CU1C);
+  ok(inst.ok && /CU1C\|cu1c-rehearsal-1/.test(JSON.stringify(inst.out)), 'db/cu1c_date_equivalence.sql commits', inst.message);
+  const s1c1 = await state(db);
+  ok(same(s1c0.rows, s1c1.rows), 'every table is unchanged by the install');
+  {
+    const c0 = JSON.parse(s1c0.cat), c1 = JSON.parse(s1c1.cat), fnName = x => x.slice(0, x.indexOf(') ') + 1);
+    const before = (c0.functions || []).filter(x => !(c1.functions || []).includes(x)).map(fnName), after = (c1.functions || []).filter(x => !(c0.functions || []).includes(x)).map(fnName);
+    const sdf = 'public.library_cu_set_season_date(p_row_id uuid, p_expected jsonb, p_new jsonb, p_finding jsonb, p_review boolean)';
+    ok(same(before, [sdf]) && same(after.sort(), ['private.cu1c_exact_date(p_display text, p_sort text)', sdf].sort())
+      && catDiff(s1c0.cat, s1c1.cat).every(x => /^(functions|runs):/.test(x)), 'the catalog changes only the date function and adds the helper (and the run record)', catDiff(s1c0.cat, s1c1.cat).join('\n'));
+    const meta = `select coalesce(array_to_string(proacl, ','), '') || ':' || prosecdef || ':' || coalesce(array_to_string(proconfig, ','), '') from pg_proc where oid = ${FN}`;
+    ok((await val(db, `select has_function_privilege('authenticated', 'private.cu1c_exact_date(text, text)', 'execute') and not has_function_privilege('anon', 'private.cu1c_exact_date(text, text)', 'execute')`)) === true,
+      'the helper: signed-in members execute it (the date function is security invoker); anon can’t');
+    ok(!!(await val(db, meta)), 'the date function keeps its grants and settings (checked in the migration)');
+  }
+  ok((await val(db, `select public.stage5_capabilities() ->> 'phase'`)) === 'contracted-cu1', 'the phase is unchanged (contracted-cu1)');
+  const replay = await tryExec(db, pre1c('cu1c-rehearsal-2') + CU1C);
+  ok(!replay.ok && /already installed/.test(replay.message) && same(s1c1, await state(db)), 'a replay is refused, state unchanged', replay.message || 'committed');
+
+  // ── Behaviour through the real SQL ──
+  // What the checks write: the dated rows, their findings and holds, and the research collection with its briefs.
+  const WRITTEN = ['public.watchlist_items', 'update_findings', 'update_holds', 'public.personal_collections', 'public.collection_memberships', 'collection_definitions', 'research_briefs', 'research_imports'];
+  const unrelated = async (touched) => ({ rows: Object.fromEntries(Object.entries(await rows(db)).filter(([k]) => !WRITTEN.includes(k))),
+    items: await val(db, `select md5(coalesce(string_agg(to_jsonb(r)::text, '|' order by id), '')) from public.watchlist_items r where not (id = any($1::uuid[]))`, [touched]) });
+  const sh = await showRow(2), tv = (await seasonsOf(sh.id)).filter(r => r.tmdb_id !== null && !['Season 5'].includes(r.season));
+  const rs3 = await showRow(3), rr = (await seasonsOf(rs3.id));
+  const touched = [...tv.map(r => r.id), ...rr.map(r => r.id)];
+  const base = await unrelated(touched);
+  const MEMB = `select md5(coalesce(string_agg(to_jsonb(m)::text, '|' order by id), '')) from public.collection_memberships m where collection_id is distinct from (select id from public.personal_collections where name = 'ZZ Rehearsal CU1c Follow')`;
+  const baseMemb = await val(db, MEMB);
+  const setRow = (r, d) => asSuper(db, `update public.watchlist_items set display_date = '${d.display_date}', date_sort = '${d.date_sort}' where id = '${r.id}'`);
+  const rowNow = async r => (await asUser(db, A, `select display_date, date_sort from public.watchlist_items where id = $1`, [r.id]))[0];
+  const fRow = async fpr => (await asUser(db, A, `select status, reason, decided_at from public.update_findings where fingerprint = $1`, [fpr]));
+  const tmdb = (r, key, d, review = false, finding) => tryCall(db, 'library_cu_set_season_date', [r.id, null, d, finding || tf('date', key, { show_id: sh.id, season_id: r.id }), review]);
+  const tmdbAt = async (r, key, d, review, finding) => { const now = await rowNow(r); return tryCall(db, 'library_cu_set_season_date', [r.id, now, d, finding || tf('date', key, { show_id: sh.id, season_id: r.id }), review]); };
+  ok(tv.length >= 4 && rr.length >= 3, `enough identified seasons for the checks (${tv.length} TMDB, ${rr.length} research)`);
+  const [t1, t2, t3, t4] = tv;
+  // One day, either way, across month, year and leap boundaries: set aside by the rule, the stored date kept.
+  for (const [i, [stored, prop]] of [[plus(today, 100), plus(today, 101)], [plus(today, 100), plus(today, 99)], ['2030-12-31', '2031-01-01'], ['2031-01-01', '2030-12-31'],
+    ['2030-01-31', '2030-02-01'], ['2028-02-28', '2028-02-29'], ['2028-02-29', '2028-03-01'], ['2031-02-28', '2031-03-01']].entries()) {
+    await setRow(t1, ex(stored));
+    const x = await tmdbAt(t1, `eq-${i}`, ex(prop), false);
+    const f = await fRow(fp('date', `eq-${i}`));
+    ok(x.ok && x.rows.status === 'set_aside' && x.rows.reason === 'same_date_within_one_day' && same(await rowNow(t1), ex(stored)) && f[0].status === 'set_aside' && f[0].decided_at === null,
+      `TMDB ${stored} → ${prop}: the same date (set aside by the rule, not an owner decision); the stored date kept`, JSON.stringify([x, f]));
+  }
+  {
+    await setRow(t1, ex('2031-02-28'));
+    const r = await tmdbAt(t1, 'eq-review', ex('2031-03-01'), true);
+    ok(r.ok && r.rows.status === 'set_aside' && same(await rowNow(t1), ex('2031-02-28')), 'one day on the owner’s review: still kept', JSON.stringify(r));
+    // Repeated TMDB sends (an older page): one finding, set aside every time, the date kept.
+    for (let n = 0; n < 3; n++) await tmdbAt(t1, 'eq-repeat', ex('2031-03-01'), false);
+    const rep = await fRow(fp('date', 'eq-repeat'));
+    ok(rep.length === 1 && rep[0].status === 'set_aside' && same(await rowNow(t1), ex('2031-02-28')), 'three repeated TMDB sends: one finding, still set aside, nothing changed', JSON.stringify(rep));
+    const fid = (await asUser(db, A, `select id from public.update_findings where fingerprint = $1`, [fp('date', 'eq-repeat')]))[0].id;
+    const rv = await tmdbAt(t1, 'x', ex('2031-03-01'), true, { id: fid });
+    ok(!rv.ok && /finding_not_pending/.test(rv.message), 'a set-aside one-day finding can’t be applied on review', rv.message);
+    const reopen = await tryCall(db, 'library_cu_set_finding_status', [fid, 'set_aside', 'pending', '']);
+    ok(!reopen.ok, 'nor reopened to pending by the owner (only dismissed)', reopen.message || 'reopened');
+    // Leap: Feb 28 → Mar 1 2028 is two days (Feb 29 counts).
+    await setRow(t2, ex('2028-02-28'));
+    const leap = await tmdbAt(t2, 'leap2', ex('2028-03-01'), false);
+    ok(leap.ok && leap.rows.status === 'pending' && leap.rows.reason === 'tmdb_date_differs' && same(await rowNow(t2), ex('2028-02-28')), 'TMDB Feb 28 → Mar 1 in a leap year (two days): review, unchanged', JSON.stringify(leap));
+  }
+  // Two or more days from TMDB on an exact date (an older page's direct call too): review only; the owner applies it.
+  {
+    await setRow(t2, ex(plus(today, 60)));
+    const d = await tmdbAt(t2, 'two', ex(plus(today, 62)), false);
+    ok(d.ok && d.rows.status === 'pending' && d.rows.reason === 'tmdb_date_differs' && same(await rowNow(t2), ex(plus(today, 60))), 'TMDB two days from a future exact date: review, unchanged', JSON.stringify(d));
+    const again = await tmdbAt(t2, 'two', ex(plus(today, 62)), false);
+    ok(again.ok && again.rows.finding_id === d.rows.finding_id && (await fRow(fp('date', 'two'))).length === 1, 'sent again: the same finding, no duplicate', JSON.stringify(again));
+    const ap = await tmdbAt(t2, 'x', ex(plus(today, 62)), true, { id: d.rows.finding_id });
+    ok(ap.ok && ap.rows.outcome === 'applied' && same(await rowNow(t2), ex(plus(today, 62))), 'the owner’s review applies two or more days', JSON.stringify(ap));
+    // Dismissal stops that disagreement; a genuinely different later proposal is a new finding.
+    const d2 = await tmdbAt(t2, 'two-b', ex(plus(today, 70)), false);
+    await call(db, 'library_cu_set_finding_status', [d2.rows.finding_id, 'pending', 'dismissed', '']);
+    const d2b = await tmdbAt(t2, 'two-b', ex(plus(today, 70)), false);
+    ok(d2b.ok && d2b.rows.status === 'dismissed' && same(await rowNow(t2), ex(plus(today, 62))), 'dismissed: the same disagreement stays dismissed', JSON.stringify(d2b));
+    const d3 = await tmdbAt(t2, 'two-c', ex(plus(today, 80)), false);
+    ok(d3.ok && d3.rows.status === 'pending' && d3.rows.reason === 'tmdb_date_differs', 'a different later date: proposed again', JSON.stringify(d3));
+    // An aired exact date: review too (the page doesn't re-check aired dates).
+    await setRow(t3, ex('2021-03-01'));
+    const aired = await tmdbAt(t3, 'aired1c', ex('2021-03-09'), false);
+    ok(aired.ok && aired.rows.status === 'pending' && same(await rowNow(t3), ex('2021-03-01')), 'an aired exact date: review, unchanged', JSON.stringify(aired));
+    // Today is aired: an exact date of today isn't changed by TMDB without review.
+    await setRow(t3, ex(today));
+    const td = await tmdbAt(t3, 'today', ex(plus(today, 5)), false);
+    ok(td.ok && td.rows.status === 'pending' && same(await rowNow(t3), ex(today)), 'an exact date of today: review, unchanged', JSON.stringify(td));
+  }
+  // TBA and windows are filled; a window's guessed sort date is never compared.
+  {
+    const target = plus(today, 200).slice(0, 4) + '-12-30';
+    await setRow(t4, { display_date: `TBA ${target.slice(0, 4)}`, date_sort: target.slice(0, 4) + '-12-31' });
+    const w = await tmdbAt(t4, 'window', ex(target), false);
+    ok(w.ok && w.rows.outcome === 'applied' && same(await rowNow(t4), ex(target)), 'a window → an exact date a day from its guessed sort date: filled', JSON.stringify(w));
+    await setRow(t4, { display_date: 'TBA', date_sort: '2099-01-01' });
+    const t = await tmdbAt(t4, 'tba', ex('2098-12-31'), false);
+    ok(t.ok && t.rows.outcome === 'applied', 'TBA → an exact date a day from 2099-01-01: filled', JSON.stringify(t));
+    const stale = await tryCall(db, 'library_cu_set_season_date', [t4.id, { display_date: 'TBA', date_sort: '2099-01-01' }, ex('2098-12-30'), tf('date', 'stale1c', { show_id: sh.id, season_id: t4.id })]);
+    ok(!stale.ok && /target_changed/.test(stale.message) && (await fRow(fp('date', 'stale1c'))).length === 0, 'a stale expected value: refused, nothing written', stale.message);
+  }
+  // Research (show 3, in the research collection): one day set aside; two or more days on a future date applied;
+  // today, aired, protected and standing decisions keep their safeguards; repeated imports stay set aside.
+  {
+    const [r1, r2, r3] = rr;
+    const fc = (await call(db, 'org_create_collection', [crypto.randomUUID(), 'ZZ Rehearsal CU1c Follow'])).collection.id;
+    await call(db, 'library_cu_save_definition', [fc, 0, 'follow', [], EVIDENCE, 'The shows on this list.']);
+    await call(db, 'org_add_membership', [fc, rs3.id, null]);
+    const research = async (r, key, d, routed = 'pending', review = false) => {
+      const b = crypto.randomUUID();
+      await call(db, 'library_cu_register_brief', [b, [fc]]);
+      const now = await rowNow(r);
+      const f = [{ fingerprint: fp('date', key), kind: 'date', collection_id: fc, show_id: rs3.id, season_id: r.id, subject: { title: rs3.title, season: r.season },
+        proposed: d, expected: now, evidence: official(), assessment: assessed(), routed_status: routed, reason: routed === 'set_aside' ? 'same_date_within_one_day' : null }];
+      const rec = await call(db, 'library_cu_record_findings', [b, sha(`${key}-${b}`), f]);
+      const status = rec.findings[0].status;
+      if (status !== 'pending') return { recorded: status };
+      return { recorded: status, applied: await tryCall(db, 'library_cu_set_season_date', [r.id, now, d, { id: rec.findings[0].id }, review]) };
+    };
+    await setRow(r1, ex(plus(today, 30)));
+    const one = await research(r1, 'r-one', ex(plus(today, 31)));
+    ok(one.applied.ok && one.applied.rows.status === 'set_aside' && one.applied.rows.reason === 'same_date_within_one_day' && same(await rowNow(r1), ex(plus(today, 30))),
+      'research one day (an older page sends it pending): set aside on apply, the date kept', JSON.stringify(one));
+    const routed = await research(r1, 'r-one', ex(plus(today, 31)), 'set_aside');
+    ok(routed.recorded === 'set_aside' && (await fRow(fp('date', 'r-one'))).length === 1 && same(await rowNow(r1), ex(plus(today, 30))),
+      'imported again from a newer brief, routed set aside (this page): stays set aside, nothing applied', JSON.stringify(routed));
+    const old = await research(r1, 'r-one', ex(plus(today, 31)));
+    ok(old.recorded === 'pending' && old.applied.ok && old.applied.rows.status === 'set_aside' && same(await rowNow(r1), ex(plus(today, 30))),
+      'imported again by an older page (routed pending): reopened, then set aside again by the rule in the same import', JSON.stringify(old));
+    const two = await research(r1, 'r-two', ex(plus(today, 40)));
+    ok(two.applied.ok && two.applied.rows.outcome === 'applied' && same(await rowNow(r1), ex(plus(today, 40))), 'research two or more days, future → future: applied under the evidence rules', JSON.stringify(two));
+    await setRow(r2, ex(today));
+    const tdy = await research(r2, 'r-today', ex(plus(today, 10)));
+    ok(tdy.applied.ok && tdy.applied.rows.reason === 'date_needs_review' && same(await rowNow(r2), ex(today)), 'research from an exact date of today: review (today counts as aired)', JSON.stringify(tdy));
+    await setRow(r2, ex('2021-05-01'));
+    const aired = await research(r2, 'r-aired', ex('2021-05-20'));
+    ok(aired.applied.ok && aired.applied.rows.reason === 'date_needs_review' && same(await rowNow(r2), ex('2021-05-01')), 'research on an aired date: review', JSON.stringify(aired));
+    await setRow(r3, ex(plus(today, 90)));
+    const h = await call(db, 'library_cu_save_hold', [{ kind: 'protected_value', item_id: r3.id, field: 'display_date', protected_value: ex(plus(today, 90)).display_date, decision: 'Keep', effect: 'keep_value', reopen: { on: 'new_evidence' } }]);
+    const prot = await research(r3, 'r-prot', ex(plus(today, 99)));
+    ok(prot.applied.ok && prot.applied.rows.reason === 'protected_value' && same(await rowNow(r3), ex(plus(today, 90))), 'research on a protected date: review', JSON.stringify(prot));
+    const protOne = await research(r3, 'r-prot-one', ex(plus(today, 91)));
+    ok(protOne.applied.ok && protOne.applied.rows.status === 'set_aside' && same(await rowNow(r3), ex(plus(today, 90))), 'one day on a protected date: kept (set aside)', JSON.stringify(protOne));
+    await call(db, 'library_cu_delete_hold', [h.id, h.decision]);
+    const sd = await call(db, 'library_cu_save_hold', [{ kind: 'standing_decision', item_id: r3.id, decision: 'Hold the date', effect: 'keep_value', reopen: { on: 'owner_only' }, decided_on: '2026-01-01' }]);
+    const stand = await research(r3, 'r-stand', ex(plus(today, 120)));
+    ok(stand.applied.ok && stand.applied.rows.status !== 'applied' && stand.applied.rows.outcome !== 'applied' && same(await rowNow(r3), ex(plus(today, 90))),
+      `a standing decision holds (${stand.applied.rows && (stand.applied.rows.reason || stand.applied.rows.status)})`, JSON.stringify(stand));
+    await call(db, 'library_cu_delete_hold', [sd.id, sd.decision]);
+  }
+  const end = await unrelated(touched);
+  const memb = await val(db, MEMB);
+  ok(same(base, end) && memb === baseMemb, 'every other row and table is unchanged by the checks (library rows outside the dated seasons, other collections and memberships)',
+    JSON.stringify([Object.keys(base.rows).filter(k => base.rows[k] !== end.rows[k]), base.items === end.items]));
+  // Test-only reverse: back to CU1's function exactly; then CU1c applies again; reversed again for the CU1 reverse below.
+  const rv = await tryExec(db, sql('db/test/cu1c_reverse.sql'));
+  const cr = JSON.parse((await state(db)).cat), c0 = JSON.parse(s1c0.cat);
+  delete cr.runs; delete c0.runs;
+  ok(rv.ok && same(cr, c0), 'the test-only reverse gives back CU1’s date function and catalog exactly', rv.message || catDiff(JSON.stringify(c0), JSON.stringify(cr)).join('\n'));
+  const again = await tryExec(db, pre1c('cu1c-rehearsal-3') + CU1C);
+  ok(again.ok, 'CU1c applies again after the reverse', again.message);
+  await tryExec(db, sql('db/test/cu1c_reverse.sql'));
 }
 
 section('rev: the test-environment reverse');

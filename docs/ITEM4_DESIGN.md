@@ -213,6 +213,29 @@ Each function verifies before returning that the show's status, priority and End
   a protected value's stored value unless its record or field is changed; an unchanged form sends nothing.
 - Neither changes any show, season, date, progress, membership or other hold. Backups are unchanged (format 7).
 
+### 4.4 Date equivalence (CU1c)
+
+- **Exact date:** a full display date ("Jan 15, 2027") whose `date_sort` is that same, real calendar date
+  (`private.cu1c_exact_date`; the page's `cuExactDate`). TBA and every window are not exact, and their guessed
+  `date_sort` is never compared.
+- **TBA or window → exact:** filled automatically, as before (TMDB and research alike).
+- **Within one calendar day** (either way, across month, year and leap-day boundaries): the same date. The stored
+  date stays. The finding is set aside with reason `same_date_within_one_day` by the rule (`decided_at` stays
+  empty: not an owner decision), for TMDB and research, on review too. Refresh shows doesn't send these; an import
+  records research ones as set aside; a one-day finding still pending from before is resolved by the next Refresh
+  or import (or Keep your date in review). An owner can dismiss a set-aside finding but never reopen it, so it can't
+  be applied. A newer brief re-imported by an older page reopens it, and the same import's apply step sets it aside
+  again.
+- **Two or more days:** a TMDB difference against a stored exact date stays `pending` with reason
+  `tmdb_date_differs` until the owner applies it in review; an older page's direct call can't change it. Qualified
+  research still moves a future exact date to another future date automatically.
+- **Unchanged:** the future boundary (strictly after today: a date of today counts as aired); aired dates, protected
+  values and standing decisions need review; an exact date → a window or TBA goes to review; TMDB without a date
+  never changes a stored date; the finding, expected-value and evidence checks. Dismissing a TMDB difference stops
+  that same difference (the fingerprint names both dates); a different later date is a new finding.
+- Enforced in `library_cu_set_season_date` (`db/cu1c_date_equivalence.sql`), so older pages get the same rules. No
+  table, status, capability or backup-format change.
+
 ## 5. Backup format 7
 
 - Tables: format 6's nine plus the ten above (nineteen), no `user_id`.

@@ -67,7 +67,9 @@ begin
   if to_char(v, 'YYYY-MM-DD') <> p_sort or to_char(v, 'Mon') || ' ' || extract(day from v)::int || ', ' || to_char(v, 'YYYY') <> p_display then return null; end if;
   return v;
 end $$;
-revoke all on function private.cu1c_exact_date(text, text) from public, anon, authenticated;
+-- The date function is security invoker, so the signed-in member executes this pure helper too (as CU1's helpers).
+revoke all on function private.cu1c_exact_date(text, text) from public, anon;
+grant execute on function private.cu1c_exact_date(text, text) to authenticated;
 
 -- ── 3. The guarded date path ───────────────────────────────────────────────────
 -- Automatic: a stored TBA or window → an exact date; qualified research: a future exact date → another future exact
@@ -157,9 +159,9 @@ begin
   end if;
   if (select md5(prosrc) from pg_proc where oid = f) = 'b3d2acd388992f380ab97b217a0c8c8e' then raise exception 'cu1c: the date function wasn''t replaced'; end if;
   if has_function_privilege('anon', f, 'execute') then raise exception 'cu1c: anon can execute the date function'; end if;
-  if has_function_privilege('authenticated', 'private.cu1c_exact_date(text, text)'::regprocedure, 'execute')
-     or has_function_privilege('anon', 'private.cu1c_exact_date(text, text)'::regprocedure, 'execute') then
-    raise exception 'cu1c: an application role can execute private.cu1c_exact_date';
+  if has_function_privilege('anon', 'private.cu1c_exact_date(text, text)'::regprocedure, 'execute')
+     or not has_function_privilege('authenticated', 'private.cu1c_exact_date(text, text)'::regprocedure, 'execute') then
+    raise exception 'cu1c: private.cu1c_exact_date must be executable by authenticated only';
   end if;
   if (select md5(prosrc) from pg_proc where oid = 'public.stage5_capabilities()'::regprocedure) is distinct from c.caps_src then raise exception 'cu1c: the capability changed'; end if;
   if (select md5(coalesce(string_agg(md5(x::text), ',' order by x.id), '')) from public.update_findings x) is distinct from c.findings_md5
