@@ -403,6 +403,7 @@ test('date equivalence: an existing pending one-day finding stops being actionab
   await app.ctx.openCuReview(null); await settle();
   let html = app.el('cuModalBox').innerHTML;
   assert.ok(html.includes(`cuKeepDate('${f1.id}')`) && !html.includes(`cuReviewDate('${f1.id}')`), 'no Apply for a one-day finding');
+  assert.ok(html.includes('the same date within a day; your stored date stays'), 'it says why (not the reason it was first recorded with)');
   await app.ctx.cuKeepDate(f1.id); await settle();
   const g1 = app.store.update_findings.find(f => f.id === f1.id);
   assert.deepStrictEqual([g1.status, g1.reason, g1.decided_at], ['set_aside', 'same_date_within_one_day', null], 'resolved by the rule, not dismissed by the owner');

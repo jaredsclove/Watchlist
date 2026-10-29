@@ -476,7 +476,8 @@ function cuReviewHtml() {
   const flagged = m.lib.shows.filter(s => (m.st.settings.get(s.id) || {}).new_season_after_ended_at);
   const itemsOf = list => list.map(f => `<li class="cu-item" data-finding="${esc(f.id)}">
       <div class="cu-item-text">${esc(cuFindingSentence(m.lib, f))}</div>
-      <div class="cu-item-why">${esc(f.status === 'pending' ? (cuReasonText(f.reason) || 'waits for your decision') : cuReasonText(f.reason) || f.status.replace(/_/g, ' '))}</div>
+      <div class="cu-item-why">${esc(f.status === 'pending' ? (cuReasonText(f.kind === 'date' && cuSameDay(m.lib.rows.find(r => r.id === (f.season_id || f.item_id)), f.proposed) ? 'same_date_within_one_day' : f.reason) || 'waits for your decision')
+        : cuReasonText(f.reason) || f.status.replace(/_/g, ' '))}</div>
       ${cuEvidenceHtml(f)}
       <div class="cu-item-actions">${cuReviewActionsHtml(m, f)}</div></li>`).join('');
   const decide = open.filter(f => f.status === 'pending'), blocked = open.filter(f => f.status !== 'pending');
