@@ -77,7 +77,7 @@ test('startup: Currently Watching opens with one paginated GET of the TV rows, o
   assert.ok(reads[0].url.includes('is_film=eq.false') && !reads[0].url.includes('collection='), 'TV rows by kind, never by storage');
   assert.strictEqual(reads[0].headers['Prefer'], 'count=exact');
   noStorage(app);
-  assert.ok(app.el('tabBar').innerHTML.includes('class="tab active" onclick="switchView(\'watching\')"'));
+  assert.ok(app.el('tabBar').innerHTML.includes('class="tab active" aria-current="page" onclick="switchView(\'watching\')"'));
   assert.strictEqual(Object.keys(app.get('tabData')).length, 0);
 });
 

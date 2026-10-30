@@ -248,7 +248,7 @@ test('a collection’s theme: a show matches on any stored season and keeps all 
   app.ctx.openBrowseCollection(DISNEY); await settle();
   setFilter(app, 'fTheme', 'Star Wars');
   assert.deepStrictEqual(titles(app), ['Mixed Show', 'Zeta']);
-  assert.ok(html(app).includes('1/1 watched') === false && html(app).includes('1/2 watched'), 'progress over both seasons');
+  assert.ok(html(app).includes('1/1 season watched') === false && html(app).includes('1/2 seasons watched'), 'progress over both seasons');
   setFilter(app, 'fTheme', 'Marvel');
   assert.deepStrictEqual(titles(app), ['Mixed Show', 'Soon Show', 'Gamma']);
   app.ctx.setBrowsePresentation('seasons'); await settle();
@@ -265,7 +265,7 @@ test('All TV: a network/theme pill filters Shows by any stored season, keeping e
   click(app, 'theme', 'Marvel');
   assert.deepStrictEqual(titles(app), ['Mixed Show', 'Soon Show']);
   const mixed = html(app).slice(html(app).indexOf('Mixed Show'), html(app).indexOf('</tr>', html(app).indexOf('Mixed Show')));
-  assert.ok(mixed.includes('1/2 watched') && mixed.includes('Season 2'), 'all seasons kept: progress 1/2, up next Season 2');
+  assert.ok(mixed.includes('1/2 seasons watched') && mixed.includes('Season 2'), 'all seasons kept: progress 1/2, up next Season 2');
   assert.ok(/data-filter-value="Star Wars"[^>]*aria-pressed="false"/.test(mixed), 'its own pill (another theme) isn’t shown as selected');
   app.ctx.toggleDerivedShow(app.get("[...tvShowsById.values()].find(s => s.title === 'Mixed Show').id"));
   assert.strictEqual((html(app).match(/class="[^"]*sub-row/g) || []).length, 4, 'expanded: the show actions (B4/B5), both seasons and the Add season row (Stage 4b)');
@@ -371,7 +371,7 @@ test('keyboard: focus stays on the same pill (same row, same container) after th
   app.ctx.switchMediaType('movie'); await settle();
   setFilter(app, 'fWatch', '');
   const focused = [];
-  const btn = { ...pill('theme', 'Action', 'f-delta'), closest: sel => (sel === '#cardList' ? {} : null) };
+  const btn = { ...pill('theme', 'Action', 'f-delta'), closest: sel => (sel === '#cardList' || sel === '.filter-pill' ? {} : null) };
   app.ctx.document.activeElement = btn;
   for (const id of ['tbody', 'cardList']) app.el(id).querySelector = sel => ({ focus: () => focused.push(`${id} ${sel}`) });
   app.ctx.toggleFilterPill(btn);

@@ -32,6 +32,7 @@
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --radius: 6px;
   --radius-lg: 10px;
+  --page-gutter: max(24px, calc((100% - 1192px) / 2)); /* padding that lines full-width bars up with .main's content */
 }
 
 @media (prefers-color-scheme: light) {
@@ -72,28 +73,27 @@
 body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; min-height: 100vh; line-height: 1.5; }
 
 /* ── Topbar ── */
-.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 8px var(--page-gutter); display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
 .logo { display: flex; align-items: center; gap: 10px; }
 .logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg, #1a6ef5, #6f3de8); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
 .logo-text { font-size: 16px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
-.topbar-right { display: flex; align-items: center; gap: 8px; }
+.topbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .save-status { font-size: 11px; color: var(--green); opacity: 0; transition: opacity 0.3s; }
 .save-status.visible { opacity: 1; }
-.backup-age { font-size: 11px; color: var(--text2); white-space: nowrap; }
-.backup-age.warn { color: var(--amber); }
-.backup-age.urgent { color: var(--orange); font-weight: 600; }
-/* S1 (D8): the backup status is a link-styled button that opens Settings → Backup & Restore. */
-button.backup-age { background: none; border: 0; padding: 2px 4px; font-family: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-button.backup-age:hover { color: var(--text); }
-button.backup-age:focus-visible, .gear-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gear-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* S1: the gear (⚙ Settings) shows that Settings is the current page. */
 .gear-btn[aria-current="page"] { background: var(--accent-dim); border-color: var(--accent); color: #9db5ff; font-weight: 600; }
 .gear-btn[aria-current="page"]:hover { background: var(--accent-dim); }
-/* S1V-2 rev1: the S1 status texts and the current gear at 4.5:1 or more in light (scoped; tokens unchanged). */
+/* The backup warning on the Settings control: ⚠, in the backup status colours. */
+.settings-warn { margin-left: 5px; font-weight: 600; }
+.settings-warn[hidden] { display: none; }
+.gear-btn.warn { border-color: var(--amber-border); color: var(--amber); }
+.gear-btn.urgent { border-color: var(--orange); color: var(--orange); font-weight: 600; }
+/* S1V-2 rev1: the current gear and the warning colours at 4.5:1 or more in light (scoped; tokens unchanged). */
 @media (prefers-color-scheme: light) {
   .gear-btn[aria-current="page"] { color: #2a4fb8; }
-  .backup-age.warn { color: #7a5f17; }
-  .backup-age.urgent { color: #a8560a; }
+  .gear-btn.warn { color: #7a5f17; }
+  .gear-btn.urgent { color: #a8560a; }
 }
 
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px; }
@@ -113,9 +113,10 @@ button.backup-age:focus-visible, .gear-btn:focus-visible { outline: 2px solid va
 .modal-success { background: var(--green-dim); border: 1px solid var(--green-border); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; color: var(--green); }
 
 /* ── Tabs ── */
-.media-switch { background: var(--bg); padding: 10px 24px 0; display: flex; gap: 8px; }
-.media-switch-btn { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 18px; font-size: 14px; font-weight: 500; color: var(--text2); cursor: pointer; transition: all 0.15s; }
-.media-switch-btn:hover { color: var(--text); }
+.media-switch { display: flex; gap: 4px; min-width: 0; }
+.media-switch-btn { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 5px 12px; font-size: 14px; font-weight: 500; color: var(--text2); cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.media-switch-btn:hover { color: var(--text); background: var(--surface2); }
+.media-switch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .media-switch-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
 /* S2: the Collections chooser (a tab list in the Collections area) and its status line. */
 .collection-tabs { display: flex; flex: 1 1 100%; min-width: 0; overflow-x: auto; border-bottom: 1px solid var(--border); }
@@ -123,25 +124,32 @@ button.backup-age:focus-visible, .gear-btn:focus-visible { outline: 2px solid va
 .collection-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .collections-state { margin: 0; font-size: 13px; color: var(--text2); }
 
-.tabs { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 0; overflow-x: auto; }
+.tabs { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 var(--page-gutter); display: flex; gap: 0; }
 .tabs[hidden] { display: none; } /* B9: an area with one view has no secondary row (display: flex would override [hidden]) */
-.tab { padding: 10px 18px; font-size: 13px; font-weight: 500; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: color 0.15s, border-color 0.15s; user-select: none; }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; font-family: inherit; padding: 7px 14px; font-size: 13px; font-weight: 500; color: var(--text2); cursor: pointer; white-space: nowrap; transition: color 0.15s, border-color 0.15s; user-select: none; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .tab-icon { margin-right: 6px; }
 
 /* ── Main ── */
-.main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+.main { max-width: 1240px; margin: 0 auto; padding: 12px 24px 24px; }
 /* B8: compact counts (one line of text) in place of the statistics tiles */
-.stats-row { margin-bottom: 12px; }
+/* The list toolbar: one wrapping line of the filter bar's controls, the count and + Add (the filter
+   bar's own box is dissolved into it), with the More filters panel and the chips on lines below. The count
+   isn't focusable, so its place in the line doesn't change the Tab order. */
+.list-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.list-toolbar:has(> .filters:empty):has(> .stats-row:empty) { display: none; }
+.stats-row { order: 2; margin-left: auto; min-width: 0; }
 .stats-row:empty { display: none; }
-.count-line { margin: 0; font-size: 13px; color: var(--text2); overflow-wrap: anywhere; }
+.add-open-btn { order: 1; }
+.count-line { margin: 0; font-size: 12px; color: var(--text2); overflow-wrap: anywhere; }
 .progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 6px; width: 80px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
 .mini-progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 4px; width: 70px; overflow: hidden; }
 .mini-progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
 
-.filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+.filters { display: contents; }
 
 .search-input {
   background: var(--surface);
@@ -151,13 +159,15 @@ button.backup-age:focus-visible, .gear-btn:focus-visible { outline: 2px solid va
   color: var(--text);
   font-size: 13px;
   outline: none;
-  width: 180px;
+  width: 220px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23555d77' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: 8px center;
-  transition: border-color 0.15s, width 0.2s;
+  transition: border-color 0.15s;
 }
-.search-input:focus { border-color: var(--accent); width: 220px; }
+.search-input:hover { border-color: var(--border2); }
+.search-input:focus { border-color: var(--accent); }
+.filter-line .search-input { flex: 1 1 260px; width: auto; min-width: 0; height: 34px; }
 .search-input::placeholder { color: var(--text3); }
 @media (prefers-color-scheme: light) {
   .search-input {
@@ -172,14 +182,16 @@ select:focus { border-color: var(--accent); }
 .loading { text-align: center; padding: 3rem; color: var(--text3); font-size: 13px; }
 
 table { width: 100%; border-collapse: collapse; }
-thead th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
+#desktopTable th:first-child { width: 38%; }
+thead th { text-align: left; padding: 6px 10px; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .year-group td { background: var(--surface); padding: 5px 12px; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); }
 
 .show-group-row { cursor: pointer; }
+td.card-date { white-space: nowrap; }
 .show-group-row:hover td { background: var(--surface); }
 .expand-chevron { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface2); border: 1px solid var(--border); color: var(--text2); font-size: 10px; flex-shrink: 0; transition: border-color 0.15s, color 0.15s; }
-.show-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.show-title-left { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; min-width: 0; } /* wraps: a long title, the TMDB score and its explanation, the markers */
+.show-title-row { display: flex; align-items: center; gap: 6px; }
+.show-title-left { flex: 1 1 auto; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; min-width: 0; } /* wraps: a long title, the TMDB score and its explanation, the markers */
 .show-group-row:hover .expand-chevron, .card-top:hover .expand-chevron { border-color: var(--accent); color: var(--accent); }
 .sub-row td { background: var(--bg); }
 .sub-row td:first-child { border-left: 2px solid var(--accent-dim); }
@@ -188,10 +200,9 @@ thead th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 50
 .card-subseasons { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
 .card-subseason-row { display: flex; flex-direction: column; gap: 6px; border-left: 2px solid var(--accent-dim); padding-left: 10px; }
 .card-subseason-row .card-actions { display: flex; gap: 6px; align-items: center; }
-.card-subseason-row .status-select { flex: 1; }
 .card-subseason-row .watch-btn { flex: 1; text-align: center; }
 tbody tr:not(.year-group):hover td { background: var(--surface); }
-tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .show-title { font-weight: 500; color: var(--text); }
 .season-lbl { color: var(--text2); font-size: 12px; }
 
@@ -288,12 +299,6 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .watch-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 11px; cursor: pointer; font-size: 12px; color: var(--text2); transition: all 0.15s; white-space: nowrap; }
 .watch-btn:hover { border-color: var(--border2); color: var(--text); }
 .watch-btn.watched { background: var(--green-dim); border-color: var(--green-border); color: var(--green); }
-/* B2: the show-level shortcut names its season in full: it wraps at word boundaries (a single
-   word longer than the button may still break), never truncates. In the desktop table it has room
-   for an ordinary label on about two lines ("Mark Season 2 / watched"); a longer stored label
-   wraps over more lines, still whole. */
-.watch-btn.show-shortcut { white-space: normal; overflow-wrap: break-word; word-break: normal; text-overflow: clip; overflow: visible; max-width: 100%; }
-#desktopTable .watch-btn.show-shortcut { min-width: 8.5em; max-width: 14em; text-align: center; }
 .watch-btn:disabled { opacity: 0.3; cursor: default; }
 
 .row-maybe td { opacity: 0.65; }
@@ -312,29 +317,34 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
   background-repeat: no-repeat;
   background-position: right 7px center;
   background-size: 8px;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, border-color 0.15s, background-color 0.15s;
+  field-sizing: content; /* as wide as the status it shows, where the browser can */
+  max-width: 100%;
 }
 .status-select:hover { opacity: 0.85; }
-.status-select.s-confirmed { background-color: var(--green-dim); color: var(--green); border-color: var(--green-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%233ecf8e' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The default status is quiet and still a control: no fill or border until hover or focus. */
+.status-select.s-confirmed:hover, .status-select.s-film-to_watch:hover, .status-select.s-skipped:hover, .status-select.s-film-skipped:hover { opacity: 1; background-color: var(--surface2); border-color: var(--border2); color: var(--text); }
+.status-select.s-confirmed { background-color: transparent; color: var(--text2); border-color: transparent; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%238b91a8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-highpriority { background-color: var(--gold-bg); color: var(--gold); border-color: var(--gold-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e8b923' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
-.status-select.s-watching  { background-color: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%234f7ef8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-watching  { background-color: transparent; color: var(--blue); border-color: var(--blue-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%234f7ef8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-caughtup { background-color: var(--teal-bg); color: var(--teal); border-color: var(--teal); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%231abc9c' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-complete { background-color: var(--surface2); color: var(--text2); border-color: var(--border2); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%238b91a8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-pending   { background-color: var(--orange-bg); color: var(--orange); border-color: var(--orange); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23e67e22' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-select.s-maybe     { background-color: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23d4a843' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
-.status-select.s-skipped   { background-color: var(--red-bg); color: var(--red); border-color: var(--red); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-skipped   { background-color: transparent; color: var(--text2); border-color: transparent; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%238b91a8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 
 @media (prefers-color-scheme: light) {
   /* Dropdown arrow SVGs are hardcoded data-URIs (can't use CSS variables inside them),
      so light mode needs its own darker-tinted arrow colors matching the light palette above. */
-  .status-select.s-confirmed    { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%231a9e6a' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+  .status-select.s-confirmed    { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%235c6377' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
   .status-select.s-highpriority { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%239c7a1f' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
   .status-select.s-watching     { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%233763d8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
   .status-select.s-caughtup     { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%230f8a7a' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
   .status-select.s-complete     { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%235c6377' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
   .status-select.s-pending      { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c86a10' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
   .status-select.s-maybe        { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%239c7a1f' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
-  .status-select.s-skipped      { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+  .status-select.s-skipped      { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%235c6377' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 }
 
 .del-btn { background: none; border: none; cursor: pointer; color: var(--text3); padding: 2px 6px; border-radius: 4px; font-size: 16px; line-height: 1; transition: color 0.15s; }
@@ -360,10 +370,15 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .collection-tag-clickable:hover { background: var(--teal); color: var(--bg); border-color: var(--teal); }
 
 .more-cell { position: relative; }
-.more-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius); width: 28px; height: 28px; font-size: 14px; line-height: 1; color: var(--text2); cursor: pointer; }
-.more-btn:hover { border-color: var(--accent); color: var(--accent); }
+.show-title-row .more-cell, .card-top .more-cell { flex: none; display: inline-flex; }
+.more-btn { background: none; border: 1px solid transparent; border-radius: var(--radius); width: 28px; height: 28px; font-size: 14px; line-height: 1; color: var(--text2); cursor: pointer; flex: none; }
+.more-btn:hover, .more-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.more-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* An open menu's row: a dimmed (Skipped) row is at full strength, so the menu isn't dimmed or under later rows. */
+.menu-open td, .item-card.menu-open { opacity: 1; }
 
-.more-popover { position: absolute; z-index: 60; top: 100%; right: 0; margin-top: 4px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; min-width: 190px; box-shadow: 0 6px 18px rgba(0,0,0,0.45); text-align: left; }
+.more-popover .priority-select { width: 100%; }
+.more-popover { cursor: default; position: absolute; z-index: 60; top: 100%; right: 0; margin-top: 4px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; min-width: 190px; box-shadow: 0 6px 18px rgba(0,0,0,0.45); text-align: left; }
 .popover-section-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
 .ww-options-grid { display: flex; flex-direction: column; gap: 6px; }
 .ww-option { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }
@@ -372,7 +387,6 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .popover-action { display: block; width: 100%; text-align: left; background: none; border: 1px solid var(--teal); border-radius: var(--radius); padding: 5px 9px; font-size: 11px; color: var(--teal); cursor: pointer; }
 .popover-action:hover { background: var(--teal-bg); }
 
-.movie-card-condensed .card-top { position: relative; }
 .card-row-actions { display: flex; gap: 6px; align-items: center; }
 
 .empty-row td { text-align: center; padding: 2.5rem; color: var(--text3); font-size: 13px; }
@@ -448,20 +462,20 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .add-form-grid input:focus, .add-form-grid select:focus { outline: none; border-color: var(--accent); }
 
 /* ── Card list (mobile) ── */
-.card-list { display: none; flex-direction: column; gap: 10px; }
+.card-list { display: none; flex-direction: column; gap: 8px; }
 .card-year-group { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; padding: 10px 4px 2px; }
 .card-year-group:first-child { padding-top: 0; }
-.item-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; }
+.item-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 10px; }
 .item-card.row-skipped { opacity: 0.45; }
 .item-card.row-maybe { opacity: 0.7; }
-.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.card-top { position: relative; display: flex; align-items: flex-start; gap: 4px; margin-bottom: 4px; }
 .card-title-block { flex: 1; min-width: 0; }
 .card-title { font-weight: 500; color: var(--text); font-size: 15px; display: block; }
 .card-season { color: var(--text2); font-size: 12px; }
-.card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.card-meta { display: flex; align-items: center; gap: 2px 6px; margin-bottom: 6px; flex-wrap: wrap; }
 .card-date { color: var(--text2); font-size: 12px; }
 .card-actions { display: flex; gap: 8px; align-items: center; }
-.card-actions .status-select { flex: 1; font-size: 12px; padding: 7px 26px 7px 10px; }
+.card-actions .status-select { flex: 0 1 auto; font-size: 12px; padding: 7px 26px 7px 10px; }
 .card-actions .watch-btn { flex: 1; text-align: center; padding: 7px 10px; }
 .card-del-btn { background: none; border: none; cursor: pointer; color: var(--text3); padding: 4px 8px; font-size: 18px; line-height: 1; flex-shrink: 0; }
 .card-del-btn:hover { color: var(--red); }
@@ -472,7 +486,6 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 /* Stage 4b: two records with one TMDB identity (never merged automatically); the only place storage is named (tooltip). */
 .dup-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 4px; vertical-align: middle; background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); white-space: nowrap; }
 /* Stage 4b: the "+ Add" panel of a view, and the Catalog updates button. */
-.add-open-btn { margin-right: 8px; }
 .library-panel { margin-bottom: 12px; }
 .library-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .library-head strong { margin-right: 4px; }
@@ -531,10 +544,10 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-a
 .review-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
 
 /* ── Browse collections / All Movies (read-only views) ── */
-.browse-bar { background: var(--bg); padding: 10px 24px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.browse-bar { background: var(--bg); padding: 8px var(--page-gutter) 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .browse-bar-label { font-size: 12px; font-weight: 600; color: var(--text2); }
-.browse-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 12px; }
-.browse-title { font-size: 18px; font-weight: 600; margin: 0; }
+.browse-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin-bottom: 8px; }
+.browse-title { font-size: 16px; font-weight: 600; margin: 0; }
 .browse-note { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--text3); }
 .browse-back { padding: 4px 10px; font-size: 12px; }
 .browse-section-row th { text-align: left; background: var(--surface); padding: 7px 12px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
@@ -588,6 +601,9 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .filter-chip:hover .chip-x, .filter-chip:focus-visible .chip-x { color: var(--text); }
 .filter-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (min-width: 701px) { .filters > .browse-controls { display: flex; flex: 1 0 100%; flex-wrap: wrap; gap: 8px; } } /* B10 corr1 (F5) */
+.filter-more { order: 3; }
+.filter-chips { order: 4; }
+.show-title-main { min-width: 0; } /* the star, title, score and Low flow as one text, so they stay beside each other when a long title wraps */
 /* "Not applied": dashed and muted, never the applied chips' accent */
 .filter-chip.filter-chip-kept { border-style: dashed; border-color: var(--border2); background: transparent; color: var(--text2); }
 .filter-chip.filter-chip-kept .chip-v { font-weight: 500; }
@@ -601,17 +617,20 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .filter-clear { font-size: 13px; }
 .empty-clear { margin-left: 8px; }
 
-@media (max-width: 359px) {
-  .media-switch-icon { display: none; } /* S2: the primary buttons keep their words only */
+@media (max-width: 860px) {
+  .logo-text { display: none; } /* between the phone layout and here, the bar's room goes to the areas */
 }
 
 @media (max-width: 700px) {
-  .main { padding: 12px; }
+  .main { padding: 8px 12px 12px; }
+  /* One non-sticky row: TV, Movies, Collections and Settings (no logo). The areas share what's left
+     by their own widths, each label on one line; the view tabs share a row and wrap their labels. */
   .tabs { padding: 0 12px; }
-  .media-switch { padding: 8px 12px 0; }
-  /* S2V2-1: three equal shares (flex-basis 0, no min-content floor), each label on one line; the narrower
-     side padding lets "🗂 Collections" fit from 360 px and "Collections" at 300 px. */
-  .media-switch-btn { flex: 1 1 0; min-width: 0; padding: 8px 6px; white-space: nowrap; text-align: center; min-height: 44px; }
+  .tab { flex: 1 1 auto; min-height: 44px; padding: 4px 6px; white-space: normal; text-align: center; }
+  .tab-icon { display: none; }
+  .media-switch { flex: 1 1 auto; }
+  .media-switch-btn { flex: 1 1 auto; min-width: 0; padding: 8px 4px; white-space: nowrap; text-align: center; min-height: 44px; }
+  .media-switch-icon { display: none; }
   .collection-tab { min-height: 44px; }
   .collections-retry, .collections-create { min-height: 44px; }
 
@@ -620,42 +639,58 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 
   .add-form-grid { grid-template-columns: 1fr 1fr; }
 
-  .view-toggle { display: flex; width: 100%; margin-bottom: 8px; }
+  .view-toggle { display: flex; flex: 0 0 auto; }
+  .view-toggle-btn { min-height: 44px; }
   .browse-bar { padding: 8px 12px 0; }
   .browse-bar select { flex: 1; }
-  .browse-controls { display: block; width: 100%; }
-  .browse-controls .view-toggle-btn { min-height: 44px; }
+  .browse-controls { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 0 100%; min-width: 0; }
+  .browse-controls .view-toggle { flex: 1 1 auto; }
   .section-toggle { min-height: 44px; width: 100%; }
   .expand-btn { min-width: 44px; min-height: 44px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0; } /* Browse show cards; the chevron stays 20px */
-  .browse-toggles { width: 100%; margin-bottom: 8px; }
-  .browse-toggles .view-toggle { flex: 1 1 150px; width: auto; margin-bottom: 0; }
+  .more-btn { width: 44px; height: 44px; font-size: 16px; }
+  .card-top > .expand-btn { margin-left: -6px; } /* the 44 px targets reach into the card's padding, leaving the title its width */
+  .card-top > .more-cell { margin-right: -6px; }
+  .card-title-block { padding-top: 2px; }
+  .card-actions .status-select, .card-actions .watch-btn, .skip-btn, .show-actions-inner .ended-check { min-height: 44px; }
+  .card-actions .watch-btn { flex: 0 1 auto; margin-left: auto; min-width: 44px; }
+  .card-del-btn { min-width: 44px; min-height: 44px; }
+  .ep-toggle { min-width: 44px; }
+  .browse-toggles { flex: 1 1 auto; min-width: 0; }
+  .browse-toggles .view-toggle { flex: 1 1 auto; width: auto; }
   .browse-title { font-size: 16px; }
   .view-toggle-btn { flex: 1; padding: 8px 12px; }
-  .filters { flex-direction: column; align-items: stretch; }
-  /* B10 (D10): Search always visible; the scope controls and Filters share rows of 44 px targets. */
-  .filter-line { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
-  .filter-line .search-input { grid-column: 1 / -1; }
-  .filter-line select, .filter-line .search-input, .filter-more-btn { min-height: 44px; width: 100%; max-width: 100%; }
-  /* F6: a collection's TV seasons choice gets columns of at least 260 px (one column below 552 px) */
-  .filter-line:has(> .season-vis-select) { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  /* B10 (D10): Search always visible. Every control is a 44 px target; they wrap in page order, Search
+     keeping at least 150 px (below that it takes its own line), and nothing is squeezed or reordered. */
+  .list-toolbar { margin-bottom: 8px; }
+  .filter-line .search-input { flex: 1 1 150px; height: auto; min-height: 44px; }
+  .filter-line select { flex: 1 1 150px; min-width: 0; min-height: 44px; }
+  .filter-line .season-vis-select { flex-basis: 260px; } /* F6: a collection's TV seasons choice stays readable */
+  .filter-more-btn, .add-open-btn { min-height: 44px; flex: 0 0 auto; }
   .filter-more-btn { justify-content: center; }
+  .add-open-btn { order: 0; }
+  .stats-row { flex: 1 0 100%; margin: -2px 0 0; }
   .more-label-wide { display: none; }
   .more-label-narrow { display: inline; }
-  .filter-more { grid-template-columns: 1fr; flex: none; }
-  .filter-chips { flex: none; }
+  .filter-more { grid-template-columns: 1fr; }
   .filter-field select { min-height: 44px; }
-  .filters > * { min-width: 0; }
+  .filter-pill { min-height: 32px; display: inline-flex; align-items: center; } /* each one its own usable target */
+  .card-meta .mini-progress-track { display: none; } /* the words say it, and the bar would take a line of its own */
+  .card-actions .status-select { border-radius: var(--radius); }
   .filter-chip { min-height: 32px; max-width: min(100%, calc(100vw - 24px)); } /* B10 corr1 (F2) */
   .filter-chip .chip-x { width: 28px; height: 28px; }
   .filter-clear { min-height: 44px; }
   .collection-refresh-link { min-height: 44px; padding: 0 10px; } /* F7 */
   .empty-clear { min-height: 44px; }
-  .search-input { width: 100%; }
-  .search-input:focus { width: 100%; }
 
 
   .tmdb-search-row { flex-direction: column; }
   .tmdb-search-row input, .tmdb-search-row button { width: 100%; }
+}
+
+@media (max-width: 340px) {
+  /* Too narrow for Search beside its neighbours: the scope select takes a line and Filters and + Add share one. */
+  .filter-line select { flex-basis: 100%; }
+  .filter-more-btn, .add-open-btn { flex: 1 1 0; }
 }
 
 /* ─── Manage collections (Stage 3b-2) ─────────────────────────────────────── */
@@ -697,14 +732,20 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 }
 
 /* ── B4 / B5: status, priority, markers, categories, Details, earlier seasons ── */
-.status-select.s-film-to_watch { background-color: var(--green-dim); color: var(--green); border-color: var(--green-border); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%233ecf8e' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
-.status-select.s-film-watched { background-color: var(--teal-bg); color: var(--teal); border-color: var(--teal); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%2314b8a6' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
-.status-select.s-film-skipped, .status-select.s-film-pair { background-color: var(--red-bg); color: var(--red); border-color: var(--red); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-film-to_watch { background-color: transparent; color: var(--text2); border-color: transparent; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%238b91a8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-film-watched { background-color: transparent; color: var(--teal); border-color: var(--teal); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%2314b8a6' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+.status-select.s-film-skipped { background-color: transparent; color: var(--text2); border-color: transparent; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%238b91a8' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+@media (prefers-color-scheme: light) {
+  .status-select.s-film-to_watch, .status-select.s-film-skipped { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%235c6377' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
+}
+/* A status waiting for the owner's choice ("Choose a status…") never goes quiet. */
+.status-select.status-needs-choice { background-color: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
+.status-select.s-film-pair { background-color: var(--red-bg); color: var(--red); border-color: var(--red); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-pill.s-film-to_watch { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
 .status-pill.s-film-watched { background: var(--teal-bg); color: var(--teal); border-color: var(--teal); }
 .status-pill.s-film-skipped, .status-pill.s-film-pair { background: var(--red-bg); color: var(--red); border-color: var(--red); }
 .priority-high { color: var(--gold); font-weight: 700; }
-.priority-low { font-size: 11px; color: var(--text3); }
+.priority-low { display: inline-block; font-size: 11px; line-height: 1.3; color: var(--text2); border: 1px solid var(--border2); border-radius: 4px; padding: 0 4px; vertical-align: middle; }
 .priority-select { font-size: 12px; padding: 3px 8px; }
 .state-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 5px; vertical-align: middle; border: 1px solid; white-space: nowrap; }
 .state-tag.ended-tag { background: var(--surface2); color: var(--text2); border-color: var(--border2); }
@@ -751,6 +792,13 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .meta-chip { background: var(--chip-bg); color: var(--chip-fg); border-color: var(--chip-border); }
 .meta-chip.meta-forms { background: var(--chip-form-bg); color: var(--chip-form-fg); border-color: var(--chip-form-border); }
 .meta-chip.meta-franchises { background: var(--chip-fr-bg); color: var(--chip-fr-fg); border-color: var(--chip-fr-border); }
+/* Genres are subdued text ("Crime · Drama"). A clickable one stays a filter button: underlined on hover, the
+   filter pills' focus ring and pressed mark, and a box of its own. A label that isn't a filter here stays plain. */
+.meta-chip.meta-genres { background: none; border-color: transparent; color: var(--text2); padding: 2px 3px; font-size: 12px; border-radius: 4px; }
+.meta-chip.meta-genres:has(+ .meta-chip.meta-genres):not([aria-pressed="true"])::after { content: '·'; display: inline-block; margin-left: 6px; text-decoration: none; }
+button.meta-chip.meta-genres { min-height: 24px; }
+@media (max-width: 700px) { button.meta-chip.meta-genres { min-height: 32px; display: inline-flex; align-items: center; } }
+button.meta-chip.meta-genres:hover { filter: none; color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 .caught-ended { font-size: 12px; color: var(--text2); }
 .gap-note { display: block; font-size: 11px; color: var(--text3); margin-top: 2px; }
 .show-actions-inner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
@@ -768,9 +816,8 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 @media (max-width: 700px) { .filter-check { min-height: 44px; } }
 .details-candidate { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 6px; }
 @media (max-width: 700px) { .details-candidate select { min-height: 44px; } }
-/* B4/B5: the cards' action row also holds the priority select; it wraps rather than overflow on a narrow phone. */
+/* B4/B5: the cards' action row wraps rather than overflow on a narrow phone. */
 .card-actions, .card-subseason-row .card-actions { flex-wrap: wrap; }
-.card-actions .priority-select { flex: 0 0 auto; }
 .details-value { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 .details-value .search-input, .details-value .search-input:focus { flex: 1 1 auto; width: auto; min-width: 0; }
 .details-progress { font-size: 13px; color: var(--text2); margin-bottom: 4px; }
@@ -802,22 +849,20 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 700px) {
-  /* O5: logo · ⬇ Backup · ⚙ Settings on one line; the backup status on its own line. */
-  .topbar { padding: 10px 12px; gap: 8px; flex-wrap: nowrap; align-items: flex-start; }
-  .logo { min-height: 44px; flex-shrink: 0; }
-  .topbar-right { flex: 1 1 0; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
-  #backupBtn, .gear-btn { min-height: 44px; }
-  button.backup-age { flex-basis: 100%; text-align: right; min-height: 32px; white-space: normal; overflow-wrap: anywhere; }
-  /* "Saved ✓" sits on the status line (left), so the first line keeps only the two buttons. */
-  .save-status { position: absolute; left: 12px; bottom: 10px; line-height: 32px; }
+  .topbar { position: static; padding: 4px 12px; gap: 4px; }
+  body:not(.signed-out) .logo { display: none; }
+  .topbar-right { flex: none; }
+  .gear-btn { min-height: 44px; min-width: 44px; padding: 6px 8px; }
+  .gear-label { display: none; }
+  .settings-warn { margin-left: 2px; }
+  /* The header scrolls away here, so "Saved ✓" is a small notice over the page. */
+  .save-status { position: fixed; right: 12px; bottom: 12px; z-index: 150; padding: 4px 10px; font-size: 12px; background: var(--surface); border: 1px solid var(--green-border); border-radius: var(--radius); pointer-events: none; }
   .settings-grid { grid-template-columns: 1fr; gap: 12px; }
   .tmdb-credit-logo { min-height: 44px; }
   .settings-title { font-size: 18px; flex-basis: 100%; }
   .settings-head .btn, .settings-actions .btn { min-height: 44px; }
   .settings-actions .btn { flex: 1 1 100%; }
 }
-/* S1V-2 rev1: below 421px the wordmark leaves room for the icon, a busy "Backing up…" and ⚙ Settings on one line. */
-@media (max-width: 420px) { .logo-text { display: none; } }
 
 /* S3: a collection's Delete… link (D6), the effect-named dialog and a quiet reread's status line. */
 .season-delete-link { color: var(--red); font-size: 12px; white-space: nowrap; }

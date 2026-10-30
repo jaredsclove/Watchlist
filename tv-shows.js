@@ -155,14 +155,19 @@ function showStatusSelectHtml(show, opts = {}) {
   const stop = opts.stopPropagation;
   const prompt = show.status_review ? '<option value="" selected disabled>Choose a status…</option>' : '';
   const options = TV_STATUS_ORDER.map(s => `<option value="${s}"${!show.status_review && s === show.status ? ' selected' : ''}>${statusOptionLabel(s)}</option>`).join('');
-  return `<select class="status-select show-status-select s-${show.status}" aria-label="Status of ${esc(show.title)}" title="Show status — applies to every season of ${esc(show.title)}"${stop ? ' onclick="event.stopPropagation()"' : ''} onchange="${stop ? 'event.stopPropagation(); ' : ''}setShowStateById('${show.id}', { status: this.value })">${prompt}<optgroup label="Applies to all seasons of ${esc(show.title)}">${options}</optgroup></select>`;
+  return `<select class="status-select show-status-select s-${show.status}${show.status_review ? ' status-needs-choice' : ''}" aria-label="Status of ${esc(show.title)}" title="Show status — applies to every season of ${esc(show.title)}"${stop ? ' onclick="event.stopPropagation()"' : ''} onchange="${stop ? 'event.stopPropagation(); ' : ''}setShowStateById('${show.id}', { status: this.value })">${prompt}<optgroup label="Applies to all seasons of ${esc(show.title)}">${options}</optgroup></select>`;
 }
-// Priority (shows and films): kind 'show' | 'film'.
-function prioritySelectHtml(rec, kind, opts = {}) {
-  const stop = opts.stopPropagation;
+// Priority (shows and films; kind 'show' | 'film'), in the row's ⋯ menu. Choosing closes the menu.
+function prioritySelectHtml(rec, kind) {
   const fn = kind === 'show' ? `setShowStateById('${rec.id}', { priority: this.value })` : `setFilmPriority('${rec.id}', this.value)`;
-  return `<select class="priority-select p-${rec.priority}" aria-label="Priority of ${esc(rec.title)}" title="Priority"${stop ? ' onclick="event.stopPropagation()"' : ''} onchange="${stop ? 'event.stopPropagation(); ' : ''}${fn}">${PRIORITIES.map(p =>
+  return `<select class="priority-select p-${rec.priority}" aria-label="Priority of ${esc(rec.title)}" title="Priority" onchange="closeRowMenu(this); ${fn}">${PRIORITIES.map(p =>
     `<option value="${p}"${p === rec.priority ? ' selected' : ''}>${PRIORITY_LABELS[p]}</option>`).join('')}</select>`;
+}
+// A show row's ⋯ (the show's priority). It sits at the far right of the title area, apart from the
+// expand button before the title; a click in it never expands the row (toggleDerivedShow).
+function showMenuHtml(show, keyArg) {
+  return `<span class="more-cell"><button type="button" class="more-btn" data-action="more" aria-expanded="false" onclick="toggleMorePopover('${keyArg}', this)" title="Priority" aria-label="${esc(`More for ${show.title}`)}">⋯</button>
+        <div class="more-popover" id="more-popover-${esc(show.id)}" style="display:none"><div class="popover-section-label">Priority</div><span class="state-action" data-action="priority">${prioritySelectHtml(show, 'show')}</span></div></span>`;
 }
 
 // Skip / Keep for one season (never deletes anything).

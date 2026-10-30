@@ -102,10 +102,10 @@ test('C1 the primary row: TV · Movies · Collections, words for names, the phon
     .map(x => [x[1], x[2], x[3], x[4]]);
   assert.deepStrictEqual(btns, [['tv', "switchMediaType('tv')", '📺', 'TV'], ['movie', "switchMediaType('movie')", '🎬', 'Movies'], ['collections', 'openCollections(this)', '🗂', 'Collections']]);
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
-  assert.match(css, /@media \(max-width: 359px\) \{\s*\.media-switch-icon \{ display: none; \}/);
   const phone = css.slice(css.indexOf('@media (max-width: 700px)'));
-  // S2V2-1: equal shares (flex-basis 0, no min-content floor), one line, narrower side padding.
-  assert.match(phone, /\.media-switch-btn \{ flex: 1 1 0; min-width: 0; padding: 8px 6px; white-space: nowrap; text-align: center; min-height: 44px; \}/);
+  // One non-sticky row with Settings: words only, each label on one line, 44 px targets.
+  assert.match(phone, /\.media-switch-icon \{ display: none; \}/);
+  assert.match(phone, /\.media-switch-btn \{ flex: 1 1 auto; min-width: 0; padding: 8px 4px; white-space: nowrap; text-align: center; min-height: 44px; \}/);
   assert.match(phone, /\.collection-tab \{ min-height: 44px; \}/);
   assert.match(css, /\.collection-tabs \{[^}]*overflow-x: auto;/);
 });

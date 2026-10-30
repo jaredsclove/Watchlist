@@ -261,13 +261,13 @@ test('G3 F2 priority and F3 Show ended: one call each; only those columns', asyn
 });
 test('G3 F4 Watched (the season-named shortcut): set_season_watched {p_row_id, p_watched}; only that row’s watched', async () => {
   const { app, L, d, sent } = await flow(async (app, L) => {
-    assert.ok(html(app).includes(`data-shortcut-show="${L.alpha.show.id}"`) && html(app).includes('>Mark Season 2 watched</button>'));
+    assert.ok(html(app).includes(`data-shortcut-show="${L.alpha.show.id}"`) && html(app).includes('aria-label="Mark watched: Season 2 of Alpha') && html(app).includes('>Mark watched</button>'));
     await app.ctx.toggleWatch(L.alpha.rows[1].id);
   });
   assert.deepStrictEqual(sent.map(r => [path(r), body(r)]), [['rpc/set_season_watched', { p_row_id: L.alpha.rows[1].id, p_watched: true }]]);
   assert.deepStrictEqual(d, { watchlist_items: { added: [], removed: [], changed: { [L.alpha.rows[1].id]: ['watched'] } } });
   assert.ok(saved(app));
-  assert.ok(!html(app).includes(`toggleWatch('${L.alpha.rows[1].id}')">Mark Season 2 watched`), 'up next advanced');
+  assert.ok(!html(app).includes(`data-shortcut-show="${L.alpha.show.id}" aria-label="Mark watched: Season 2`), 'up next advanced');
 });
 test('G3 F4 an unaired season has no Watched control (“Not aired yet”)', async () => {
   const L = lib();
@@ -1199,13 +1199,13 @@ test('G6 F-5 / F-4: Skip hides a season entry under All (except Skipped) → the
   await app.ctx.setSeasonSkipped(L.lone.rows[0].id, true); await settle();
   assert.ok(dom.active() && 'data-empty' in dom.active().attrs, `F-4: ${desc(dom.active())}`);
 });
-test('G6 F-1: a priority change in a collection keeps focus on the priority select', async () => {
+test('G6 F-1: a priority change in a collection keeps focus on the row’s ⋯ (the menu closes first)', async () => {
   const L = lib();
   const app = await boot(L);
   await openTC(app);
   const dom = makeMiniDom(app);
   dom.hide('cardList');
-  const sel = `[data-item="${L.bravo.show.id}"] [data-action="priority"] select`;
+  const sel = `[data-item="${L.bravo.show.id}"] [data-action="more"]`;
   dom.focus('tbody', sel);
   await app.ctx.setShowStateById(L.bravo.show.id, { priority: 'high' }); await settle();
   assert.strictEqual(desc(dom.active()), desc(dom.in('tbody', sel)), 'F-1');

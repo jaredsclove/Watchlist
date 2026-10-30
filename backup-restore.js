@@ -149,10 +149,9 @@ function timestampForFilename() {
 
 
 // ─── Backup buttons ─────────────────────────────────────────────────────────
-// O5 (S1): ⬇ Backup in the header and ⬇ Download backup in Settings run the same backup
-// and share one busy state: while it runs both are disabled, the pressed one says
-// "Backing up…", and a second press (of either) does nothing.
-const BACKUP_LABELS = { backupBtn: '⬇ Backup', settingsBackupBtn: '⬇ Download backup' };
+// ⬇ Download backup in Settings (the only Backup action since the compact header): while it
+// runs it is disabled and says "Backing up…", and a second press does nothing.
+const BACKUP_LABELS = { settingsBackupBtn: '⬇ Download backup' };
 let backupBusy = false;
 let backupPressedId = null;
 
@@ -168,7 +167,7 @@ function setBackupButtons() {
 async function handleBackupClick(opener) {
   if (backupBusy) return;
   backupBusy = true;
-  backupPressedId = opener && BACKUP_LABELS[opener.id] ? opener.id : 'backupBtn';
+  backupPressedId = opener && BACKUP_LABELS[opener.id] ? opener.id : 'settingsBackupBtn';
   setBackupButtons();
   try {
     const backup = await buildBackupObject();
@@ -1329,8 +1328,8 @@ function recordBackupTimestamp() {
   updateBackupAgeIndicator();
 }
 
-// The backup status (this device's last backup for the signed-in account, from localStorage; no request): the same
-// text and colour in the header link and on Settings (S1).
+// The backup status (this device's last backup for the signed-in account, from localStorage; no request): shown in
+// Settings' Backup & Restore; a status with a class (none yet, or 14 days or more) also marks the header's Settings control.
 function backupStatus() {
   let lastStr = null;
   try { lastStr = userStorage.getItem(LAST_BACKUP_KEY); } catch (e) { lastStr = null; }
@@ -1344,11 +1343,7 @@ function backupStatus() {
 
 function updateBackupAgeIndicator() {
   const status = backupStatus();
-  const el = document.getElementById('backupAgeIndicator');
-  if (el) {
-    el.textContent = status.text;
-    el.className = status.cls ? `backup-age ${status.cls}` : 'backup-age';
-  }
+  updateSettingsWarning(status);
   const onSettings = document.getElementById('settingsBackupStatus');
   if (onSettings) {
     onSettings.textContent = status.text;

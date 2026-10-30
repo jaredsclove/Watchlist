@@ -217,7 +217,7 @@ test('the focus rule: focus on a list control follows its redraw after a change;
   const app = await open('alltv', data);
   const dom = makeMiniDom(app);
   dom.hide('cardList');
-  const sel = `[data-item="${a.show.id}"] [data-action="priority"] select`;
+  const sel = `[data-item="${a.show.id}"] [data-action="more"]`;
   dom.focus('tbody', sel);
   await app.ctx.setShowStateById(a.show.id, { priority: 'high' }); await settle();
   assert.strictEqual(dom.active(), dom.in('tbody', sel), 'the same control, redrawn');

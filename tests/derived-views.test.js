@@ -166,13 +166,15 @@ async function viewApp(data) {
 const tbody = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 
-test('render (B6): Currently Watching rows and cards carry no status or priority control (the expanded show does); Caught up has no Up to date pill', async () => {
+test('render (B6): Currently Watching rows and cards carry no status control (the expanded show does) and priority only in ⋯; Caught up has no Up to date pill', async () => {
   const p = show({ title: 'Progress', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-3) }]);
   const u = show({ title: 'Current', status: 'watching', tmdb_id: 101 }, [{ num: 1, w: true }, { num: 2, date: day(40) }]);
   const app = await viewApp(all(p, u));
   for (const html of [tbody(app), cards(app)]) {
     assert.strictEqual((html.match(/\{ status: this\.value \}/g) || []).length, 0, 'no show status control while collapsed');
-    assert.strictEqual((html.match(/\{ priority: this\.value \}/g) || []).length, 0, 'no priority control while collapsed');
+    assert.strictEqual((html.match(/\{ priority: this\.value \}/g) || []).length, 2, 'priority in each row’s ⋯');
+    assert.strictEqual((html.match(/data-action="priority"/g) || []).length, 2);
+    assert.strictEqual((html.match(/class="more-popover"/g) || []).length, 2);
     assert.ok(!/setStatus\(/.test(html), 'no row-level status control for TV');
     assert.ok(!html.includes('s-caughtup'), 'no Up to date pill on Caught up shows');
     assert.ok(html.includes(`Season 2 · ${disp(day(40))}`) && !html.includes('Next: '), 'no "Next:" prefix');

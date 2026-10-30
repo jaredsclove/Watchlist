@@ -129,7 +129,7 @@ const TV_EDIT_HANDLERS = new Set(['toggleDerivedShow', 'setShowStateById', 'togg
   'toggleEpisodes', 'retryEpisodes', 'toggleEpisodeTitle', 'setEpisodeMark',
   // EP2: the one Mark watched through control
   'chooseEpisodesThrough', 'applyEpisodesThrough']);
-const FILM_EDIT_HANDLERS = new Set(['setStatus', 'setFilmPriority', 'toggleMorePopover', 'toggleWatchWith', 'libraryPullRest', 'dismissCatalogNew',
+const FILM_EDIT_HANDLERS = new Set(['setStatus', 'setFilmPriority', 'toggleMorePopover', 'closeRowMenu', 'toggleWatchWith', 'libraryPullRest', 'dismissCatalogNew',
   'removeFromCollection']);
 function assertReadOnlyDom(app) {
   for (const id of ['filtersRow', 'statsRow', 'browseBar', 'viewHead']) {

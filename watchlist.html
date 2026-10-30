@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261030-cu1d">
+<link rel="stylesheet" href="styles.css?v=20261030-compact">
 </head>
 <body>
 
@@ -13,13 +13,12 @@
     <div class="logo-icon">📺</div>
     <div><div class="logo-text">Watchlist Tracker</div></div>
   </div>
+  <div class="media-switch" id="mediaSwitch"></div>
   <div class="topbar-right">
-    <button class="btn" id="backupBtn" onclick="handleBackupClick(this)">⬇ Backup</button>
+    <span class="save-status" id="saveStatus">Saved ✓</span>
     <span id="settingsEntry"></span>
     <input type="file" id="restoreFileInput" accept="application/json" style="display:none" onchange="handleRestoreFileSelected(event)">
     <input type="file" id="cuFileInput" accept="application/json" style="display:none" onchange="handleCuFileSelected(event)">
-    <span class="save-status" id="saveStatus">Saved ✓</span>
-    <button class="backup-age" id="backupAgeIndicator" title="Open Backup &amp; Restore in Settings" onclick="openSettings(this, 'backup')"></button>
   </div>
 </div>
 
@@ -48,8 +47,6 @@
   <div class="modal-box" id="effectModalBox" role="alertdialog" aria-modal="true" aria-labelledby="effectModalText" tabindex="-1" onkeydown="effectDialogKeydown(event)"></div>
 </div>
 
-<div class="media-switch" id="mediaSwitch"></div>
-
 <div class="tabs" id="tabBar"></div>
 
 <div class="browse-bar" id="browseBar"></div>
@@ -62,8 +59,10 @@
   <div id="errorBanner"></div>
   <div id="viewHead"></div>
   <div id="settingsScreen" class="settings-screen" style="display:none"></div>
-  <div class="filters" id="filtersRow"></div>
-  <div class="stats-row" id="statsRow"></div>
+  <div class="list-toolbar">
+    <div class="filters" id="filtersRow"></div>
+    <div class="stats-row" id="statsRow"></div>
+  </div>
   <div id="readStatus" class="read-status"></div>
 
   <div id="tmdbPanel" class="tmdb-panel" style="display:none"></div>
@@ -99,34 +98,34 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261030-cu1d"></script>
-<script src="api.js?v=20261030-cu1d"></script>
-<script src="write-lane.js?v=20261030-cu1d"></script>
-<script src="ui-helpers.js?v=20261030-cu1d"></script>
-<script src="metadata.js?v=20261030-cu1d"></script>
-<script src="backup-restore.js?v=20261030-cu1d"></script>
-<script src="backup-format3.js?v=20261030-cu1d"></script>
-<script src="tabs.js?v=20261030-cu1d"></script>
-<script src="render.js?v=20261030-cu1d"></script>
-<script src="row-actions.js?v=20261030-cu1d"></script>
-<script src="tmdb-search.js?v=20261030-cu1d"></script>
-<script src="collections-pull.js?v=20261030-cu1d"></script>
-<script src="universe-pull.js?v=20261030-cu1d"></script>
-<script src="person-pull.js?v=20261030-cu1d"></script>
-<script src="tmdb-match.js?v=20261030-cu1d"></script>
-<script src="derived-views.js?v=20261030-cu1d"></script>
-<script src="tv-shows.js?v=20261030-cu1d"></script>
-<script src="episodes.js?v=20261030-cu1d"></script>
-<script src="show-ratings.js?v=20261030-cu1d"></script>
-<script src="organization.js?v=20261030-cu1d"></script>
-<script src="organization-manage.js?v=20261030-cu1d"></script>
-<script src="collection-members.js?v=20261030-cu1d"></script>
-<script src="collection-updates.js?v=20261030-cu1d"></script>
-<script src="collection-research.js?v=20261030-cu1d"></script>
-<script src="collection-settings.js?v=20261030-cu1d"></script>
-<script src="browse-views.js?v=20261030-cu1d"></script>
-<script src="history.js?v=20261030-cu1d"></script>
-<script src="library.js?v=20261030-cu1d"></script>
+<script src="auth.js?v=20261030-compact"></script>
+<script src="api.js?v=20261030-compact"></script>
+<script src="write-lane.js?v=20261030-compact"></script>
+<script src="ui-helpers.js?v=20261030-compact"></script>
+<script src="metadata.js?v=20261030-compact"></script>
+<script src="backup-restore.js?v=20261030-compact"></script>
+<script src="backup-format3.js?v=20261030-compact"></script>
+<script src="tabs.js?v=20261030-compact"></script>
+<script src="render.js?v=20261030-compact"></script>
+<script src="row-actions.js?v=20261030-compact"></script>
+<script src="tmdb-search.js?v=20261030-compact"></script>
+<script src="collections-pull.js?v=20261030-compact"></script>
+<script src="universe-pull.js?v=20261030-compact"></script>
+<script src="person-pull.js?v=20261030-compact"></script>
+<script src="tmdb-match.js?v=20261030-compact"></script>
+<script src="derived-views.js?v=20261030-compact"></script>
+<script src="tv-shows.js?v=20261030-compact"></script>
+<script src="episodes.js?v=20261030-compact"></script>
+<script src="show-ratings.js?v=20261030-compact"></script>
+<script src="organization.js?v=20261030-compact"></script>
+<script src="organization-manage.js?v=20261030-compact"></script>
+<script src="collection-members.js?v=20261030-compact"></script>
+<script src="collection-updates.js?v=20261030-compact"></script>
+<script src="collection-research.js?v=20261030-compact"></script>
+<script src="collection-settings.js?v=20261030-compact"></script>
+<script src="browse-views.js?v=20261030-compact"></script>
+<script src="history.js?v=20261030-compact"></script>
+<script src="library.js?v=20261030-compact"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
