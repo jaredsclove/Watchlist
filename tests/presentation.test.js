@@ -63,7 +63,7 @@ test('B9: Movies has no secondary row (hidden, empty); TV keeps its three views'
   assert.strictEqual(app.get('activeViewId'), 'allmovies', 'the Movies button opens the film list directly');
   assert.strictEqual(app.el('tabBar').hidden, true);
   assert.strictEqual(app.el('tabBar').innerHTML, '');
-  assert.ok(app.el('viewHead').innerHTML.includes('🎞️ All Movies</h2>'), 'the content heading stays');
+  assert.ok(app.el('viewHead').innerHTML.includes('<h2 class="visually-hidden">All Movies</h2>'), 'the heading stays for screen readers');
   assert.strictEqual(app.el('browseBar').innerHTML, '', 'S2: no Browse row in Movies');
   assert.ok(!app.el('browseBar').innerHTML.includes('openCatalogChooser('), 'S1: Catalog updates is on Settings, not in the Browse bar');
   assert.deepStrictEqual(app.writes(), []);
@@ -87,7 +87,7 @@ test('B9: repeated TV ↔ Movies switches leave no stale row', async () => {
     app.ctx.switchMediaType('tv'); await settle();
     assert.strictEqual(app.el('tabBar').hidden, false);
     assert.strictEqual(app.get('activeViewId'), 'watching');
-    assert.ok(app.el('tabBar').innerHTML.includes('class="tab active" onclick="switchView(\'watching\')"'));
+    assert.ok(app.el('tabBar').innerHTML.includes('class="tab active" aria-current="page" onclick="switchView(\'watching\')"'));
   }
 });
 
@@ -107,11 +107,11 @@ test('B9: from a collection opened in Movies, Back and the Movies button both re
   assert.strictEqual(app.el('tabBar').hidden, true);
 });
 
-// ─── B2: the show-level shortcut names its season ─────────────────────────────
-const shortcuts = html => [...html.matchAll(/<button class="watch-btn show-shortcut" data-shortcut-show="([^"]*)" aria-label="([^"]*)" onclick="([^"]*)">([^<]*)<\/button>/g)]
-  .map(m => ({ show: m[1], aria: m[2], onclick: m[3], text: m[4] }));
+// ─── B2: the show-level shortcut reads Mark watched; its name and tooltip name the season ──
+const shortcuts = html => [...html.matchAll(/<button class="watch-btn show-shortcut" data-shortcut-show="([^"]*)" aria-label="([^"]*)" title="([^"]*)" onclick="([^"]*)">([^<]*)<\/button>/g)]
+  .map(m => ({ show: m[1], aria: m[2], title: m[3], onclick: m[4], text: m[5] }));
 
-test('B2: Currently Watching and All TV name the up-next season on the show-level shortcut, in table and cards', async () => {
+test('B2: Currently Watching and All TV: the show-level shortcut reads Mark watched and names the up-next season to assistive tech, in table and cards', async () => {
   const a = show({ title: 'Synthetic Neighbor Show', status: 'watching' }, [{ num: 1, date: day(-3) }]);
   for (const view of ['watching', 'alltv']) {
     const app = await boot(all(a));
@@ -120,12 +120,12 @@ test('B2: Currently Watching and All TV name the up-next season on the show-leve
     assert.strictEqual(rows.length, 1, `${view}: one shortcut in the table`);
     assert.strictEqual(cards.length, 1, `${view}: one shortcut in the cards`);
     for (const s of [rows[0], cards[0]]) {
-      assert.strictEqual(s.text, 'Mark Season 1 watched');
-      assert.strictEqual(s.aria, 'Mark Season 1 of Synthetic Neighbor Show watched');
+      assert.strictEqual(s.text, 'Mark watched');
+      assert.strictEqual(s.aria, 'Mark watched: Season 1 of Synthetic Neighbor Show');
+      assert.strictEqual(s.title, 'Mark Season 1 watched');
       assert.strictEqual(s.show, a.show.id);
       assert.ok(s.onclick.endsWith(`toggleWatch('${a.rows[0].id}')`));
     }
-    assert.ok(!/>Mark watched</.test(app.html()), `${view}: no bare "Mark watched" at show level`);
   }
 });
 
@@ -144,11 +144,12 @@ test('B2: the stored label is used verbatim (Volume, Specials, parts, a 60-chara
   for (const [s, label] of cases) {
     const b = got.find(x => x.show === s.show.id);
     assert.ok(b, `${s.show.title}: has a shortcut`);
-    assert.strictEqual(b.text, `Mark ${label} watched`);
+    assert.strictEqual(b.text, 'Mark watched');
+    assert.strictEqual(b.aria, `Mark watched: ${label} of ${s.show.title.replace(/"/g, '&quot;')}`);
     assert.ok(b.onclick.endsWith(`toggleWatch('${s.rows[s.rows.length - 1].id}')`));
   }
   assert.ok(!app.el('tbody').innerHTML.includes('<b>S1</b>'), 'the label is escaped');
-  assert.ok(app.html().includes('aria-label="Mark &lt;b&gt;S1&lt;/b&gt; &amp; &quot;x&quot; of O\'Neil &quot;Q&quot; watched"'), 'the accessible name is escaped (esc: & < > ")');
+  assert.ok(app.html().includes('aria-label="Mark watched: &lt;b&gt;S1&lt;/b&gt; &amp; &quot;x&quot; of O\'Neil &quot;Q&quot;"'), 'the accessible name is escaped (esc: & < > ")');
 });
 
 test('B2: an unaired up-next season shows "Not aired yet" and no shortcut', async () => {
@@ -157,7 +158,7 @@ test('B2: an unaired up-next season shows "Not aired yet" and no shortcut', asyn
   const app = await boot(all(a, b));
   app.ctx.switchView('alltv'); await settle();
   const got = shortcuts(app.el('tbody').innerHTML);
-  assert.deepStrictEqual(got.map(x => x.text), ['Mark Season 2 watched'], 'only the aired up-next season gets a shortcut');
+  assert.deepStrictEqual(got.map(x => x.title), ['Mark Season 2 watched'], 'only the aired up-next season gets a shortcut');
 });
 
 test('B2: with an active earlier-seasons range the shortcut names the range’s next season', async () => {
@@ -167,7 +168,7 @@ test('B2: with an active earlier-seasons range the shortcut names the range’s 
   const app = await boot(all(a));
   const got = shortcuts(app.el('tbody').innerHTML);
   assert.strictEqual(got.length, 1);
-  assert.strictEqual(got[0].text, 'Mark Season 1 watched');
+  assert.strictEqual(got[0].title, 'Mark Season 1 watched');
   assert.ok(got[0].onclick.endsWith(`toggleWatch('${a.rows[0].id}')`));
 });
 
@@ -201,12 +202,13 @@ function cwLibrary() {
   return { p, u, none, tba, text, data: all(p, u, none, tba, text) };
 }
 
-test('B6: Currently Watching has no Status column; collapsed rows and cards have no status or priority control', async () => {
+test('B6: Currently Watching has no Status column; collapsed rows and cards have no status control and priority only in ⋯', async () => {
   const { p, u, data } = cwLibrary();
   const app = await boot(data);
   assert.strictEqual(app.el('tableHead').innerHTML, '<tr><th>Show</th><th>Categories</th><th>Up next</th><th>Watched</th><th>Progress</th></tr>');
   for (const html of [tbody(app), cards(app)]) {
-    assert.ok(!/\{ status: this\.value \}|\{ priority: this\.value \}/.test(html), 'no status or priority select while collapsed');
+    assert.ok(!/\{ status: this\.value \}/.test(html), 'no status select while collapsed');
+    assert.ok(html.split('<select').slice(1).every(s => s.startsWith(' class="priority-select')), 'the only selects are priority, in the menus');
     assert.ok(!html.includes('s-caughtup'), 'no Up to date pill in Currently Watching');
   }
   assert.strictEqual(cellCount(showRowOf(app, p.show.id)), 5, 'in progress: Show · Categories · Up next · Watched · Progress');
@@ -281,7 +283,7 @@ test('B6 (decision 6): the hidden "Next season: " is only on phone cards, only b
   assert.ok(/\.visually-hidden \{[^}]*clip: rect\(0 0 0 0\)/.test(css));
 });
 
-test('B6: the expanded show has the labelled Status and Priority selects, a progress line and the existing actions, each with a focus hook', async () => {
+test('B6: the expanded show has the labelled Status select, a progress line and the existing actions, each with a focus hook', async () => {
   const s = show({ title: 'Full', status: 'watching', priority: 'high', catalog_new: true, status_review: true, ended: true },
     [{ num: 1, date: day(-900) }, { num: 2, w: true, date: day(-800) }, { num: 3, date: day(-10) }, { num: 4, date: day(30) }, { num: 5, s: true, date: day(-5) }]);
   const app = await boot(all(s));
@@ -298,7 +300,7 @@ test('B6: the expanded show has the labelled Status and Priority selects, a prog
   for (const [where, h] of [['table', tbody(app)], ['cards', cards(app)]]) {
     assert.ok(h.includes('<label class="state-field" data-action="status"><span class="state-field-label">Status</span> <select'), `${where}: Status`);
     assert.ok(h.includes('<option value="" selected disabled>Choose a status…</option>'), `${where}: review starts on Choose a status…`);
-    assert.ok(h.includes('<label class="state-field" data-action="priority"><span class="state-field-label">Priority</span> <select'), `${where}: Priority`);
+    assert.ok(!h.includes('<label class="state-field" data-action="priority">'), `${where}: priority is in ⋯`);
     assert.ok(h.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && h.includes(`setShowStateById('${s.show.id}', { priority: this.value })`), `${where}: the same writes as All TV's selects`);
     for (const a of ['details', 'ended', 'dismiss-new', 'keep-status', 'open-resume']) assert.ok(h.includes(`data-action="${a}"`), `${where}: ${a}`);
   }
@@ -326,7 +328,7 @@ test('B6: phone cards: in progress = title, season, categories, progress, shortc
   const app = await boot(data);
   const c = cardOf(app, p.show.id);
   const at = s => c.indexOf(s);
-  assert.ok(at('card-title') < at('card-season') && at('card-season') < at('card-meta') && at('card-meta') < at('1/2 watched') && at('mini-progress') < at('show-shortcut'), 'in-progress order');
+  assert.ok(at('card-title') < at('card-season') && at('card-season') < at('card-meta') && at('card-meta') < at('1/2 seasons watched') && at('mini-progress') < at('show-shortcut'), 'in-progress order');
   assert.ok(c.includes('<div class="card-actions shortcut-actions"'));
   const cu = cardOf(app, u.show.id);
   assert.ok(!cu.includes('card-meta') && !cu.includes('mini-progress') && !cu.includes('watched</span>'), 'caught up collapsed: no categories, no progress');
@@ -652,14 +654,13 @@ test('correction 1: the status select’s target survives the optimistic redraw 
   dom.focus('tbody', `[data-show-of="${a.show.id}"] [data-action="status"] select`);
   await app.ctx.setShowStateById(a.show.id, { status: 'confirmed' }); await settle();
   assert.strictEqual(dom.active(), dom.in('tbody', `[data-item="${b.show.id}"] [data-primary]`), 'F-5: Bravo’s expand button');
-  // All TV: a priority change keeps the same row's priority select (identity, not position).
+  // All TV: a priority change (the menu closes first) keeps the same row's ⋯ (identity, not position).
   const app2 = await boot(all(a, b));
   const dom2 = makeMiniDom(app2);
   app2.ctx.switchView('alltv'); await settle();
-  dom2.focus('tbody', `[data-item="${a.show.id}"] [data-action="priority"] select`);
+  dom2.focus('tbody', `[data-item="${a.show.id}"] [data-action="more"]`);
   await app2.ctx.setShowStateById(a.show.id, { priority: 'high' }); await settle();
-  assert.strictEqual(dom2.active(), dom2.in('tbody', `[data-item="${a.show.id}"] [data-action="priority"] select`));
-  assert.ok(dom2.active().attrs.class.includes('p-high'), 'the redrawn select');
+  assert.strictEqual(dom2.active(), dom2.in('tbody', `[data-item="${a.show.id}"] [data-action="more"]`));
 });
 
 test('correction 2: season actions are found by identity (season + action), never by their position among controls', async () => {
@@ -766,14 +767,9 @@ test('correction 6: every full-width row of Currently Watching spans its five co
   assert.ok(spans().every(x => x === '6'), `All TV rows span 6: ${spans()}`);
 });
 
-test('B2: the shortcut style wraps the full label and never truncates it', () => {
+test('B2: the shortcut is an ordinary one-line Mark watched button', () => {
   const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
-  const rule = (css.match(/\.watch-btn\.show-shortcut\s*\{([^}]*)\}/) || [])[1] || '';
-  assert.ok(/white-space:\s*normal/.test(rule), 'wraps (overrides .watch-btn nowrap)');
-  assert.ok(/overflow-wrap:\s*break-word/.test(rule) && !/anywhere/.test(rule), 'PV2-F1: wraps at word boundaries, not mid-word');
-  const desk = (css.match(/#desktopTable \.watch-btn\.show-shortcut\s*\{([^}]*)\}/) || [])[1] || '';
-  assert.ok(/min-width:\s*8\.5em/.test(desk) && /max-width:\s*14em/.test(desk), 'PV2-F1: room on desktop for an ordinary label');
-  assert.ok(!/ellipsis/.test(rule) && !/text-overflow:\s*ellipsis/.test(css.match(/show-shortcut[^}]*\}/g).join('')), 'no ellipsis');
+  assert.ok(!/\.watch-btn\.show-shortcut/.test(css), 'no two-line sizing is left');
 });
 
 T.run();

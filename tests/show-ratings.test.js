@@ -253,7 +253,7 @@ test('tap or click (Enter / Space activate a button) toggles the note without ex
   // The note sits in the flow (no popup) on a line of its own below the title, so the score stays beside the title and
   // the note wraps inside the row or card instead of overflowing.
   assert.match(css, /\.tmdb-rating-slot \{ display: contents;/);
-  assert.match(css, /\.show-title-left \{ display: flex; align-items: center; flex-wrap: wrap;/);
+  assert.match(css, /\.show-title-left \{ flex: 1 1 auto; display: flex; align-items: center; flex-wrap: wrap;/);
 });
 
 test('focus: the rating is a list control found by identity (data-action="rating"), so a redraw returns focus to it', async () => {

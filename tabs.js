@@ -8,12 +8,17 @@ function buildTabs() {
   // Settings (S1) has no view tabs, and nor has the Collections area (S2): its chooser is drawn
   // by buildBrowseBar.
   const views = isSettingsView() || activeArea === 'collections' ? [] : tabViewsFor(activeMediaType);
+  // A redraw keeps keyboard focus on the view tabs (the open view's tab takes it).
+  const active = document.activeElement;
+  const hadFocus = !!active && typeof active.closest === 'function' && !!active.closest('#tabBar');
   bar.hidden = views.length <= 1;
   bar.innerHTML = views.length <= 1 ? '' : views.map(v =>
-    `<div class="tab${v.id===activeViewId?' active':''}" onclick="switchView('${v.id}')">
-      <span class="tab-icon">${v.icon}</span>${esc(v.label)}
-    </div>`
+    `<button type="button" class="tab${v.id===activeViewId?' active':''}"${v.id===activeViewId?' aria-current="page"':''} onclick="switchView('${v.id}')"><span class="tab-icon" aria-hidden="true">${v.icon}</span>${esc(v.label)}</button>`
   ).join('');
+  if (hadFocus && typeof bar.querySelector === 'function') {
+    const open = bar.querySelector('.tab.active');
+    if (open && typeof open.focus === 'function') open.focus();
+  }
   buildBrowseBar();
   updateRestoreVisibility();
 }
@@ -38,7 +43,27 @@ function buildMediaSwitch() {
     if (again && again !== active && typeof again.focus === 'function') again.focus();
   }
   const entry = document.getElementById('settingsEntry');
-  if (entry) entry.innerHTML = `<button class="btn gear-btn" id="settingsBtn" aria-label="Settings &amp; Management"${onSettings ? ' aria-current="page"' : ''} onclick="openSettings(this)">⚙ Settings</button>`;
+  if (entry) {
+    entry.innerHTML = `<button class="btn gear-btn" id="settingsBtn" aria-label="Settings &amp; Management"${onSettings ? ' aria-current="page"' : ''} onclick="openSettings(this, settingsEntrySection())"><span aria-hidden="true">⚙</span><span class="gear-label"> Settings</span><span class="settings-warn" id="settingsWarn" aria-hidden="true" hidden>⚠</span></button>`;
+    updateSettingsWarning(backupStatus());
+  }
+}
+
+// The header's Settings control while a backup is missing or overdue: ⚠ (a shape, not only a colour), the status in
+// its name and tooltip, and it opens on Backup & Restore. Updated in place, so focus stays on it. A healthy backup
+// adds nothing here; its date is in Settings.
+function updateSettingsWarning(status) {
+  const btn = document.getElementById('settingsBtn');
+  if (!btn || typeof btn.setAttribute !== 'function') return;
+  const warn = !!status.cls;
+  btn.setAttribute('aria-label', warn ? `Settings & Management. ${status.text}` : 'Settings & Management');
+  btn.title = warn ? status.text : '';
+  btn.className = `btn gear-btn${warn ? ` has-warning ${status.cls}` : ''}`;
+  const mark = document.getElementById('settingsWarn');
+  if (mark) mark.hidden = !warn;
+}
+function settingsEntrySection() {
+  return backupStatus().cls ? 'backup' : undefined;
 }
 
 function switchMediaType(type) {

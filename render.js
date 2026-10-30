@@ -175,9 +175,10 @@ function filterFieldHtml(label, id, control) {
   return control ? `<div class="filter-field"><label class="filter-field-label" for="${id}">${esc(label)}</label>${control}</div>` : '';
 }
 
-// lead: what stays outside the filters (layout toggles, + Add); line: the scope controls;
-// cats / marks / more: the panel's fields, in that group order.
-function filterBarHtml({ lead = '', line = '', cats = [], marks = [], more = [] }) {
+// lead: what stays outside the filters before them (layout toggles); line: the scope controls;
+// trail: what follows More filters on the same line (+ Add); cats / marks / more: the panel's
+// fields, in that group order.
+function filterBarHtml({ lead = '', line = '', trail = '', cats = [], marks = [], more = [] }) {
   const groups = [['Categories', cats], ['Your marks', marks], ['More', more]].map(([title, fields]) => {
     const body = fields.filter(Boolean).join('');
     return body ? `<div class="filter-group" role="group" aria-label="${title}"><span class="filter-group-title" aria-hidden="true">${title}</span>${body}</div>` : '';
@@ -185,7 +186,7 @@ function filterBarHtml({ lead = '', line = '', cats = [], marks = [], more = [] 
   return `${lead}
     <div class="filter-line">
       <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" aria-label="Search titles" oninput="renderTable()">${line}
-      <button type="button" class="btn filter-more-btn" id="filterMoreBtn" aria-expanded="${filterPanelOpen}" aria-controls="filterMore" onclick="toggleFilterPanel()"><span class="more-label-wide">More filters</span><span class="more-label-narrow">Filters</span><span class="filter-count" id="filterMoreCount" aria-hidden="true" hidden></span><span class="visually-hidden" id="filterMoreA11y"></span> <span id="filterMoreChevron" aria-hidden="true">${filterPanelOpen ? '▴' : '▾'}</span></button>
+      <button type="button" class="btn filter-more-btn" id="filterMoreBtn" aria-expanded="${filterPanelOpen}" aria-controls="filterMore" onclick="toggleFilterPanel()"><span class="more-label-wide">More filters</span><span class="more-label-narrow">Filters</span><span class="filter-count" id="filterMoreCount" aria-hidden="true" hidden></span><span class="visually-hidden" id="filterMoreA11y"></span> <span id="filterMoreChevron" aria-hidden="true">${filterPanelOpen ? '▴' : '▾'}</span></button>${trail}
     </div>
     <div class="filter-more" id="filterMore" role="group" aria-label="More filters" onkeydown="filterPanelKeydown(event)"${filterPanelOpen ? '' : ' hidden'}>${groups}</div>
     <div class="filter-chips" id="filterChips"></div>`;
@@ -653,6 +654,13 @@ function watchWithPickerHtml(rowId, current) {
   }).join('');
 }
 
+// The row's ⋯ menu is a disclosure, not a role="menu": it mixes checkboxes, a select and buttons, which
+// keep their own keys, and it follows its button in the Tab order.
+function closeMorePopovers() {
+  document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.more-btn[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  document.querySelectorAll('.menu-open').forEach(r => r.classList.remove('menu-open'));
+}
 function toggleMorePopover(rowId, btn) {
   // Each movie row renders this popover twice (desktop table cell and mobile card),
   // so open the copy next to the tapped button rather than the first one by id.
@@ -661,8 +669,21 @@ function toggleMorePopover(rowId, btn) {
   if (!el) return;
   const isOpen = el.style.display !== 'none';
   // close any other open popovers first
-  document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
+  closeMorePopovers();
   el.style.display = isOpen ? 'none' : 'block';
+  if (isOpen || !btn) return;
+  btn.setAttribute('aria-expanded', 'true');
+  // A dimmed (Skipped) row keeps its open menu at full strength and above the rows after it.
+  const row = btn.closest('tr, .item-card');
+  if (row) row.classList.add('menu-open');
+}
+// A choice in the menu that redraws the list: the menu closes and focus goes to its ⋯ first, so the
+// focus rule keeps it there through the redraw.
+function closeRowMenu(control) {
+  const container = control.closest('.more-cell, .card-top');
+  const btn = container && container.querySelector('.more-btn');
+  closeMorePopovers();
+  if (btn) btn.focus();
 }
 
 // close any open popover when clicking elsewhere on the page
@@ -670,7 +691,21 @@ function toggleMorePopover(rowId, btn) {
 document.addEventListener('click', function(e) {
   if (e.target.isConnected === false) return;
   if (e.target.closest('.more-popover') || e.target.closest('.more-btn')) return;
-  document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
+  closeMorePopovers();
+});
+// Escape closes it and returns focus to its ⋯.
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Escape') return;
+  const open = [...document.querySelectorAll('.more-popover')].find(p => p.style.display !== 'none');
+  if (!open) return;
+  const btn = open.closest('.more-cell, .card-top').querySelector('.more-btn');
+  closeMorePopovers();
+  if (btn) btn.focus();
+});
+// Tabbing out of it closes it.
+document.addEventListener('focusin', function(e) {
+  const open = [...document.querySelectorAll('.more-popover')].find(p => p.style.display !== 'none');
+  if (open && !open.contains(e.target) && !e.target.closest('.more-btn')) closeMorePopovers();
 });
 
 
@@ -678,9 +713,9 @@ document.addEventListener('click', function(e) {
 // The watch control for one season row. Derived views pass requireReleased, which
 // replaces "Mark watched" with a note until the season has aired (a row already
 // marked watched keeps its toggle so it can be undone). compact is the mobile label.
-// opts.shortcutOf (B2): the show whose show-level shortcut this is; the button then names
-// the season it marks ("Mark Season 1 watched"), in full (it wraps, never truncates), and
-// its accessible name names the show too. Same action as the season row's button.
+// opts.shortcutOf (B2): the show whose show-level shortcut this is. It is drawn only beside the
+// up-next line that names the season it marks, so the button reads "Mark watched"; its accessible
+// name and tooltip name the season (and the show). Same action as the season row's button.
 function seasonWatchControlHtml(r, opts, compact) {
   if (isOffList(r)) return compact ? '' : `<span class="confirmed-lbl">—</span>`;
   if (opts.requireReleased && !r.watched && !isReleasedRow(r, opts.today)) {
@@ -689,7 +724,7 @@ function seasonWatchControlHtml(r, opts, compact) {
   const stop = opts.stopPropagation ? 'event.stopPropagation(); ' : '';
   const show = opts.shortcutOf;
   if (show && !r.watched) {
-    return `<button class="watch-btn show-shortcut" data-shortcut-show="${esc(show.id)}" aria-label="${esc(`Mark ${r.season} of ${show.title} watched`)}" onclick="${stop}toggleWatch('${r.id}')">Mark ${esc(r.season)} watched</button>`;
+    return `<button class="watch-btn show-shortcut" data-shortcut-show="${esc(show.id)}" aria-label="${esc(`Mark watched: ${r.season} of ${show.title}`)}" title="${esc(`Mark ${r.season} watched`)}" onclick="${stop}toggleWatch('${r.id}')">Mark watched</button>`;
   }
   const label = r.watched ? (compact ? '✓' : '✓ Watched') : 'Mark watched';
   return `<button class="watch-btn${r.watched?' watched':''}" onclick="${stop}toggleWatch('${r.id}')">${label}</button>`;

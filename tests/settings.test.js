@@ -46,7 +46,7 @@ const memStore = (initial = {}) => { const data = { ...initial }; return { data,
 // ─── N1, N2: entry, selected state, no reads ─────────────────────────────────────
 test('N1 the labelled gear opens Settings: the gear is the current page, no area is active, no tab or Browse row, the list hidden', async () => {
   const app = await boot();
-  assert.match(app.el('settingsEntry').innerHTML, /id="settingsBtn" aria-label="Settings &amp; Management" onclick="openSettings\(this\)">⚙ Settings</);
+  assert.match(app.el('settingsEntry').innerHTML, /id="settingsBtn" aria-label="Settings &amp; Management" onclick="openSettings\(this, settingsEntrySection\(\)\)"><span aria-hidden="true">⚙<\/span><span class="gear-label"> Settings</);
   assert.ok(!app.el('settingsEntry').innerHTML.includes('aria-current'), 'not current before');
   assert.ok(/media-switch-btn active/.test(app.el('mediaSwitch').innerHTML), 'TV active before');
   app.ctx.openSettings(null);
@@ -337,41 +337,34 @@ test('N11 a late redraw on Settings (filters, list) draws nothing', async () => 
 });
 
 // ─── N12, N13: Backup (O5) ──────────────────────────────────────────────────────
-test('N12 Backup in the header and on Settings: one build and download per press; while busy both disabled and the pressed one says "Backing up…"; a second press does nothing', async () => {
-  for (const pressedId of ['backupBtn', 'settingsBackupBtn', null]) {
+test('N12 Backup on Settings: one build and download per press; while busy it is disabled and says "Backing up…"; a second press does nothing', async () => {
+  for (const pressedId of ['settingsBackupBtn', null]) {
     const app = await boot();
     app.ctx.openSettings(null);
     let builds = 0, resolve;
     app.ctx.buildBackupObject = () => { builds++; return new Promise(r => { resolve = () => r({ formatVersion: 6 }); }); };
     const pressed = pressedId ? app.el(pressedId) : undefined;
     const run = app.ctx.handleBackupClick(pressed);
-    const busyId = pressedId || 'backupBtn';
-    const otherId = busyId === 'backupBtn' ? 'settingsBackupBtn' : 'backupBtn';
-    assert.strictEqual(app.el(busyId).disabled, true);
-    assert.strictEqual(app.el(otherId).disabled, true, 'both disabled');
-    assert.strictEqual(app.el(busyId).textContent, 'Backing up…');
-    assert.strictEqual(app.el(otherId).textContent, otherId === 'backupBtn' ? '⬇ Backup' : '⬇ Download backup');
-    await app.ctx.handleBackupClick(app.el('backupBtn'));
+    assert.strictEqual(app.el('settingsBackupBtn').disabled, true);
+    assert.strictEqual(app.el('settingsBackupBtn').textContent, 'Backing up…');
     await app.ctx.handleBackupClick(app.el('settingsBackupBtn'));
     assert.strictEqual(builds, 1, 'a press while busy does nothing');
     resolve(); await run; await settle();
     assert.strictEqual(app.downloads, 1);
-    for (const [id, label] of [['backupBtn', '⬇ Backup'], ['settingsBackupBtn', '⬇ Download backup']]) {
-      assert.strictEqual(app.el(id).disabled, false, `${id} enabled again`);
-      assert.strictEqual(app.el(id).textContent, label);
-    }
+    assert.strictEqual(app.el('settingsBackupBtn').disabled, false, 'enabled again');
+    assert.strictEqual(app.el('settingsBackupBtn').textContent, '⬇ Download backup');
   }
-  // A failure: reported as before, both buttons restored.
+  // A failure: reported as before, the button restored.
   const app = await boot();
   app.ctx.openSettings(null);
   app.ctx.buildBackupObject = async () => { throw new Error('boom'); };
   await app.ctx.handleBackupClick(app.el('settingsBackupBtn')); await settle();
   assert.match(app.el('errorBanner').innerHTML, /Backup failed: boom/);
   assert.strictEqual(app.downloads, 0);
-  assert.deepStrictEqual([app.el('backupBtn').disabled, app.el('settingsBackupBtn').disabled], [false, false]);
+  assert.strictEqual(app.el('settingsBackupBtn').disabled, false);
 });
 
-test('N13 the backup status is the same text and colour in the header link and on Settings, updated after a backup; no request', async () => {
+test('N13 the backup status is on Settings; a missing or overdue backup marks the header’s Settings control with the same text; updated after a backup; no request', async () => {
   const day = 24 * 60 * 60 * 1000;
   for (const [stored, text, cls] of [
     [null, 'No backup yet', 'warn'],
@@ -386,8 +379,11 @@ test('N13 the backup status is the same text and colour in the header link and o
     const before = app.requests.length;
     app.ctx.updateBackupAgeIndicator();
     assert.strictEqual(app.requests.length, before, 'no request');
-    assert.strictEqual(app.el('backupAgeIndicator').textContent, text);
-    assert.strictEqual(app.el('backupAgeIndicator').className, cls ? `backup-age ${cls}` : 'backup-age');
+    assert.strictEqual(app.el('settingsWarn').hidden, !cls, `the ⚠ shows only for a warning: ${text}`);
+    assert.strictEqual(app.el('settingsBtn').className, cls ? `btn gear-btn has-warning ${cls}` : 'btn gear-btn');
+    assert.strictEqual(app.el('settingsBtn').attrs['aria-label'], cls ? `Settings & Management. ${text}` : 'Settings & Management');
+    assert.strictEqual(app.el('settingsBtn').title, cls ? text : '');
+    assert.strictEqual(app.ctx.settingsEntrySection(), cls ? 'backup' : undefined, 'a warning opens on Backup & Restore');
     assert.ok(screen(app).includes(`class="settings-status${cls ? ' ' + cls : ''}" id="settingsBackupStatus">${text}</p>`), `Settings: ${text}`);
     assert.strictEqual(app.el('settingsBackupStatus').textContent, text, 'updated in place on Settings');
     assert.strictEqual(app.el('settingsBackupStatus').className, cls ? `settings-status ${cls}` : 'settings-status');
@@ -397,7 +393,7 @@ test('N13 the backup status is the same text and colour in the header link and o
   app.ctx.openSettings(null);
   await app.ctx.handleBackupClick(app.el('settingsBackupBtn')); await settle();
   assert.ok(storage.data[userKeyOf('watchlist_last_backup_at')], 'recorded');
-  assert.strictEqual(app.el('backupAgeIndicator').textContent, 'Backed up today');
+  assert.strictEqual(app.el('settingsWarn').hidden, true, 'the warning clears after a backup');
   assert.strictEqual(app.el('settingsBackupStatus').textContent, 'Backed up today');
   assert.strictEqual(app.el('settingsBackupStatus').className, 'settings-status');
 });
@@ -415,7 +411,7 @@ test('N14 Restore is offered only on Settings: no Restore control in the header,
   assert.ok(screen(app).includes('handleRestoreClick()'), 'on Settings');
 });
 
-test('N15 (S2) no Browse row in the library; the Collections chooser keeps Retry and "may be out of date", without Manage or Catalog updates; the header keeps Backup and the status link', async () => {
+test('N15 (S2) no Browse row in the library; the Collections chooser keeps Retry and "may be out of date", without Manage or Catalog updates; the header has no Backup action or status', async () => {
   const app = await boot();
   const bar = () => app.el('browseBar').innerHTML;
   assert.strictEqual(bar(), '', 'S2: no Browse row in the library');
@@ -429,12 +425,11 @@ test('N15 (S2) no Browse row in the library; the Collections chooser keeps Retry
   assert.ok(!/openManage\(|openCatalogChooser\(/.test(bar()));
   app.ctx.switchMediaType('movie'); await settle();
   assert.ok(!app.el('filtersRow').innerHTML.includes('openManage('), 'All Movies: no in-context Manage link, as at the baseline (none exists there)');
-  // The header: Backup kept (O5), the status link opens Settings at Backup & Restore (D8).
+  // The header: Backup and its status live in Settings; the ⚠ on the Settings control opens Backup & Restore.
   const page = require('fs').readFileSync(require('path').join(__dirname, '..', 'watchlist.html'), 'utf8');
-  assert.ok(page.includes('<button class="btn" id="backupBtn" onclick="handleBackupClick(this)">⬇ Backup</button>'));
-  assert.ok(page.includes(`<button class="backup-age" id="backupAgeIndicator" title="Open Backup &amp; Restore in Settings" onclick="openSettings(this, 'backup')"></button>`));
+  assert.ok(!page.includes('id="backupBtn"') && !page.includes('id="backupAgeIndicator"'));
   assert.ok(!page.includes('id="restoreBtn"'));
-  app.ctx.openSettings(app.el('backupAgeIndicator'), 'backup');
+  app.ctx.openSettings(app.el('settingsBtn'), 'backup');
   assert.strictEqual(app.get('activeViewId'), 'settings');
 });
 

@@ -476,8 +476,9 @@ function renderDerivedFilters() {
     ? yearFilterSelectHtml(deriveAllTv(derivedData.rows, tvShowsById, localTodayStr()).items.flatMap(x => x.seasons)) : '';
 
   filtersRowEl.innerHTML = filterBarHtml({
-    lead: `${presentationToggle}${libraryAddButtonHtml('tv')}`,
+    lead: presentationToggle,
     line: `${statusSelect}${seasonVisSelect}`,
+    trail: libraryAddButtonHtml('tv'),
     cats: [categoryFields],
     marks: [filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml()), markerFilterChecksHtml()],
     more: [filterFieldHtml('Year', 'fYear', yearSelect), filterFieldHtml('Progress', 'fProgress', progressSelect), filterFieldHtml('Original label', 'fTheme', themeSelect)]
@@ -861,7 +862,7 @@ function showProgressText(seasons) {
 // of the show with Watched and Skip / Keep. Currently Watching passes only
 // Watching shows; All TV passes shows of every status.
 // B6: in Currently Watching there is no status control on the row (it is in the expanded
-// show, with priority), and a caught-up show's row is compact (no progress, no "—").
+// show), and a caught-up show's row is compact (no progress, no "—").
 // S3: a collection's show entry is All TV's (browse-views.js browseShowHtml). opts: { section
 // (its focus section), kindTag (Combined), dateHtml (the collection's date text for a season),
 // expandBtn (the collection's own expand button, given isExpanded) }.
@@ -878,12 +879,12 @@ function derivedShowHtml(item, today, opts = {}) {
     ? ` <span class="state-tag resume-tag" title="Watching earlier seasons">Earlier seasons from ${esc(range.start.season)}</span>` : '';
   // Item 2: the TMDB score directly after the title, in rows and cards alike (show-ratings.js).
   const rating = showRatingHtml(show);
-  const titleHtml = `${priorityMarkHtml(show.priority)}<span class="show-title">${esc(item.title)}</span>${rating ? ` ${rating}` : ''}${priorityMarkHtml(show.priority, true)}${stateTagsHtml(show, 'show')}${resumeTag}`;
+  const titleHtml = `<span class="show-title-main">${priorityMarkHtml(show.priority)}<span class="show-title">${esc(item.title)}</span>${rating ? ` ${rating}` : ''}${priorityMarkHtml(show.priority, true)}</span>${stateTagsHtml(show, 'show')}${resumeTag}`;
 
   const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;
   const progressPct = trackable.length > 0 ? Math.round(watchedCount / trackable.length * 100) : 0;
-  const progressLabel = trackable.length > 0 ? `${watchedCount}/${trackable.length} watched` : `${seasons.length} season${seasons.length === 1 ? '' : 's'}`;
+  const progressLabel = trackable.length > 0 ? `${watchedCount}/${trackable.length} season${trackable.length === 1 ? '' : 's'} watched` : `${seasons.length} season${seasons.length === 1 ? '' : 's'}`;
   const progressBarHtml = trackable.length > 0
     ? `<div class="mini-progress-track"><div class="mini-progress-fill" style="width:${progressPct}%"></div></div>`
     : '';
@@ -928,6 +929,7 @@ function derivedShowHtml(item, today, opts = {}) {
   // The focus hooks (B6): the show's row or card, and the section it is listed in.
   const section = cw ? (upToDate ? 'uptodate' : 'inprogress') : opts.section || 'all';
   const kindTag = opts.kindTag || '';
+  const menu = showMenuHtml(show, keyArg);
   const showAttrs = `data-item="${esc(key)}" data-show-row="${esc(key)}" data-row-section="${section}"`;
   const ofAttr = `data-show-of="${esc(key)}"`;
 
@@ -939,8 +941,9 @@ function derivedShowHtml(item, today, opts = {}) {
     let row = `<tr class="show-group-row derived-show-row${dimClass}" ${showAttrs} onclick="toggleDerivedShow('${keyArg}', event)">
       <td>
         <div class="show-title-row">
-          <div class="show-title-left">${titleHtml}</div>
           ${expandBtn}
+          <div class="show-title-left">${titleHtml}</div>
+          ${menu}
         </div>
       </td>
       <td>${badges}</td>
@@ -957,11 +960,12 @@ function derivedShowHtml(item, today, opts = {}) {
       : isExpanded ? `<div class="card-meta">${badges} <span class="card-date">${showProgressText(seasons)}</span></div>` : '';
     const card = `<div class="item-card show-group-card${dimClass}" ${showAttrs}>
       <div class="card-top" onclick="toggleDerivedShow('${keyArg}', event)" style="cursor:pointer">
+        ${expandBtn}
         <div class="card-title-block">
           <span class="card-title">${titleHtml}</span>
           <span class="card-season">${nextCard}</span>
         </div>
-        ${expandBtn}
+        ${menu}
       </div>
       ${meta}
       ${inProgress ? `<div class="card-actions shortcut-actions" onclick="event.stopPropagation()">${shortcut}</div>` : ''}
@@ -974,13 +978,14 @@ function derivedShowHtml(item, today, opts = {}) {
   let row = `<tr class="show-group-row derived-show-row${dimClass}" ${showAttrs} onclick="toggleDerivedShow('${keyArg}', event)">
       <td>
         <div class="show-title-row">
-          <div class="show-title-left">${titleHtml}${kindTag}</div>
           ${expandBtn}
+          <div class="show-title-left">${titleHtml}${kindTag}</div>
+          ${menu}
         </div>
       </td>
       <td>${badges}</td>
       <td class="date-cell">${nextCell}</td>
-      <td><span class="state-action" data-action="status">${showStatusSelectHtml(show, { stopPropagation: true })}</span> <span class="state-action" data-action="priority">${prioritySelectHtml(show, 'show', { stopPropagation: true })}</span>${upToDatePill}</td>
+      <td><span class="state-action" data-action="status">${showStatusSelectHtml(show, { stopPropagation: true })}</span>${upToDatePill}</td>
       <td>${watchCell}</td>
       <td class="card-date">${progressLabel}${progressBarHtml}</td>
     </tr>`;
@@ -990,11 +995,12 @@ function derivedShowHtml(item, today, opts = {}) {
 
   const card = `<div class="item-card show-group-card${dimClass}" ${showAttrs}>
       <div class="card-top" onclick="toggleDerivedShow('${keyArg}', event)" style="cursor:pointer">
+        ${expandBtn}
         <div class="card-title-block">
           <span class="card-title">${titleHtml}</span>${kindTag}
           <span class="card-season">${nextCard}</span>
         </div>
-        ${expandBtn}
+        ${menu}
       </div>
       <div class="card-meta">
         ${badges}
@@ -1002,7 +1008,7 @@ function derivedShowHtml(item, today, opts = {}) {
         ${progressBarHtml}
       </div>
       <div class="card-actions" onclick="event.stopPropagation()">
-        <span class="state-action" data-action="status">${showStatusSelectHtml(show)}</span> <span class="state-action" data-action="priority">${prioritySelectHtml(show, 'show')}</span>${upToDatePill}
+        <span class="state-action" data-action="status">${showStatusSelectHtml(show)}</span>${upToDatePill}
         ${inProgress ? seasonWatchControlHtml(upNext, shortcutOpts, false) : ''}
       </div>
       ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${actions}</div>${seasons.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}${addSeasonBtn ? `<div class="card-subseason-row" ${ofAttr}>${addSeasonBtn}</div>` : ''}</div>` : ''}
@@ -1013,8 +1019,8 @@ function derivedShowHtml(item, today, opts = {}) {
 
 // An expanded show's own actions (B4/B5): Details, Show ended, the markers, and the
 // earlier-seasons range (Watch earlier seasons; the chooser; Stop).
-// opts.state (B6, Currently Watching): the status and priority selects come first, labelled
-// (the row has none); opts.progress: a line of season progress. data-action marks each
+// opts.state (B6, Currently Watching): the status select comes first, labelled (the row has
+// none; priority is in the row's ⋯); opts.progress: a line of season progress. data-action marks each
 // control for focus after a redraw.
 function showActionsHtml(item, keyArg, opts = {}) {
   const { show, seasons } = item;
@@ -1022,8 +1028,7 @@ function showActionsHtml(item, keyArg, opts = {}) {
   const gap = gapSeasons(seasons);
   const parts = [];
   if (opts.state) {
-    parts.push(`<label class="state-field" data-action="status"><span class="state-field-label">Status</span> ${showStatusSelectHtml(show)}</label>`,
-      `<label class="state-field" data-action="priority"><span class="state-field-label">Priority</span> ${prioritySelectHtml(show, 'show')}</label>`);
+    parts.push(`<label class="state-field" data-action="status"><span class="state-field-label">Status</span> ${showStatusSelectHtml(show)}</label>`);
   }
   if (opts.progress) parts.push(`<span class="show-progress-line">${showProgressText(seasons)}</span>`);
   parts.push(`<button class="btn btn-link" data-action="details" onclick="openDetails('show', '${keyArg}', this)">Details…</button>`,
@@ -1155,7 +1160,7 @@ function comingSoonRowHtml(r, today, section = 'dated') {
 // doesn't also toggle; the expand button calls this without an event.
 function toggleDerivedShow(key, ev) {
   const target = ev && ev.target;
-  if (target && typeof target.closest === 'function' && target.closest('button, select, input, label, a, textarea')) return;
+  if (target && typeof target.closest === 'function' && target.closest('button, select, input, label, a, textarea, .more-cell')) return;
   if (expandedShows.has(key)) expandedShows.delete(key);
   else { expandedShows.add(key); requestShowRating(tvShowsById.get(key)); }
   renderTable();

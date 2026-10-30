@@ -133,11 +133,11 @@ test('§5: each view and mode has Search, its scope controls and More filters on
   assert.ok(readsOnly(app));
 });
 
-test('§5: layout controls and + Add stay outside the filters, before the filter line; the old collapse toggle is gone', async () => {
+test('§5: layout controls come before the filter line and + Add after More filters, outside the panel; the old collapse toggle is gone', async () => {
   const app = await boot();
   await allTv(app);
   let f = fb(app);
-  assert.ok(f.indexOf('view-toggle') < f.indexOf('class="filter-line"') && f.indexOf('add-open-btn') < f.indexOf('class="filter-line"'));
+  assert.ok(f.indexOf('view-toggle') < f.indexOf('class="filter-line"') && f.indexOf('id="filterMoreBtn"') < f.indexOf('add-open-btn') && f.indexOf('add-open-btn') < f.indexOf('id="filterMore"'));
   await collection(app);
   f = fb(app);
   for (const s of ['data-media="all"', 'data-presentation="shows"', 'data-grouping="separate"']) assert.ok(f.indexOf(s) < f.indexOf('class="filter-line"'), s);
@@ -564,7 +564,7 @@ test('CSS: the panel hides with [hidden], phone rules replace the collapse; calc
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   assert.ok(css.includes('.filter-more[hidden] { display: none; }') && css.includes('.filter-count[hidden] { display: none; }'));
   assert.ok(!/filter-toggle-btn|filters-inner|\.filters\.collapsed/.test(css), 'the collapse rules are gone');
-  assert.ok(/\.filter-line \{ display: grid;/.test(css) && /\.filter-chip \.chip-x \{ width: 28px; height: 28px; \}/.test(css), 'phone rules');
+  assert.ok(/\.filter-line \.search-input \{ flex: 1 1 150px;/.test(css) && /\.filter-chip \.chip-x \{ width: 28px; height: 28px; \}/.test(css), 'phone rules');
   for (const light of [false, true]) {
     const t = { ...tokens(css, false), ...(light ? tokens(css, true) : {}) };
     const pairs = [['chip text', t.text, t['accent-dim']], ['chip kind', t.text, t['accent-dim']], ['kept chip', t.text2, t.bg],
@@ -599,7 +599,7 @@ test('corr1 (F1, F2, F5): kept chips are a two-row grid inside their box; chips 
   assert.ok(/\.filter-chip\.filter-chip-kept \.chip-na \{[^}]*white-space: normal;/.test(css), 'F1: the context may wrap (and wins over the general nowrap rule by specificity)');
   assert.ok(/\.filter-chips \{[^}]*min-width: 0; max-width: 100%;/.test(css) && /\.chip-group \{ display: flex;[^}]*min-width: 0; max-width: 100%;/.test(css), 'F2: rows and groups shrink');
   const phone = css.slice(css.indexOf('/* B10 (D10)'));
-  assert.ok(/\.filters > \* \{ min-width: 0; \}/.test(phone) && /\.filter-chip \{ min-height: 32px; max-width: min\(100%, calc\(100vw - 24px\)\); \}/.test(phone), 'F2: phone bounds');
+  assert.ok(/\.filter-chip \{ min-height: 32px; max-width: min\(100%, calc\(100vw - 24px\)\); \}/.test(phone), 'F2: phone bounds');
   assert.ok(/@media \(min-width: 701px\) \{ \.filters > \.browse-controls \{ display: flex; flex: 1 0 100%;/.test(css), 'F5: desktop toggles on their own line');
 });
 
@@ -676,8 +676,7 @@ test('follow-up F6: only a collection\'s TV seasons select carries the marker cl
   assert.ok(!tvSel.includes('season-vis-select') && tvSel.includes('aria-label="Seasons"'), 'All TV unchanged (outside scope)');
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   const phone = css.slice(css.indexOf('/* B10 (D10)'), css.indexOf('/* ─── Manage collections'));
-  assert.ok(/\.filter-line:has\(> \.season-vis-select\) \{ grid-template-columns: repeat\(auto-fit, minmax\(260px, 1fr\)\); \}/.test(phone), 'phone-only rule, 260 px columns');
-  assert.ok(/\.filter-line \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(140px, 1fr\)\); gap: 8px; \}/.test(phone), 'the general phone grid is unchanged');
+  assert.ok(/\.filter-line \.season-vis-select \{ flex-basis: 260px; \}/.test(phone), 'phone-only rule, 260 px wide');
   assert.strictEqual((css.match(/season-vis-select/g) || []).length, 1, 'no desktop rule');
 });
 

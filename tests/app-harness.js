@@ -947,7 +947,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     const classes = new Set();
     let html = '';
     const el = {
-      id, tagName: 'DIV', value: '', textContent: '', style: {}, dataset: {}, options: [],
+      id, tagName: 'DIV', value: '', textContent: '', style: {}, dataset: {}, options: [], attrs: {},
+      setAttribute(k, v) { el.attrs[k] = String(v); },
       classList: {
         add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c),
         toggle: c => (classes.has(c) ? classes.delete(c) : classes.add(c))

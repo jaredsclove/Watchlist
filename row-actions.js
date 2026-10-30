@@ -63,7 +63,7 @@ function filmStatusSelectHtml(r) {
   const prompt = r.status_review ? '<option value="" selected disabled>Choose a status…</option>' : '';
   const states = state === 'pair' ? ['pair', 'to_watch', 'watched', 'skipped'] : ['to_watch', 'watched', 'skipped'];
   const options = states.map(v => `<option value="${v}"${!r.status_review && v === state ? ' selected' : ''}${v === 'pair' ? ' disabled' : ''}>${FILM_STATE_LABELS[v]}</option>`).join('');
-  return `<select class="status-select s-film-${state}" onchange="setStatus('${r.id}', this.value, this)" aria-label="Status of ${esc(r.title)}">${prompt}${options}</select>`;
+  return `<select class="status-select s-film-${state}${r.status_review ? ' status-needs-choice' : ''}" onchange="setStatus('${r.id}', this.value, this)" aria-label="Status of ${esc(r.title)}">${prompt}${options}</select>`;
 }
 
 // Selector → To Watch / Watched / Skipped (O1, one guarded call). Choosing the state already

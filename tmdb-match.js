@@ -113,7 +113,7 @@ function openTmdbMatch(rowId) {
   if (!row || !isTmdbMatchEligible(row)) return;
   openLibraryPanel(isFilmRow(row) ? 'movie' : 'tv', 'match');
   cancelTMDBPreview();
-  document.querySelectorAll('.more-popover').forEach(p => p.style.display = 'none');
+  if (typeof closeMorePopovers === 'function') closeMorePopovers();
   document.getElementById('tmdbResults').innerHTML = '';
   window.__tmdbMatch = { rowId, results: [], target: null };
   const previewEl = document.getElementById('tmdbPreview');

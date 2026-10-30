@@ -18,7 +18,7 @@ function buildPage(rowIds) {
     const container = { className: where === 'desktop' ? 'more-cell' : 'card-top' };
     const popover = { id: `more-popover-${rowId}`, where, rowId, style: { display: 'none' } };
     container.querySelector = sel => (sel === '.more-popover' ? popover : null);
-    const btn = { where, rowId, closest: sel => (sel === '.more-cell, .card-top' ? container : null) };
+    const btn = { where, rowId, setAttribute() {}, closest: sel => (sel === '.more-cell, .card-top' ? container : null) };
     all.push(popover);
     return { btn, popover };
   };
