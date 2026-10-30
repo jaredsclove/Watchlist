@@ -716,4 +716,48 @@ test('Movie tools: a person collection tags only films stored with the films; on
   assert.match(preview(app), /Dune: Part Two[\s\S]*Already added/);
 });
 
+// ── CU1d: a new show's network ──
+const network = (app, title) => { const s = showOf(app, title); return [s.network ?? null, (s.network_candidates || []).slice(), !!s.metadata_owner_set]; };
+test('a new show with one TMDB network: confirmed straight after creation, not recorded as the owner’s choice', async () => {
+  const app = await boot();
+  await allTv(app); await openPanel(app);
+  await choose(app, 777, 'Brand New');
+  tick(app, [1]);
+  await app.ctx.addSelectedTMDBSeasons(); await settle();
+  assert.strictEqual(rpc(app, 'library_cu_sync_show_network').length, 1);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rpc(app, 'library_cu_sync_show_network')[0].body)), { p_show_id: showOf(app, 'Brand New').id, p_networks: ['HBO'],
+    p_expected: { tmdb_id: 777, network: null, network_candidates: ['HBO'], metadata_owner_set: false } });
+  assert.deepStrictEqual(network(app, 'Brand New'), ['HBO', ['HBO'], false]);
+});
+test('a new show with several TMDB networks: nothing is guessed, and the owner is told; with none: left unset', async () => {
+  const app = await boot(undefined, { tmdb: p => (p === '/tv/777' ? { ...TMDB['/tv/777'], networks: [{ name: 'HBO' }, { name: 'Max' }] } : tmdb(p)) });
+  await allTv(app); await openPanel(app);
+  await choose(app, 777, 'Brand New');
+  tick(app, [1]);
+  await app.ctx.addSelectedTMDBSeasons(); await settle();
+  assert.deepStrictEqual(rpc(app, 'library_cu_sync_show_network'), []);
+  assert.deepStrictEqual(network(app, 'Brand New'), [null, ['HBO', 'Max'], false]);
+  assert.match(app.el('libraryOutcome').innerHTML, /TMDB lists several networks \(HBO, Max\); choose one in the show’s Details\./);
+  const app2 = await boot(undefined, { tmdb: p => (p === '/tv/777' ? { ...TMDB['/tv/777'], networks: [] } : tmdb(p)) });
+  await allTv(app2); await openPanel(app2);
+  await choose(app2, 777, 'Brand New');
+  tick(app2, [1]);
+  await app2.ctx.addSelectedTMDBSeasons(); await settle();
+  assert.deepStrictEqual(rpc(app2, 'library_cu_sync_show_network'), []);
+  assert.deepStrictEqual(network(app2, 'Brand New'), [null, [], false]);
+});
+test('a confirmation that fails doesn’t undo the addition, isn’t resent, and says Refresh shows will try again', async () => {
+  const app = await boot();
+  await allTv(app); await openPanel(app);
+  await choose(app, 777, 'Brand New');
+  tick(app, [1]);
+  app.failNext(r => r.url.endsWith('/rpc/library_cu_sync_show_network'));
+  await app.ctx.addSelectedTMDBSeasons(); await settle();
+  assert.strictEqual(rpc(app, 'library_cu_sync_show_network').length, 1);
+  assert.ok(showOf(app, 'Brand New'), 'the show is added');
+  assert.deepStrictEqual(network(app, 'Brand New'), [null, ['HBO'], false]);
+  assert.match(app.el('libraryOutcome').innerHTML, /Added/);
+  assert.match(app.el('libraryOutcome').innerHTML, /Its network \(HBO\) couldn’t be confirmed just now; Refresh shows will try again\./);
+});
+
 T.run();

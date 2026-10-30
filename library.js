@@ -610,14 +610,28 @@ async function libraryNewShow(ctx, showInfo, seasons, unmapped = []) {
       libraryReport(ctx, f.text, true);
       return;
     }
+    const networkNote = res && res.show_created ? await libraryConfirmNetwork(showInfo, res.show_id) : '';
     await libraryAfterWrite(ctx);
     if (!res || !res.show_created) { // not expected from library_create_show_b45; never reported as a new show
       libraryReport(ctx, `The answer didn’t confirm a new show “${showInfo.title}”. Check your list before adding again.`, true);
       return;
     }
     if ((res.inserted || []).length) showSaved();
-    libraryReport(ctx, libraryAddText({ ...res, unmapped }, showInfo.title), false, libraryMembershipHtml(ctx, { show_id: res.show_id }, showInfo.title));
+    libraryReport(ctx, [libraryAddText({ ...res, unmapped }, showInfo.title), networkNote].filter(Boolean).join(' '), false, libraryMembershipHtml(ctx, { show_id: res.show_id }, showInfo.title));
   });
+}
+// A new TMDB show's network (CU1d): creation can't set one, so a sole TMDB network is confirmed straight after, in
+// the same change; several wait for the owner's choice. The show is added either way: a confirmation that fails
+// is never resent, and the next Refresh shows confirms it. The sentence for the outcome ('' when there's nothing to say).
+async function libraryConfirmNetwork(showInfo, showId) {
+  const names = showInfo.network_candidates || [];
+  if (showInfo.tmdb_id == null || !names.length) return '';
+  if (names.length > 1) return `TMDB lists several networks (${names.join(', ')}); choose one in the show’s Details.`;
+  try {
+    await sbRpc('library_cu_sync_show_network', { p_show_id: showId, p_networks: names,
+      p_expected: { tmdb_id: showInfo.tmdb_id, network: null, network_candidates: names, metadata_owner_set: false } });
+    return '';
+  } catch (e) { return `Its network (${names[0]}) couldn’t be confirmed just now; Refresh shows will try again.`; }
 }
 
 // A film: from TMDB through library_add_films (already on the list: reported, not

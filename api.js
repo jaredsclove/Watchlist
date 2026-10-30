@@ -106,7 +106,7 @@ async function sbRequest(method, path, body, headers, onAnswer = () => {}) {
     // A B4/B5 function that doesn't exist, or an EP1 one (the marks function, or delete_tv_season with
     // its mark count): the database isn't (or is no longer) in this page's phase. Nothing ran; the
     // page stops writing until it is reloaded.
-    if (res.status === 404 && /^rpc\/([a-z0-9_]+_b45|library_set_episode_marks|delete_tv_season|library_cu_[a-z_]+)$/.test(path) && /PGRST202/.test(err)) {
+    if (res.status === 404 && /^rpc\/([a-z0-9_]+_b45|library_set_episode_marks|library_add_watched_season_marks|delete_tv_season|library_cu_[a-z_]+)$/.test(path) && /PGRST202/.test(err)) {
       stopB45Writes();
       throw stage5Refusal(STATE_MISMATCH_TEXT);
     }

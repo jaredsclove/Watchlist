@@ -6,6 +6,9 @@
 //   cu1b   db/cu1b_hold_edit.sql: refusals, failure injection, install, editing a hold in place, a backup round trip, the test reverse;
 //   cu1c   db/cu1c_date_equivalence.sql: refusals, failure injection, install, the date rules (one day, two or more days, windows, today,
 //          aired, protected, standing decisions) for TMDB and research, repeated sends and imports, the test reverse;
+//   cu1d   db/cu1d_network_and_marks.sql (after CU1b and CU1c): refusals, failure injection, install, the network rules (one, several, none,
+//          saved in Details, cleared, stale, rematched), marks on a Watched season (add only, the identity guard, the lock kept), isolation,
+//          a backup round trip, the test reverse;
 //   CU     the migration: every existing row unchanged; only the intended catalog changes; the run record;
 //          a replay refused;
 //   anon   nothing on the new tables or functions; a non-member is refused;
@@ -995,6 +998,199 @@ section('cu1c: date equivalence (db/cu1c_date_equivalence.sql)');
   const again = await tryExec(db, pre1c('cu1c-rehearsal-3') + CU1C);
   ok(again.ok, 'CU1c applies again after the reverse', again.message);
   await tryExec(db, sql('db/test/cu1c_reverse.sql'));
+}
+
+section('cu1d: the sole network and marks on a Watched season (db/cu1d_network_and_marks.sql)');
+{
+  // On CU1 + CU1b + CU1c, as production.
+  ok((await tryExec(db, `select set_config('watchlist.cu1b_run', 'cu1d-base-b', false);\n` + sql('db/cu1b_hold_edit.sql'))).ok, 'CU1b is installed first');
+  ok((await tryExec(db, `select set_config('watchlist.cu1c_run', 'cu1d-base-c', false);\n` + sql('db/cu1c_date_equivalence.sql'))).ok, 'CU1c is installed first');
+  const CU1D = sql('db/cu1d_network_and_marks.sql');
+  const pre1d = run => `select set_config('watchlist.cu1d_run', '${run}', false);\n`;
+  const s1d0 = await state(db);
+  for (const [label, run, re] of [['no run id', '', /set watchlist\.cu1d_run/], ['a recorded run id', 'cu1-rehearsal-1', /already recorded/]]) {
+    const x = await tryExec(db, pre1d(run) + CU1D);
+    ok(!x.ok && re.test(x.message) && same(s1d0, await state(db)), `${label}: refused, state unchanged`, x.message || 'committed');
+  }
+  if (inject) {
+    const st = statements(CU1D);
+    const bi = st.findIndex(x => /^begin\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim())), ci = st.findIndex(x => /^commit\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim()));
+    const bad = [];
+    for (let k = bi; k < ci; k++) {
+      const text = pre1d(`inject1d-${k}`) + st.slice(0, k + 1).join('') + `\ndo $zz$ begin raise exception 'zz injected after %', ${k}; end $zz$;\n` + st.slice(k + 1).join('');
+      const x = await tryExec(db, text);
+      if (x.ok || !/zz injected/.test(x.message) || !same(s1d0, await state(db))) bad.push(`${k}: ${stmtHead(st[k])} ${x.message || 'committed'}`);
+    }
+    ok(bad.length === 0, `a failure after each of CU1d's ${ci - bi} statements leaves the state unchanged and no run record`, bad.join('\n'));
+  }
+  const inst = await tryExec(db, pre1d('cu1d-rehearsal-1') + CU1D);
+  ok(inst.ok && /CU1D\|cu1d-rehearsal-1/.test(JSON.stringify(inst.out)), 'db/cu1d_network_and_marks.sql commits', inst.message);
+  const s1d1 = await state(db);
+  ok(same(s1d0.rows, s1d1.rows), 'every table is unchanged by the install');
+  const cd = catDiff(s1d0.cat, s1d1.cat), onlyAfter = /only before \[\] only after \[(.*)\]$/.exec(cd.find(x => /^functions:/.test(x)) || '');
+  ok(cd.length === 2 && onlyAfter && /public\.library_add_watched_season_marks\(p_season_id uuid, p_expected jsonb, p_episodes jsonb\)/.test(onlyAfter[1])
+    && /public\.library_cu_sync_show_network\(p_show_id uuid, p_expected jsonb, p_networks jsonb\)/.test(onlyAfter[1]) && cd.some(x => /^runs:/.test(x)),
+    'the catalog gains only the two functions (and the run record); the episode lock, creation and the Details save are unchanged', cd.join('\n'));
+  ok((await val(db, `select public.stage5_capabilities() ->> 'phase'`)) === 'contracted-cu1' && (await val(db, `select public.stage5_capabilities() ->> 'backup_format'`)) === '7', 'the phase and backup format are unchanged');
+  const replay = await tryExec(db, pre1d('cu1d-rehearsal-2') + CU1D);
+  ok(!replay.ok && /already installed/.test(replay.message) && same(s1d1, await state(db)), 'a replay is refused, state unchanged', replay.message || 'committed');
+  for (const fn of ['library_cu_sync_show_network(uuid, jsonb, jsonb)', 'library_add_watched_season_marks(uuid, jsonb, jsonb)']) {
+    ok((await val(db, `select has_function_privilege('authenticated', 'public.${fn}', 'execute') and not has_function_privilege('anon', 'public.${fn}', 'execute')`)) === true, `${fn.split('(')[0]}: members only`);
+    ok((await val(db, `select prosecdef from pg_proc where oid = 'public.${fn}'::regprocedure`)) === false, `${fn.split('(')[0]}: security invoker`);
+  }
+
+  // ── The network ──
+  const matched = await asUser(db, A, `select id from public.tv_shows where tmdb_id is not null order by id limit 8`);
+  const unmatched = (await asUser(db, A, `select id from public.tv_shows where tmdb_id is null order by id limit 1`))[0];
+  ok(matched.length >= 6 && !!unmatched, 'the library has matched and unmatched shows to check');
+  const blank = async (id, flag = false, cands = '{}') => asSuper(db, `update public.tv_shows set network = null, network_candidates = '${cands}', metadata_owner_set = ${flag} where id = '${id}'`);
+  const S = async id => (await asUser(db, A, `select to_jsonb(s) j from public.tv_shows s where id = $1`, [id]))[0].j;
+  const ex = s => ({ tmdb_id: s.tmdb_id, network: s.network, network_candidates: s.network_candidates, metadata_owner_set: s.metadata_owner_set });
+  const rest = s => { const { network, network_candidates, ...o } = s; return o; };
+  const sync = (id, e, names, who) => tryCall(db, 'library_cu_sync_show_network', [id, e, names], who);
+  const [n1, n2, n3, n4, n5, n6] = matched.map(x => x.id);
+
+  await blank(n1); await blank(n2); await blank(n3, true); await blank(n4); await blank(n5); await blank(n6);
+  const b1 = await S(n1), r1 = await sync(n1, ex(b1), ['Net One']), a1 = await S(n1);
+  ok(r1.ok && r1.rows.outcome === 'applied' && r1.rows.result.network_outcome === 'confirmed' && a1.network === 'Net One' && same(a1.network_candidates, ['Net One']) && a1.metadata_owner_set === false && same(rest(a1), rest(b1)),
+    'one TMDB network: confirmed; the Details flag stays off; no other column changes', JSON.stringify([r1.message, r1.rows]));
+  const s1 = await rows(db);
+  const st1 = await sync(n1, ex(b1), ['Net Two']);
+  ok(!st1.ok && /target_changed/.test(st1.message) && (await S(n1)).network === 'Net One', 'a stale page can’t replace it (target_changed)', st1.message);
+  const k1 = await sync(n1, ex(a1), ['Net Two']);
+  ok(k1.ok && k1.rows.outcome === 'already' && k1.rows.result.network_outcome === 'kept' && same(await rows(db), s1), 'a confirmed network is kept even when TMDB now differs; nothing is written', JSON.stringify(k1.rows));
+
+  const b2 = await S(n2), r2 = await sync(n2, ex(b2), ['Net A', 'Net B']), a2 = await S(n2);
+  ok(r2.ok && r2.rows.outcome === 'applied' && r2.rows.result.network_outcome === 'needs_choice' && a2.network === null && same(a2.network_candidates, ['Net A', 'Net B']) && same(rest(a2), rest(b2)),
+    'several networks: none guessed; only the candidates are saved', JSON.stringify(r2.rows));
+  const s2 = await rows(db), r2b = await sync(n2, ex(a2), ['Net A', 'Net B']);
+  ok(r2b.ok && r2b.rows.outcome === 'already' && r2b.rows.result.network_outcome === 'needs_choice' && same(await rows(db), s2), 'the same candidates again: no write', JSON.stringify(r2b.rows));
+  const r2c = await sync(n2, ex(a2), ['Net B']), a2c = await S(n2);
+  ok(r2c.ok && r2c.rows.result.network_outcome === 'confirmed' && a2c.network === 'Net B', 'TMDB down to one network: confirmed from TMDB’s current list', JSON.stringify(r2c.rows));
+
+  const b3 = await S(n3), r3 = await sync(n3, ex(b3), ['Net Saved']), a3 = await S(n3);
+  ok(r3.ok && r3.rows.result.network_outcome === 'needs_choice' && a3.network === null && a3.metadata_owner_set === true && same(a3.network_candidates, ['Net Saved']),
+    'saved in Details: one TMDB network isn’t confirmed; the blank is kept and the candidate saved', JSON.stringify(r3.rows));
+  const s3 = await rows(db), r3b = await sync(n3, ex(a3), ['Net Saved']);
+  ok(r3b.ok && r3b.rows.outcome === 'already' && r3b.rows.result.network_outcome === 'needs_choice' && same(await rows(db), s3), 'saved in Details, the candidate unchanged: no write', JSON.stringify(r3b.rows));
+
+  const b4 = await S(n4); await sync(n4, ex(b4), ['Net Clear']);
+  const c4 = await S(n4), meta = await asUser(db, A, `select private.b45_show_metadata(s) j from public.tv_shows s where id = $1`, [n4]);
+  const cleared = await tryCall(db, 'library_set_metadata_b45', ['show', n4, meta[0].j, { network: null, network_candidates: c4.network_candidates }]);
+  const c4b = await S(n4), r4 = await sync(n4, ex(c4b), ['Net Clear']);
+  ok(cleared.ok && c4b.network === null && c4b.metadata_owner_set === true && r4.ok && r4.rows.result.network_outcome === 'needs_choice' && (await S(n4)).network === null,
+    'a confirmed network cleared in Details stays cleared on the next sync', JSON.stringify([cleared.message, r4.rows]));
+  const staleFlag = await sync(n4, { ...ex(c4b), metadata_owner_set: false }, ['Net Clear']);
+  ok(!staleFlag.ok && /target_changed/.test(staleFlag.message), 'a page from before the Details save is refused (target_changed)', staleFlag.message);
+
+  const b5 = await S(n5), st0 = await rows(db);
+  for (const [label, e, names] of [['an empty list', ex(b5), []], ['a list that isn’t one', ex(b5), { a: 1 }], ['a repeat', ex(b5), ['A', 'a']], ['a value over 80 characters', ex(b5), ['x'.repeat(81)]], ['surrounding spaces', ex(b5), [' A']],
+    ['a missing expected value', { tmdb_id: b5.tmdb_id, network: null, network_candidates: [] }, ['A']], ['an extra expected value', { ...ex(b5), genres: [] }, ['A']]]) {
+    const x = await sync(n5, e, names);
+    ok(!x.ok && /invalid_input/.test(x.message) && same(st0, await rows(db)), `${label}: refused as invalid input; nothing changes`, x.message);
+  }
+  const reId = await sync(n5, { ...ex(b5), tmdb_id: b5.tmdb_id + 1 }, ['Other Show Net']);
+  ok(!reId.ok && /target_changed/.test(reId.message) && same(st0, await rows(db)), 'a list read for another TMDB identity is refused (a rematch)', reId.message);
+  const u = await S(unmatched.id), un = await sync(unmatched.id, ex(u), ['Net']);
+  ok(!un.ok && /show_unmatched/.test(un.message) && same(st0, await rows(db)), 'an unmatched show is refused', un.message);
+  const missing = await sync(crypto.randomUUID(), ex(b5), ['Net']);
+  ok(!missing.ok && /target_missing/.test(missing.message), 'a show that isn’t there is refused', missing.message);
+  const asB = await sync(n5, ex(b5), ['B Was Here'], B);
+  ok(!asB.ok && /target_missing/.test(asB.message) && same(st0, await rows(db)), 'another member can’t touch A’s show, or learn it exists', asB.message);
+  const asC = await sync(n5, ex(b5), ['C Was Here'], C);
+  ok(!asC.ok && same(st0, await rows(db)), 'a signed-in non-member is refused', asC.message);
+  const anon = await attempt(() => asAnon(db, `select public.library_cu_sync_show_network($1, $2, $3)`, [n5, ex(b5), ['Anon']]));
+  ok(!anon.ok && /permission denied/.test(anon.message) && same(st0, await rows(db)), 'signed out: no access', anon.message);
+  const direct = await attempt(() => asUser(db, A, `update public.tv_shows set network = 'direct' where id = $1`, [n5]));
+  ok(!direct.ok, 'a direct update of the network is still refused', direct.message || 'updated');
+  const createdCheck = await tryCall(db, 'library_create_show_b45', [{ tmdb_id: 990001, title: 'ZZ CU1d Show', show_key: 'zz cu1d show', network: 'ZZ', original_network: 'ZZ' }, [{ item_key: 'zz cu1d show|season 1', season: 'Season 1' }]]);
+  ok(!createdCheck.ok && /set only by the owner/.test(createdCheck.message), 'creation still refuses an original network: the page confirms it after creating the show', createdCheck.message);
+
+  // ── Marks on a Watched season ──
+  const seasonRows = await asUser(db, A, `select w.id, w.show_id, w.tmdb_id, w.season_number, s.tmdb_id show_tmdb_id from public.watchlist_items w join public.tv_shows s on s.id = w.show_id
+    where w.tmdb_id is not null and w.season_number is not null and w.media_type = 'tv' and s.tmdb_id = w.tmdb_id order by w.id limit 4`);
+  ok(seasonRows.length >= 3, 'the library has TMDB-matched seasons to check');
+  const [w1, w2, w3] = seasonRows;
+  await asSuper(db, `update public.watchlist_items set watched = true, skipped = false where id in ('${w1.id}', '${w3.id}'); update public.watchlist_items set watched = false, skipped = false where id = '${w2.id}'; delete from public.episode_marks where season_id in ('${w1.id}', '${w2.id}', '${w3.id}')`);
+  const ident = w => ({ show_id: w.show_id, show_tmdb_id: w.show_tmdb_id, tmdb_id: w.tmdb_id, season_number: w.season_number, watched: true, skipped: false });
+  const add = (w, e, eps, who) => tryCall(db, 'library_add_watched_season_marks', [w.id, e, eps], who);
+  const R = async id => (await asUser(db, A, `select to_jsonb(w) j from public.watchlist_items w where id = $1`, [id]))[0].j;
+  const M = async id => (await asUser(db, A, `select tmdb_episode_id t, episode_number n from public.episode_marks where season_id = $1 order by tmdb_episode_id`, [id]));
+  const eps = (...list) => list.map(([t, n]) => ({ tmdb_episode_id: t, episode_number: n }));
+  const rowB = await R(w1.id), showB = await S(w1.show_id);
+  const m1 = await add(w1, ident(w1), eps([7001, 1], [7002, 2]));
+  ok(m1.ok && same((m1.rows.marks || []).map(m => m.tmdb_episode_id), [7001, 7002]) && m1.rows.watched === true && same(await R(w1.id), rowB) && same(await S(w1.show_id), showB),
+    'marks are added to a Watched season; the season and show don’t change (status included)', JSON.stringify([m1.message, m1.rows]));
+  const m2 = await add(w1, ident(w1), eps([7002, 99], [7003, 3]));
+  ok(m2.ok && same(await M(w1.id), [{ t: 7001, n: 1 }, { t: 7002, n: 2 }, { t: 7003, n: 3 }]), 'an existing mark is kept as stored; only the new one is added', JSON.stringify(await M(w1.id)));
+  const locked = await tryCall(db, 'library_set_episode_marks', [w1.id, { watched: true, skipped: false }, false, [{ tmdb_episode_id: 7001 }]]);
+  ok(!locked.ok && /season_locked/.test(locked.message) && (await M(w1.id)).length === 3, 'ordinary editing stays locked on a Watched season', locked.message);
+  const lockedAdd = await tryCall(db, 'library_set_episode_marks', [w1.id, { watched: true, skipped: false }, true, eps([7009, 9])]);
+  ok(!lockedAdd.ok && /season_locked/.test(lockedAdd.message), 'the ordinary function still can’t add one either', lockedAdd.message);
+  const baseM = await rows(db);
+  const noChange = async (label, re, x) => ok(!x.ok && re.test(x.message) && same(baseM, await rows(db)), `${label}; nothing changes`, x.message || 'accepted');
+  await noChange('not Watched: refused (season_not_watched)', /season_not_watched/, await add(w2, { ...ident(w2), watched: false }, eps([7101, 1])));
+  await noChange('a page that showed Watched, the season not Watched any more: refused (target_changed)', /target_changed/, await add(w2, ident(w2), eps([7101, 1])));
+  await noChange('a page that showed it not Watched, the season Watched now: refused (target_changed)', /target_changed/, await add(w1, { ...ident(w1), watched: false }, eps([7101, 1])));
+  for (const [key, value] of [['tmdb_id', w1.tmdb_id + 1], ['show_tmdb_id', w1.show_tmdb_id + 1], ['season_number', w1.season_number + 1], ['show_id', w2.show_id === w1.show_id ? crypto.randomUUID() : w2.show_id]]) {
+    await noChange(`a list read for a different ${key}: refused (target_changed)`, /target_changed/, await add(w1, { ...ident(w1), [key]: value }, eps([7101, 1])));
+  }
+  // A real rematch while the list is open: the stored identity moves, the page's expected values don't.
+  await asSuper(db, `update public.watchlist_items set season_number = season_number + 100 where id = '${w3.id}'`);
+  const movedRow = await rows(db), rematch = await add(w3, ident(w3), eps([7201, 1]));
+  ok(!rematch.ok && /target_changed/.test(rematch.message) && same(movedRow, await rows(db)) && (await M(w3.id)).length === 0, 'a season rematched after its list was read: refused; no mark for the wrong episodes', rematch.message);
+  await asSuper(db, `update public.watchlist_items set season_number = season_number - 100 where id = '${w3.id}'`);
+  await asSuper(db, `update public.tv_shows set tmdb_id = tmdb_id + 500000 where id = '${w3.show_id}'`);
+  const movedShow = await rows(db), reShow = await add(w3, ident(w3), eps([7201, 1]));
+  ok(!reShow.ok && /target_changed/.test(reShow.message) && same(movedShow, await rows(db)), 'a show rematched after the list was read: refused', reShow.message);
+  await asSuper(db, `update public.tv_shows set tmdb_id = tmdb_id - 500000 where id = '${w3.show_id}'`);
+  await asSuper(db, `update public.watchlist_items set skipped = true where id = '${w3.id}'`);
+  const skipR = await rows(db), sk = await add(w3, { ...ident(w3), skipped: true }, eps([7201, 1]));
+  ok(!sk.ok && /season_locked/.test(sk.message) && same(skipR, await rows(db)), 'Watched and Skipped together: refused (season_locked)', sk.message);
+  await asSuper(db, `update public.watchlist_items set skipped = false where id = '${w3.id}'`);
+  const noKey = (({ show_id, ...o }) => o)(ident(w1));
+  const tooMany = Array.from({ length: 501 }, (_, i) => ({ tmdb_episode_id: 8000 + i, episode_number: i }));
+  for (const [label, e, list] of [['a missing identity key', noKey, eps([1, 1])], ['an extra key', { ...ident(w1), x: 1 }, eps([1, 1])], ['a null identity', { ...ident(w1), tmdb_id: null }, eps([1, 1])], ['no episodes', ident(w1), []], ['501 episodes', ident(w1), tooMany],
+    ['a repeat', ident(w1), eps([1, 1], [1, 2])], ['an episode without its number', ident(w1), [{ tmdb_episode_id: 1 }]], ['a non-number', ident(w1), [{ tmdb_episode_id: '1', episode_number: 1 }]]]) {
+    await noChange(`${label}: refused as invalid input`, /invalid_input/, await add(w1, e, list));
+  }
+  const film = (await asUser(db, A, `select id from public.watchlist_items where is_film order by id limit 1`))[0];
+  if (film) await noChange('a film: refused', /target_missing/, await tryCall(db, 'library_add_watched_season_marks', [film.id, ident(w1), eps([1, 1])]));
+  await noChange('another member can’t touch A’s season, or learn it exists', /target_missing/, await add(w1, ident(w1), eps([7301, 1]), B));
+  const cAdd = await add(w1, ident(w1), eps([7301, 1]), C);
+  ok(!cAdd.ok && same(baseM, await rows(db)), 'a signed-in non-member is refused', cAdd.message);
+  const anonM = await attempt(() => asAnon(db, `select public.library_add_watched_season_marks($1, $2, $3)`, [w1.id, ident(w1), eps([7301, 1])]));
+  ok(!anonM.ok && /permission denied/.test(anonM.message) && same(baseM, await rows(db)), 'signed out: no access', anonM.message);
+  const directM = await attempt(() => asUser(db, A, `insert into public.episode_marks (season_id, tmdb_episode_id, episode_number) values ($1, 7301, 1)`, [w1.id]));
+  ok(!directM.ok, 'a direct insert into episode_marks is still refused', directM.message || 'inserted');
+  // Unmarking Watched keeps them, and ordinary editing works again.
+  const un1 = await tryCall(db, 'set_season_watched', [w1.id, false]);
+  ok(un1.ok && (await M(w1.id)).length === 3, 'unmarking Watched keeps the marks', un1.message);
+  const back = await tryCall(db, 'library_set_episode_marks', [w1.id, { watched: false, skipped: false }, false, [{ tmdb_episode_id: 7003 }]]);
+  ok(back.ok && (await M(w1.id)).length === 2, 'then ordinary editing clears one as usual', back.message);
+  await tryCall(db, 'set_season_watched', [w1.id, true]);
+  // Backup: marks on a Watched season and the networks round-trip through the admin runbook (format 7, unchanged spec).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu1d-'));
+  try {
+    const exp1 = backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', A).out));
+    fs.writeFileSync(path.join(dir, 'file.json'), exp1);
+    const r = await tryExec(db, adminTool('restore-sql', '--file', path.join(dir, 'file.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'cu1d-adm-1').out);
+    fs.writeFileSync(path.join(dir, 'after.json'), backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', A).out)));
+    const ver = adminTool('verify', '--file', path.join(dir, 'file.json'), '--after', path.join(dir, 'after.json'));
+    const d = JSON.parse(exp1);
+    ok(r.ok && ver.ok && /VERIFIED/.test(ver.out) && d.formatVersion === 7 && d.tables.episode_marks.some(m => m.season_id === w1.id) && d.tables.tv_shows.some(s => s.id === n1 && s.network === 'Net One' && s.metadata_owner_set === false),
+      'a format-7 backup with these marks and networks restores and verifies field by field', [r.message, ver.out].join(' '));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // Test-only reverse, then the install applies again; CU1b and CU1c come off for the CU1 reverse below.
+  const rv = await tryExec(db, sql('db/test/cu1d_reverse.sql'));
+  const cr = JSON.parse((await state(db)).cat), c0 = JSON.parse(s1d0.cat);
+  delete cr.runs; delete c0.runs;
+  ok(rv.ok && same(cr, c0), 'the test-only reverse gives back the catalog exactly', rv.message || catDiff(JSON.stringify(c0), JSON.stringify(cr)).join('\n'));
+  const again = await tryExec(db, pre1d('cu1d-rehearsal-3') + CU1D);
+  ok(again.ok, 'CU1d applies again after the reverse', again.message);
+  await tryExec(db, sql('db/test/cu1d_reverse.sql'));
+  await tryExec(db, sql('db/test/cu1c_reverse.sql'));
+  await tryExec(db, sql('db/test/cu1b_reverse.sql'));
 }
 
 section('rev: the test-environment reverse');

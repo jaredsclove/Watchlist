@@ -182,8 +182,8 @@ test('Refresh shows → one library_cu_reconcile_season per new season; new seas
       200: { name: 'Other', networks: [], seasons: [{ season_number: 1, air_date: '2020-01-01' }, { season_number: 2, air_date: '2026-01-01', episode_count: 6 }] } }) });
   await allTv(app);
   await refreshShows(app);
-  assert.deepStrictEqual(writes(app), ['POST rpc/library_cu_reconcile_season', 'POST rpc/library_cu_reconcile_season', 'POST rpc/library_cu_reconcile_season']);
-  const calls = app.writes().map(r => r.body);
+  assert.deepStrictEqual(writes(app).filter(w => !w.endsWith('library_cu_sync_show_network')), ['POST rpc/library_cu_reconcile_season', 'POST rpc/library_cu_reconcile_season', 'POST rpc/library_cu_reconcile_season']);
+  const calls = app.writes().filter(r => r.url.endsWith('/rpc/library_cu_reconcile_season')).map(r => r.body);
   assert.deepStrictEqual(calls.map(b => [b.p_show_id, b.p_season.season_number, b.p_season.date_sort]),
     [['s200', 2, '2026-01-01'], ['s100', 2, '2027-01-01'], ['s100', 3, '2099-01-01']]);
   assert.deepStrictEqual(out(calls[0].p_expected), { tmdb_id: 200, show_key: 'other' });
@@ -245,7 +245,7 @@ test('TMDB search: a film goes through library_add_films_b45; a series through l
   await app.ctx.libraryChoose(10, 'tv', null, true); await settle();
   app.el('tmdbPreview').querySelectorAll = sel => (sel.includes('data-season') ? [{ checked: true, disabled: false, dataset: { season: '1' } }] : []);
   await app.ctx.addSelectedTMDBSeasons(); await settle();
-  assert.deepStrictEqual(writes(app), ['POST rpc/library_add_films_b45', 'POST rpc/library_create_show_b45']);
+  assert.deepStrictEqual(writes(app), ['POST rpc/library_add_films_b45', 'POST rpc/library_create_show_b45', 'POST rpc/library_cu_sync_show_network']);
   const series = app.store.watchlist_items.find(r => r.tmdb_id === 10);
   assert.ok(series && series.show_id);
   assert.ok(app.store.watchlist_items.find(r => r.tmdb_id === 9).show_id == null);

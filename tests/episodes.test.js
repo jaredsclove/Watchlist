@@ -344,10 +344,20 @@ test('the suggestion: only with a loaded, non-empty list and every listed episod
   assert.match(panel(app), /Every listed episode is checked/, 'unlocked again; still only a suggestion');
 });
 
-test('a watched season without marks: "Watched (no episode detail)", no list and no fabricated marks; a skipped season is locked with its marks', async () => {
+test('a watched season without marks: its list for reference, no checkboxes, no fabricated marks; a skipped season is locked with its marks', async () => {
   const { app, lib } = await boot({ marks: l => [mark(l.s3, 1, 1)] });
   await open(app, lib.s1);
-  assert.match(panel(app), /^\s*Watched \(no episode detail\)\s*$/);
+  assert.match(panel(app), /This season is marked watched\. No episode progress is recorded for it, so this list is for reference\./);
+  assert.match(panel(app), /2 episodes listed/);
+  assert.match(panel(app), /Episode 1 .*Episode 2/);
+  assert.ok(!/0\/2 watched/.test(panel(app)), 'no progress count for a season with no recorded progress');
+  assert.ok(!/type="checkbox"/.test(html(app).match(/<tr class="sub-row ep-panel-row"[\s\S]*?<\/tr>/)[0]), 'no checkbox: nothing suggests an episode is unwatched');
+  assert.ok(!/Title 1/.test(panel(app)), 'titles stay hidden by default');
+  app.ctx.toggleEpisodeTitle(lib.s1.id, 8001); await settle();
+  assert.match(panel(app), /Episode 1: Title 1/, 'the title preference and Show title work as elsewhere');
+  assert.deepStrictEqual(app.writes().map(r => r.url).filter(u => /episode_marks/.test(u)), [], 'nothing is written');
+  assert.deepStrictEqual(marksIn(app, lib.s1), []);
+  await open(app, lib.s1);
   await app.ctx.setSeasonSkipped(lib.s3.id, true); await settle();
   await open(app, lib.s3);
   assert.match(panel(app), /This season is skipped, so its episodes are locked; keep it to change them\. Its marks are kept\./);
@@ -603,6 +613,243 @@ test('this page on a database before EP1 (the marks table missing): the page and
   const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
   assert.notStrictEqual(res, 'made');
   assert.deepStrictEqual(app.writes(), []);
+});
+
+// ── CU1d: a Watched season's list, Mark all episodes watched ──
+const EP_ALL = 'library_add_watched_season_marks';
+const tmdbWith = (shows = {}, eps = EPISODES) => p => {
+  const m = /^\/tv\/95396\/season\/(\d+)$/.exec(p);
+  if (m) return eps[m[1]] ? { id: 1, episodes: eps[m[1]] } : undefined;
+  return p === '/tv/95396' ? shows.details : undefined;
+};
+const reads = (app, path) => app.requests.filter(r => r.url.includes(`/3${path}`) && new URL(r.url).pathname.endsWith(path)).length;
+
+test('Mark all episodes watched: asked first; adds every listed episode, aired or not, with the identity the list was read for; the season doesn’t change', async () => {
+  const eps = { ...EPISODES, 1: [E(8001, 1), E(8002, 2, { air_date: '2099-01-01' }), E(8003, 3, { air_date: null })] };
+  const { app, lib } = await boot({ episodes: eps });
+  await open(app, lib.s1);
+  const before = { ...app.store.watchlist_items.find(r => r.id === lib.s1.id) };
+  assert.match(panel(app), /Mark all episodes watched/);
+  app.ctx.askMarkAllEpisodes(lib.s1.id, true); await settle();
+  assert.match(panel(app), /Mark 3 listed episodes watched\? The season stays marked watched, and episodes TMDB adds later won’t be marked\./);
+  app.ctx.askMarkAllEpisodes(lib.s1.id, false); await settle();
+  assert.deepStrictEqual(rpcs(app, EP_ALL), [], 'Cancel sends nothing');
+  app.ctx.askMarkAllEpisodes(lib.s1.id, true); await settle();
+  await app.ctx.markAllEpisodesWatched(lib.s1.id); await settle();
+  const [call] = rpcs(app, EP_ALL);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body)), { p_season_id: lib.s1.id,
+    p_expected: { show_id: lib.sev.id, show_tmdb_id: 95396, tmdb_id: 95396, season_number: 1, watched: true, skipped: false },
+    p_episodes: [8001, 8002, 8003].map((id, i) => ({ tmdb_episode_id: id, episode_number: i + 1 })) });
+  assert.deepStrictEqual(rpcs(app, 'library_set_episode_marks'), [], 'the ordinary function isn’t used');
+  assert.deepStrictEqual(rpcs(app, 'set_season_watched'), [], 'no status change, not even a round trip');
+  assert.deepStrictEqual(marksIn(app, lib.s1), [8001, 8002, 8003]);
+  assert.deepStrictEqual({ ...app.store.watchlist_items.find(r => r.id === lib.s1.id) }, before);
+  assert.match(panel(app), /This season is marked watched, so its episodes are locked/);
+  assert.match(panel(app), /3\/3 watched/);
+  assert.ok(!/Mark all episodes watched/.test(panel(app)), 'nothing left to mark: no button');
+});
+
+test('Mark all on a Watched season with some marks: only the unmarked go; ordinary editing stays locked; a later episode isn’t marked', async () => {
+  const eps = { ...EPISODES, 1: [E(8001, 1), E(8002, 2), E(8003, 3)] };
+  const { app, lib } = await boot({ episodes: eps, marks: l => [mark(l.s1, 8002, 2)] });
+  await open(app, lib.s1);
+  app.ctx.setEpisodeMark(lib.s1.id, 8001, true); await settle();
+  assert.deepStrictEqual(rpcs(app, 'library_set_episode_marks'), [], 'one box on a Watched season stays locked');
+  app.ctx.askMarkAllEpisodes(lib.s1.id, true); await settle();
+  assert.match(panel(app), /Mark 2 listed episodes watched\?/);
+  await app.ctx.markAllEpisodesWatched(lib.s1.id); await settle();
+  assert.deepStrictEqual(rpcs(app, EP_ALL)[0].body.p_episodes.map(e => e.tmdb_episode_id), [8001, 8003]);
+  assert.deepStrictEqual(marksIn(app, lib.s1), [8001, 8002, 8003]);
+  // TMDB adds an episode: it's listed unmarked, and nothing marks it.
+  app.setTmdb(tmdb({ ...EPISODES, 1: [E(8001, 1), E(8002, 2), E(8003, 3), E(8004, 4)] }));
+  await open(app, lib.s1); await open(app, lib.s1);
+  assert.match(panel(app), /3\/4 watched/);
+  assert.deepStrictEqual(marksIn(app, lib.s1), [8001, 8002, 8003]);
+  // Unmarking Watched keeps them all and unlocks ordinary editing.
+  await app.ctx.toggleWatch(lib.s1.id); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s1), [8001, 8002, 8003]);
+  assert.ok(!/Mark all episodes watched/.test(panel(app)), 'only a Watched season has it');
+  await app.ctx.setEpisodeMark(lib.s1.id, 8001, false); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s1), [8002, 8003]);
+});
+
+test('marking Watched adds no marks; unmarking clears none', async () => {
+  const { app, lib } = await boot({ marks: l => [mark(l.s2, 9001, 1)] });
+  await open(app, lib.s2);
+  await app.ctx.toggleWatch(lib.s2.id); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001]);
+  await app.ctx.toggleWatch(lib.s2.id); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001]);
+});
+
+test('a season rematched after its list was read: refused, nothing marked, what was shown put back', async () => {
+  for (const change of [s => { s.season_number = 7; }, s => { s.tmdb_id = 1234; }]) {
+    const { app, lib } = await boot();
+    await open(app, lib.s1);
+    change(app.store.watchlist_items.find(r => r.id === lib.s1.id));
+    app.ctx.askMarkAllEpisodes(lib.s1.id, true); await settle();
+    await app.ctx.markAllEpisodesWatched(lib.s1.id); await settle();
+    assert.strictEqual(rpcs(app, EP_ALL).length, 1);
+    assert.deepStrictEqual(rpcs(app, EP_ALL)[0].body.p_expected.tmdb_id, 95396, 'the identity the list was read for, not the row’s newer one');
+    assert.deepStrictEqual(marksIn(app, lib.s1), []);
+    assert.match(banners(app), /changed|Nothing was changed/i);
+  }
+  const { app, lib } = await boot();
+  await open(app, lib.s1);
+  app.store.tv_shows.find(s => s.id === lib.sev.id).tmdb_id = 1234;
+  app.ctx.askMarkAllEpisodes(lib.s1.id, true); await settle();
+  await app.ctx.markAllEpisodesWatched(lib.s1.id); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s1), [], 'the show rematched: refused too');
+});
+
+test('Mark all: no clear answer is never resent; the view is read again', async () => {
+  const { app, lib } = await boot();
+  await open(app, lib.s1);
+  app.failNext(r => r.url.endsWith(`/rpc/${EP_ALL}`));
+  app.ctx.askMarkAllEpisodes(lib.s1.id, true); await settle();
+  await app.ctx.markAllEpisodesWatched(lib.s1.id); await settle();
+  assert.strictEqual(rpcs(app, EP_ALL).length, 1);
+  assert.deepStrictEqual(marksIn(app, lib.s1), []);
+});
+
+// ── CU1d: the completion suggestion ──
+const AIRED = (n, o = {}) => E(9100 + n, n, { air_date: '2025-01-0' + n, ...o });
+const FINALE = { 2: [AIRED(1), AIRED(2, { episode_type: 'finale' })] };
+const details = (o = {}) => ({ id: 95396, status: 'Returning Series', next_episode_to_air: null, seasons: [{ season_number: 1, episode_count: 2 }, { season_number: 2, episode_count: 2 }], ...o });
+const allMarked = l => [mark(l.s2, 9101, 1), mark(l.s2, 9102, 2)];
+const FINISHED = /TMDB’s details indicate this season has finished, though that isn’t a guarantee\./;
+async function bootFinish(o = {}) {
+  const lib0 = await boot({ episodes: o.episodes || FINALE, marks: o.marks || allMarked, storage: o.storage });
+  lib0.app.setTmdb(tmdbWith({ details: o.details === undefined ? details() : o.details }, o.episodes || FINALE));
+  return lib0;
+}
+
+test('completion evidence: every rule, on its own', async () => {
+  const { app } = await boot();
+  const eps = [{ id: 1, air_date: '2025-01-01', type: null }, { id: 2, air_date: '2025-01-02', type: 'finale' }];
+  const marks = new Map([[1, {}], [2, {}]]), today = '2026-01-01';
+  const yes = (d, list = eps, n = 2, m = marks) => app.ctx.seasonLooksFinished(d, n, list, m, today);
+  const plain = [{ id: 1, air_date: '2025-01-01', type: null }, { id: 2, air_date: '2025-01-02', type: 'standard' }];
+  assert.strictEqual(yes(details()), true, 'an aired finale at the end of the list');
+  assert.strictEqual(yes(details({ next_episode_to_air: { season_number: 3 } })), true, 'a next episode in a later season doesn’t matter to a finale');
+  assert.strictEqual(yes(details({ status: 'Ended' }), plain), true, 'Ended with nothing scheduled');
+  assert.strictEqual(yes(details({ status: 'Canceled' }), plain), true, 'Canceled with nothing scheduled');
+  assert.strictEqual(yes(details({ status: 'Returning Series' }), plain), false, 'no finale, not ended');
+  assert.strictEqual(yes(details({ status: 'Ended', next_episode_to_air: { season_number: 3 } }), plain), false, 'Ended, something scheduled');
+  assert.strictEqual(yes(details({ next_episode_to_air: { season_number: 2 } })), false, 'a next episode in this season stops it, finale or not');
+  assert.strictEqual(yes(details({ status: 'Ended', next_episode_to_air: { season_number: 2 } })), false);
+  assert.strictEqual(yes(details({ next_episode_to_air: { name: 'x' } })), false, 'a next episode without a season is conflicting evidence');
+  assert.strictEqual(yes(details({ last_episode_to_air: { season_number: 3 }, status: 'Returning Series', seasons: [{ season_number: 2, episode_count: 2 }, { season_number: 3, air_date: '2025-06-01', episode_count: 1 }] }), plain), false, 'a later season having started counts for nothing');
+  assert.strictEqual(yes(details({ seasons: [{ season_number: 2, episode_count: 3 }] })), false, 'TMDB’s count disagrees with the list');
+  assert.strictEqual(yes(details({ seasons: [{ season_number: 2 }] })), false, 'no count for the season');
+  assert.strictEqual(yes(details({ seasons: [] })), false, 'the season isn’t in the details');
+  assert.strictEqual(yes(details({ seasons: undefined })), false);
+  assert.strictEqual(yes(null), false, 'no details');
+  assert.strictEqual(yes(details(), []), false, 'an empty list');
+  assert.strictEqual(yes(details(), [eps[0], { ...eps[1], air_date: '2026-06-01' }]), false, 'an episode still to air');
+  assert.strictEqual(yes(details(), [eps[0], { ...eps[1], air_date: null }]), false, 'an episode without an air date');
+  assert.strictEqual(yes(details(), eps, 2, new Map([[1, {}]])), false, 'an unmarked episode');
+  assert.strictEqual(yes(details({ status: 'Ended', seasons: [{ season_number: 0, episode_count: 2 }] }), eps, 0), false, 'specials never');
+  assert.strictEqual(yes(details(), [{ ...eps[1] }, { ...eps[0], id: 3 }], 2, new Map([[2, {}], [3, {}]])), false, 'a finale that isn’t last');
+});
+
+test('the last box checked: the season and show are read once; the existing offer says so honestly; Watched waits for the owner', async () => {
+  const { app, lib } = await bootFinish({ marks: l => [mark(l.s2, 9101, 1)] });
+  await open(app, lib.s2);
+  assert.ok(!FINISHED.test(panel(app)));
+  const before = app.requests.length;
+  await app.ctx.setEpisodeMark(lib.s2.id, 9102, true); await settle();
+  const after = app.requests.slice(before).filter(r => /\/3\/tv\//.test(r.url)).map(r => new URL(r.url).pathname);
+  assert.strictEqual(after.filter(p => p.endsWith('/tv/95396/season/2')).length, 1, 'one fresh season read');
+  assert.strictEqual(after.filter(p => p.endsWith('/tv/95396')).length, 1, 'one fresh show read');
+  assert.match(panel(app), FINISHED);
+  assert.match(panel(app), /Mark Season 2 watched/);
+  assert.strictEqual((html(app).match(/<tr class="sub-row ep-panel-row"[\s\S]*?<\/tr>/)[0].match(/toggleWatch\(/g) || []).length, 1, 'the one existing control, not a second');
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s2.id).watched, false, 'nothing changes without the owner');
+  await app.ctx.setEpisodeMark(lib.s2.id, 9102, false); await settle();
+  assert.ok(!FINISHED.test(panel(app)), 'unchecked: the suggestion goes');
+  await app.ctx.setEpisodeMark(lib.s2.id, 9102, true); await settle();
+  assert.match(panel(app), FINISHED, 'checked again: decided again');
+  await app.ctx.toggleWatch(lib.s2.id); await settle();
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s2.id).watched, true);
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9101, 9102], 'marks kept');
+  await app.ctx.toggleWatch(lib.s2.id); await settle();
+  assert.ok(!FINISHED.test(panel(app)), 'a suggestion doesn’t outlive the state it was made for');
+});
+
+test('opening a fully marked list checks too, with one season read and one show read', async () => {
+  const { app, lib } = await bootFinish();
+  const before = app.requests.length;
+  await open(app, lib.s2);
+  const after = app.requests.slice(before).filter(r => /\/3\/tv\//.test(r.url)).map(r => new URL(r.url).pathname);
+  assert.deepStrictEqual([after.filter(p => p.endsWith('/season/2')).length, after.filter(p => p.endsWith('/tv/95396')).length], [1, 1]);
+  assert.match(panel(app), FINISHED);
+});
+
+test('uncertain metadata: the plain offer stays, with Mark season watched', async () => {
+  for (const [label, o] of [
+    ['a failed show read', { details: null }],
+    ['no finale, Returning Series', { episodes: { 2: [AIRED(1), AIRED(2)] } }],
+    ['a next episode in this season', { details: details({ next_episode_to_air: { season_number: 2 } }) }],
+    ['the count disagrees', { details: details({ seasons: [{ season_number: 2, episode_count: 3 }] }) }]]) {
+    const { app, lib } = await bootFinish(o);
+    await open(app, lib.s2);
+    assert.ok(!FINISHED.test(panel(app)), label);
+    assert.match(panel(app), /Every listed episode is checked\./, label);
+    assert.match(panel(app), /Mark Season 2 watched/, label);
+    assert.ok(!/Not now/.test(panel(app)), label);
+  }
+});
+
+test('a list that isn’t fully marked or aired reads nothing extra', async () => {
+  const { app, lib } = await bootFinish({ episodes: EPISODES, marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2), mark(l.s2, 9003, 3), mark(l.s2, 9004, 4)] });
+  const before = app.requests.length;
+  await open(app, lib.s2);
+  const after = app.requests.slice(before).filter(r => /\/3\/tv\//.test(r.url)).map(r => new URL(r.url).pathname);
+  assert.strictEqual(after.filter(p => p.endsWith('/tv/95396')).length, 0, 'unaired episodes: no show read');
+  assert.match(panel(app), /Every listed episode is checked/);
+});
+
+test('fresh TMDB data wins: an episode added since the list opened leaves the season not fully checked', async () => {
+  const { app, lib } = await bootFinish({ marks: l => [mark(l.s2, 9101, 1)] });
+  await open(app, lib.s2);
+  app.setTmdb(tmdbWith({ details: details({ seasons: [{ season_number: 2, episode_count: 3 }] }) }, { 2: [AIRED(1), AIRED(2), AIRED(3, { episode_type: 'finale' })] }));
+  await app.ctx.setEpisodeMark(lib.s2.id, 9102, true); await settle();
+  assert.match(panel(app), /2\/3 watched/);
+  assert.ok(!/Every listed episode is checked/.test(panel(app)));
+});
+
+test('Not now: the plain offer stays and no reads repeat, across a reload, until the episode count changes', async () => {
+  const storage = memoryStorage();
+  const { app, lib } = await bootFinish({ storage });
+  await open(app, lib.s2);
+  assert.match(panel(app), /Not now/);
+  app.ctx.declineSeasonFinish(lib.s2.id); await settle();
+  assert.ok(!FINISHED.test(panel(app)));
+  assert.match(panel(app), /Mark Season 2 watched/, 'ordinary completion stays');
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s2.id).watched, false);
+  const again = await bootFinish({ storage });
+  const before = again.app.requests.length;
+  await open(again.app, again.lib.s2);
+  const after = again.app.requests.slice(before).map(r => new URL(r.url).pathname);
+  assert.strictEqual(after.filter(p => p.endsWith('/tv/95396')).length, 0, 'declined: no show read');
+  assert.ok(!FINISHED.test(panel(again.app)));
+  // Another account's choice is its own: userStorage is per account (auth.js); here, one more episode asks again.
+  const more = { 2: [AIRED(1), AIRED(2), AIRED(3, { episode_type: 'finale' })] };
+  const third = await bootFinish({ storage, episodes: more, details: details({ seasons: [{ season_number: 2, episode_count: 3 }] }),
+    marks: l => [mark(l.s2, 9101, 1), mark(l.s2, 9102, 2), mark(l.s2, 9103, 3)] });
+  await open(third.app, third.lib.s2);
+  assert.match(panel(third.app), FINISHED);
+});
+
+test('Not now without working storage holds for the open page', async () => {
+  const storage = memoryStorage();
+  const { app, lib } = await bootFinish({ storage });
+  storage.setItem = () => { throw new Error('quota'); };
+  await open(app, lib.s2);
+  app.ctx.declineSeasonFinish(lib.s2.id); await settle();
+  await open(app, lib.s2); await open(app, lib.s2);
+  assert.ok(!FINISHED.test(panel(app)));
 });
 
 T.run();

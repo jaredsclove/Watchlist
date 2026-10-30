@@ -876,6 +876,7 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .ep-item.ep-checked .ep-check span { color: var(--text2); }
 .ep-date { font-size: 11px; color: var(--text3); }
 .ep-title { font-size: 12px; }
+.ep-check.ep-ref { cursor: default; }
 .ep-bulk { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ep-bulk-label { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text2); }
 .ep-through-select { font: inherit; padding: 2px 4px; }
@@ -885,7 +886,7 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
   /* Phone: each episode row and its controls are at least 44px tall. */
   .ep-check { min-height: 44px; flex: 1 1 auto; }
   .ep-check input { width: 22px; height: 22px; }
-  .ep-title, .ep-toggle, .ep-through-select, .ep-through-apply, .settings-check { min-height: 44px; }
+  .ep-title, .ep-toggle, .ep-through-select, .ep-through-apply, .ep-all, .ep-all-confirm, .ep-suggest .btn-link, .cu-list .btn-link, .settings-check { min-height: 44px; }
 }
 
 /* Item 4: collection updates (results, review, rules and setup dialogs) */
