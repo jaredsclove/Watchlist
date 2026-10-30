@@ -117,7 +117,24 @@ Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
-(CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29].
+(CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29], the compact interface [#32].
+
+- **Release:** `5d588f2`, the compact interface (item 8; PR #32, the branch's four commits rebased, same tree as the
+  reviewed head `f254b62`), released 2026-10-30 UTC. Presentation and interaction only: no migration, and no write, backup-format or
+  saved-data change. Validation: offline 1216/1216; a local browser check with synthetic data at 1280, 375 and 300 px in
+  light and dark. Space above the first item at 1280 / 375 / 300 px, before → after: Currently Watching 261 → 178 /
+  412 → 207 / 412 → 207; All TV 293 → 178 / 502 → 244 / 522 → 244; Coming Soon 292 → 178 / 429 → 217 / 449 → 217; All
+  Movies 312 → 144 / 538 → 197 / 576 → 197. Verified after deployment: Pages built `5d588f2`; the 35 application files
+  are byte-identical and all 29 versioned files carry `20261030-compact`. On the live site, signed in, read-only: desktop
+  navigation, ⋯ (opens, Escape closes and returns focus, doesn't expand), an expanded show, and Settings' Backup &
+  Restore (no Backup button or date in the header; the ⚠ correctly absent after a same-day backup). At 375 and 300 px, in
+  same-origin frames, one in light and one in dark for each check: Currently Watching, All TV and All Movies at the measured space (All Movies
+  215 at 300 px, its longer count wrapping), no sideways overflow, no clipped card content, labels 32 px, ⋯ on screen, an expanded card,
+  Coming Soon and a collection. No status, priority, episode mark or library row was changed. The network log, kept
+  only for the last part of the check, shows only GET requests to the database; the opened and closed menus and the
+  expansions sent no write. No backup was taken, because nothing was to change. Not verified: real phones, Safari, Firefox, native select popups by
+  pointer, a live status or priority change (offline tests cover them), the Download backup button itself, and the live
+  ⚠ states (offline, and "No backup yet" with synthetic data). An older tab keeps working until reloaded.
 
 - **Since the CU1d release (owner's use, 2026-10-30; compared in a valid format-7 backup against the post-deploy one):**
   the owner ran Refresh shows, chose networks from its results and used Mark all. 27 shows gained a network (17 automatic
@@ -353,6 +370,7 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
 [#25]: https://github.com/jaredsclove/Watchlist/pull/25
 [#27]: https://github.com/jaredsclove/Watchlist/pull/27
 [#29]: https://github.com/jaredsclove/Watchlist/pull/29
+[#32]: https://github.com/jaredsclove/Watchlist/pull/32
 
 ## How we work
 
@@ -441,6 +459,10 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   deletes still send no expected values (the lane and the out-of-date pause cover a stale list).
 
 ## Open items
+
+- **Compact interface, phones (seen in the release check; not blockers):** a very short collection name's tab is 44 px tall
+  but only about 40 px wide, since the release narrowed the tabs' padding. A collection's header is tall, so its first
+  item starts about 520 px down at 375 px. Both are possible follow-ups, for the owner to choose.
 
 - **Access (M1):** signed-out callers get nothing (no table, view or function; the `db/` scripts before
   M1 granted `anon` broad access, which M1 removes). Default privileges owned by `supabase_admin` can't
