@@ -403,7 +403,7 @@ test('F5: a show labelled “Caught up · Ended” or “All seasons skipped” 
   for (const t of ['Ended', 'Skipped']) assert.ok(!cardOf(t).includes('Up to date'), `${t}: no pill on the card`);
   const items = app.ctx.deriveAllTv(app.get('derivedData').rows, app.get('tvShowsById'), app.get('localTodayStr()')).items;
   assert.deepStrictEqual(Object.fromEntries(Array.from(items, x => [x.title, x.upToDate])), { Ended: true, Plain: true, Skipped: true }, 'the calculation is unchanged');
-  assert.strictEqual(app.el('statsRow').innerHTML, '<p class="count-line">3 shows · of these, 3 Watching, 3 up to date</p>', 'the count is unchanged (B8: a count line)');
+  assert.strictEqual(app.el('statsRow').innerHTML, '<p class="count-line">3 shows · 3 Watching · 3 up to date</p>', 'the count is unchanged (B8: a count line)');
   app.ctx.switchView('watching'); await settle();
   assert.deepStrictEqual(watchingIds(app), { active: [], upToDate: ['Plain'] }, 'Currently Watching membership unchanged (Ended exit and all-skipped excluded)');
   // Browse collections show “Caught up · Ended” too (read-only): no pill beside it.

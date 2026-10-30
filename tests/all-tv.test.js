@@ -57,11 +57,11 @@ const titlesShown = app => [...app.el('tbody').innerHTML.matchAll(/<span class="
 const cardTitles = app => [...app.el('cardList').innerHTML.matchAll(/<span class="card-title"><span class="show-title-main">(?:<span class="priority-high"[^>]*>★<\/span> )?<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
 const stateCall = (app, i = 0) => { const w = app.writes()[i]; return { fn: w.url.split('/rpc/')[1], body: w.body }; };
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
-// B8: All TV's count line ("Showing N of T shows · of these, W Watching, U up to date"), read
+// B8: All TV's count line ("N of T shows · W Watching · U up to date"), read
 // back as the old tiles' numbers [shows shown, Watching, up to date].
 const statNums = app => {
   const line = (app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || '';
-  const m = line.match(/^(?:Showing (\d+) of )?(\d+) shows?(?: · of these, (\d+) Watching, (\d+) up to date)?$/);
+  const m = line.match(/^(?:(\d+) of )?(\d+) shows?(?: · (\d+) Watching · (\d+) up to date)?$/);
   return m ? [Number(m[1] ?? m[2]), Number(m[3] ?? 0), Number(m[4] ?? 0)] : [];
 };
 
@@ -333,7 +333,7 @@ test('header and stats follow the open view (All TV has its own branch)', async 
   const s = show({ title: 'Alpha', status: 'watching' }, [{ num: 1 }]);
   const app = await openAllTv(all(s));
   assert.ok(app.el('tableHead').innerHTML.includes('<th>Next</th>'));
-  assert.ok(app.el('statsRow').innerHTML.includes('<p class="count-line">1 show · of these, 1 Watching, 0 up to date</p>'), 'B8: one count line');
+  assert.ok(app.el('statsRow').innerHTML.includes('<p class="count-line">1 show · 1 Watching · 0 up to date</p>'), 'B8: one count line');
   app.ctx.switchView('watching'); await settle();
   assert.ok(app.el('tableHead').innerHTML.includes('<th>Up next</th>'));
   assert.strictEqual(app.el('statsRow').innerHTML, '', 'B8: Currently Watching counts in its headings');

@@ -59,11 +59,11 @@ const cards = app => app.el('cardList').innerHTML;
 const seasonRows = app => [...tbody(app).matchAll(/<span class="show-title">([^<]*)<\/span>\s*<span class="season-lbl"> · ([^<]*)<\/span>/g)].map(m => `${m[1]} · ${m[2]}`);
 const seasonCards = app => [...cards(app).matchAll(/<span class="card-title">([^<]*)<\/span>\s*<span class="card-season">([^<]*)<\/span>/g)].map(m => `${m[1]} · ${m[2]}`);
 const showCards = app => [...tbody(app).matchAll(/toggleDerivedShow\('([^']+)'\)/g)].map(m => m[1]).filter((x, i, a) => a.indexOf(x) === i);
-// B8: All TV Seasons' count line ("Showing N seasons from K shows") and the TBA / no date
+// B8: All TV Seasons' count line ("N seasons from K shows") and the TBA / no date
 // heading ("· T TBA seasons · R seasons need a date review"), read back as the old tiles' tokens.
 const statNums = app => {
   const line = (app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || '';
-  const m = line.match(/^Showing (\d+) seasons?(?: from (\d+) shows?)?$/) || [];
+  const m = line.match(/^(\d+) seasons?(?: from (\d+) shows?)?$/) || [];
   const head = (app.el('tbody').innerHTML.match(/TBA \/ no date <span class="section-count">· ([^<]*)<\/span>/) || [])[1] || '';
   const tba = Number((head.match(/(\d+) TBA seasons?/) || [0, 0])[1]), review = Number((head.match(/(\d+) seasons? needs? a date review/) || [0, 0])[1]);
   const n = Number(m[1] ?? 0), k = Number(m[2] ?? 0);

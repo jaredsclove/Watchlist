@@ -543,19 +543,19 @@ function themeBadgeHtml(catalog, theme, owner = '') {
 
 // ─── Compact counts (B8) ──────────────────────────────────────────────────────
 // Two scopes only: shown (after every filter, defaults included) and total (the view's
-// whole set of that unit with every filter cleared). Units are always written. "Showing N
-// of T" (a count line) or "N of T" (a heading) only when N ≠ T; a secondary count names its
-// scope ("of these": the shown items; "library": the total). Counts come from the rows the
+// whole set of that unit with every filter cleared). Units are always written. "N of T" only
+// when N ≠ T. A secondary count describes the shown items, unless "library:" names the total
+// instead. Counts come from the rows the
 // view already read; nothing is counted from a read that failed or is still loading (the
 // line is cleared then).
 function countUnit(n, one, many) {
   return `${n} ${n === 1 ? one : many}`;
 }
 function countScoped(n, total, one, many) {
-  return n === total ? countUnit(total, one, many) : `Showing ${n} of ${countUnit(total, one, many)}`;
+  return n === total ? countUnit(total, one, many) : `${n} of ${countUnit(total, one, many)}`;
 }
 function headingCount(n, total, one, many) {
-  return `· ${n === total ? countUnit(total, one, many) : `${n} of ${countUnit(total, one, many)}`}`;
+  return `· ${countScoped(n, total, one, many)}`;
 }
 function countLineHtml(text) {
   return `<p class="count-line">${esc(text)}</p>`;
@@ -674,9 +674,9 @@ function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '', fYear = 
   const shown = listed.filter(x => themeMatchesShow(x.seasons, fTheme) && allTvProgressMatches(x, fProgress)
     && (!fYear || x.seasons.some(r => rowYear(r) === fYear)));
 
-  // B8: shows listed of every show with a linked season (all statuses); of these, Watching and up to date.
-  const ofThese = shown.length ? ` · of these, ${shown.filter(x => x.show.status === 'watching').length} Watching, ${shown.filter(x => x.upToDate).length} up to date` : '';
-  document.getElementById('statsRow').innerHTML = countLineHtml(countScoped(shown.length, items.length, 'show', 'shows') + ofThese);
+  // B8: shows listed of every show with a linked season (all statuses), then those listed that are Watching and up to date.
+  const breakdown = shown.length ? ` · ${shown.filter(x => x.show.status === 'watching').length} Watching · ${shown.filter(x => x.upToDate).length} up to date` : '';
+  document.getElementById('statsRow').innerHTML = countLineHtml(countScoped(shown.length, items.length, 'show', 'shows') + breakdown);
 
   const dismissAll = dismissAllNewHtml(shown.filter(x => x.show.catalog_new).map(x => ({ kind: 'show', id: x.show.id })));
   let html = dismissAll.row, cardHtml = dismissAll.card;
@@ -710,7 +710,7 @@ function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '', fYear = 
 function renderAllTvSeasons(today, items, shown, notListed, fTheme = '', fYear = '') {
   const { dated, tba, review, total, showCount } = deriveAllTvSeasons(shown, allTvSeasonVis, r => themeMatchesRow(r, fTheme) && (!fYear || rowYear(r) === fYear));
   // B8: the seasons listed and the shows they come from (no total: the Seasons choice is a list mode).
-  document.getElementById('statsRow').innerHTML = countLineHtml(`Showing ${countUnit(total, 'season', 'seasons')}${total ? ` from ${countUnit(showCount, 'show', 'shows')}` : ''}`);
+  document.getElementById('statsRow').innerHTML = countLineHtml(`${countUnit(total, 'season', 'seasons')}${total ? ` from ${countUnit(showCount, 'show', 'shows')}` : ''}`);
 
   let html = '', cardHtml = '';
   const note = msg => {
@@ -997,7 +997,7 @@ function derivedShowHtml(item, today, opts = {}) {
       <div class="card-top" onclick="toggleDerivedShow('${keyArg}', event)" style="cursor:pointer">
         ${expandBtn}
         <div class="card-title-block">
-          <span class="card-title">${titleHtml}</span>${kindTag}
+          <span class="card-title">${titleHtml}${kindTag}</span>
           <span class="card-season">${nextCard}</span>
         </div>
         ${menu}
@@ -1069,8 +1069,8 @@ function renderComingSoon(today, keep) {
   in30.setDate(in30.getDate() + 30);
   const cutoff30 = localTodayStr(in30);
 
-  // B8: dated seasons shown of every eligible dated season; of these, the next 30 days.
-  const soon = shownDated.length ? ` · of these, ${shownDated.filter(r => r.date_sort <= cutoff30).length} in the next 30 days` : '';
+  // B8: dated seasons shown of every eligible dated season, then those shown in the next 30 days.
+  const soon = shownDated.length ? ` · ${shownDated.filter(r => r.date_sort <= cutoff30).length} in the next 30 days` : '';
   document.getElementById('statsRow').innerHTML = countLineHtml(countScoped(shownDated.length, dated.length, 'dated season', 'dated seasons') + soon);
 
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
