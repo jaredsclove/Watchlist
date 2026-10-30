@@ -108,10 +108,15 @@ admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unw
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
 (CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29].
 
-- **Since the CU1d release (owner-reported; not independently checked):** the owner ran Refresh shows on the live site
-  and chose networks from its results, so sole-network confirmation and "Choose a network" have now been used in
-  production. Which shows changed, how many remain and the findings' current counts haven't been read back; no backup
-  has been compared since the post-deploy one. Not reported as used yet: Mark all, Not now, the completion suggestion.
+- **Since the CU1d release (owner's use, 2026-10-30; compared in a valid format-7 backup against the post-deploy one):**
+  the owner ran Refresh shows, chose networks from its results and used Mark all. 27 shows gained a network (17 automatic
+  with the Details flag still off, 10 through Details, 9 of them from several candidates), each one of its saved
+  candidates; no confirmed network was replaced or cleared, and no show waits with candidates (25 have no network: 22
+  unmatched and 3 matched with none from TMDB). Mark all added 28 marks on 3 Watched seasons, whose status stayed
+  Watched; no mark was removed and no season's Watched changed. Refresh also matched one show and one season to TMDB
+  and set one date (two findings, both applied). No row was added or removed in the library tables. Findings: 23 (14
+  applied, 6 waiting for more research, 1 accepted, 2 dismissed), none waiting for a decision. Not yet seen in use:
+  the completion suggestion and Not now.
 
 - **Release:** `0cac052`, sole-network confirmation, Watched-season episode lists, the completion suggestion and Mark all
   episodes watched (items 1 and 4; PR #29, the branch's two commits rebased, same tree as the reviewed head), released
