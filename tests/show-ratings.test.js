@@ -106,11 +106,11 @@ test('a cached score shows directly after the show\'s title, in rows and phone c
   assert.ok(cells[1].includes('<span class="show-title">ZZ Synthetic Alpha</span> <span class="tmdb-rating-slot" data-rating-of="900001"><button'), 'directly after the title');
   assert.ok(!cells[2].includes('tmdb-rating') && !cells[4].includes('tmdb-rating'), 'not with the categories or the status controls');
   const cardOf = card(app).split('<div class="item-card').find(x => x.includes(`data-show-row="${lib.a.id}"`));
-  assert.match(cardOf, /<span class="card-title"><span class="show-title">ZZ Synthetic Alpha<\/span> <span class="tmdb-rating-slot" data-rating-of="900001"><button/, 'the card\'s title line too');
+  assert.match(cardOf, /<span class="card-title"><span class="show-title-main"><span class="show-title">ZZ Synthetic Alpha<\/span> <span class="tmdb-rating-slot" data-rating-of="900001"><button/, 'the card\'s title line too');
   assert.ok(!/card-meta[\s\S]*tmdb-rating/.test(cardOf), 'not in the card\'s categories line');
   // A show without a score keeps its title exactly as before (no stray space).
   const local = html(app).split('<tr').find(x => x.includes(`data-show-row="${lib.c.id}"`));
-  assert.ok(local.includes('<span class="show-title">ZZ Synthetic Local</span></div>'));
+  assert.ok(local.includes('<span class="show-title">ZZ Synthetic Local</span></span></div>'));
   // Currently Watching too.
   app.ctx.switchView('watching'); await settle();
   assert.match(html(app), /data-action="rating"[^>]*>8\.2<\/button>/);
@@ -270,7 +270,7 @@ test('focus: the rating is a list control found by identity (data-action="rating
 test('phones: the rating is a 44 px target; desktop and phone cards both carry it', async () => {
   const now = Date.now();
   const { app } = await boot({ width: 375, storage: memoryStorage(cached({ 900001: { a: 8.2, c: 500, t: now } })) });
-  assert.match(card(app), /card-title"><span class="show-title">[^<]*<\/span> <span class="tmdb-rating-slot"[^>]*><button type="button" class="tmdb-rating r-high"/);
+  assert.match(card(app), /card-title"><span class="show-title-main"><span class="show-title">[^<]*<\/span> <span class="tmdb-rating-slot"[^>]*><button type="button" class="tmdb-rating r-high"/);
   const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
   assert.match(css, /@media \(max-width: 700px\) \{\n  \.tmdb-rating \{ min-height: 44px; min-width: 44px; padding: 0 6px; \}/);
 });
