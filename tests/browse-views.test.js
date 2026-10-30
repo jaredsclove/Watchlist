@@ -85,7 +85,7 @@ async function openCol(app, id) { app.ctx.openBrowseCollection(id); await settle
 const html = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 const titles = app => [...html(app).matchAll(/<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
-const cardTitles = app => [...cards(app).matchAll(/<span class="card-title">(?:<span class="priority-high"[^>]*>★<\/span> )?(?:<span class="show-title">)?([^<]*)</g)].map(m => m[1]);
+const cardTitles = app => [...cards(app).matchAll(/<span class="card-title">(?:<span class="show-title-main">)?(?:<span class="priority-high"[^>]*>★<\/span> )?(?:<span class="show-title">)?([^<]*)</g)].map(m => m[1]);
 // B8: a collection's counts are in its section headings ("· N shows · N season entries",
 // "· N films"; "N of T" when filters narrow them); read back as the old tiles' tokens.
 const collectionStats = app => {

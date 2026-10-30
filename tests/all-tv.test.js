@@ -54,7 +54,7 @@ async function openAllTv(data, opts = {}) {
   return app;
 }
 const titlesShown = app => [...app.el('tbody').innerHTML.matchAll(/<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
-const cardTitles = app => [...app.el('cardList').innerHTML.matchAll(/<span class="card-title">(?:<span class="priority-high"[^>]*>★<\/span> )?<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
+const cardTitles = app => [...app.el('cardList').innerHTML.matchAll(/<span class="card-title"><span class="show-title-main">(?:<span class="priority-high"[^>]*>★<\/span> )?<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
 const stateCall = (app, i = 0) => { const w = app.writes()[i]; return { fn: w.url.split('/rpc/')[1], body: w.body }; };
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
 // B8: All TV's count line ("Showing N of T shows · of these, W Watching, U up to date"), read
