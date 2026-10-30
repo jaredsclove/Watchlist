@@ -108,6 +108,11 @@ admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unw
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
 (CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29].
 
+- **Since the CU1d release (owner-reported; not independently checked):** the owner ran Refresh shows on the live site
+  and chose networks from its results, so sole-network confirmation and "Choose a network" have now been used in
+  production. Which shows changed, how many remain and the findings' current counts haven't been read back; no backup
+  has been compared since the post-deploy one. Not reported as used yet: Mark all, Not now, the completion suggestion.
+
 - **Release:** `0cac052`, sole-network confirmation, Watched-season episode lists, the completion suggestion and Mark all
   episodes watched (items 1 and 4; PR #29, the branch's two commits rebased, same tree as the reviewed head), released
   2026-10-30 UTC with database migration `db/cu1d_network_and_marks.sql` (two functions; no table, column, trigger,
@@ -361,6 +366,8 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
 - Work only in the git checkout, never in loose copies. No history rewrites or force-pushes.
 - Keep the architecture: classic globals, inline handlers, page state in `watchlist.html`, no build
   step, modules or framework, unless approved as its own project.
+- **Merging to `main` deploys the page.** When a page needs a migration, merge only after the migration's run record is
+  confirmed.
 - **Database work** (unchanged from the former handoff §11 rules 4–9):
   - No schema, RLS, identity-rule or backup/restore behaviour change without a written plan approved first.
   - Sequence: read-only audit → proposal → dry run / preflight → **explicit owner approval** →
@@ -425,7 +432,7 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   commit. Deleting a removed member's library is deferred (`docs/MEMBER_RECOVERY.md`).
 - **Collection updates (CU1):** the individual-hold editor gap and the stale setup-status line after import are
   resolved (PR #25, CU1b); dates within a day are the same date (PR #27, CU1c). The owner ran the first production
-  Refresh shows and research import before CU1c. Still open: a page can't detect CU1b before calling it (a page deployed before its migration stops its
+  Refresh shows and research import before CU1c, and Refresh shows again after CU1d. Still open: a page can't detect CU1b before calling it (a page deployed before its migration stops its
   writes on Edit until reloaded).
 - **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip); on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
