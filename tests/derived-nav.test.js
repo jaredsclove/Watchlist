@@ -255,7 +255,7 @@ test('guard: a TMDB search add → another view mid-call: one library_create_sho
   app.ctx.switchView('watching'); await settle();
   g.release(); await done; await settle();
   const posts = app.writes();
-  assert.deepStrictEqual(posts.map(r => r.url.split('/rest/v1/')[1]), ['rpc/library_create_show_b45']);
+  assert.deepStrictEqual(posts.map(r => r.url.split('/rest/v1/')[1]), ['rpc/library_create_show_b45', 'rpc/library_cu_sync_show_network']);
   // (network: the seasons' label, as before; B4: TMDB networks become candidates — Original network is never set automatically.)
   assert.deepStrictEqual(copyOut(posts[0].body.p_show), { tmdb_id: 55, title: 'New Show', show_key: 'new show', network: 'HBO',
     genres: [], forms: [], genre_candidates: [], companies: [], network_candidates: ['HBO'] });

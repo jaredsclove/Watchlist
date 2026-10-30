@@ -153,7 +153,7 @@ for (const phase of ['contracted-cu1']) { // (since CU1 the page writes only to 
     noStorage(app);
     assert.ok(!app.requests.some(r => /othertv_shows|legacy_source|[?&,=]collection\b/.test(r.url)), 'no retired table or column in any request');
     assert.deepStrictEqual([...new Set(writes(app).map(w => w.split(' ')[1]))].sort(),
-      ['rpc/library_add_films_b45', 'rpc/library_add_seasons_b45', 'rpc/library_create_show_b45', 'rpc/library_match_film_b45', 'rpc/library_match_season_b45', 'rpc/org_add_membership']);
+      ['rpc/library_add_films_b45', 'rpc/library_add_seasons_b45', 'rpc/library_create_show_b45', 'rpc/library_cu_sync_show_network', 'rpc/library_match_film_b45', 'rpc/library_match_season_b45', 'rpc/org_add_membership']);
     assert.ok(app.store.watchlist_items.some(r => r.tmdb_id === 999), 'the film was added');
     assert.ok(app.store.watchlist_items.some(r => r.id === localRow.id && r.tmdb_id === 888), 'the season was matched');
   });

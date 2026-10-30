@@ -93,7 +93,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261023-holds`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261030-cu1d`, not yet released; deployed: `20261028-dates`). The tests
 check only that all 29 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
@@ -106,6 +106,11 @@ test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 epi
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
 (CU1b) [#25], date equivalence (CU1c) [#27].
+
+- **Not released (local branch `claude/network-episode-details`, 2026-10-30):** sole-network confirmation, the episode list on a
+  Watched season without marks, the completion suggestion and Mark all episodes watched (owner decisions; design
+  `docs/ITEM4_DESIGN.md` §4.5). Needs `db/cu1d_network_and_marks.sql` in production before the page; neither is
+  authorized yet. Until then every description below is of the deployed release.
 
 - **Release:** `697d123`, date equivalence (item 4; PR #27, the branch's five commits rebased, same tree as the
   reviewed head), released 2026-10-29 UTC with database migration `db/cu1c_date_equivalence.sql` (replaces

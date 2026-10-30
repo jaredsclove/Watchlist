@@ -16,9 +16,15 @@
 // Next unwatched: beside an in-progress season's progress, the first listed episode without a mark
 // (from the open list, else this device's cached list with its numbers); its title only when titles
 // are shown by default. Hidden whenever that list isn't known: never inferred from the marks.
+// CU1d: a Watched season shows its list either way; without marks it's read-only reference, not progress, and
+// "Mark all episodes watched" is the one exception to the lock: an add of the listed episodes through its own
+// function, which checks the identity the list was read for. Watched and marks otherwise stay separate.
+// The completion suggestion (checkSeasonFinished) reads TMDB afresh and only strengthens the offer; Watched
+// changes only when the owner presses Mark season watched. Not now is per account, on this device.
 
 const EPISODE_LIST_CACHE_KEY = 'watchlist-episode-lists';
 const EPISODE_TITLES_KEY = 'watchlist_episode_titles';
+const SEASON_FINISH_LATER_KEY = 'watchlist-season-finish-later';
 
 // ── Episode titles by default (Settings) ──
 // The choice made on this page wins (kept in page memory, so a choice that couldn't be saved still
@@ -202,7 +208,10 @@ function toggleEpisodes(seasonId) {
 
 async function loadEpisodeList(row) {
   const seq = ++episodePanelSeq;
-  episodePanel = { seasonId: row.id, seq, status: 'loading', episodes: [], error: '', titles: new Set(), throughId: null, throughNote: '' };
+  const show = showOfRow(row);
+  episodePanel = { seasonId: row.id, seq, status: 'loading', episodes: [], error: '', titles: new Set(), throughId: null, throughNote: '',
+    identity: show && show.tmdb_id != null ? { show_id: row.show_id, show_tmdb_id: show.tmdb_id, tmdb_id: row.tmdb_id, season_number: row.season_number } : null,
+    finish: null, finishSeq: 0, confirmAll: false };
   renderTable();
   let d;
   try { d = await tmdbFetch(`/tv/${row.tmdb_id}/season/${row.season_number}`); }
@@ -214,18 +223,80 @@ async function loadEpisodeList(row) {
     return;
   }
   if (!episodePanel || episodePanel.seq !== seq) return;
-  const seen = new Set();
-  const episodes = (d && Array.isArray(d.episodes) ? d.episodes : [])
-    .filter(e => e && Number.isInteger(e.id) && e.id > 0 && Number.isInteger(e.episode_number) && e.episode_number >= 0 && !seen.has(e.id) && seen.add(e.id))
-    .map(e => ({ id: e.id, number: e.episode_number, name: typeof e.name === 'string' ? e.name : '',
-      air_date: /^\d{4}-\d{2}-\d{2}$/.test(e.air_date || '') ? e.air_date : null, type: typeof e.episode_type === 'string' ? e.episode_type : null }))
-    .sort((a, b) => a.number - b.number || a.id - b.id);
+  const episodes = cuEpisodes(d && d.episodes);
   episodePanel.status = 'ready';
   episodePanel.episodes = episodes;
   // Mark watched through: the first episode not marked yet, else the last; kept until changed.
   const marks = marksOf(row.id), first = episodes.find(e => !marks.has(e.id)) || episodes[episodes.length - 1];
   episodePanel.throughId = first ? first.id : null;
   noteEpisodeList(row.tmdb_id, row.season_number, episodes);
+  renderTable();
+  checkSeasonFinished(row.id, d);
+}
+
+// ── The completion suggestion ──
+// Whether TMDB's details indicate a season has finished, conservatively, for a list every episode of which is
+// marked. Stricter than the airing lifecycle (cuSeasonFinished), which only decides what to re-read: a regular
+// season only (no specials); a non-empty list, every episode with an air date that has passed; TMDB's count of the
+// season agreeing with the list; no next episode in this season; and either a finale aired at the end of the list,
+// or an Ended / Canceled show with nothing scheduled. A later season having started counts for nothing. Missing or
+// conflicting evidence is a no.
+function seasonLooksFinished(details, seasonNumber, episodes, marks, today) {
+  if (!details || !(seasonNumber >= 1) || !episodes.length) return false;
+  if (!episodes.every(e => marks.has(e.id) && e.air_date && e.air_date <= today)) return false;
+  const entry = (Array.isArray(details.seasons) ? details.seasons : []).find(s => s && s.season_number === seasonNumber);
+  if (!entry || entry.episode_count !== episodes.length) return false;
+  const next = details.next_episode_to_air;
+  if (next && (typeof next !== 'object' || !Number.isInteger(next.season_number) || next.season_number === seasonNumber)) return false;
+  if (episodes[episodes.length - 1].type === 'finale') return true;
+  return /^(ended|canceled|cancelled)$/i.test(String(details.status || '')) && !next;
+}
+function readSeasonFinishLater() {
+  try {
+    const v = JSON.parse(userStorage.getItem(SEASON_FINISH_LATER_KEY) || '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch (e) { return {}; }
+}
+// "Not now" holds while the list keeps the episode count it was said about; a changed count asks again. The choice
+// made on this page wins, so one that couldn't be saved still holds until the page is closed.
+function seasonFinishDeclined(row, count) {
+  const key = episodeCacheKey(row.tmdb_id, row.season_number);
+  return (seasonFinishLater.has(key) ? seasonFinishLater.get(key) : readSeasonFinishLater()[key]) === count;
+}
+function declineSeasonFinish(seasonId) {
+  const p = episodePanel, row = actionRows().find(r => r.id === seasonId);
+  if (!p || p.seasonId !== seasonId || !isEpisodeTrackable(row)) return;
+  const key = episodeCacheKey(row.tmdb_id, row.season_number), later = readSeasonFinishLater();
+  seasonFinishLater.set(key, p.episodes.length);
+  later[key] = p.episodes.length;
+  try { userStorage.setItem(SEASON_FINISH_LATER_KEY, JSON.stringify(later)); } catch (e) { /* storage unavailable: this page only */ }
+  p.finish = 'declined';
+  renderTable();
+}
+// One bounded check when a fully marked list opens (season: the list just read) or its last box is checked. The
+// season and show are read afresh; a failure, or a list that no longer holds, leaves today's plain offer.
+async function checkSeasonFinished(seasonId, season) {
+  const p = episodePanel, row = actionRows().find(r => r.id === seasonId);
+  if (!p || p.seasonId !== seasonId || p.status !== 'ready' || p.finish || !isEpisodeTrackable(row) || row.watched || row.skipped) return;
+  const marks = marksOf(seasonId), today = localTodayStr();
+  if (!(row.season_number >= 1) || !p.episodes.length || !p.episodes.every(e => marks.has(e.id) && e.air_date && e.air_date <= today)) return;
+  if (seasonFinishDeclined(row, p.episodes.length)) { p.finish = 'declined'; return; }
+  const token = ++p.finishSeq;
+  p.finish = 'checking';
+  let details = null;
+  try {
+    if (!season) season = await tmdbFetch(`/tv/${row.tmdb_id}/season/${row.season_number}`);
+    details = await tmdbFetch(`/tv/${row.tmdb_id}`);
+  } catch (e) { details = null; }
+  const live = episodePanel;
+  if (!live || live.seq !== p.seq || live.finishSeq !== token || live.finish !== 'checking') return;
+  const episodes = details ? cuEpisodes(season && season.episodes) : [];
+  if (details) noteShowRating(row.tmdb_id, details); // item 2 (show-ratings.js)
+  if (episodes.length) {
+    live.episodes = episodes;
+    noteEpisodeList(row.tmdb_id, row.season_number, episodes);
+  }
+  live.finish = seasonLooksFinished(details, row.season_number, episodes, marksOf(seasonId), localTodayStr()) ? 'finished' : 'plain';
   renderTable();
 }
 
@@ -248,26 +319,43 @@ function episodePanelHtml(r, opts = {}, card = false) {
   const idArg = esc(r.id).replace(/'/g, "\\'");
   const marks = marksOf(r.id);
   const locked = r.watched || r.skipped;
+  const reference = r.watched && !marks.size; // the list as reference: no progress is recorded for it
+  if (locked) p.finish = null; // a suggestion doesn't outlive the state it was made for
+  if (!r.watched) p.confirmAll = false;
   const today = localTodayStr();
   const parts = [];
-  if (r.watched && !marks.size) parts.push('<div class="ep-note">Watched (no episode detail)</div>');
+  if (reference) parts.push('<div class="ep-note">This season is marked watched. No episode progress is recorded for it, so this list is for reference.</div>');
   else if (r.watched) parts.push(`<div class="ep-note">This season is marked watched, so its episodes are locked; unmark it to change them. Its marks are kept.</div>`);
   else if (r.skipped) parts.push(`<div class="ep-note">This season is skipped, so its episodes are locked; keep it to change them.${marks.size ? ' Its marks are kept.' : ''}</div>`);
   if (p.status === 'loading') parts.push('<div class="ep-note" role="status">Loading episodes…</div>');
   else if (p.status === 'error') {
     parts.push(`<div class="ep-note" role="status">Couldn’t load the episode list (${esc(p.error)}).${marks.size ? ` ${marks.size} episode${marks.size === 1 ? ' is' : 's are'} marked.` : ''} `
       + `${seasonActionHtml('ep-retry', `<button type="button" class="btn btn-link" onclick="retryEpisodes('${idArg}')">Retry</button>`)}</div>`);
-  } else if (!(r.watched && !marks.size)) {
+  } else {
     const eps = p.episodes;
     const listed = new Set(eps.map(e => e.id));
     const done = eps.filter(e => marks.has(e.id)).length;
     const notAired = eps.filter(e => e.air_date && e.air_date > today).length, noDate = eps.filter(e => !e.air_date).length;
-    parts.push(`<div class="ep-summary">${eps.length ? `${done}/${eps.length} watched` : 'TMDB lists no episodes for this season'}${notAired ? ` · ${notAired} not aired yet` : ''}${noDate ? ` · ${noDate} without an air date` : ''}</div>`);
+    parts.push(`<div class="ep-summary">${eps.length ? (reference ? `${eps.length} episode${eps.length === 1 ? '' : 's'} listed` : `${done}/${eps.length} watched`) : 'TMDB lists no episodes for this season'}${notAired ? ` · ${notAired} not aired yet` : ''}${noDate ? ` · ${noDate} without an air date` : ''}</div>`);
     // The explicit completion suggestion: a loaded, non-empty list with every listed episode checked.
     if (!locked && eps.length && done === eps.length) {
       const why = notAired || noDate
         ? ` TMDB lists ${eps.length} episode${eps.length === 1 ? '' : 's'}; ${[notAired ? `${notAired} ha${notAired === 1 ? 's' : 've'}n’t aired yet` : '', noDate ? `${noDate} ha${noDate === 1 ? 's' : 've'} no air date` : ''].filter(Boolean).join(' and ')}.` : '';
-      parts.push(`<div class="ep-suggest">Every listed episode is checked.${esc(why)} ${seasonActionHtml('ep-complete', `<button type="button" class="watch-btn" onclick="toggleWatch('${idArg}')">Mark ${esc(r.season)} watched</button>`)}</div>`);
+      const finished = p.finish === 'finished';
+      const claim = finished ? ' TMDB’s details indicate this season has finished, though that isn’t a guarantee.' : why;
+      parts.push(`<div class="ep-suggest">Every listed episode is checked.${esc(claim)} ${seasonActionHtml('ep-complete', `<button type="button" class="watch-btn" onclick="toggleWatch('${idArg}')">Mark ${esc(r.season)} watched</button>`)}`
+        + `${finished ? ` ${seasonActionHtml('ep-finish-later', `<button type="button" class="btn btn-link" onclick="declineSeasonFinish('${idArg}')">Not now</button>`)}` : ''}</div>`);
+    }
+    // The one deliberate exception to the lock: an explicit add of the listed episodes, asked first (there's no
+    // single undo: removing them means unmarking Watched and clearing them).
+    const unmarked = eps.length - done;
+    if (r.watched && !r.skipped && unmarked && p.identity) {
+      const count = `${unmarked} listed episode${unmarked === 1 ? '' : 's'}`;
+      parts.push(p.confirmAll
+        ? `<div class="ep-suggest" role="group" aria-label="Confirm marking episodes">Mark ${esc(count)} watched? The season stays marked watched, and episodes TMDB adds later won’t be marked. `
+          + `${seasonActionHtml('ep-all-confirm', `<button type="button" class="btn ep-all-confirm" onclick="markAllEpisodesWatched('${idArg}')">Mark ${esc(count)}</button>`)} `
+          + `${seasonActionHtml('ep-all-cancel', `<button type="button" class="btn btn-link" onclick="askMarkAllEpisodes('${idArg}', false)">Cancel</button>`)}</div>`
+        : `<div class="ep-bulk">${seasonActionHtml('ep-all', `<button type="button" class="btn ep-all" onclick="askMarkAllEpisodes('${idArg}', true)">Mark all episodes watched</button>`)}</div>`);
     }
     // One bulk control above the list (no ids: the table row and the phone card are both on the page).
     if (!locked && eps.length) {
@@ -285,6 +373,7 @@ function episodePanelHtml(r, opts = {}, card = false) {
       const label = `Episode ${e.number}${showTitle ? `: ${name}` : ''}`;
       const title = name && !titlesOn ? seasonActionHtml(`ep-title-${e.id}`, `<button type="button" class="btn btn-link ep-title" aria-label="${esc(`${showTitle ? 'Hide' : 'Show'} title of episode ${e.number}`)}" onclick="toggleEpisodeTitle('${idArg}', ${e.id})">${showTitle ? 'Hide title' : 'Show title'}</button>`) : '';
       const date = e.air_date ? (e.air_date > today ? `<span class="ep-date">${esc(formatDisplayDate(e.air_date))}</span>` : '') : '<span class="ep-date">No air date</span>';
+      if (reference) return `<li class="ep-item"><span class="ep-check ep-ref">${esc(label)}</span> ${date} ${title}</li>`;
       return `<li class="ep-item${checked ? ' ep-checked' : ''}">${seasonActionHtml(`ep-${e.id}`, `<label class="ep-check"><input type="checkbox"${checked ? ' checked' : ''}${locked ? ' disabled' : ''} onchange="setEpisodeMark('${idArg}', ${e.id}, this.checked)"> <span>${esc(label)}</span></label>`)} ${date} ${title}</li>`;
     }).join('');
     if (items) parts.push(`<ul class="ep-list" aria-label="${esc(`Episodes of ${r.season}`)}">${items}</ul>`);
@@ -343,13 +432,39 @@ function markEpisodesThrough(seasonId, episodeId) {
   renderTable();
 }
 
+// Mark all episodes watched on a Watched season (CU1d). Literal: every listed episode not marked yet, aired or not.
+// The expected values are the identity the list was read for, not the row's current one, so a season or show
+// rematched since then is refused. Existing marks stay as stored; the season's status doesn't change.
+function askMarkAllEpisodes(seasonId, on) {
+  if (!episodePanel || episodePanel.seasonId !== seasonId) return;
+  episodePanel.confirmAll = !!on;
+  renderTable();
+}
+function markAllEpisodesWatched(seasonId) {
+  const p = episodePanel, row = actionRows().find(r => r.id === seasonId);
+  if (!p || p.seasonId !== seasonId || p.status !== 'ready' || !p.identity) return;
+  p.confirmAll = false;
+  if (!isEpisodeTrackable(row) || !row.watched || row.skipped) { renderTable(); return; }
+  const marks = marksOf(seasonId);
+  const episodes = p.episodes.filter(e => !marks.has(e.id)).map(e => ({ tmdb_episode_id: e.id, episode_number: e.number }));
+  if (!episodes.length) { renderTable(); return; }
+  return sendEpisodeMarks(row, episodes, true, 'library_add_watched_season_marks',
+    { p_season_id: seasonId, p_expected: { ...p.identity, watched: true, skipped: false }, p_episodes: episodes });
+}
+
 // One guarded change: the season's watched / skipped as shown are its expected values. Shown at
 // once; the database's answer replaces the season's marks. A refusal puts back what was shown; no
 // clear answer is never resent, and the view is read again (tv-shows.js reportStateFailure).
 async function setEpisodeMarks(seasonId, episodes, watched) {
   const row = actionRows().find(r => r.id === seasonId);
   if (!isEpisodeTrackable(row) || row.watched || row.skipped || !episodes.length) { renderTable(); return; }
-  const expected = { watched: !!row.watched, skipped: !!row.skipped };
+  await sendEpisodeMarks(row, episodes, watched, 'library_set_episode_marks', { p_season_id: seasonId, p_expected: { watched: !!row.watched, skipped: !!row.skipped }, p_watched: watched,
+    p_episodes: episodes.map(e => (watched ? { tmdb_episode_id: e.tmdb_episode_id, episode_number: e.episode_number } : { tmdb_episode_id: e.tmdb_episode_id })) });
+  // The list's state changed: the suggestion is decided again (nothing is read unless every episode is marked).
+  if (episodePanel && episodePanel.seasonId === seasonId) { episodePanel.finish = null; checkSeasonFinished(seasonId); }
+}
+async function sendEpisodeMarks(row, episodes, watched, rpc, args) {
+  const seasonId = row.id;
   if (episodePanel && episodePanel.seasonId === seasonId) episodePanel.throughNote = '';
   const what = episodes.length === 1 ? `episode ${episodes[0].episode_number}` : `${episodes.length} episodes`;
   await runWrite(`“${row.title}” · ${row.season} · ${what}`, async () => {
@@ -359,8 +474,7 @@ async function setEpisodeMarks(seasonId, episodes, watched) {
     if (shown.size) episodeMarks.set(seasonId, shown); else episodeMarks.delete(seasonId);
     renderTable();
     try {
-      const saved = await sbRpc('library_set_episode_marks', { p_season_id: seasonId, p_expected: expected, p_watched: watched,
-        p_episodes: episodes.map(e => (watched ? { tmdb_episode_id: e.tmdb_episode_id, episode_number: e.episode_number } : { tmdb_episode_id: e.tmdb_episode_id })) });
+      const saved = await sbRpc(rpc, args);
       replaceSeasonMarks(seasonId, saved && saved.marks);
       showSaved();
     } catch (e) {

@@ -203,7 +203,7 @@ function cuSeasonFinished(details, seasonNumber, cached, today) {
 
 // ── Results ──
 function cuEmptyResults(source) {
-  return { source, checked: 0, matched: 0, unmatched: 0, skipped: 0, applied: [], review: [], blocked: [], failed: [], setAside: [], episodes: [], unknown: null, laneRefused: null };
+  return { source, checked: 0, matched: 0, unmatched: 0, skipped: 0, applied: [], review: [], blocked: [], failed: [], setAside: [], episodes: [], networkConfirmed: [], networkChoices: [], unknown: null, laneRefused: null };
 }
 function cuResultsHtml(r) {
   const li = items => items.map(x => `<li>${esc(x)}</li>`).join('');
@@ -221,14 +221,33 @@ function cuResultsHtml(r) {
     <h4 class="cu-results-head">Automatic updates (${auto.length})</h4>${auto.length ? `<ul class="cu-list">${li(auto)}</ul>` : '<p class="cu-none">None.</p>'}
     <h4 class="cu-results-head">Needs your review (${r.review.length})</h4>${r.review.length ? `<ul class="cu-list">${li(r.review)}</ul>
       <div class="settings-actions"><button class="btn" onclick="openCuReview(this)">Review…</button></div>` : '<p class="cu-none">None.</p>'}
+    ${r.networkChoices.length ? `<h4 class="cu-results-head">Choose a network (${r.networkChoices.length})</h4><p class="cu-none">Nothing was guessed; each stays unset until you choose in Details.</p>
+      <ul class="cu-list">${r.networkChoices.map(cuNetworkChoiceHtml).join('')}</ul>` : ''}
+    ${r.networkConfirmed.length ? `<h4 class="cu-results-head">Networks confirmed automatically (${r.networkConfirmed.length})</h4><ul class="cu-list">${li(r.networkConfirmed)}</ul>` : ''}
     ${r.blocked.length ? `<h4 class="cu-results-head">Waiting for more research (${r.blocked.length})</h4><p class="cu-none">${esc(CU_BLOCKED_TEXT)}</p><ul class="cu-list">${li(r.blocked)}</ul>` : ''}
     <h4 class="cu-results-head">Couldn’t check or apply (${notChecked.length})</h4>${notChecked.length ? `<ul class="cu-list">${li(notChecked)}</ul>` : '<p class="cu-none">None.</p>'}
   </div>`;
 }
 
+// A show waiting for the owner's network choice: why it's listed, and Details, where the choice is made.
+function cuNetworkChoiceHtml(c) {
+  const why = c.saved ? ' (its Details are saved, so this wasn’t confirmed automatically)' : '';
+  return `<li>${esc(c.title)}: ${esc(c.names.join(', '))}${esc(why)} <button type="button" class="btn btn-link" onclick="cuChooseNetwork('${esc(c.id).replace(/'/g, "\\'")}', this)">Choose…</button></li>`;
+}
+function cuChooseNetwork(showId, opener) {
+  if (tvShowsById.has(showId)) openDetails('show', showId, opener);
+  else showNotice('Open the show in TV to choose its network.');
+}
+
 // What one applying call's answer means for the results.
 function cuRecordOutcome(op, res, results) {
   if (!res || typeof res !== 'object') { results.failed.push(`${op.what}: the answer couldn’t be read; check the list`); return; }
+  if (op.type === 'network') {
+    const r = res.result || {};
+    if (r.network_outcome === 'confirmed') results.networkConfirmed.push(`${op.what}: ${r.network}`);
+    else if (r.network_outcome === 'needs_choice' && !results.networkChoices.some(c => c.id === op.choice.id)) results.networkChoices.push(op.choice);
+    return;
+  }
   const why = cuReasonText(res.reason);
   if (res.outcome === 'applied') {
     const o = (res.result || {}).outcome;
@@ -298,9 +317,26 @@ async function cuRefreshShows() {
   await cuApplyPlan(plan, results, 'Refresh shows');
   const el = document.getElementById('tmdbPreview');
   if (libraryLive(session) && el) el.innerHTML = cuResultsHtml(results);
-  else showNotice(`Refresh shows: ${results.applied.length} automatic update${results.applied.length === 1 ? '' : 's'}, ${results.review.length} to review, ${results.blocked.length} waiting for more research, ${results.failed.length} couldn’t be checked.`);
+  else showNotice(`Refresh shows: ${results.applied.length + results.networkConfirmed.length} automatic update${results.applied.length + results.networkConfirmed.length === 1 ? '' : 's'}, ${results.review.length} to review, ${results.networkChoices.length} network${results.networkChoices.length === 1 ? '' : 's'} to choose, ${results.blocked.length} waiting for more research, ${results.failed.length} couldn’t be checked.`);
   if (libraryLive(session)) libraryLoad(session);
   return results;
+}
+
+// A show without a confirmed network, against TMDB's current list (CU1d). A confirmed network is never looked at;
+// no TMDB network leaves it unset. One name on a show whose Details were never saved is confirmed; anything else
+// is the owner's choice, listed here whether or not its candidates need saving, so an unchanged choice still shows
+// on every Refresh while nothing is written. The database decides again under lock.
+function cuPlanNetwork(show, details, plan, results) {
+  if (show.network) return;
+  const names = labelList(((details && details.networks) || []).map(n => n && n.name));
+  if (!names.length) return;
+  const saved = !!show.metadata_owner_set, sole = names.length === 1 && !saved;
+  const stored = show.network_candidates || [];
+  const choice = { id: show.id, title: show.title, names, saved: saved && names.length === 1 };
+  if (!sole) results.networkChoices.push(choice);
+  if (!sole && JSON.stringify(stored) === JSON.stringify(names)) return;
+  plan.push({ type: 'network', fn: 'library_cu_sync_show_network', what: show.title, choice,
+    args: { p_show_id: show.id, p_networks: names, p_expected: { tmdb_id: show.tmdb_id, network: null, network_candidates: stored, metadata_owner_set: saved } } });
 }
 
 async function cuCheckMatchedShow(show, lib, plan, results) {
@@ -308,6 +344,7 @@ async function cuCheckMatchedShow(show, lib, plan, results) {
   try { details = await tmdbFetch(`/tv/${show.tmdb_id}`); }
   catch (e) { results.failed.push(`${show.title}: TMDB didn’t answer, so it wasn’t checked`); return; }
   noteShowRating(show.tmdb_id, details); // item 2 (show-ratings.js)
+  cuPlanNetwork(show, details, plan, results);
   const seasons = (details.seasons || []).filter(s => s && Number.isInteger(s.season_number) && (tmdbShowSpecials || s.season_number !== 0));
   const rows = lib.rows.filter(r => r.show_id === show.id);
   // Full episode lists from TMDB's season details (one documented request per season) for every stored season of

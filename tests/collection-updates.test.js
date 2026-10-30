@@ -1017,4 +1017,91 @@ test('hold editor (review fixes): show-wide protected values, a named source wit
   assert.deepStrictEqual([idh.show_id, idh.subject_label, idh.effect], [b.id, null, 'block_season_mapping'], 'the stored effect stands while the target is unchanged');
 });
 
+// ═══ CU1d: networks through Refresh shows ═══════════════════════════════
+const SYNC = 'library_cu_sync_show_network';
+function networkLibrary() {
+  const mk = (title, id, o = {}) => showOf({ title, show_key: title.toLowerCase(), tmdb_id: id, network: null, network_candidates: [], metadata_owner_set: false, ...o });
+  const sole = mk('Sole', 801, { network_candidates: ['Apple TV'] }), multi = mk('Multi', 802), unchanged = mk('Unchanged', 803, { network_candidates: ['A', 'B'] });
+  const saved = mk('Saved', 804, { metadata_owner_set: true }), savedSame = mk('SavedSame', 805, { metadata_owner_set: true, network_candidates: ['Net E'] });
+  const kept = mk('Kept', 806, { network: 'Curated', network_candidates: ['Curated', 'Other'], metadata_owner_set: true }), none = mk('None', 807, { network_candidates: ['Old'] });
+  const shows = [sole, multi, unchanged, saved, savedSame, kept, none];
+  const tmdb = tmdbOf({ shows: { 801: { networks: [{ id: 2, name: 'Apple TV' }] }, 802: { networks: [{ id: 3, name: 'C' }, { id: 4, name: 'D' }] }, 803: { networks: [{ id: 5, name: 'A' }, { id: 6, name: 'B' }] },
+    804: { networks: [{ id: 7, name: 'Net D' }] }, 805: { networks: [{ id: 8, name: 'Net E' }] }, 806: { networks: [{ id: 9, name: 'Moved' }] }, 807: { networks: [] } } });
+  return { shows, sole, multi, unchanged, saved, savedSame, kept, none, tmdb };
+}
+const stored = (app, s) => { const x = app.store.tv_shows.find(y => y.id === s.id); return [x.network ?? null, (x.network_candidates || []).slice(), !!x.metadata_owner_set]; };
+
+test('Refresh shows: one network confirmed; several, or saved Details, wait for a choice; a confirmed network and no network are left alone', async () => {
+  const lib = networkLibrary();
+  const app = await createApp({ rows: lib.shows.map(s => seasonOf(s, 1)), tvShows: lib.shows, tmdb: lib.tmdb });
+  const r = await refresh(app);
+  assert.deepStrictEqual(stored(app, lib.sole), ['Apple TV', ['Apple TV'], false], 'confirmed, not recorded as the owner’s choice');
+  assert.deepStrictEqual(stored(app, lib.multi), [null, ['C', 'D'], false], 'candidates only');
+  assert.deepStrictEqual(stored(app, lib.unchanged), [null, ['A', 'B'], false]);
+  assert.deepStrictEqual(stored(app, lib.saved), [null, ['Net D'], true], 'the blank is kept; the candidate saved');
+  assert.deepStrictEqual(stored(app, lib.savedSame), [null, ['Net E'], true]);
+  assert.deepStrictEqual(stored(app, lib.kept), ['Curated', ['Curated', 'Other'], true], 'a confirmed network never changes');
+  assert.deepStrictEqual(stored(app, lib.none), [null, ['Old'], false], 'no TMDB network: nothing blanked or set');
+  assert.deepStrictEqual(rpcs(app, SYNC).map(c => c.body.p_show_id).sort(), [lib.sole.id, lib.multi.id, lib.saved.id].sort(), 'a write only where something changes');
+  assert.match(r, /Networks confirmed automatically \(1\)/);
+  assert.match(r, /Sole: Apple TV/);
+  assert.match(r, /Choose a network \(4\)/);
+  assert.match(r, /Multi: C, D/);
+  assert.match(r, /Unchanged: A, B/, 'unchanged candidates still appear, with no write');
+  assert.match(r, /Saved: Net D \(its Details are saved, so this wasn.t confirmed automatically\)/);
+  assert.match(r, /SavedSame: Net E/);
+  assert.ok(!/Kept:|None:/.test(r));
+});
+
+test('a second Refresh writes no network; the choices are all still listed', async () => {
+  const lib = networkLibrary();
+  const app = await createApp({ rows: lib.shows.map(s => seasonOf(s, 1)), tvShows: lib.shows, tmdb: lib.tmdb });
+  await refresh(app);
+  const n = rpcs(app, SYNC).length;
+  const r = await refresh(app);
+  assert.strictEqual(rpcs(app, SYNC).length, n, 'nothing to write');
+  assert.match(r, /Choose a network \(4\)/);
+  assert.ok(!/Networks confirmed automatically/.test(r));
+});
+
+test('Choose… opens Details; a network cleared there stays cleared and is offered again, with no write', async () => {
+  const lib = networkLibrary();
+  const app = await createApp({ rows: lib.shows.map(s => seasonOf(s, 1)), tvShows: lib.shows, tmdb: lib.tmdb });
+  await refresh(app);
+  assert.match(app.el('tmdbPreview').innerHTML, /cuChooseNetwork\(/);
+  app.ctx.cuChooseNetwork(lib.multi.id, null); await settle();
+  assert.match(app.el('detailsModalBox').innerHTML, /Network candidates \(TMDB\)/);
+  app.ctx.closeDetails();
+  // The owner clears Sole's confirmed network in Details.
+  app.ctx.cuChooseNetwork(lib.sole.id, null); await settle();
+  app.ctx.detailsSetNetwork('');
+  await app.ctx.saveDetails(); await settle();
+  assert.deepStrictEqual(stored(app, lib.sole), [null, ['Apple TV'], true]);
+  const n = rpcs(app, SYNC).length;
+  const r = await refresh(app);
+  assert.deepStrictEqual(stored(app, lib.sole), [null, ['Apple TV'], true], 'stays blank');
+  assert.strictEqual(rpcs(app, SYNC).length, n, 'candidate unchanged: no write');
+  assert.match(r, /Sole: Apple TV \(its Details are saved/);
+});
+
+test('a network write refused as stale is reported and changes nothing; no clear answer stops the plan and is never resent', async () => {
+  const lib = networkLibrary();
+  const app = await createApp({ rows: lib.shows.map(s => seasonOf(s, 1)), tvShows: lib.shows, tmdb: lib.tmdb });
+  app.refuseNext(c => c.url.endsWith(`/rpc/${SYNC}`), 'P0001', 'target_changed: This changed since the page showed it, so nothing was changed. Look at it again.');
+  const r = await refresh(app);
+  assert.match(r, /Couldn.t check or apply \([1-9]/);
+  const lib2 = networkLibrary();
+  const app2 = await createApp({ rows: lib2.shows.map(s => seasonOf(s, 1)), tvShows: lib2.shows, tmdb: lib2.tmdb });
+  app2.failNext(c => c.url.endsWith(`/rpc/${SYNC}`));
+  const r2 = await refresh(app2);
+  assert.strictEqual(rpcs(app2, SYNC).length, 1, 'never resent; nothing more is sent');
+  assert.match(r2, /Nothing more was sent/);
+});
+
+test('the Refresh results for a research import have no network sections', async () => {
+  const { app } = { app: await createApp({ rows: [], tvShows: [] }) };
+  const html = app.ctx.cuResultsHtml({ ...app.ctx.cuEmptyResults('research'), checked: 0 });
+  assert.ok(!/Choose a network|Networks confirmed/.test(html));
+});
+
 T.run();

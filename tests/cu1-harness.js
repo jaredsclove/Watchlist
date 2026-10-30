@@ -518,6 +518,28 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
         decision: String(p_hold.decision).trim(), effect: p_hold.effect, reopen: clone(p_hold.reopen), decided_on: p_hold.decided_on || null });
       return clone(h);
     },
+    // db/cu1d_network_and_marks.sql: the rules are the database's, under lock; a confirmed network is never replaced
+    // and metadata_owner_set is never written.
+    library_cu_sync_show_network({ p_show_id, p_expected, p_networks }) {
+      requireOn('library_cu_sync_show_network');
+      const keys = ['metadata_owner_set', 'network', 'network_candidates', 'tmdb_id'];
+      if (!p_show_id || !p_expected || typeof p_expected !== 'object' || Object.keys(p_expected).sort().join() !== keys.join()) invalid('show network');
+      const names = Array.isArray(p_networks) ? p_networks : null;
+      if (!names || !names.length || names.length > 10 || names.some(x => typeof x !== 'string' || x !== x.trim() || !x || x.length > 80)
+        || new Set(names.map(x => x.toLowerCase())).size !== names.length) invalid('show network');
+      const s = showOf(p_show_id);
+      if (!s) refuse('target_missing', 'This show is no longer on your list, so nothing was changed.');
+      const stored = { metadata_owner_set: !!s.metadata_owner_set, network: s.network ?? null, network_candidates: s.network_candidates || [], tmdb_id: s.tmdb_id ?? null };
+      if (keys.some(k => jsonbText(stored[k]) !== jsonbText(p_expected[k]))) changed();
+      if (s.tmdb_id == null) refuse('show_unmatched', 'Only a show matched to TMDB takes its networks from TMDB. Nothing was changed.');
+      const result = (network_outcome) => ({ network_outcome, network: s.network ?? null, network_candidates: clone(s.network_candidates || []) });
+      if (s.network != null) return { outcome: 'already', result: result('kept') };
+      const confirm = names.length === 1 && !s.metadata_owner_set;
+      if (!confirm && jsonbText(stored.network_candidates) === jsonbText(names)) return { outcome: 'already', result: result('needs_choice') };
+      if (confirm) s.network = names[0];
+      s.network_candidates = names.slice();
+      return { outcome: 'applied', result: result(confirm ? 'confirmed' : 'needs_choice') };
+    },
     library_cu_delete_hold({ p_id, p_expected_decision }) {
       requireOn('library_cu_delete_hold');
       const i = T('update_holds').findIndex(h => h.id === p_id && h.decision === p_expected_decision);

@@ -623,6 +623,34 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
       r.watched = watched;
       return clone(r);
     },
+    // CU1d (db/cu1d_network_and_marks.sql): adds marks to a Watched season, checking the identity the page's list
+    // was read for as well as the flags. An add only: the season is never written.
+    library_add_watched_season_marks({ p_season_id: id, p_expected: expected, p_episodes: eps }) {
+      const okId = v => Number.isInteger(v) && v > 0 && v < 1e9, okNum = v => Number.isInteger(v) && v >= 0 && v < 1e6;
+      const keys = 'season_number,show_id,show_tmdb_id,skipped,tmdb_id,watched';
+      if (typeof id !== 'string' || !expected || typeof expected !== 'object' || Object.keys(expected).sort().join() !== keys || typeof expected.show_id !== 'string'
+          || !Number.isInteger(expected.show_tmdb_id) || !Number.isInteger(expected.tmdb_id) || !Number.isInteger(expected.season_number)
+          || typeof expected.watched !== 'boolean' || typeof expected.skipped !== 'boolean' || !Array.isArray(eps) || eps.length < 1 || eps.length > 500
+          || eps.some(e => !e || typeof e !== 'object' || !okId(e.tmdb_episode_id) || !okNum(e.episode_number))
+          || new Set(eps.map(e => e.tmdb_episode_id)).size !== eps.length) throw new DbError('22023', 'invalid_input: episode marks');
+      const r = items().find(x => x.id === id && !isFilmRow(x));
+      if (!r) throw new DbError('P0001', 'target_missing: This season is no longer on your list, so nothing was changed.');
+      const sh = r.show_id ? shows().find(s => s.id === r.show_id) : null;
+      if (expected.show_id !== r.show_id || expected.show_tmdb_id !== (sh ? sh.tmdb_id : null) || expected.tmdb_id !== r.tmdb_id || expected.season_number !== r.season_number
+          || expected.watched !== !!r.watched || expected.skipped !== !!r.skipped) throw new DbError('P0001', 'target_changed: This changed since the page showed it, so nothing was changed. Look at it again.');
+      if (r.show_id == null || r.media_type !== 'tv') throw new DbError('P0001', 'season_unmatched: Only a season matched to TMDB has episode marks. Nothing was changed.');
+      if (!r.watched) throw new DbError('P0001', 'season_not_watched: This season isn\'t marked watched, so nothing was changed.');
+      if (r.skipped) throw new DbError('P0001', 'season_locked: This season is skipped, so its episodes can\'t be changed. Nothing was changed.');
+      for (const e of eps) {
+        if (!store.episode_marks.some(m => m.season_id === id && m.tmdb_episode_id === e.tmdb_episode_id)) {
+          store.episode_marks.push({ id: `0f000000-0000-4000-8000-${String(app.markSeq = (app.markSeq || 0) + 1).padStart(12, '0')}`,
+            season_id: id, tmdb_episode_id: e.tmdb_episode_id, episode_number: e.episode_number });
+        }
+      }
+      const marks = store.episode_marks.filter(m => m.season_id === id).sort((a, b) => a.episode_number - b.episode_number || a.tmdb_episode_id - b.tmdb_episode_id)
+        .map(m => ({ id: m.id, tmdb_episode_id: m.tmdb_episode_id, episode_number: m.episode_number }));
+      return { season_id: id, watched: !!r.watched, skipped: !!r.skipped, marks };
+    },
     // EP1: one season's marks set or cleared, refused while the season is watched or skipped.
     library_set_episode_marks({ p_season_id: id, p_expected: expected, p_watched: watched, p_episodes: eps }) {
       const okId = v => Number.isInteger(v) && v > 0 && v < 1e9, okNum = v => Number.isInteger(v) && v >= 0 && v < 1e6;

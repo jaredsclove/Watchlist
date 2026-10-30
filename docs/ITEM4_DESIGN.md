@@ -240,6 +240,63 @@ Each function verifies before returning that the show's status, priority and End
 - Enforced in `library_cu_set_season_date` (`db/cu1c_date_equivalence.sql`), so older pages get the same rules. No
   table, status, capability or backup-format change.
 
+### 4.5 Sole networks and marks on a Watched season (CU1d)
+
+Owner decisions, 2026-10-30. `db/cu1d_network_and_marks.sql` adds two functions and nothing else: no table, column,
+capability or backup-format change. Both are security invoker, for members only, and take the owner from the signed-in
+member, never from the page.
+
+**`library_cu_sync_show_network(p_show_id, p_expected, p_networks)`.** Original network stayed owner-set from B4, so
+a new show kept TMDB's network only as a candidate. Now a sole TMDB network is confirmed automatically. The function
+locks the show and refuses a stale page unless `tmdb_id`, `network`, `network_candidates` and `metadata_owner_set` are
+as expected; a show without a TMDB identity is refused. Then, deciding under the lock:
+
+| Stored | TMDB | Result |
+|---|---|---|
+| A confirmed network | Anything | Kept, no write |
+| No network, flag off | One name | Network and candidates set (`confirmed`) |
+| No network | Several names | Candidates only, when they differ (`needs_choice`) |
+| No network, flag on | One name | Candidates only, when they differ (`needs_choice`) |
+
+`metadata_owner_set` is never written, so an automatic confirmation isn't recorded as the owner's choice. The Details
+save sets it, which is what keeps a network the owner cleared from coming back. It can't tell a clearing from an
+unrelated Details edit, so a show saved in Details is listed under "Choose a network" instead of being confirmed; that
+suggestion recurs on each Refresh, without a write, while the network stays blank. No TMDB network is never sent, so
+missing data can't blank anything. A confirmed network isn't refreshed: TMDB's list can change without the original
+network changing.
+
+The page calls it straight after `library_create_show_b45` (which still refuses an original network), inside the same
+change; a failure leaves the show added, isn't resent, and the next Refresh shows confirms it. Refresh shows reads
+TMDB's current list and sends a call only when something would change, so a repeat Refresh writes no networks. Its
+"Choose a network" list comes from that read, not from the write, so an unchanged choice still appears.
+
+**`library_add_watched_season_marks(p_season_id, p_expected, p_episodes)`.** The one exception to the Watched lock, and an
+add only: it has no path that removes a mark or writes a season, and `library_set_episode_marks` is unchanged.
+`p_expected` is `{ show_id, show_tmdb_id, tmdb_id, season_number, watched, skipped }`: the identity the page's episode
+list was read for, held with the open list, not the row's current values. It locks the show and then the season (the
+order of `library_set_episode_marks`), and any difference refuses the request, so a rematch can't mark the wrong
+episodes. A season that isn't Watched, is Skipped, or isn't a TMDB-matched TV season is refused. Existing marks stay as
+stored. "Mark all episodes watched" sends every listed episode not yet marked, aired or not: it's a literal, explicit
+action, asked first, and date checks belong to the completion suggestion. There's no single undo: removing them means
+unmarking Watched and clearing them. Episodes TMDB adds later stay unmarked.
+
+**Watched and marks stay separate.** Marking a season Watched adds no marks, unmarking clears none, and no history is
+backfilled. A Watched season without marks shows its list as reference: no checkboxes and no progress count, with a
+note that no episode progress is recorded.
+
+**The completion suggestion** needs no database change and only strengthens the existing Mark season watched offer;
+Watched changes only when the owner presses it. When a fully marked list opens or its last box is checked, the season
+and show are read afresh, once. It's claimed only for a regular season with a non-empty list, every episode marked and
+aired, TMDB's count of the season equal to the list, no next episode in that season, and either a finale aired at the
+end of the list or an Ended / Canceled show with nothing scheduled. This is stricter than the airing lifecycle
+(`cuSeasonFinished`), which only decides what to re-read: a later season having started counts for nothing here.
+Missing or conflicting evidence leaves the plain offer. Not now is per account on the device and holds until the
+episode count changes.
+
+Limits: TMDB's status, finale tag and counts are contributor data and can be late or wrong, so the suggestion says it
+isn't a guarantee. An automatic network is TMDB's current network, which isn't always the original one. A network write
+from a page that loaded before the owner's Details save is refused as stale, then decided on the next Refresh.
+
 ## 5. Backup format 7
 
 - Tables: format 6's nine plus the ten above (nineteen), no `user_id`.
