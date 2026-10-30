@@ -1043,8 +1043,8 @@ test('Refresh shows: one network confirmed; several, or saved Details, wait for 
   assert.deepStrictEqual(stored(app, lib.kept), ['Curated', ['Curated', 'Other'], true], 'a confirmed network never changes');
   assert.deepStrictEqual(stored(app, lib.none), [null, ['Old'], false], 'no TMDB network: nothing blanked or set');
   assert.deepStrictEqual(rpcs(app, SYNC).map(c => c.body.p_show_id).sort(), [lib.sole.id, lib.multi.id, lib.saved.id].sort(), 'a write only where something changes');
-  assert.match(r, /Networks confirmed automatically \(1\)/);
-  assert.match(r, /Sole: Apple TV/);
+  assert.match(r, /Automatic updates \(1\)/);
+  assert.match(r, /Sole: network confirmed as Apple TV/);
   assert.match(r, /Choose a network \(4\)/);
   assert.match(r, /Multi: C, D/);
   assert.match(r, /Unchanged: A, B/, 'unchanged candidates still appear, with no write');
@@ -1061,7 +1061,7 @@ test('a second Refresh writes no network; the choices are all still listed', asy
   const r = await refresh(app);
   assert.strictEqual(rpcs(app, SYNC).length, n, 'nothing to write');
   assert.match(r, /Choose a network \(4\)/);
-  assert.ok(!/Networks confirmed automatically/.test(r));
+  assert.ok(!/network confirmed as/.test(r));
 });
 
 test('Choose… opens Details; a network cleared there stays cleared and is offered again, with no write', async () => {
@@ -1101,7 +1101,7 @@ test('a network write refused as stale is reported and changes nothing; no clear
 test('the Refresh results for a research import have no network sections', async () => {
   const { app } = { app: await createApp({ rows: [], tvShows: [] }) };
   const html = app.ctx.cuResultsHtml({ ...app.ctx.cuEmptyResults('research'), checked: 0 });
-  assert.ok(!/Choose a network|Networks confirmed/.test(html));
+  assert.ok(!/Choose a network|network confirmed as/.test(html));
 });
 
 T.run();

@@ -267,7 +267,7 @@ network changing.
 
 The page calls it straight after `library_create_show_b45` (which still refuses an original network), inside the same
 change; a failure leaves the show added, isn't resent, and the next Refresh shows confirms it. Refresh shows reads
-TMDB's current list and sends a call only when something would change, so a repeat Refresh writes no networks. Its
+TMDB's current list and sends a call only when something would change, so a repeat Refresh writes no networks. Confirmations are listed under Automatic updates. Its
 "Choose a network" list comes from that read, not from the write, so an unchanged choice still appears.
 
 **`library_add_watched_season_marks(p_season_id, p_expected, p_episodes)`.** The one exception to the Watched lock, and an
