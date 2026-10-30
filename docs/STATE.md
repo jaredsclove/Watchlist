@@ -19,8 +19,17 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 - **Views:** TV (Currently Watching, All TV, Coming Soon), Movies (All Movies), Collections
   (personal collections: shows, seasons and, since S4, films editable there; Remove from a
   collection with Undo; Add to <collection>…, S5), Settings (Manage collections and watch-with
-  choices, Collection updates, Backup & Restore). ⬇ Backup is also in the header. Since S6 every view
+  choices, Collection updates, Backup & Restore). Since S6 every view
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
+- **Layout (compact interface):** one app bar holds the title, TV · Movies · Collections and Settings (on phones, a
+  non-sticky row of the areas and a gear, no logo); view tabs below it; then one list toolbar (`.list-toolbar`: toggles,
+  Search that grows, scope selects, More filters, + Add, the count), wrapping in page order on phones. Backup and its date
+  are only in Settings' Backup & Restore; no backup, or 14 days or more, puts ⚠ on the Settings control (with the status
+  in its name) and it then opens on that section. Show rows read expand · title · ⋯. Status is a quiet directly editable
+  select ("Choose a status…" is never quiet). Priority is edited in the row's ⋯ (shows and films; Seasons lists show it
+  only); High shows ★ and Low the word, Normal nothing. The show-row shortcut reads "Mark watched" (its name and tooltip
+  name the season; the episode list's offer keeps "Mark Season N watched"). Season progress reads "1/3 seasons watched".
+  Clickable genres are subdued filter buttons ("Crime · Drama"), underlined on hover, 32 px tall on phones.
 - **Film collections (TMDB):** a film TMDB places in a collection keeps that identity. Its ⋯ menu offers Check
   collection while the collection's contents are unknown on this page, then Pull rest only when another film can be
   added, "All collection films are already in your library." when none can, nothing for a collection of one, or a
@@ -94,7 +103,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261030-cu1d`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261030-compact`). The tests
 check only that all 29 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
@@ -439,7 +448,7 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   resolved (PR #25, CU1b); dates within a day are the same date (PR #27, CU1c). The owner ran the first production
   Refresh shows and research import before CU1c, and Refresh shows again after CU1d. Still open: a page can't detect CU1b before calling it (a page deployed before its migration stops its
   writes on Edit until reloaded).
-- **Optional, not scheduled:** phone controls under 44 px (status select, Show ended, Skip); on an
+- **Optional, not scheduled:** on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
   instead of a sentence (polish, not a blocker).
 - **Deferred (owner, 2026-10-18):** archiving the historical `db/` and `tools/` scripts. They stay
