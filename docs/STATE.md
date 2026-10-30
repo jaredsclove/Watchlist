@@ -69,7 +69,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   Rows are owner-scoped: `user_id` is the signed-in member (`auth.uid()`), never sent
   by the client; membership is `private.library_members`.
 - **Writes** go mainly through database functions (the `library_*_b45` family, `org_*`,
-  `set_season_watched` / `set_season_skipped`, `library_set_episode_marks`, `delete_tv_season`, `restore_backup`).
+  `set_season_watched` / `set_season_skipped`, `library_set_episode_marks`, `library_add_watched_season_marks`,
+  `library_cu_sync_show_network`, `delete_tv_season`, `restore_backup`).
   Some take `p_expected` values and refuse a stale write; not every path does, so check each one before relying
   on it. `delete_tv_season` takes the mark count the page showed: a page from before EP1 can't delete a marked season.
 - **Backup** is format 7 (nineteen tables: format 6's nine plus collection updates' ten; no `user_id`). **Restore**
@@ -93,26 +94,50 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261030-cu1d`, not yet released; deployed: `20261028-dates`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261030-cu1d`). The tests
 check only that all 29 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
-## Where things stand (2026-10-29)
+## Where things stand (2026-10-30)
 
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
-(CU1b) [#25], date equivalence (CU1c) [#27].
+(CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29].
 
-- **Not released (local branch `claude/network-episode-details`, 2026-10-30):** sole-network confirmation, the episode list on a
-  Watched season without marks, the completion suggestion and Mark all episodes watched (owner decisions; design
-  `docs/ITEM4_DESIGN.md` §4.5). Needs `db/cu1d_network_and_marks.sql` in production before the page; neither is
-  authorized yet. Until then every description below is of the deployed release.
+- **Release:** `0cac052`, sole-network confirmation, Watched-season episode lists, the completion suggestion and Mark all
+  episodes watched (items 1 and 4; PR #29, the branch's two commits rebased, same tree as the reviewed head), released
+  2026-10-30 UTC with database migration `db/cu1d_network_and_marks.sql` (two functions; no table, column, trigger,
+  policy, status, capability or backup-format change). Design: `docs/ITEM4_DESIGN.md` §4.5. Behaviour: a sole TMDB network
+  is confirmed at Add and in Refresh shows without being recorded as the owner's choice; several networks, or a show saved
+  in Details, are listed under "Choose a network" (also when nothing needs writing); a confirmed network is never
+  replaced and missing TMDB data blanks nothing. A Watched season without marks shows its list as reference. A fully
+  checked list reads TMDB afresh and, on strict evidence, strengthens the existing Mark season watched offer; Watched
+  changes only when the owner confirms, and Not now is per account on the device. Mark all episodes watched is explicit
+  and literal on a Watched season, guarded by the identity the list was read for; `library_set_episode_marks` keeps the
+  lock; Watched and marks otherwise stay separate. Before release: offline 1203/1203; the CU1 → CU1b → CU1c → CU1d
+  rehearsal on PGlite (262 checks, a failure injected after each of CU1d's 14 statements, rematches, stale writes,
+  isolation, a format-7 backup round trip, the test reverse); a local browser check with synthetic data at desktop, 375
+  and 300 px; a Fable review of the two functions and their page callers (nothing blocking or worth fixing). Release: a
+  pre-release format-7 backup validated; a read-only preflight (phase `contracted-cu1`, format 7, CU1 to CU1c's run
+  records, CU1d absent, its dependencies present, 22 holds, 21 findings, no other writers); the SQL Editor's contents
+  checked against the run file's hash and run as written (its RLS prompt concerned the migration's own temp table); the
+  run record confirmed by a separate read (both functions' sources equal the file, security invoker, members only, anon
+  and PUBLIC none). The post-migration backup validated and equals the pre-release one field by field (19 tables, 1,363
+  rows, no differences). Merged only after that, because merging deploys. Verified after deployment: Pages built `0cac052`
+  (delayed by a GitHub incident); the 35 application files are byte-identical and all 29 versioned files carry
+  `20261030-cu1d`; the reloaded page runs in `contracted-cu1` without console errors; two Watched seasons without marks
+  show their lists read-only (no checkboxes) with Mark all offered. Those reads sent no writes, and a third backup equals
+  the post-migration one. No production network, mark, status, hold or finding was changed; Refresh shows was not run
+  and Mark all, Not now and "Choose a network" weren't used on the live site, so they're verified offline and with
+  synthetic data only. Limits: TMDB's status, finale tags and counts are contributor data, so the suggestion is not a
+  guarantee, and real finale and network data were not sampled; an automatic network is TMDB's current one, not always
+  the original; a blank network on a show saved in Details is offered again on each Refresh; Mark all has no single undo.
 
-- **Release:** `697d123`, date equivalence (item 4; PR #27, the branch's five commits rebased, same tree as the
+- **Earlier release:** `697d123`, date equivalence (item 4; PR #27, the branch's five commits rebased, same tree as the
   reviewed head), released 2026-10-29 UTC with database migration `db/cu1c_date_equivalence.sql` (replaces
   `library_cu_set_season_date`, adds `private.cu1c_exact_date`; no table, status, capability or backup-format
   change). Behaviour (design §4.4): an exact date is a full display date whose `date_sort` is that same real date;
@@ -234,13 +259,13 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   only): verified deployed, with the owner's phone checks and an owner-operated write smoke test. `45f12d9`, EP1
   episode progress (PR #9, 2026-10-21): `db/ep1_episode_marks.sql` applied once, original tables preserved in the
   first format-6 backup, signed-out access refused, a desktop mark / clear smoke test. Each PR holds the details.
-- **Database (as observed at the CU1c release, 2026-10-29):** phase `contracted-cu1` (B4/B5 with M1 owner-only
+- **Database (as observed at the CU1d release, 2026-10-30):** phase `contracted-cu1` (B4/B5 with M1 owner-only
   access, `access = members`, episode marks and collection updates), backup format 7, recovery archive active, the
   collection setup imported. G9 (archive retirement) is paused. The API exposes only `public` and `graphql_public`;
   the format-5 and format-6 restores are kept as `private.restore_backup_v5` and `private.restore_backup_v6`,
   reachable only through `restore_backup`. **Repairs are fix-forward:** the B4/B5 and D2 rollbacks are retired,
-  EP1, CU1, CU1b and CU1c have none (`db/test/cu1_reverse.sql`, `cu1b_reverse.sql` and `cu1c_reverse.sql` are for
-  test environments only; CU1c's run record confirmed 2026-10-29), and reopening anonymous access
+  EP1, CU1, CU1b, CU1c and CU1d have none (`db/test/cu1_reverse.sql`, `cu1b_reverse.sql`, `cu1c_reverse.sql` and
+  `cu1d_reverse.sql` are for test environments only; CU1d's run record confirmed 2026-10-30), and reopening anonymous access
   is never a recovery step. Data recovery is a format-7 restore through the signed-in page, or
   `docs/ADMIN_RESTORE.md` (its tool exports and checks the database's own format); accounts,
   `docs/MEMBER_RECOVERY.md`.
@@ -263,6 +288,8 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - CU1d: the page can be reverted by a code revert of `0cac052` and `1ffd079`, newest first; the two functions stay
+    (fix-forward), unused by older pages; networks and marks set with it stay as saved.
   - Date equivalence (CU1c): the page can be reverted by a code revert of its five commits, newest first; the
     CU1c function stays (fix-forward) and keeps its rules for any page (an older page's TMDB differences on exact
     dates then wait in review instead of applying).
@@ -304,6 +331,7 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
 [#23]: https://github.com/jaredsclove/Watchlist/pull/23
 [#25]: https://github.com/jaredsclove/Watchlist/pull/25
 [#27]: https://github.com/jaredsclove/Watchlist/pull/27
+[#29]: https://github.com/jaredsclove/Watchlist/pull/29
 
 ## How we work
 
