@@ -474,7 +474,7 @@ test('B8: no statistics tile in any view; one count line or the section headings
     if (kind) assert.ok(line(app), `${v}: one count line`); else assert.strictEqual(app.el('statsRow').innerHTML, '');
   }
   app.ctx.switchView('alltv'); await settle(); app.ctx.setAllTvPresentation('seasons'); await settle();
-  assert.ok(/^Showing \d+ seasons? from \d+ shows?$/.test(line(app)));
+  assert.ok(/^\d+ seasons? from \d+ shows?$/.test(line(app)));
   app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
   assert.strictEqual(app.el('statsRow').innerHTML, '', 'a collection: counts in its section headings');
   assert.ok(!/stat-num/.test(app.html()));
@@ -505,17 +505,17 @@ test('B8: Currently Watching headings: shows with their unit, "N of T" only when
   assert.ok(tbody(onlyCu).includes('In progress <span class="section-count">· 0 shows</span>') && tbody(onlyCu).includes('Every Watching show is caught up.'));
 });
 
-test('B8: All TV Shows: "Showing N of T shows" (T: every show with a linked season, all statuses) · of these, Watching and up to date; zero states', async () => {
+test('B8: All TV Shows: "N of T shows" (T: every show with a linked season, all statuses) · those listed that are Watching and up to date; zero states', async () => {
   const w = show({ title: 'Watch', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(30) }]);
   const t = show({ title: 'ToWatch', status: 'confirmed' }, [{ num: 1, date: day(-9) }]);
   const s = show({ title: 'Skip', status: 'skipped' }, [{ num: 1, date: day(-9) }]);
   const app = await boot(all(w, t, s));
   app.ctx.switchView('alltv'); await settle();
-  assert.strictEqual(line(app), 'Showing 2 of 3 shows · of these, 1 Watching, 1 up to date', 'the Skipped default narrows it');
+  assert.strictEqual(line(app), '2 of 3 shows · 1 Watching · 1 up to date', 'the Skipped default narrows it');
   setFilter(app, 'fStatus', 'all');
-  assert.strictEqual(line(app), '3 shows · of these, 1 Watching, 1 up to date');
+  assert.strictEqual(line(app), '3 shows · 1 Watching · 1 up to date');
   setFilter(app, 'fSearch', 'zzz');
-  assert.strictEqual(line(app), 'Showing 0 of 3 shows', 'no "of these" at 0');
+  assert.strictEqual(line(app), '0 of 3 shows', 'no breakdown at 0');
   assert.ok(tbody(app).includes('No shows match your filters.'));
   const before = app.requests.length;
   setFilter(app, 'fSearch', '');
@@ -526,44 +526,44 @@ test('B8: All TV Shows: "Showing N of T shows" (T: every show with a linked seas
   assert.ok(tbody(none).includes('No TV shows on your list yet.'));
 });
 
-test('B8: All TV Seasons: "Showing N seasons from K shows"; the TBA / no date heading carries units; zero', async () => {
+test('B8: All TV Seasons: "N seasons from K shows"; the TBA / no date heading carries units; zero', async () => {
   const a = show({ title: 'A', status: 'confirmed' }, [{ num: 1, date: day(-90) }, { num: 2, tba: true }, { num: 3, date: '2024-13-40', display: 'Someday' }]);
   const b = show({ title: 'B', status: 'confirmed' }, [{ num: 1, date: day(-80) }]);
   const app = await boot(all(a, b));
   app.ctx.switchView('alltv'); await settle(); app.ctx.setAllTvPresentation('seasons'); await settle();
-  assert.strictEqual(line(app), 'Showing 4 seasons from 2 shows');
+  assert.strictEqual(line(app), '4 seasons from 2 shows');
   assert.ok(tbody(app).includes('TBA / no date <span class="section-count">· 1 TBA season · 1 season needs a date review</span>'));
   setFilter(app, 'fSearch', 'zzz');
-  assert.strictEqual(line(app), 'Showing 0 seasons');
+  assert.strictEqual(line(app), '0 seasons');
 });
 
-test('B8: Coming Soon: dated seasons (of every eligible dated season) · of these, the next 30 days; the TBA heading has units', async () => {
+test('B8: Coming Soon: dated seasons (of every eligible dated season) · those in the next 30 days; the TBA heading has units', async () => {
   const a = show({ title: 'Alpha', status: 'confirmed' }, [{ num: 1, date: day(5) }, { num: 2, date: day(90) }, { num: 3, tba: true }]);
   const b = show({ title: 'Bravo', status: 'confirmed' }, [{ num: 1, date: day(10) }, { num: 2, tba: true }]);
   const app = await boot(all(a, b));
   app.ctx.switchView('comingsoon'); await settle();
-  assert.strictEqual(line(app), '3 dated seasons · of these, 2 in the next 30 days');
+  assert.strictEqual(line(app), '3 dated seasons · 2 in the next 30 days');
   assert.ok(tbody(app).includes('TBA <span class="section-count">· 2 seasons</span>'));
   setFilter(app, 'fSearch', 'alpha');
-  assert.strictEqual(line(app), 'Showing 2 of 3 dated seasons · of these, 1 in the next 30 days');
+  assert.strictEqual(line(app), '2 of 3 dated seasons · 1 in the next 30 days');
   assert.ok(tbody(app).includes('TBA <span class="section-count">· 1 of 2 seasons</span>'));
   setFilter(app, 'fSearch', 'zzz');
-  assert.strictEqual(line(app), 'Showing 0 of 3 dated seasons');
+  assert.strictEqual(line(app), '0 of 3 dated seasons');
   assert.ok(tbody(app).includes('No dated entries match your filters.') && !tbody(app).includes('section-toggle" data-section="tba"'));
   const none = await boot(all());
   none.ctx.switchView('comingsoon'); await settle();
   assert.strictEqual(line(none), '0 dated seasons');
 });
 
-test('B8 (decision 13): All Movies: "Showing N of T films" (T: every saved film) · library: watched, unwatched; zero', async () => {
+test('B8 (decision 13): All Movies: "N of T films" (T: every saved film) · library: watched, unwatched; zero', async () => {
   const data = all(film({ title: 'A' }), film({ title: 'B', watched: true }), film({ title: 'C', status: 'skipped' }), film({ title: 'D', status: 'skipped', watched: true }));
   const app = await boot(data);
   app.ctx.switchMediaType('movie'); await settle();
-  assert.strictEqual(line(app), 'Showing 1 of 4 films · library: 2 watched, 2 unwatched', 'defaults: Unwatched only, Skipped hidden');
+  assert.strictEqual(line(app), '1 of 4 films · library: 2 watched, 2 unwatched', 'defaults: Unwatched only, Skipped hidden');
   setFilter(app, 'fWatch', ''); setFilter(app, 'fStatus', 'all');
   assert.strictEqual(line(app), '4 films · library: 2 watched, 2 unwatched');
   setFilter(app, 'fSearch', 'zzz');
-  assert.strictEqual(line(app), 'Showing 0 of 4 films · library: 2 watched, 2 unwatched');
+  assert.strictEqual(line(app), '0 of 4 films · library: 2 watched, 2 unwatched');
   assert.ok(app.html().includes('No films match these filters.'));
   const none = await boot(all());
   none.ctx.switchMediaType('movie'); await settle();

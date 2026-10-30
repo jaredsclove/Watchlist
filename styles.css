@@ -648,9 +648,22 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .section-toggle { min-height: 44px; width: 100%; }
   .expand-btn { min-width: 44px; min-height: 44px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0; } /* Browse show cards; the chevron stays 20px */
   .more-btn { width: 44px; height: 44px; font-size: 16px; }
-  .card-top > .expand-btn { margin-left: -6px; } /* the 44 px targets reach into the card's padding, leaving the title its width */
-  .card-top > .more-cell { margin-right: -6px; }
+  /* A card's information shares one left margin. The chevron starts on it and its title follows; the season line
+     drops to the margin below them (the title block dissolves into the grid). The 44 px targets reach into the
+     card's padding and past the title's line, and stay on top of the season line. */
+  .show-group-card > .card-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0; }
+  .show-group-card .card-title-block { display: contents; }
+  .show-group-card .card-title { grid-area: 1 / 2; }
+  .show-group-card .card-season { grid-column: 1 / -1; }
+  .card-top > .expand-btn { position: relative; z-index: 1; margin: -6px 0 -6px -10px; padding-left: 10px; justify-content: flex-start; }
+  .card-top > .more-cell { margin: -6px -6px -6px 0; }
+  .show-group-card > .card-top > .more-cell { grid-area: 1 / 3; }
+  .card-top > .card-row-actions { margin-right: -6px; }
+  .card-top .more-btn { position: relative; z-index: 1; }
   .card-title-block { padding-top: 2px; }
+  .card-meta > .meta-chip.meta-genres:first-child { margin-left: -4px; } /* the name, not its box, sits on the margin */
+  .card-actions .status-select:not(.status-needs-choice):is(.s-confirmed, .s-skipped, .s-film-to_watch, .s-film-skipped) { border-left-width: 0; padding-left: 0; } /* the borderless ones too */
+  .card-actions .status-pill.s-caughtup { background: none; border: 0; padding: 0; color: var(--text2); } /* a state, not a control */
   .card-actions .status-select, .card-actions .watch-btn, .skip-btn, .show-actions-inner .ended-check { min-height: 44px; }
   .card-actions .watch-btn { flex: 0 1 auto; margin-left: auto; min-width: 44px; }
   .card-del-btn { min-width: 44px; min-height: 44px; }
@@ -688,9 +701,13 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 }
 
 @media (max-width: 340px) {
-  /* Too narrow for Search beside its neighbours: the scope select takes a line and Filters and + Add share one. */
-  .filter-line select { flex-basis: 100%; }
-  .filter-more-btn, .add-open-btn { flex: 1 1 0; }
+  /* Page order in two lines: the view toggle beside Search, then the scope select, Filters and + Add. The select
+     keeps room for its longest label; when Filters grows (its count), + Add takes a line of its own. */
+  .view-toggle-btn { padding: 8px; }
+  .filter-line .search-input { flex-basis: 120px; }
+  .filter-line select { flex-basis: 142px; padding-left: 6px; padding-right: 2px; }
+  .filter-more-btn, .add-open-btn { padding: 6px; }
+  .add-open-btn { flex: 1 0 auto; }
 }
 
 /* ─── Manage collections (Stage 3b-2) ─────────────────────────────────────── */
@@ -797,7 +814,12 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .meta-chip.meta-genres { background: none; border-color: transparent; color: var(--text2); padding: 2px 3px; font-size: 12px; border-radius: 4px; }
 .meta-chip.meta-genres:has(+ .meta-chip.meta-genres):not([aria-pressed="true"])::after { content: '·'; display: inline-block; margin-left: 6px; text-decoration: none; }
 button.meta-chip.meta-genres { min-height: 24px; }
-@media (max-width: 700px) { button.meta-chip.meta-genres { min-height: 32px; display: inline-flex; align-items: center; } }
+@media (max-width: 700px) {
+  button.meta-chip.meta-genres { min-height: 32px; display: inline-flex; align-items: center; }
+  /* A label's 32 px target with a smaller pill inside it: the transparent top and bottom borders are the rest of the
+     target. The pill's colours stay its own (a network's are inline), without an outline. */
+  .item-card .filter-pill:not(.meta-genres) { border-width: 5px 0; border-color: transparent !important; background-clip: padding-box !important; padding: 0 8px; min-height: 32px; }
+}
 button.meta-chip.meta-genres:hover { filter: none; color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 .caught-ended { font-size: 12px; color: var(--text2); }
 .gap-note { display: block; font-size: 11px; color: var(--text3); margin-top: 2px; }

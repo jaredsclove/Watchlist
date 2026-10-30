@@ -95,7 +95,7 @@ const collectionStats = app => {
   num(/(\d+)(?: of \d+)? shows?\b/, 'Show', 'Shows'); num(/(\d+) season entr/, 'Season entry', 'Season entries'); num(/(\d+)(?: of \d+)? films?\b/, 'Film', 'Films');
   return out;
 };
-// B8: All Movies' count line ("Showing N of T films · library: W watched, U unwatched").
+// B8: All Movies' count line ("N of T films · library: W watched, U unwatched").
 const countLine = app => (app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || '';
 const stats = app => (app.get('activeViewId') === 'allmovies' ? [countLine(app)] : collectionStats(app));
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
@@ -534,7 +534,7 @@ test('All Movies has no Source filter (Stage 4b); Status is the film row’s own
   setFilter(app, 'fSearch', 'tell me'); setFilter(app, 'fStatus', '');
   assert.deepStrictEqual(titles(app), ['Tell Me Who I Am']);
   // B8 (decision 13): shown of every saved film (all statuses); the library's watched / unwatched.
-  assert.deepStrictEqual(stats(app), ['Showing 1 of 9 films · library: 2 watched, 7 unwatched']);
+  assert.deepStrictEqual(stats(app), ['1 of 9 films · library: 2 watched, 7 unwatched']);
 });
 
 test('no duplicate marker or storage name is shown (Stage 5: one record per identity); Disney+ shows only its own The Bear', async () => {

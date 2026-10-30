@@ -69,7 +69,7 @@ async function boot(data = library(), opts = {}) {
 const html = app => app.el('tbody').innerHTML;
 const cards = app => app.el('cardList').innerHTML;
 const titles = app => [...html(app).matchAll(/<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
-// B8: All Movies' count line ("Showing N of T films · library: W watched, U unwatched").
+// B8: All Movies' count line ("N of T films · library: W watched, U unwatched").
 const stats = app => [(app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || ''];
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
 // A pill as the page passes it to its handler (this): its kind and value, and optionally its row.
@@ -92,10 +92,10 @@ test('All Movies opens on Unwatched only (the stored watched flag); Status still
   assert.ok(/<option value="unwatched" selected>/.test(app.el('filtersRow').innerHTML), 'selected in the markup too (a real select shows it)');
   assert.deepStrictEqual(titles(app), ['Alpha', 'Gamma', 'Zeta'], 'unwatched; Skipped Epsilon hidden by Status');
   // B8 (decision 13): shown of every saved film (Skipped Epsilon included); the library's watched / unwatched.
-  assert.deepStrictEqual(stats(app), ['Showing 3 of 6 films · library: 2 watched, 4 unwatched']);
+  assert.deepStrictEqual(stats(app), ['3 of 6 films · library: 2 watched, 4 unwatched']);
   setFilter(app, 'fWatch', 'watched');
   assert.deepStrictEqual(titles(app), ['Beta', 'Delta']);
-  assert.deepStrictEqual(stats(app), ['Showing 2 of 6 films · library: 2 watched, 4 unwatched']);
+  assert.deepStrictEqual(stats(app), ['2 of 6 films · library: 2 watched, 4 unwatched']);
   setFilter(app, 'fWatch', '');
   assert.deepStrictEqual(titles(app), ['Alpha', 'Beta', 'Delta', 'Gamma', 'Zeta']);
   setFilter(app, 'fStatus', 'all'); setFilter(app, 'fWatch', 'unwatched');

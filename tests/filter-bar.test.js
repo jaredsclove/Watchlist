@@ -324,7 +324,7 @@ test('§4.4 / AC6: Clear filters returns every filter to its starting value (Unw
   assert.strictEqual(chipsHtml(app), '', 'no chips and no Clear');
   assert.ok(isOpen(app), 'the panel stays open');
   assert.strictEqual(focused[focused.length - 1], 'fSearch');
-  assert.strictEqual(countLine(app), 'Showing 1 of 3 films · library: 1 watched, 2 unwatched', 'the starting list');
+  assert.strictEqual(countLine(app), '1 of 3 films · library: 1 watched, 2 unwatched', 'the starting list');
   assert.strictEqual(app.requests.length, before);
 });
 
@@ -526,13 +526,13 @@ test('D5: a pill with the panel closed sets its filter and chip but never opens 
 test('AC8: count lines keep their B8 wording with the bar, chips and panel', async () => {
   const app = await boot();
   await allTv(app);
-  assert.strictEqual(countLine(app), 'Showing 3 of 4 shows · of these, 2 Watching, 1 up to date');
+  assert.strictEqual(countLine(app), '3 of 4 shows · 2 Watching · 1 up to date');
   setFilter(app, 'fGenre', 'Drama');
-  assert.strictEqual(countLine(app), 'Showing 2 of 4 shows · of these, 2 Watching, 1 up to date');
+  assert.strictEqual(countLine(app), '2 of 4 shows · 2 Watching · 1 up to date');
   app.ctx.toggleFilterPanel(true);
-  assert.strictEqual(countLine(app), 'Showing 2 of 4 shows · of these, 2 Watching, 1 up to date', 'opening the panel changes nothing');
+  assert.strictEqual(countLine(app), '2 of 4 shows · 2 Watching · 1 up to date', 'opening the panel changes nothing');
   await movies(app);
-  assert.strictEqual(countLine(app), 'Showing 1 of 3 films · library: 1 watched, 2 unwatched');
+  assert.strictEqual(countLine(app), '1 of 3 films · library: 1 watched, 2 unwatched');
 });
 
 // ─── assets and CSS ───────────────────────────────────────────────────────────

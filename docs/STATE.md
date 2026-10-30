@@ -25,7 +25,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   non-sticky row of the areas and a gear, no logo); view tabs below it; then one list toolbar (`.list-toolbar`: toggles,
   Search that grows, scope selects, More filters, + Add, the count), wrapping in page order on phones. Backup and its date
   are only in Settings' Backup & Restore; no backup, or 14 days or more, puts ⚠ on the Settings control (with the status
-  in its name) and it then opens on that section. Show rows read expand · title · ⋯. Status is a quiet directly editable
+  in its name) and it then opens on that section. Show rows read expand · title · ⋯. On a phone card the chevron starts on
+  the card's one left margin, the season line and everything below it sit on that margin, category labels are small pills
+  inside 32 px targets, and Up to date is quiet text. Status is a quiet directly editable
   select ("Choose a status…" is never quiet). Priority is edited in the row's ⋯ (shows and films; Seasons lists show it
   only); High shows ★ and Low the word, Normal nothing. The show-row shortcut reads "Mark watched" (its name and tooltip
   name the season; the episode list's offer keeps "Mark Season N watched"). Season progress reads "1/3 seasons watched".
