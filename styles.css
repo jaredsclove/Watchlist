@@ -731,7 +731,7 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .list-toolbar { margin-bottom: 6px; }
   .browse-controls .view-toggle { flex: 0 1 auto; }
   .browse-controls .view-toggle-btn { flex: 1 1 auto; min-width: 44px; padding: 8px 12px; }
-  .collection-tab { max-width: min(240px, 72vw); padding-left: 6px; padding-right: 6px; }
+  .collection-tab { flex: 1 0 auto; max-width: min(240px, 72vw); padding-left: 6px; padding-right: 6px; white-space: nowrap; } /* the names stay on one line and the row scrolls */
   .collection-tab:first-child { padding-left: 0; }
   .browse-head { margin: 0 0 4px; gap: 0 8px; }
   .browse-head-actions { order: 2; margin-left: 0; }
@@ -768,6 +768,7 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .filter-more-btn, .add-open-btn { padding: 6px; }
   .add-open-btn { flex: 1 0 auto; }
   .browse-controls .view-toggle-btn { padding: 8px 6px; }
+  .filter-line .search-input { padding-left: 24px; padding-right: 2px; background-position: 6px center; } /* the placeholder fits beside the status */
   .browse-controls .view-toggle[aria-label="Media"] { flex: 1 0 100%; }
 }
 
