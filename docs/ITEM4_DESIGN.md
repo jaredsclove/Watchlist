@@ -297,6 +297,69 @@ Limits: TMDB's status, finale tag and counts are contributor data and can be lat
 isn't a guarantee. An automatic network is TMDB's current network, which isn't always the original one. A network write
 from a page that loaded before the owner's Details save is refused as stale, then decided on the next Refresh.
 
+### 4.6 Research access (CU2)
+
+Owner decisions, 2026-10-31. `db/cu2_research_access.sql`. Research is per member and off by default; ordinary collections, TMDB
+Refresh shows and backup and restore aren't affected. **This restricts research operations, not a member's access to their own
+saved research data:** rows stay readable, because the applying functions read holds as the caller and backups read every table,
+and hiding them would silently switch protections off or drop data. Members stay isolated from each other as before.
+
+**Permission.** `private.library_members.research_enabled`, default false, so every member added later and every member re-added
+in recovery starts off. The migration's preamble names the one member to enable; the id is never in the repository. No application
+role can reach the table. `private.research_enabled()` answers only for `auth.uid()` and only for a current member, read on each
+write, so a change applies on the next request with no new sign-in. Token claims and user metadata play no part.
+`stage5_capabilities().research` tells the page; phase and backup format are unchanged, so older pages keep working.
+
+**The guard.** `private.research_write_guard()`, a BEFORE row trigger, covers `update_setup`, `collection_definitions`,
+`collection_exclusions`, `update_holds`, `research_briefs`, `research_imports`, `record_aliases`, and `update_findings` rows whose
+stored or new source is research. It refuses every write without access (`research_not_enabled`, the whole call rolled back)
+whatever the path, beside `library_write_guard` rather than instead of it. No `library_cu_*` function changed: each research
+outcome writes a guarded row (`cu1_finish` updates the stored finding, so a research finding sent as TMDB content is refused too).
+`show_update_settings` and `membership_removals` aren't guarded: Refresh shows and ordinary collection work write them.
+
+**Holds without access.** Management is gated; existing holds keep protecting data. Changing one needs access back (owner-accepted).
+
+**Two exemptions, and no others.**
+
+- *Cascade.* Only ordinary deletes of a show or season reach a guarded table: `tv_shows` and `watchlist_items` cascade to `update_holds`
+  and `record_aliases` (`delete_tv_season`, `lib_match_season_core_b45`, `library_match_film_b45`). Collections are archived, never
+  deleted, outside restore. A DELETE from those two tables passes only when a referenced parent is gone by its full identity (`id`,
+  `user_id`). The composite foreign keys make that true only inside the cascade, so while a parent exists no delete passes. A null
+  reference is never a missing parent, and the guard is security definer so that a parent row security hides isn't one either. As for
+  any member today, deleting a record takes the holds on it, and Refresh shows can add a deleted season back.
+- *Restore.* `public.restore_backup` is now a wrapper around the unchanged `private.restore_backup_v7`. It sets
+  `watchlist.research_restore` transaction-locally around that one call and clears it before returning; a failure discards it with the
+  transaction or the caller's savepoint, and there's deliberately no exception block. Members can't set it: nothing exposed calls
+  `set_config` with their values, and the API exposes neither `private` nor `pg_catalog`. Calling the inner function gains nothing,
+  because the flag is the wrapper's. The rule covers chained GraphQL mutations in one request.
+
+**Restore and backup.** Format 7 is unchanged, and a backup taken without access is complete. A restore replaces saved data for any member,
+research rows included: they're stored, verified and inert until access is on; restored holds protect at once. The permission isn't
+in a backup, and restore's exact table and field lists refuse a file that tries to carry it. A restore can also remove holds (the
+replace contract; its preview and safety backup apply).
+
+**Revocation.** Research rows stay. Later research writes are refused; a call already running can still commit. A page left open shows its
+controls until its next capability read or first refusal, then follows: a research dialog gives way to a message (an unsaved draft is
+lost), and a running plan stops. Access returning shows on reload or the next capability read.
+
+**An interrupted import.** An import records its findings, then applies them one call at a time. If it stops between, by revocation, a lost
+answer, a busy lane or a closed tab, the file can't be imported again, and review's Apply is an owner override, with none for an
+alias. So review offers "Continue applying imported updates", with access only and only on a click. A finding is unfinished when it's
+a research new season, date or alias, `pending`, with an empty `reason`, and its record still exists:
+
+| How a pending finding got there | `reason` | `decided_at` | Unfinished |
+|---|---|---|---|
+| A new fingerprint routed pending | empty | null | yes |
+| An import reopened it from `needs_*` or `set_aside` | empty | null | yes |
+| An import reopened it from Not now (newer evidence) | empty | **kept** | yes |
+| A refused or lost call | unchanged | unchanged | yes, until read as applied |
+| Any evaluation that left it pending (`date_needs_review`, `standing_decision`, `protected_value`, `setup_required`, …) | set | any | no: review |
+
+So `decided_at` can't be part of the test (the third row). The action reads the library and findings afresh, then sends the same calls
+as an import with `p_review` false: every current hold, rule and evidence check runs again, so a finding may apply, go to review or be
+blocked. A finding an unclear call did apply is `applied` on that read and isn't sent; the finding's lock and the state-based rules cover a
+call still running. An unclear answer stops the rest. A finding that keeps being refused stays listed with Not now and Dismiss.
+
 ## 5. Backup format 7
 
 - Tables: format 6's nine plus the ten above (nineteen), no `user_id`.
