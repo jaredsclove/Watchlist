@@ -308,6 +308,7 @@ test('collection tabs: one scrolling row at every width, 44 px, full names avail
   assert.match(b, /title="True Crime \/ Docs"/);
   assert.match(css, /\.collection-tabs \{ display: flex;[^}]*overflow-x: auto;/);
   assert.ok(!/\.collection-tabs \{[^}]*flex-wrap: wrap/.test(css));
+  assert.match(css, /\.collection-tab \{ flex: 1 0 auto;[^}]*white-space: nowrap; \}/, 'on phones too, where .tab otherwise lets labels shrink and wrap');
   assert.match(css, /\.collection-tab \{[^}]*min-width: 44px; min-height: 44px;[^}]*text-overflow: ellipsis;/);
 });
 
