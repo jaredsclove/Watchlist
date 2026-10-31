@@ -1193,6 +1193,399 @@ section('cu1d: the sole network and marks on a Watched season (db/cu1d_network_a
   await tryExec(db, sql('db/test/cu1b_reverse.sql'));
 }
 
+section('cu2: research access (db/cu2_research_access.sql)');
+{
+  // On CU1 + CU1b + CU1c + CU1d, as production. A has access, B (a member) doesn't, C isn't a member.
+  for (const [g, f, run] of [['cu1b', 'db/cu1b_hold_edit.sql', 'cu2-base-b'], ['cu1c', 'db/cu1c_date_equivalence.sql', 'cu2-base-c'], ['cu1d', 'db/cu1d_network_and_marks.sql', 'cu2-base-d']]) {
+    ok((await tryExec(db, `select set_config('watchlist.${g}_run', '${run}', false);\n` + sql(f))).ok, `${g} is installed first`);
+  }
+  const CU2 = sql('db/cu2_research_access.sql');
+  const pre2 = (run, owner = A) => `select set_config('watchlist.cu2_run', '${run}', false), set_config('watchlist.cu2_owner', '${owner}', false);\n`;
+  ok(!/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(CU2), 'the migration file names no account id');
+  const s20 = await state(db);
+  for (const [label, text, re] of [['no run id', pre2(''), /set watchlist\.cu2_run/], ['no member named', pre2('cu2-x1', ''), /set watchlist\.cu2_owner/],
+    ['a recorded run id', pre2('cu1-rehearsal-1'), /already recorded/], ['a non-member named', pre2('cu2-x2', C), /isn't in private\.library_members/],
+    ['an unknown id named', pre2('cu2-x3', '00000000-0000-4000-8000-0000000000ff'), /isn't in private\.library_members/]]) {
+    const x = await tryExec(db, text + CU2);
+    ok(!x.ok && re.test(x.message) && same(s20, await state(db)), `${label}: refused, state unchanged`, x.message || 'committed');
+  }
+  await db.exec(`select set_config('watchlist.cu2_run', '', false), set_config('watchlist.cu2_owner', '', false)`);
+  if (inject) {
+    const st = statements(CU2);
+    const bi = st.findIndex(x => /^begin\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim())), ci = st.findIndex(x => /^commit\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim()));
+    const bad = [];
+    for (let k = bi; k < ci; k++) {
+      const text = pre2(`inject2-${k}`) + st.slice(0, k + 1).join('') + `\ndo $zz$ begin raise exception 'zz injected after %', ${k}; end $zz$;\n` + st.slice(k + 1).join('');
+      const x = await tryExec(db, text);
+      if (x.ok || !/zz injected/.test(x.message) || !same(s20, await state(db))) bad.push(`${k}: ${stmtHead(st[k])} ${x.message || 'committed'}`);
+    }
+    ok(bad.length === 0, `a failure after each of CU2's ${ci - bi} statements leaves the state unchanged and no run record`, bad.join('\n'));
+  }
+  const inst = await tryExec(db, pre2('cu2-rehearsal-1') + CU2);
+  ok(inst.ok && /CU2\|/.test(JSON.stringify(inst.out)), 'db/cu2_research_access.sql commits', inst.message);
+  const s21 = await state(db);
+  const noMembers = r => { const { 'private.library_members': m, ...x } = r; return x; };
+  ok(same(noMembers(s20.rows), noMembers(s21.rows)), 'every library and research row is unchanged by the install');
+  const flags = async () => (await db.query(`select user_id, research_enabled from private.library_members order by user_id`)).rows.map(r => `${r.user_id}:${r.research_enabled}`).join();
+  ok((await flags()) === `${A}:true,${B}:false`, 'the named member is on and every other member off');
+  await db.exec(`insert into private.library_members (user_id, note) values ('${C}', 'a future member')`);
+  ok(/c:false/.test(await flags()), 'a member added the usual way starts off');
+  await db.exec(`delete from private.library_members where user_id = '${C}'`);
+  {
+    const c0 = JSON.parse(s20.cat), c1 = JSON.parse(s21.cat);
+    const after = k => (c1[k] || []).filter(x => !(c0[k] || []).includes(x)), before = k => (c0[k] || []).filter(x => !(c1[k] || []).includes(x));
+    ok(after('triggers').length === 8 && after('triggers').every(x => /_research_guard BEFORE INSERT OR DELETE OR UPDATE .* private\.research_write_guard\(\)/.test(x)) && before('triggers').length === 0,
+      'triggers: only the eight research guards added', JSON.stringify(after('triggers')));
+    const fnName = x => x.slice(0, x.indexOf(') ') + 1);
+    ok(same(before('functions').map(fnName).sort(), ['public.restore_backup(p_backup jsonb, p_allow_v1_reset boolean)', 'public.stage5_capabilities()'].sort()),
+      'functions: only restore and the capability changed; no library_cu_* function', JSON.stringify(before('functions').map(fnName)));
+    ok(same(after('functions').map(fnName).sort(), ['private.research_enabled()', 'private.research_write_guard()', 'private.restore_backup_v7(p_backup jsonb, p_allow_v1_reset boolean)',
+      'public.restore_backup(p_backup jsonb, p_allow_v1_reset boolean)', 'public.stage5_capabilities()'].sort()), 'functions added: the permission, the guard and the unchanged format-7 function', JSON.stringify(after('functions').map(fnName)));
+    ok(same(c0.policies, c1.policies) && same(c0.tables, c1.tables) && same(c0.acl, c1.acl), 'policies, tables and table privileges are unchanged');
+    ok(same(after('columns').map(x => x.split(' ')[0]), ['private.library_members.research_enabled']), 'columns: only research_enabled', JSON.stringify(after('columns')));
+    ok(before('constraints').length === 0 && after('constraints').filter(x => !/research_enabled/.test(x)).length === 0, 'constraints: nothing else');
+  }
+  ok((await val(db, `select prosrc from pg_proc where oid = 'private.restore_backup_v7(jsonb, boolean)'::regprocedure`))
+    === JSON.parse('"' + (/create function public\.restore_backup\(p_backup jsonb, p_allow_v1_reset boolean default false\)\nreturns jsonb\nlanguage plpgsql security invoker set search_path = '' as \$\$([\s\S]*?)\$\$;/.exec(CU1)[1]).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n') + '"'),
+    'the format-7 restore moved unchanged, byte for byte');
+  ok((await tryExec(db, pre2('cu2-rehearsal-2') + CU2)).message && /already installed/.test((await tryExec(db, pre2('cu2-rehearsal-2') + CU2)).message), 'a replay is refused');
+  await db.exec(`select set_config('watchlist.cu2_run', '', false), set_config('watchlist.cu2_owner', '', false)`);
+  const capOf = async who => (await asUser(db, who, `select public.stage5_capabilities() c`))[0].c;
+  ok((await capOf(A)).research === true && (await capOf(B)).research === false && (await capOf(C)).research === false && (await capOf(C)).member === false, 'the capability: A on, B off, a non-member off');
+  ok((await capOf(A)).phase === 'contracted-cu1' && (await capOf(A)).backup_format === 7, 'the phase and backup format are unchanged');
+  ok(!(await attempt(() => asAnon(db, `select public.stage5_capabilities()`))).ok && !(await attempt(() => asAnon(db, `select private.research_enabled()`))).ok, 'anon reads neither');
+
+  // No self-enablement, by any route an application role has.
+  const access = (who, v) => db.exec(`update private.library_members set research_enabled = ${v} where user_id = '${who}'`);
+  const before0 = await flags();
+  for (const [label, q] of [['update', `update private.library_members set research_enabled = true where user_id = '${B}'`], ['upsert', `insert into private.library_members (user_id, research_enabled) values ('${B}', true) on conflict (user_id) do update set research_enabled = true`],
+    ['read of every member', `select * from private.library_members`], ['ownership change', `alter table private.library_members disable row level security`]]) {
+    ok(!(await attempt(() => asUser(db, B, q))).ok && (await flags()) === before0, `a member's direct ${label} is refused`);
+  }
+  const forged = await db.transaction(async tx => {
+    await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true)`, [JSON.stringify({ sub: B, role: 'authenticated', research_enabled: true, app_metadata: { research: true }, user_metadata: { research: true } })]);
+    return (await tx.query(`select public.stage5_capabilities() c`)).rows[0].c.research;
+  });
+  ok(forged === false, 'token claims and metadata carry no permission');
+
+  // B's research data, made while B has access, as a member's would be.
+  await access(B, true);
+  const cB = (await call(db, 'org_create_collection', [crypto.randomUUID(), 'ZZ CU2 B'], B)).collection.id;
+  await call(db, 'library_cu_save_definition', [cB, 0, 'discover', RULES, EVIDENCE, 'CU2.'], B);
+  const excl = await call(db, 'library_cu_set_exclusion', [cB, 'add', { kind: 'title', title: 'ZZ CU2 Excluded' }], B);
+  const cDef = (await call(db, 'org_create_collection', [crypto.randomUUID(), 'ZZ CU2 No Members'], B)).collection.id;
+  await call(db, 'library_cu_save_definition', [cDef, 0, 'follow', [], EVIDENCE, 'CU2.'], B);
+  const mkShow = async (n, tmdb, date = 'TBA', sort = '2099-01-01') => {
+    const t = `ZZ CU2 ${n}`, k = t.toLowerCase();
+    const o = await call(db, 'library_create_show_b45', [{ ...(tmdb ? { tmdb_id: tmdb } : {}), title: t, show_key: k, network: 'ZZ' },
+      [{ item_key: `${k}|season 1`, title: t, season: 'Season 1', theme: 'ZZ', display_date: date, date_sort: sort, ...(tmdb ? { season_number: 1 } : {}) }]], B);
+    const id = o.show.id;
+    await call(db, 'org_add_membership', [cB, id, null], B);
+    const row = (await asUser(db, B, `select id, display_date, date_sort from public.watchlist_items where show_id = $1`, [id]))[0];
+    return { id, row, exp: { tmdb_id: tmdb || null, show_key: k } };
+  };
+  const T = await mkShow('Tmdb', 990100), V = await mkShow('Dated', 990101), P = await mkShow('Protected', 990102), U = await mkShow('Unmatched', null, 'Jan 1, 2020', '2020-01-01'),
+    W = await mkShow('Matchable', null, 'Jan 1, 2020', '2020-01-01'), D = await mkShow('Deleted', 990103), E = await mkShow('Season Hold', 990104), G = await mkShow('Stays', 990105), F = await mkShow('Filled', 990106);
+  const hold = h => call(db, 'library_cu_save_hold', [{ decided_on: '2026-01-01', ...h }], B);
+  const reopen = { on: 'owner_only' };
+  const hStanding = await hold({ kind: 'standing_decision', show_id: T.id, subject_label: 'Season 9', decision: 'Not Season 9', effect: 'do_not_add', reopen });
+  await hold({ kind: 'protected_value', item_id: P.row.id, field: 'display_date', protected_value: 'TBA', decision: 'Kept', effect: 'keep_value', reopen });
+  await hold({ kind: 'identity_hold', show_id: U.id, decision: 'No matching', effect: 'block_matching', reopen });
+  const hLabel = await hold({ kind: 'standing_decision', subject_label: 'ZZ CU2 Not In Library', decision: 'No references', effect: 'do_not_add', reopen });
+  const hColl = await hold({ kind: 'standing_decision', collection_id: cB, subject_label: 'ZZ CU2 Collection Only', decision: 'A collection only', effect: 'do_not_add', reopen });
+  const hShow = await hold({ kind: 'standing_decision', show_id: D.id, decision: 'On a show that goes', effect: 'do_not_add', reopen });
+  const hItem = await hold({ kind: 'standing_decision', item_id: E.row.id, decision: 'On a season that goes', effect: 'do_not_add', reopen });
+  const hStays = await hold({ kind: 'standing_decision', show_id: G.id, decision: 'On a show that stays', effect: 'keep_value', reopen });
+  const brief2 = crypto.randomUUID();
+  await call(db, 'library_cu_register_brief', [brief2, [cB]], B);
+  const rf = (key, kind, x) => ({ fingerprint: fp(kind, key), kind, collection_id: cB, evidence: official(), assessment: assessed(), routed_status: 'pending', ...x });
+  const fileFindings = [
+    rf('cu2-s5', 'new_season', { show_id: T.id, subject: { title: 'ZZ CU2 Tmdb', season_number: 5 }, proposed: { display_date: 'TBA', date_sort: '2099-01-01' } }),
+    rf('cu2-date', 'date', { show_id: V.id, season_id: V.row.id, subject: { title: 'ZZ CU2 Dated' }, proposed: { display_date: 'Jan 15, 2030', date_sort: '2030-01-15' } }),
+    rf('cu2-alias', 'alias', { show_id: T.id, subject: { title: 'ZZ CU2 Tmdb' }, proposed: { alias: 'ZZ CU2 Other Title' } }),
+    rf('cu2-alias-d', 'alias', { show_id: D.id, subject: { title: 'ZZ CU2 Deleted' }, proposed: { alias: 'ZZ CU2 Deleted Too' } }),
+    rf('cu2-alias-g', 'alias', { show_id: G.id, subject: { title: 'ZZ CU2 Stays' }, proposed: { alias: 'ZZ CU2 Stays Too' } }),
+    rf('cu2-new', 'new_show', { subject: { title: 'ZZ CU2 New Title' } })];
+  const impB = await call(db, 'library_cu_record_findings', [brief2, sha('cu2-file'), fileFindings], B);
+  const fidB = (kind, key) => impB.findings.find(x => x.fingerprint === fp(kind, key)).id;
+  const aD = await call(db, 'library_cu_add_alias', [D.id, null, 'ZZ CU2 Deleted Too', { id: fidB('alias', 'cu2-alias-d') }], B);
+  const aG = await call(db, 'library_cu_add_alias', [G.id, null, 'ZZ CU2 Stays Too', { id: fidB('alias', 'cu2-alias-g') }], B);
+  ok(aD.outcome === 'applied' && aG.outcome === 'applied', 'with access, a research alias applies');
+  await access(B, false);
+
+  // Revocation applies on the next request, with no new sign-in.
+  ok((await capOf(B)).research === false, 'switching B off applies at once');
+  const refused = async (label, fn) => {
+    const b = await rows(db), r = await fn();
+    ok(!r.ok && /^research_not_enabled: /.test(r.message) && same(b, await rows(db)), `refused, nothing changed: ${label}`, r.message || 'it ran');
+  };
+  const holdRow = (await db.query(`select kind, collection_id, show_id, item_id, subject_label, field, protected_value, decision, effect, reopen, decided_on from public.update_holds where id = $1`, [hStanding.id])).rows[0];
+  holdRow.decided_on = '2026-01-01';
+  const newHold = { kind: 'standing_decision', subject_label: 'ZZ CU2 New Hold', decision: 'x', effect: 'do_not_add', reopen };
+  await refused('library_cu_register_brief', () => tryCall(db, 'library_cu_register_brief', [crypto.randomUUID(), [cB]], B));
+  await refused('library_cu_record_findings', () => tryCall(db, 'library_cu_record_findings', [brief2, sha('another-file'), [rf('cu2-x', 'alias', { show_id: T.id, subject: { title: 'x' }, proposed: { alias: 'y' } })]], B));
+  await refused('library_cu_record_findings, an empty file', () => tryCall(db, 'library_cu_record_findings', [brief2, sha('empty-file'), []], B));
+  await refused('library_cu_import_setup, an empty setup', () => tryCall(db, 'library_cu_import_setup', [{ definitions: [], exclusions: [], holds: [] }], B));
+  await refused('library_cu_save_definition', () => tryCall(db, 'library_cu_save_definition', [cB, 1, 'manual', [], EVIDENCE, 'off'], B));
+  await refused('library_cu_set_exclusion add', () => tryCall(db, 'library_cu_set_exclusion', [cB, 'add', { kind: 'title', title: 'ZZ CU2 Another' }], B));
+  await refused('library_cu_set_exclusion add, a repeat', () => tryCall(db, 'library_cu_set_exclusion', [cB, 'add', { kind: 'title', title: 'ZZ CU2 Excluded' }], B));
+  await refused('library_cu_set_exclusion remove', () => tryCall(db, 'library_cu_set_exclusion', [cB, 'remove', { id: excl.id, title: 'ZZ CU2 Excluded' }], B));
+  await refused('library_cu_save_hold', () => tryCall(db, 'library_cu_save_hold', [newHold], B));
+  await refused('library_cu_update_hold', () => tryCall(db, 'library_cu_update_hold', [hStanding.id, holdRow, { ...holdRow, decision: 'Changed' }], B));
+  await refused('library_cu_delete_hold', () => tryCall(db, 'library_cu_delete_hold', [hStanding.id, 'Not Season 9'], B));
+  await refused('library_cu_add_alias', () => tryCall(db, 'library_cu_add_alias', [T.id, null, 'ZZ CU2 Other Title', { id: fidB('alias', 'cu2-alias') }], B));
+  await refused('library_cu_accept_finding', () => tryCall(db, 'library_cu_accept_finding', [fidB('new_show', 'cu2-new'), { action: 'create', show: { title: 'ZZ CU2 New Title', seasons: [{ season_number: 1, display_date: 'TBA', date_sort: '2099-01-01' }] } }], B));
+  await refused('library_cu_set_finding_status on a research finding', () => tryCall(db, 'library_cu_set_finding_status', [fidB('new_show', 'cu2-new'), 'pending', 'dismissed', ''], B));
+  await refused('library_cu_reconcile_season with a research finding', () => tryCall(db, 'library_cu_reconcile_season', [T.id, T.exp, { season_number: 5 }, { id: fidB('new_season', 'cu2-s5') }], B));
+  await refused('library_cu_reconcile_season, a review decision', () => tryCall(db, 'library_cu_reconcile_season', [T.id, T.exp, { season_number: 5 }, { id: fidB('new_season', 'cu2-s5') }, true, null], B));
+  await refused('library_cu_set_season_date with a research finding', () => tryCall(db, 'library_cu_set_season_date', [V.row.id, { display_date: 'TBA', date_sort: '2099-01-01' }, { display_date: 'Jan 15, 2030', date_sort: '2030-01-15' }, { id: fidB('date', 'cu2-date') }], B));
+  // A research finding sent as TMDB content: the stored row decides.
+  await refused('a research new_season sent as a TMDB finding', () => tryCall(db, 'library_cu_reconcile_season', [T.id, T.exp, { season_number: 5, display_date: 'TBA', date_sort: '2099-01-01', episode_count: 8 },
+    { source: 'tmdb', kind: 'new_season', fingerprint: fp('new_season', 'cu2-s5'), show_id: T.id }], B));
+  await refused('a research date sent as a TMDB finding', () => tryCall(db, 'library_cu_set_season_date', [V.row.id, { display_date: 'TBA', date_sort: '2099-01-01' }, { display_date: 'Jan 15, 2030', date_sort: '2030-01-15' },
+    { source: 'tmdb', kind: 'date', fingerprint: fp('date', 'cu2-date'), show_id: V.id, season_id: V.row.id }], B));
+
+  // Direct writes, with the library flag already on (as a function earlier in one transaction would leave it).
+  const direct = (who, q, p) => attempt(() => db.transaction(async tx => {
+    await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true), set_config('watchlist.library_write', 'on', true)`, [JSON.stringify({ sub: who, role: 'authenticated' })]);
+    return (await tx.query(q, p)).rows;
+  }));
+  const tmdbF = await call(db, 'library_cu_reconcile_season', [T.id, T.exp, tmdbSeason(2), tf('new_season', 'cu2-tmdb-s2', { show_id: T.id })], B);
+  ok(tmdbF.outcome === 'applied', 'without access, a TMDB new season still applies', JSON.stringify(tmdbF));
+  for (const [label, q, p] of [
+    ['a finding changed from research to tmdb', `update public.update_findings set source = 'tmdb' where id = $1`, [fidB('new_season', 'cu2-s5')]],
+    ['a finding changed from tmdb to research', `update public.update_findings set source = 'research', collection_id = '${cB}', brief_id = '${brief2}' where id = $1`, [tmdbF.finding_id]],
+    ['a research finding’s status', `update public.update_findings set status = 'dismissed' where id = $1`, [fidB('new_season', 'cu2-s5')]],
+    ['a new research finding', `insert into public.update_findings (fingerprint, source, kind, status, collection_id, brief_id) values ('${fp('alias', 'cu2-direct')}', 'research', 'alias', 'pending', '${cB}', '${brief2}')`, []],
+    ['a research finding deleted', `delete from public.update_findings where id = $1`, [fidB('new_season', 'cu2-s5')]],
+    ['a definition deleted', `delete from public.collection_definitions where collection_id = $1`, [cB]],
+    ['an exclusion changed', `update public.collection_exclusions set note = 'x' where id = $1`, [excl.id]],
+    ['an exclusion deleted', `delete from public.collection_exclusions where id = $1`, [excl.id]],
+    ['a hold changed', `update public.update_holds set decision = 'x' where id = $1`, [hStays.id]],
+    ['a hold with a live parent deleted', `delete from public.update_holds where id = $1`, [hStays.id]],
+    ['a hold with no references deleted', `delete from public.update_holds where id = $1`, [hLabel.id]],
+    ['a hold on a collection only deleted', `delete from public.update_holds where id = $1`, [hColl.id]],
+    ['an alias with a live parent deleted', `delete from public.record_aliases where show_id = $1`, [G.id]],
+    ['a brief deleted (its imports would cascade)', `delete from public.research_briefs where id = $1`, [brief2]],
+    ['an import record deleted', `delete from public.research_imports where brief_id = $1`, [brief2]],
+    ['a setup row added', `insert into public.update_setup (source) values ('setup_file')`, []],
+    ['a collection with a definition deleted (no ordinary path does this)', `delete from public.personal_collections where id = $1`, [cDef]]]) {
+    await refused(label, () => direct(B, q, p));
+  }
+  // A parent row security hides is not a deleted parent.
+  await db.exec(`create policy zz_hide on public.tv_shows as restrictive for select to authenticated using (false)`);
+  await refused('a hold whose parent show row security hides', () => direct(B, `delete from public.update_holds where id = $1`, [hStays.id]));
+  await refused('an alias whose parent show row security hides', () => direct(B, `delete from public.record_aliases where show_id = $1`, [G.id]));
+  await db.exec(`drop policy zz_hide on public.tv_shows`);
+  await db.exec(`create policy zz_hide on public.watchlist_items as restrictive for select to authenticated using (false)`);
+  await refused('a hold whose parent season row security hides', () => direct(B, `delete from public.update_holds where item_id = $1`, [P.row.id]));
+  await db.exec(`drop policy zz_hide on public.watchlist_items`);
+  // Members can't reach each other's rows through the guard either.
+  await access(A, false);
+  const aSees = await direct(A, `delete from public.update_holds where id = $1 returning id`, [hStays.id]);
+  ok(aSees.ok && aSees.rows.length === 0, 'another member’s delete reaches no row (row security first)', aSees.message);
+  await access(A, true);
+
+  // Reading stays available: this restricts operations, not a member's own saved data.
+  ok((await asUser(db, B, `select (select count(*) from public.update_holds)::int h, (select count(*) from public.collection_definitions)::int d, (select count(*) from public.update_findings where source = 'research')::int f`))
+    .every(r => r.h === 8 && r.d === 2 && r.f === 6), 'B still reads its own holds, definitions and research findings');
+  ok((await asUser(db, B, `select count(*)::int n from public.research_briefs where user_id = '${A}'`))[0].n === 0, 'and still nobody else’s');
+
+  // Existing protections keep governing TMDB operations while access is off.
+  const stand = await call(db, 'library_cu_reconcile_season', [T.id, T.exp, tmdbSeason(9), tf('new_season', 'cu2-tmdb-s9', { show_id: T.id })], B);
+  ok(stand.status === 'pending' && stand.reason === 'standing_decision', 'a standing decision still holds a TMDB season', JSON.stringify(stand));
+  const prot = await call(db, 'library_cu_set_season_date', [P.row.id, { display_date: 'TBA', date_sort: '2099-01-01' }, { display_date: 'Mar 1, 2027', date_sort: '2027-03-01' }, tf('date', 'cu2-tmdb-prot', { show_id: P.id, season_id: P.row.id })], B);
+  ok(prot.status === 'pending' && prot.reason === 'protected_value', 'a protected value still holds a TMDB date', JSON.stringify(prot));
+  const idh = await call(db, 'library_cu_attach_identity', [U.id, { title: 'ZZ CU2 Unmatched', show_key: 'zz cu2 unmatched' }, 990200, [1], tf('identity', 'cu2-tmdb-id', { show_id: U.id, subject: { tmdb_id: 990200, tmdb_title: 'ZZ CU2 Unmatched' } })], B);
+  ok(idh.status === 'pending' && idh.reason === 'identity_hold', 'an identity hold still blocks a TMDB match', JSON.stringify(idh));
+
+  // Ordinary work stays available.
+  const fp0 = async () => JSON.stringify([await fpOf(db, 'public', 'update_holds'), await fpOf(db, 'public', 'record_aliases'), await fpOf(db, 'public', 'collection_definitions'), await fpOf(db, 'public', 'collection_exclusions')]);
+  const held = await fp0();
+  const c2 = (await tryCall(db, 'org_create_collection', [crypto.randomUUID(), 'ZZ CU2 Ordinary'], B));
+  ok(c2.ok, 'without access, a collection is created', c2.message);
+  const cid = c2.rows.collection.id;
+  ok((await tryCall(db, 'org_rename_collection', [cid, 'ZZ CU2 Ordinary', 'ZZ CU2 Renamed'], B)).ok, 'renamed');
+  const mem = await tryCall(db, 'org_add_membership', [cid, G.id, null], B);
+  ok(mem.ok, 'a membership added', mem.message);
+  const rem = await tryCall(db, 'org_remove_membership', [mem.rows.membership.id, cid, G.id, null], B);
+  ok(rem.ok && rem.rows.removed === true && (await asUser(db, B, `select count(*)::int n from public.membership_removals where collection_id = $1`, [cid]))[0].n === 1, 'removed, and the removal remembered', rem.message);
+  ok((await tryCall(db, 'org_set_collection_archived', [cid, true], B)).ok, 'archived');
+  const fill = await tryCall(db, 'library_cu_set_season_date', [F.row.id, { display_date: 'TBA', date_sort: '2099-01-01' }, { display_date: 'Mar 1, 2027', date_sort: '2027-03-01' }, tf('date', 'cu2-tmdb-fill', { show_id: F.id, season_id: F.row.id })], B);
+  ok(fill.ok && fill.rows.outcome === 'applied', 'a TMDB date fills a TBA', fill.message || JSON.stringify(fill.rows));
+  const attach = await tryCall(db, 'library_cu_attach_identity', [W.id, { title: 'ZZ CU2 Matchable', show_key: 'zz cu2 matchable' }, 990201, [1], tf('identity', 'cu2-tmdb-w', { show_id: W.id, subject: { tmdb_id: 990201, tmdb_title: 'ZZ CU2 Matchable' } })], B);
+  ok(attach.ok && attach.rows.outcome === 'applied', 'a TMDB match applies', attach.message);
+  const note = await tryCall(db, 'library_cu_note_finding', [tf('identity', 'cu2-tmdb-note', { show_id: U.id, subject: { title: 'ZZ CU2 Unmatched' } }), 'possible_match'], B);
+  ok(note.ok && note.rows.status === 'pending', 'a TMDB possible match is noted', note.message);
+  ok((await tryCall(db, 'library_cu_set_finding_status', [note.rows.finding_id, 'pending', 'dismissed', ''], B)).ok, 'a TMDB finding is dismissed');
+  ok((await tryCall(db, 'library_cu_set_show_settings', [G.id, { follow_when_skipped: false, flagged: false }, true, false], B)).ok, 'Keep checking a Skipped show still saves');
+  ok(held === await fp0(), 'none of that touched a hold, alias, definition or exclusion');
+
+  // The two ordinary cascades, and only those rows.
+  const holdsNow = async () => (await asUser(db, B, `select id from public.update_holds order by id`)).map(r => r.id);
+  const aliasCount = async () => (await asUser(db, B, `select count(*)::int n from public.record_aliases`))[0].n;
+  const h0 = await holdsNow(), al0 = await aliasCount();
+  const delS = await tryCall(db, 'delete_tv_season', [E.row.id, 0], B);
+  const h1 = await holdsNow();
+  ok(delS.ok && delS.rows.show_deleted === true && !h1.includes(hItem.id) && h1.length === h0.length - 1, 'deleting a season takes the hold on that season, and only it', delS.message);
+  const delD = await tryCall(db, 'delete_tv_season', [D.row.id, 0], B);
+  const h2 = await holdsNow();
+  ok(delD.ok && !h2.includes(hShow.id) && h2.length === h1.length - 1 && (await aliasCount()) === al0 - 1, 'deleting a show’s last season takes the holds and aliases on the show, and only those', delD.message);
+  ok(h2.includes(hStays.id) && h2.includes(hLabel.id) && h2.includes(hColl.id), 'every other hold stays');
+
+  // Restore: saved data, not a research operation.
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'cu2-'));
+  try {
+    const flags0 = await flags();
+    const expB = backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', B).out));
+    const docB7 = JSON.parse(expB);
+    ok(docB7.formatVersion === 7 && docB7.tables.update_holds.length === h2.length && docB7.tables.update_findings.some(f => f.source === 'research'), 'B’s backup (format 7) holds its research rows');
+    const rows0 = await rows(db);
+    const rs = await tryCall(db, 'restore_backup', [docB7, false], B);
+    ok(rs.ok && same(rows0, await rows(db)) && (await flags()) === flags0, 'without access, a format-7 restore succeeds, every row as it was, the permission unchanged', rs.message);
+    const noHolds = JSON.parse(expB); noHolds.tables.update_holds = []; noHolds.rowCounts.update_holds = 0;
+    ok((await tryCall(db, 'restore_backup', [noHolds, false], B)).ok && (await holdsNow()).length === 0, 'a file without holds replaces them (the restore contract; the safety backup keeps them)');
+    const rs2 = await tryCall(db, 'restore_backup', [docB7, false], B);
+    ok(rs2.ok && (await holdsNow()).length === h2.length && (await capOf(B)).research === false, 'restoring them gives no access');
+    fs.writeFileSync(path.join(dir2, 'b.json'), expB);
+    const rAdm = await tryExec(db, adminTool('restore-sql', '--file', path.join(dir2, 'b.json'), '--owner', B, '--email', 'b@test.invalid', '--run', 'cu2-adm-1').out);
+    fs.writeFileSync(path.join(dir2, 'after.json'), backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', B).out)));
+    const verB = adminTool('verify', '--file', path.join(dir2, 'b.json'), '--after', path.join(dir2, 'after.json'));
+    ok(rAdm.ok && verB.ok && /VERIFIED/.test(verB.out) && (await flags()) === flags0, 'the admin runbook restores a member without access and verifies field by field', [rAdm.message, verB.out].join(' '));
+    // A file can't carry the permission.
+    const withTable = JSON.parse(expB); withTable.tables.library_members = [{ user_id: B, research_enabled: true }]; withTable.rowCounts.library_members = 1;
+    const withTop = JSON.parse(expB); withTop.research_enabled = true;
+    for (const [label, f, re] of [['a table', withTable, /unexpected set of tables/], ['a top-level field', withTop, /unexpected top-level fields/]]) {
+      const b = await rows(db), x = await tryCall(db, 'restore_backup', [f, false], B);
+      ok(!x.ok && re.test(x.message) && same(b, await rows(db)) && (await flags()) === flags0, `a file with the permission as ${label}: refused, nothing changed`, x.message);
+    }
+
+    // The bypass ends with the call: after success, after failure and after a failure an outer caller catches.
+    const badEarly = { format: 'watchlist-tracker-backup', formatVersion: 7, tables: {}, rowCounts: {}, exportedAt: 'x' };
+    const badLate = JSON.parse(expB); badLate.tables.record_aliases = [{ ...(badLate.tables.record_aliases[0]), id: crypto.randomUUID(), show_id: crypto.randomUUID(), item_id: null, match_text: 'zz orphan', alias: 'zz orphan' }]; badLate.rowCounts.record_aliases = 1;
+    const asTx = (who, body) => attempt(() => db.transaction(async tx => {
+      await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true)`, [JSON.stringify({ sub: who, role: 'authenticated' })]);
+      return body(tx);
+    }));
+    const holdArg = JSON.stringify(newHold);
+    await refused('a research write after a successful restore, same transaction', () => asTx(B, async tx => {
+      await tx.query(`select public.restore_backup($1::jsonb, false)`, [expB]);
+      if ((await tx.query(`select coalesce(current_setting('watchlist.research_restore', true), '') f`)).rows[0].f !== '') throw new Error('the flag stayed on');
+      return tx.query(`select public.library_cu_save_hold($1::jsonb)`, [holdArg]);
+    }));
+    await refused('a direct research write after a successful restore, same transaction', () => asTx(B, async tx => {
+      await tx.query(`select public.restore_backup($1::jsonb, false)`, [expB]);
+      return tx.query(`delete from public.update_holds where id = $1`, [hStays.id]);
+    }));
+    for (const [label, bad] of [['an early failure', badEarly], ['a failure after rows were replaced', badLate]]) {
+      const top = await asTx(B, tx => tx.query(`select public.restore_backup($1::jsonb, false)`, [JSON.stringify(bad)]));
+      ok(!top.ok && /restore_invalid/.test(top.message), `${label}: restore refused`, top.message);
+      await refused(`the next research write, after ${label} (the transaction is gone)`, () => tryCall(db, 'library_cu_save_hold', [newHold], B));
+      // A plpgsql exception block is the outer caller; so is a savepoint.
+      const outer = await asTx(B, async tx => {
+        await tx.query(`select set_config('zz.doc', $1, true), set_config('zz.hold', $2, true)`, [JSON.stringify(bad), holdArg]);
+        await tx.query(`do $zz$ begin
+          begin perform public.restore_backup(current_setting('zz.doc')::jsonb, false);
+          exception when others then
+            if coalesce(current_setting('watchlist.research_restore', true), '') <> '' then raise exception 'the flag stayed on after a caught failure'; end if;
+            perform set_config('zz.caught', sqlstate, true);
+          end;
+          if coalesce(current_setting('zz.caught', true), '') = '' then raise exception 'the failure wasn''t caught'; end if;
+          perform public.library_cu_save_hold(current_setting('zz.hold')::jsonb);
+        end $zz$`);
+      });
+      const b = await rows(db);
+      ok(!outer.ok && /^research_not_enabled: /.test(outer.message) && same(b, await rows(db)), `${label} caught by an outer block, then a research write: refused`, outer.message || 'it ran');
+      const direct2 = await asTx(B, async tx => {
+        await tx.query(`select set_config('zz.doc', $1, true), set_config('zz.id', $2, true)`, [JSON.stringify(bad), hStays.id]);
+        await tx.query(`do $zz$ begin
+          begin perform public.restore_backup(current_setting('zz.doc')::jsonb, false); exception when others then null; end;
+          delete from public.update_holds where id = current_setting('zz.id')::uuid;
+        end $zz$`);
+      });
+      ok(!direct2.ok && /^research_not_enabled: /.test(direct2.message) && same(b, await rows(db)), `${label} caught, then a direct delete of a hold: refused`, direct2.message || 'it ran');
+      const save = await asTx(B, async tx => {
+        await tx.query('savepoint s1');
+        await tx.query(`select public.restore_backup($1::jsonb, false)`, [JSON.stringify(bad)]).catch(() => {});
+        await tx.query('rollback to savepoint s1');
+        return tx.query(`select public.library_cu_save_hold($1::jsonb)`, [holdArg]);
+      });
+      ok(!save.ok && /^research_not_enabled: /.test(save.message) && same(b, await rows(db)), `${label} rolled back to a savepoint, then a research write: refused`, save.message || 'it ran');
+    }
+    const inner = await asTx(B, async tx => {
+      await tx.query(`select set_config('zz.doc', $1, true), set_config('zz.hold', $2, true)`, [expB, holdArg]);
+      await tx.query(`do $zz$ begin
+        begin perform public.restore_backup(current_setting('zz.doc')::jsonb, false); end;
+        perform public.library_cu_save_hold(current_setting('zz.hold')::jsonb);
+      end $zz$`);
+    });
+    ok(!inner.ok && /^research_not_enabled: /.test(inner.message), 'a success inside an outer block, then a research write: refused', inner.message || 'it ran');
+    // The internal function gains nothing: the flag is the wrapper's.
+    await refused('the internal restore called directly', () => attempt(() => asUser(db, B, `select private.restore_backup_v7($1::jsonb, false)`, [expB])));
+    // Only a member's own setting of a name it can't reach would matter; a caller outside restore has no way to set it.
+    ok((await val(db, `select array_agg(p.proname::text order by p.proname)::text from pg_proc p where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace) and p.prosrc like '%watchlist.research_restore%'`)) === '{research_write_guard,restore_backup}',
+      'only the wrapper and the guard name the flag');
+    ok((await val(db, `select count(*)::int from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc ~ 'set_config\\(\\s*[^''\\s]'`)) === 0, 'no public function passes a computed name to set_config');
+    // With access, restore is unchanged.
+    ok((await tryCall(db, 'restore_backup', [docB7, false], B)).ok && (await tryCall(db, 'restore_backup', [backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', A).out)), false], A)).ok, 'restore works for a member with access too');
+  } finally { fs.rmSync(dir2, { recursive: true, force: true }); }
+
+  // Interrupted imports: what's unfinished stays pending and is continued only by the applying functions.
+  const unfinished = async who => (await asUser(db, who, `select id, kind from public.update_findings where source = 'research' and status = 'pending' and reason = '' and kind in ('new_season', 'date', 'alias') order by id`)).map(r => r.id);
+  const left = await unfinished(B);
+  ok(same(left.sort(), [fidB('new_season', 'cu2-s5'), fidB('date', 'cu2-date'), fidB('alias', 'cu2-alias')].sort()), 'the unfinished findings survive revocation and restore; applied ones aren’t among them, nor a new title', JSON.stringify(left));
+  await access(B, true);
+  const twice2 = await tryCall(db, 'library_cu_record_findings', [brief2, sha('cu2-file'), fileFindings], B);
+  ok(!twice2.ok && /already_imported/.test(twice2.message), 'with access back, the same file is still refused');
+  const cont1 = await call(db, 'library_cu_reconcile_season', [T.id, T.exp, { season_number: 5 }, { id: fidB('new_season', 'cu2-s5') }, false, null], B);
+  ok(cont1.outcome === 'applied', 'the unfinished season applies under the automatic rules (p_review false)', JSON.stringify(cont1));
+  const rep1 = await call(db, 'library_cu_reconcile_season', [T.id, T.exp, { season_number: 5 }, { id: fidB('new_season', 'cu2-s5') }, false, null], B);
+  ok(rep1.outcome === 'not_pending' && (await asUser(db, B, `select count(*)::int n from public.watchlist_items where show_id = $1 and season = 'Season 5'`, [T.id]))[0].n === 1, 'sending it again adds nothing');
+  // A hold added since the import sends the finding to review, with a reason, so it stops being unfinished.
+  await hold({ kind: 'protected_value', item_id: V.row.id, field: 'display_date', protected_value: 'TBA', decision: 'Kept since', effect: 'keep_value', reopen });
+  const cont2 = await call(db, 'library_cu_set_season_date', [V.row.id, { display_date: 'TBA', date_sort: '2099-01-01' }, { display_date: 'Jan 15, 2030', date_sort: '2030-01-15' }, { id: fidB('date', 'cu2-date') }, false], B);
+  ok(cont2.status === 'pending' && cont2.reason === 'protected_value' && !(await unfinished(B)).includes(fidB('date', 'cu2-date')), 'a hold added since keeps the date, to review, no longer unfinished', JSON.stringify(cont2));
+  // The current definition decides too: a changed rule hash waits for research.
+  await call(db, 'library_cu_save_definition', [cB, 1, 'discover', RULES, { ...EVIDENCE, official_domains: ['other.example.org'] }, 'Changed.'], B);
+  const cont3 = await call(db, 'library_cu_add_alias', [T.id, null, 'ZZ CU2 Other Title', { id: fidB('alias', 'cu2-alias') }], B);
+  ok(cont3.status === 'needs_research' && !(await unfinished(B)).includes(fidB('alias', 'cu2-alias')), 'a changed definition blocks the alias, no longer unfinished', JSON.stringify(cont3));
+  await call(db, 'library_cu_save_definition', [cB, 2, 'discover', RULES, EVIDENCE, 'Back.'], B);
+  // Every status path: only a pending finding with no reason is unfinished, including one an import reopened from Not now.
+  const b3 = crypto.randomUUID();
+  await call(db, 'library_cu_register_brief', [b3, [cB]], B);
+  const nf = [rf('cu2-nn', 'alias', { show_id: G.id, subject: { title: 'ZZ CU2 Stays' }, proposed: { alias: 'ZZ CU2 Not Now' } }),
+    rf('cu2-dis', 'alias', { show_id: G.id, subject: { title: 'ZZ CU2 Stays' }, proposed: { alias: 'ZZ CU2 Dismissed' } }),
+    rf('cu2-weak', 'alias', { show_id: G.id, subject: { title: 'ZZ CU2 Stays' }, proposed: { alias: 'ZZ CU2 Weak' }, routed_status: 'needs_evidence', reason: 'evidence_below_standard', assessment: assessed('insufficient') })];
+  const i3 = await call(db, 'library_cu_record_findings', [b3, sha('cu2-file-3'), nf], B);
+  const id3 = k => i3.findings.find(x => x.fingerprint === fp('alias', k)).id;
+  await call(db, 'library_cu_set_finding_status', [id3('cu2-nn'), 'pending', 'not_now', ''], B);
+  await call(db, 'library_cu_set_finding_status', [id3('cu2-dis'), 'pending', 'dismissed', ''], B);
+  let u3 = await unfinished(B);
+  ok(![id3('cu2-nn'), id3('cu2-dis'), id3('cu2-weak')].some(i => u3.includes(i)), 'Not now, Dismissed and blocked findings aren’t unfinished');
+  const b4 = crypto.randomUUID();
+  await call(db, 'library_cu_register_brief', [b4, [cB]], B);
+  await db.exec(`select pg_sleep(0.01)`);
+  const later = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+  const i4 = await call(db, 'library_cu_record_findings', [b4, sha('cu2-file-4'), [{ ...nf[0], evidence: [{ url: 'https://press.example.org/news/2', outlet: 'official', source_type: 'official', published_on: later }], assessment: assessed('official', { researched_on: later }) }]], B);
+  const reopened = (await asUser(db, B, `select status, reason, decided_at from public.update_findings where id = $1`, [i4.findings[0].id]))[0];
+  ok(reopened.status === 'pending' && reopened.reason === '' && reopened.decided_at !== null && (await unfinished(B)).includes(i4.findings[0].id),
+    'an import that reopens Not now leaves a decision time on an unfinished finding, so that time can’t be part of the test', JSON.stringify(reopened));
+  await access(B, false);
+
+  // Test-only reverse, then the install applies again.
+  await asSuper(db, `select set_config('watchlist.research_restore', 'on', true); delete from public.update_findings; delete from public.research_imports; delete from public.research_briefs; delete from public.record_aliases; delete from public.update_holds; delete from public.collection_exclusions; delete from public.collection_definitions; delete from public.update_setup`);
+  const rv = await tryExec(db, sql('db/test/cu2_reverse.sql'));
+  const cr = JSON.parse((await state(db)).cat), c0 = JSON.parse(s20.cat);
+  delete cr.runs; delete c0.runs;
+  ok(rv.ok && same(cr, c0), 'the test-only reverse gives back the catalog exactly', rv.message || catDiff(JSON.stringify(c0), JSON.stringify(cr)).join('\n'));
+  ok((await tryExec(db, pre2('cu2-rehearsal-3') + CU2)).ok, 'CU2 applies again after the reverse');
+  await db.exec(`select set_config('watchlist.cu2_run', '', false), set_config('watchlist.cu2_owner', '', false)`);
+  await tryExec(db, sql('db/test/cu2_reverse.sql'));
+  await tryExec(db, sql('db/test/cu1d_reverse.sql'));
+  await tryExec(db, sql('db/test/cu1c_reverse.sql'));
+  await tryExec(db, sql('db/test/cu1b_reverse.sql'));
+}
+
 section('rev: the test-environment reverse');
 {
   const blocked = await tryExec(db, sql('db/test/cu1_reverse.sql'));
