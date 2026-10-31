@@ -429,6 +429,7 @@ function buildBrowseBar(opts = {}) {
   updateCollectionPanel();
   const selected = openCollectionTab();
   if (selected && typeof selected.scrollIntoView === 'function') selected.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  syncCollectionTabOverflow();
   if (hadFocus) {
     const target = chooserFocusTarget(focusedId);
     if (target && typeof target.focus === 'function') { dropChooserFocusIntent(); target.focus(); }
@@ -497,7 +498,7 @@ function collectionsChooserHtml() {
   const tabs = list.map((d, i) => {
     const selected = d.id === openId;
     const focusable = selected || (!openId && i === 0);
-    return `<button type="button" role="tab" class="tab collection-tab${selected ? ' active' : ''}" id="ctab-${esc(d.collectionId)}" aria-controls="mainContent" aria-selected="${selected}" tabindex="${focusable ? 0 : -1}" onclick="selectCollectionTab('${esc(d.collectionId)}')">${esc(d.label)}</button>`;
+    return `<button type="button" role="tab" class="tab collection-tab${selected ? ' active' : ''}" id="ctab-${esc(d.collectionId)}" aria-controls="mainContent" aria-selected="${selected}" tabindex="${focusable ? 0 : -1}" title="${esc(d.label)}" onclick="selectCollectionTab('${esc(d.collectionId)}')">${esc(d.label)}</button>`;
   }).join('');
   let after = '';
   if (orgCollectionsStale) {
@@ -506,8 +507,23 @@ function collectionsChooserHtml() {
       ? status('Your last collection couldn’t be checked because your collections may be out of date. Retry, or choose a collection above.', retry('retryOrgRefresh'))
       : ` <span class="browse-stale">Collections may be out of date · <button class="btn" id="collectionsRetry" onclick="retryOrgRefresh()">Retry</button></span>`;
   }
-  return `<div role="tablist" aria-label="Collections" class="collection-tabs" onkeydown="collectionTabsKeydown(event)">${tabs}</div>${after}`;
+  // One scrolling row. The arrows are for the mouse (tabs-scroll); the keyboard moves with the tabs themselves.
+  return `<div class="collection-nav"><button type="button" class="tabs-scroll tabs-left" tabindex="-1" aria-hidden="true" onclick="scrollCollectionTabs(-1)">‹</button><div role="tablist" aria-label="Collections" class="collection-tabs" id="collectionTabs" onkeydown="collectionTabsKeydown(event)" onscroll="syncCollectionTabOverflow()">${tabs}</div><button type="button" class="tabs-scroll tabs-right" tabindex="-1" aria-hidden="true" onclick="scrollCollectionTabs(1)">›</button></div>${after}`;
 }
+
+// The row's edges say when there are more tabs that way (styles.css fades them; desktop adds arrows).
+function syncCollectionTabOverflow() {
+  const tabs = document.getElementById('collectionTabs');
+  const nav = tabs && tabs.parentElement;
+  if (!nav || !nav.classList) return;
+  nav.classList.toggle('can-left', tabs.scrollLeft > 2);
+  nav.classList.toggle('can-right', tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 2);
+}
+function scrollCollectionTabs(direction) {
+  const tabs = document.getElementById('collectionTabs');
+  if (tabs && typeof tabs.scrollBy === 'function') tabs.scrollBy({ left: direction * tabs.clientWidth * 0.7 });
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('resize', syncCollectionTabOverflow);
 
 // The open collection's tab, when it has one (an unavailable collection has none).
 function openCollectionTab() {
@@ -560,6 +576,7 @@ function collectionTabsKeydown(event) {
   if (typeof tabs[next].focus === 'function') tabs[next].focus();
   // The focused tab is scrolled fully into view within the row (focus() leaves a partly visible one as it is; O-1).
   if (typeof tabs[next].scrollIntoView === 'function') tabs[next].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  syncCollectionTabOverflow();
 }
 
 // The view heading is shown only in a browse view. (Restore has no header button since
@@ -567,6 +584,21 @@ function collectionTabsKeydown(event) {
 function updateRestoreVisibility() {
   const head = document.getElementById('viewHead');
   if (head) head.innerHTML = isBrowseView(activeViewId) ? browseHeadHtml() : '';
+  updateCollectionAddButton();
+}
+
+// A collection's + Add: it opens the picker of saved shows and films (collection-members.js), so it is
+// drawn only while the picker may open. Named for its collection; the toolbar stays as it is when
+// nothing changed, so focus stays on the button.
+function collectionAddButtonHtml() {
+  if (!collectionAddAllowed()) return '';
+  return `<button type="button" class="btn add-open-btn" id="collectionAddBtn" aria-label="Add to ${esc(currentBrowseDest().label)}" onclick="openAddPicker(this)">+ Add</button>`;
+}
+function updateCollectionAddButton() {
+  const slot = document.getElementById('collectionAddSlot');
+  if (!slot) return;
+  const shown = !!document.getElementById('collectionAddBtn');
+  if (shown !== collectionAddAllowed()) slot.innerHTML = collectionAddButtonHtml();
 }
 
 // Re-rendering replaces the controls, so keyboard focus is put back on the
@@ -800,13 +832,11 @@ function browseHeadHtml() {
   const back = browseBackHtml();
   if (!dest) return back ? `<div class="browse-head">${back}</div>` : '';
   // S3-D3, as amended by S4: shows and films are edited here; Remove changes only the collection.
-  const notes = [dest.note, `The shows and films in your ${dest.label} collection. Changing a show or film here changes it in your library everywhere; Remove takes it out of ${dest.label} only.`].filter(Boolean);
+  const notes = [dest.note, `Changes here apply everywhere in your library. Remove takes a title out of ${dest.label} only.`].filter(Boolean);
   return `<div class="browse-head">
       <h2 class="browse-title">🗂 ${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
-      ${back}
-      <button class="btn btn-link browse-edit-members" onclick="openManage('members', '${esc(dest.collectionId)}', this)">Edit collection</button>
-      ${collectionAddAllowed() ? `<button class="btn btn-link browse-add-items" id="collectionAddBtn" onclick="openAddPicker(this)">Add to ${esc(dest.label)}…</button>` : ''}
-      ${notes.map(n => `<p class="browse-note">${esc(n)}</p>`).join('')}
+      <p class="browse-note">${esc(notes.join(' '))}</p>
+      <span class="browse-head-actions">${back}<button class="btn btn-link browse-edit-members" onclick="openManage('members', '${esc(dest.collectionId)}', this)">Edit collection</button></span>
     </div>`;
 }
 
@@ -814,7 +844,7 @@ function browseHeadHtml() {
 function browseBackHtml() {
   const viewId = browseOrigin && browseOrigin.viewId;
   const view = viewId ? [...DERIVED_VIEWS, ALL_MOVIES_VIEW].find(v => v.id === viewId) : null;
-  return view ? `<button class="btn browse-back" onclick="browseBack()">← Back to ${esc(view.label)}</button>` : '';
+  return view ? `<button class="btn btn-link browse-back" onclick="browseBack()">← Back to ${esc(view.label)}</button>` : '';
 }
 
 // What a browse view's filter choices are drawn from: every loaded show and film
@@ -871,7 +901,7 @@ function renderBrowseFilters() {
     : '';
   const seasonVisSelect = dest && browseMedia !== 'movie' && browsePresentation === 'seasons'
     ? `<select id="fSeasonVis" class="season-vis-select" onchange="setBrowseSeasonVis(this.value)" aria-label="TV seasons">${Object.entries(BROWSE_SEASON_VIS_LABELS).map(([value, text]) =>
-        `<option value="${value}"${browseSeasonVis === value ? ' selected' : ''}>TV seasons: ${text}</option>`).join('')}</select>`
+        `<option value="${value}"${browseSeasonVis === value ? ' selected' : ''}>Seasons: ${value === 'notskipped' ? 'Not skipped' : text}</option>`).join('')}</select>`
     : '';
   const watchSelect = dest
     ? ''
@@ -888,7 +918,8 @@ function renderBrowseFilters() {
   // .browse-controls scopes the larger phone touch targets to these views (All TV's toggle is unchanged).
   filtersRowEl.innerHTML = filterBarHtml({
     lead: dest ? `<div class="browse-controls">${mediaToggle}${layoutToggles}</div>` : '',
-    trail: dest ? '' : libraryAddButtonHtml('movie'),
+    trail: dest ? `${tmdbQuickHtml(browseMedia === 'all' ? 'mixed' : browseMedia, currentBrowseDest())}<span id="collectionAddSlot" class="collection-add-slot">${collectionAddButtonHtml()}</span>`
+      : tmdbQuickHtml('movie') + libraryAddButtonHtml('movie'),
     line: `
       <select id="fStatus" onchange="renderTable()" aria-label="Status">
         <option value="">All (except Skipped)</option>
@@ -1127,8 +1158,8 @@ function browseSeasonEntryHtml(e, today, combined, part) {
         </div>
       </div>
       <div class="card-meta">
-        ${badges}
         <span class="card-date">${browseDateHtml(r, today)}</span>
+        <span class="card-labels">${badges}</span>
       </div>
       <div class="card-actions">${statusHtml} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))} ${remove}</div>
     </div>`;
@@ -1144,6 +1175,11 @@ function collectionRemoveShowHtml(show, season) {
   const seasonArg = season ? `'${esc(season.id).replace(/'/g, "\\'")}'` : 'null';
   const name = `Remove the show ${show.title} and all its seasons from ${dest.label}`;
   return `<button class="btn btn-link collection-remove" onclick="removeFromCollection('show', '${idArg}', ${seasonArg})" aria-label="${esc(name)}">${esc(season ? 'Remove show…' : `Remove show from ${dest.label}…`)}</button>`;
+}
+
+// "Film" beside a title only where a list mixes films with TV (Combined); elsewhere the view or section says it.
+function browseFilmNoun() {
+  return isBrowseCollectionView(activeViewId) && browseMedia === 'all' && browseGrouping === 'combined' ? ' · Film' : '';
 }
 
 // A film in a collection (S4): All Movies' controls — status, Watched and the ⋯ menu (priority,
@@ -1173,7 +1209,7 @@ function browseFilmHtml(r, today, part) {
   const popover = filmMenuHtml(r, policy, extra);
   const moreBtn = `<button class="more-btn" data-action="more" aria-expanded="false" onclick="toggleMorePopover('${idArg}', this)" title="Priority, watch with, details, collection, TMDB" aria-label="${esc(`More for ${r.title}`)}">⋯</button>`;
   const row = `<tr class="browse-film-row ${dimClass}"${item}>
-      <td tabindex="-1" data-primary="1">${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl"> · Film</span>${stateTagsHtml(r, 'film')}${labelsHtml}</td>
+      <td tabindex="-1" data-primary="1">${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl">${browseFilmNoun()}</span>${stateTagsHtml(r, 'film')}${labelsHtml}</td>
       <td>${badges}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusCell}</td>
@@ -1183,17 +1219,15 @@ function browseFilmHtml(r, today, part) {
   const card = `<div class="item-card ${dimClass}"${item}>
       <div class="card-top">
         <div class="card-title-block" tabindex="-1" data-primary="1">
-          <span class="card-title">${priorityMarkHtml(r.priority)}${esc(r.title)}${priorityMarkHtml(r.priority, true)}${stateTagsHtml(r, 'film')}</span>
-          <span class="card-season">Film</span>
+          <span class="card-title">${priorityMarkHtml(r.priority)}${esc(r.title)}${priorityMarkHtml(r.priority, true)}${stateTagsHtml(r, 'film')}</span>${browseFilmNoun() ? '<span class="card-season">Film</span>' : ''}
         </div>
         <div class="card-row-actions">${moreBtn}</div>
         ${popover}
       </div>
       <div class="card-meta">
-        ${badges}
         <span class="card-date">${browseDateHtml(r, today)}</span>
+        <span class="card-labels">${badges}${pills}</span>
       </div>
-      ${labelsHtml}
       <div class="card-actions">${statusCell} ${isSkipped ? '' : watchBtn}</div>
     </div>`;
   return { row, card };
@@ -1234,7 +1268,7 @@ function allMoviesFilmHtml(r, today, films) {
   const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
   const item = ` data-item="${esc(r.id)}" data-row-section="film"`;
   const statusCell = `<span class="state-action" data-action="status">${filmStatusSelectHtml(r)}</span>`;
-  const titleHtml = `${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl"> · Film</span>${stateTagsHtml(r, 'film')}`;
+  const titleHtml = `${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl">${browseFilmNoun()}</span>${stateTagsHtml(r, 'film')}`;
   const watchBtn = isSkipped ? '<span class="confirmed-lbl">—</span>'
     : `<span class="state-action" data-action="watch"><button class="watch-btn${r.watched ? ' watched' : ''}" onclick="toggleWatch('${r.id}')">${r.watched ? '✓ Watched' : 'Mark watched'}</button></span>`;
   const popover = filmMenuHtml(r, policy);
@@ -1253,8 +1287,7 @@ function allMoviesFilmHtml(r, today, films) {
   const card = `<div class="item-card ${dimClass}"${item}>
       <div class="card-top">
         <div class="card-title-block" tabindex="-1" data-primary="1">
-          <span class="card-title">${priorityMarkHtml(r.priority)}${esc(r.title)}${priorityMarkHtml(r.priority, true)}${stateTagsHtml(r, 'film')}</span>
-          <span class="card-season">Film</span>
+          <span class="card-title">${priorityMarkHtml(r.priority)}${esc(r.title)}${priorityMarkHtml(r.priority, true)}${stateTagsHtml(r, 'film')}</span>${browseFilmNoun() ? '<span class="card-season">Film</span>' : ''}
         </div>
         <div class="card-row-actions">
           ${moreBtn}
@@ -1263,10 +1296,9 @@ function allMoviesFilmHtml(r, today, films) {
         ${popover}
       </div>
       <div class="card-meta">
-        ${badges}
         <span class="card-date">${browseDateHtml(r, today)}</span>
+        <span class="card-labels">${badges}${pills}</span>
       </div>
-      ${labelsHtml}
       <div class="card-actions">${statusCell} ${isSkipped ? '' : watchBtn}</div>
     </div>`;
   return { row, card };

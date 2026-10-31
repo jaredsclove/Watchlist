@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261030-compact">
+<link rel="stylesheet" href="styles.css?v=20261031-density">
 </head>
 <body>
 
@@ -98,34 +98,34 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261030-compact"></script>
-<script src="api.js?v=20261030-compact"></script>
-<script src="write-lane.js?v=20261030-compact"></script>
-<script src="ui-helpers.js?v=20261030-compact"></script>
-<script src="metadata.js?v=20261030-compact"></script>
-<script src="backup-restore.js?v=20261030-compact"></script>
-<script src="backup-format3.js?v=20261030-compact"></script>
-<script src="tabs.js?v=20261030-compact"></script>
-<script src="render.js?v=20261030-compact"></script>
-<script src="row-actions.js?v=20261030-compact"></script>
-<script src="tmdb-search.js?v=20261030-compact"></script>
-<script src="collections-pull.js?v=20261030-compact"></script>
-<script src="universe-pull.js?v=20261030-compact"></script>
-<script src="person-pull.js?v=20261030-compact"></script>
-<script src="tmdb-match.js?v=20261030-compact"></script>
-<script src="derived-views.js?v=20261030-compact"></script>
-<script src="tv-shows.js?v=20261030-compact"></script>
-<script src="episodes.js?v=20261030-compact"></script>
-<script src="show-ratings.js?v=20261030-compact"></script>
-<script src="organization.js?v=20261030-compact"></script>
-<script src="organization-manage.js?v=20261030-compact"></script>
-<script src="collection-members.js?v=20261030-compact"></script>
-<script src="collection-updates.js?v=20261030-compact"></script>
-<script src="collection-research.js?v=20261030-compact"></script>
-<script src="collection-settings.js?v=20261030-compact"></script>
-<script src="browse-views.js?v=20261030-compact"></script>
-<script src="history.js?v=20261030-compact"></script>
-<script src="library.js?v=20261030-compact"></script>
+<script src="auth.js?v=20261031-density"></script>
+<script src="api.js?v=20261031-density"></script>
+<script src="write-lane.js?v=20261031-density"></script>
+<script src="ui-helpers.js?v=20261031-density"></script>
+<script src="metadata.js?v=20261031-density"></script>
+<script src="backup-restore.js?v=20261031-density"></script>
+<script src="backup-format3.js?v=20261031-density"></script>
+<script src="tabs.js?v=20261031-density"></script>
+<script src="render.js?v=20261031-density"></script>
+<script src="row-actions.js?v=20261031-density"></script>
+<script src="tmdb-search.js?v=20261031-density"></script>
+<script src="collections-pull.js?v=20261031-density"></script>
+<script src="universe-pull.js?v=20261031-density"></script>
+<script src="person-pull.js?v=20261031-density"></script>
+<script src="tmdb-match.js?v=20261031-density"></script>
+<script src="derived-views.js?v=20261031-density"></script>
+<script src="tv-shows.js?v=20261031-density"></script>
+<script src="episodes.js?v=20261031-density"></script>
+<script src="show-ratings.js?v=20261031-density"></script>
+<script src="organization.js?v=20261031-density"></script>
+<script src="organization-manage.js?v=20261031-density"></script>
+<script src="collection-members.js?v=20261031-density"></script>
+<script src="collection-updates.js?v=20261031-density"></script>
+<script src="collection-research.js?v=20261031-density"></script>
+<script src="collection-settings.js?v=20261031-density"></script>
+<script src="browse-views.js?v=20261031-density"></script>
+<script src="history.js?v=20261031-density"></script>
+<script src="library.js?v=20261031-density"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -201,6 +201,7 @@ let cuLastState = null; // item 4: the newest collection-updates state this page
 let cuShowSettings = new Map(); // item 4: per-show update settings read with each view: show id → { follow_when_skipped, new_season_after_ended_at } (collection-updates.js)
 let libraryPanel = null; // the open "+ Add" panel of a view (library.js); null while closed
 let libraryPanelSeq = 0; // bumped each time the panel opens; answers for an earlier opening never touch it
+let tmdbQuickText = ''; // the toolbar's TMDB search as typed (a toolbar redraw keeps it); cleared with the view
 let orgWriteCapability = null; // { value: 'yes' }: this database has the Stage 3b-2 functions (checked when Manage opens)
 let orgEpoch = 0; // S4: bumped by a restore made in this page (organization.js invalidateOrganization); a membership change or its Undo checks it before sending
 let addPicker = null; // S5: the open Add to <collection> picker (collection-members.js); null while closed

@@ -106,7 +106,7 @@ test('C1 the primary row: TV · Movies · Collections, words for names, the phon
   // One non-sticky row with Settings: words only, each label on one line, 44 px targets.
   assert.match(phone, /\.media-switch-icon \{ display: none; \}/);
   assert.match(phone, /\.media-switch-btn \{ flex: 1 1 auto; min-width: 0; padding: 8px 4px; white-space: nowrap; text-align: center; min-height: 44px; \}/);
-  assert.match(phone, /\.collection-tab \{ min-height: 44px; \}/);
+  assert.match(css, /\.collection-tab \{[^}]*min-width: 44px; min-height: 44px;/);
   assert.match(css, /\.collection-tabs \{[^}]*overflow-x: auto;/);
 });
 
@@ -239,7 +239,7 @@ test('C6 Back names the origin view and returns with its filters once; the first
     app.ctx.switchMediaType(media); await settle(); app.ctx.switchView(view); await settle();
     app.el('fSearch').value = 'zz'; app.ctx.renderTable();
     app.ctx.openCollections(null); await settle();
-    assert.ok(head(app).includes(`<button class="btn browse-back" onclick="browseBack()">← Back to ${label}</button>`), label);
+    assert.ok(head(app).includes(`<button class="btn btn-link browse-back" onclick="browseBack()">← Back to ${label}</button>`), label);
     app.ctx.selectCollectionTab(ID.sheridan); await settle();
     assert.ok(head(app).includes(`← Back to ${label}`), 'a tab switch keeps the first origin');
     app.ctx.browseBack(); await settle();
@@ -354,11 +354,11 @@ test('C8 no write from any Collections chooser control; the collection note verb
   const app = await boot();
   spyDom(app);
   app.ctx.openCollections(null); await settle();
-  const allowed = new Set(['selectCollectionTab', 'collectionTabsKeydown', 'retryOrgRefresh', 'loadOrganization', 'openSettings']);
+  const allowed = new Set(['selectCollectionTab', 'collectionTabsKeydown', 'scrollCollectionTabs', 'retryOrgRefresh', 'loadOrganization', 'openSettings']);
   for (const k of ['disney', 'sheridan', '90day', 'truecrime']) {
     app.ctx.selectCollectionTab(ID[k]); await settle();
     const name = coll(app, k).name.replace('&', '&amp;');
-    assert.ok(head(app).includes(`The shows and films in your ${name} collection. Changing a show or film here changes it in your library everywhere; Remove takes it out of ${name} only.`), k);
+    assert.ok(head(app).includes(`Changes here apply everywhere in your library. Remove takes a title out of ${name} only.`), k);
     const hs = [...bar(app).matchAll(/on(?:click|keydown)="([A-Za-z]+)\(/g)].map(m => m[1]);
     assert.ok(hs.every(h => allowed.has(h)), hs.join(','));
     app.ctx.collectionTabsKeydown({ key: 'ArrowRight', target: app.ctx.document.getElementById(`ctab-${ID[k]}`), preventDefault() {} });
@@ -961,7 +961,7 @@ test('C15 the chooser is a complete tabs pattern: roles, one selected, roving ta
   const app = await boot();
   spyDom(app);
   app.ctx.openCollections(null); await settle();
-  assert.match(bar(app), /^<div role="tablist" aria-label="Collections" class="collection-tabs" onkeydown="collectionTabsKeydown\(event\)">/);
+  assert.match(bar(app), /<div role="tablist" aria-label="Collections" class="collection-tabs" id="collectionTabs" onkeydown="collectionTabsKeydown\(event\)" onscroll="syncCollectionTabOverflow\(\)">/);
   const t = tabs(app);
   assert.strictEqual(t.length, 4);
   assert.strictEqual(new Set(t.map(x => x.id)).size, 4);

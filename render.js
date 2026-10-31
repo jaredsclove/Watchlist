@@ -185,7 +185,7 @@ function filterBarHtml({ lead = '', line = '', trail = '', cats = [], marks = []
   }).join('');
   return `${lead}
     <div class="filter-line">
-      <input class="search-input" id="fSearch" type="text" placeholder="Search titles…" aria-label="Search titles" oninput="renderTable()">${line}
+      <input class="search-input" id="fSearch" type="text" placeholder="Search library…" aria-label="Search my library" oninput="renderTable()">${line}
       <button type="button" class="btn filter-more-btn" id="filterMoreBtn" aria-expanded="${filterPanelOpen}" aria-controls="filterMore" onclick="toggleFilterPanel()"><span class="more-label-wide">More filters</span><span class="more-label-narrow">Filters</span><span class="filter-count" id="filterMoreCount" aria-hidden="true" hidden></span><span class="visually-hidden" id="filterMoreA11y"></span> <span id="filterMoreChevron" aria-hidden="true">${filterPanelOpen ? '▴' : '▾'}</span></button>${trail}
     </div>
     <div class="filter-more" id="filterMore" role="group" aria-label="More filters" onkeydown="filterPanelKeydown(event)"${filterPanelOpen ? '' : ' hidden'}>${groups}</div>

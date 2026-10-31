@@ -478,7 +478,7 @@ function renderDerivedFilters() {
   filtersRowEl.innerHTML = filterBarHtml({
     lead: presentationToggle,
     line: `${statusSelect}${seasonVisSelect}`,
-    trail: libraryAddButtonHtml('tv'),
+    trail: tmdbQuickHtml('tv') + libraryAddButtonHtml('tv'),
     cats: [categoryFields],
     marks: [filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml()), markerFilterChecksHtml()],
     more: [filterFieldHtml('Year', 'fYear', yearSelect), filterFieldHtml('Progress', 'fProgress', progressSelect), filterFieldHtml('Original label', 'fTheme', themeSelect)]
@@ -807,8 +807,8 @@ function allTvSeasonRowHtml(r, today, needsReview, section = 'dated') {
         </div>
       </div>
       <div class="card-meta">
-        ${badges}
         <span class="card-date">${esc(r.display_date)}</span>${upcomingTag}${reviewTag}
+        <span class="card-labels">${badges}</span>
       </div>
       <div class="card-actions">${statusPill} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))}</div>
     </div>`;
@@ -952,23 +952,20 @@ function derivedShowHtml(item, today, opts = {}) {
     if (isExpanded) row += `<tr class="sub-row show-actions-row" ${ofAttr}><td style="padding-left:28px" colspan="${derivedColspan()}" onclick="event.stopPropagation()">${showActionsHtml(item, keyArg, { state: true, progress: true })}</td></tr>`
       + seasons.map(r => seasonSubRowHtml(r, subOpts(r))).join('');
 
-    // Phone card, top to bottom: title (expand button), season line, categories, progress,
-    // the shortcut; expanded: the actions, then the seasons. A caught-up card shows its
-    // categories and progress only when expanded.
-    const meta = !upToDate
-      ? `<div class="card-meta">${badges} <span class="card-date">${progressLabel}</span>${progressBarHtml}</div>`
-      : isExpanded ? `<div class="card-meta">${badges} <span class="card-date">${showProgressText(seasons)}</span></div>` : '';
+    // Phone card, top to bottom: title (expand button), then one wrapping flow of the season line,
+    // progress, categories and the shortcut; expanded: the actions, then the seasons. A caught-up
+    // card shows its categories and progress only when expanded.
+    const detail = !upToDate ? progressLabel : isExpanded ? showProgressText(seasons) : '';
+    const meta = `<div class="card-meta"><span class="card-season">${nextCard}</span>${detail ? `<span class="card-date card-progress">${detail}</span><span class="card-labels">${badges}</span>` : ''}${inProgress ? `<span class="card-complete" onclick="event.stopPropagation()">${shortcut}</span>` : ''}</div>`;
     const card = `<div class="item-card show-group-card${dimClass}" ${showAttrs}>
       <div class="card-top" onclick="toggleDerivedShow('${keyArg}', event)" style="cursor:pointer">
         ${expandBtn}
         <div class="card-title-block">
           <span class="card-title">${titleHtml}</span>
-          <span class="card-season">${nextCard}</span>
         </div>
         ${menu}
       </div>
       ${meta}
-      ${inProgress ? `<div class="card-actions shortcut-actions" onclick="event.stopPropagation()">${shortcut}</div>` : ''}
       ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${showActionsHtml(item, keyArg, { state: true })}</div>${seasons.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}</div>` : ''}
     </div>`;
     return { row, card };
@@ -998,15 +995,10 @@ function derivedShowHtml(item, today, opts = {}) {
         ${expandBtn}
         <div class="card-title-block">
           <span class="card-title">${titleHtml}${kindTag}</span>
-          <span class="card-season">${nextCard}</span>
         </div>
         ${menu}
       </div>
-      <div class="card-meta">
-        ${badges}
-        <span class="card-date">${progressLabel}</span>
-        ${progressBarHtml}
-      </div>
+      <div class="card-meta"><span class="card-season">${nextCard}</span><span class="card-date card-progress">${progressLabel}</span><span class="card-labels">${badges}</span></div>
       <div class="card-actions" onclick="event.stopPropagation()">
         <span class="state-action" data-action="status">${showStatusSelectHtml(show)}</span>${upToDatePill}
         ${inProgress ? seasonWatchControlHtml(upNext, shortcutOpts, false) : ''}
@@ -1147,8 +1139,8 @@ function comingSoonRowHtml(r, today, section = 'dated') {
         </div>
       </div>
       <div class="card-meta">
-        ${chips}
         <span class="card-date">${esc(r.display_date)}</span>
+        <span class="card-labels">${chips}</span>
       </div>
       <div class="card-actions">${statusPill} ${skip}</div>
     </div>`;

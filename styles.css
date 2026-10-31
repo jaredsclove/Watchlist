@@ -119,8 +119,19 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .media-switch-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .media-switch-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
 /* S2: the Collections chooser (a tab list in the Collections area) and its status line. */
-.collection-tabs { display: flex; flex: 1 1 100%; min-width: 0; overflow-x: auto; border-bottom: 1px solid var(--border); }
-.collection-tab { background: none; border: 0; border-bottom: 2px solid transparent; font-family: inherit; }
+/* Collections: one scrolling row at every width. Faded edges (and, for the mouse, arrows) say there's more that way. */
+.collection-nav { position: relative; flex: 1 1 100%; min-width: 0; display: flex; border-bottom: 1px solid var(--border); }
+.collection-tabs { display: flex; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.collection-tabs::-webkit-scrollbar { display: none; }
+.collection-nav.can-left .collection-tabs { -webkit-mask-image: linear-gradient(to right, transparent, #000 36px); mask-image: linear-gradient(to right, transparent, #000 36px); }
+.collection-nav.can-right .collection-tabs { -webkit-mask-image: linear-gradient(to left, transparent, #000 36px); mask-image: linear-gradient(to left, transparent, #000 36px); }
+.collection-nav.can-left.can-right .collection-tabs { -webkit-mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
+.collection-tab { background: none; border: 0; border-bottom: 2px solid transparent; font-family: inherit; flex: 0 0 auto; min-width: 44px; min-height: 44px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; scroll-margin-inline: 32px; }
+.collection-tab:first-child { padding-left: 0; text-align: left; } /* its name sits on the content's margin */
+.tabs-scroll { display: none; position: absolute; top: 0; bottom: 1px; z-index: 2; width: 28px; background: var(--bg); border: 0; color: var(--text2); font-size: 18px; cursor: pointer; }
+.tabs-left { left: 0; }
+.tabs-right { right: 0; }
+@media (min-width: 701px) { .collection-nav.can-left .tabs-left, .collection-nav.can-right .tabs-right { display: block; } }
 .collection-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .collections-state { margin: 0; font-size: 13px; color: var(--text2); }
 
@@ -138,7 +149,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 /* The list toolbar: one wrapping line of the filter bar's controls, the count and + Add (the filter
    bar's own box is dissolved into it), with the More filters panel and the chips on lines below. The count
    isn't focusable, so its place in the line doesn't change the Tab order. */
-.list-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.list-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }
 .list-toolbar:has(> .filters:empty):has(> .stats-row:empty) { display: none; }
 .stats-row { order: 2; margin-left: auto; min-width: 0; }
 .stats-row:empty { display: none; }
@@ -146,7 +157,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .count-line { margin: 0; font-size: 12px; color: var(--text2); overflow-wrap: anywhere; }
 .progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 6px; width: 80px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
-.mini-progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 4px; width: 70px; overflow: hidden; }
+.mini-progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 2px; width: 70px; overflow: hidden; }
 .mini-progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
 
 .filters { display: contents; }
@@ -182,8 +193,10 @@ select:focus { border-color: var(--accent); }
 .loading { text-align: center; padding: 3rem; color: var(--text3); font-size: 13px; }
 
 table { width: 100%; border-collapse: collapse; }
-#desktopTable th:first-child { width: 38%; }
-thead th { text-align: left; padding: 6px 10px; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
+/* The title and the categories share the room: a short title leaves it to the categories, and long titles wrap. */
+#desktopTable th:first-child { width: 31%; }
+#desktopTable th:nth-child(2) { width: 27%; }
+thead th { text-align: left; padding: 3px 8px; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .year-group td { background: var(--surface); padding: 5px 12px; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); }
 
 .show-group-row { cursor: pointer; }
@@ -202,7 +215,7 @@ td.card-date { white-space: nowrap; }
 .card-subseason-row .card-actions { display: flex; gap: 6px; align-items: center; }
 .card-subseason-row .watch-btn { flex: 1; text-align: center; }
 tbody tr:not(.year-group):hover td { background: var(--surface); }
-tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .show-title { font-weight: 500; color: var(--text); }
 .season-lbl { color: var(--text2); font-size: 12px; }
 
@@ -463,7 +476,7 @@ tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-a
 
 /* ── Card list (mobile) ── */
 .card-list { display: none; flex-direction: column; gap: 8px; }
-.card-year-group { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; padding: 10px 4px 2px; }
+.card-year-group { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 0 0; }
 .card-year-group:first-child { padding-top: 0; }
 .item-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 10px; }
 .item-card.row-skipped { opacity: 0.45; }
@@ -496,8 +509,8 @@ tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-a
 .upcoming-tag { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
 .today-tag { background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); }
 .not-aired-lbl { font-size: 11px; color: var(--text3); white-space: nowrap; }
-.derived-section-row td, .derived-heading-row th { text-align: left; background: var(--surface); padding: 7px 12px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.derived-section-card { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; padding: 12px 4px 4px; }
+.derived-section-row td, .derived-heading-row th { text-align: left; padding: 5px 8px 2px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); }
+.derived-section-card { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 0 1px; }
 .derived-section-row:hover .expand-chevron, .derived-section-card:hover .expand-chevron { border-color: var(--accent); color: var(--accent); }
 .section-count { color: var(--text3); }
 /* B6: Currently Watching's In progress heading (no toggle), focus targets and screen-reader text */
@@ -511,13 +524,11 @@ tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-a
 .season-action, .state-action { display: contents; }
 .state-field-label { font-size: 12px; color: var(--text2); }
 .show-progress-line { font-size: 12px; color: var(--text2); }
-.shortcut-actions .show-shortcut { flex: 1 1 100%; }
-@media (max-width: 700px) {
+@media (max-width: 1099px) {
   .show-actions-state { flex-direction: column; align-items: stretch; }
   .show-actions-state > * { width: 100%; }
   .show-actions-state .state-field { justify-content: space-between; }
   .show-actions-state .state-field select { flex: 1; min-height: 44px; }
-  .shortcut-actions .show-shortcut { min-height: 44px; }
 }
 .status-pill { display: inline-block; padding: 4px 10px; border-radius: var(--radius); font-size: 12px; font-weight: 500; border: 1px solid; white-space: nowrap; }
 .status-pill.s-caughtup { background: var(--teal-bg); color: var(--teal); border-color: var(--teal); }
@@ -544,14 +555,14 @@ tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-a
 .review-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
 
 /* ── Browse collections / All Movies (read-only views) ── */
-.browse-bar { background: var(--bg); padding: 8px var(--page-gutter) 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.browse-bar { background: var(--bg); padding: 0 var(--page-gutter); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .browse-bar-label { font-size: 12px; font-weight: 600; color: var(--text2); }
-.browse-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin-bottom: 8px; }
+.browse-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; margin: -4px 0 6px; }
 .browse-title { font-size: 16px; font-weight: 600; margin: 0; }
-.browse-note { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--text3); }
-.browse-back { padding: 4px 10px; font-size: 12px; }
-.browse-section-row th { text-align: left; background: var(--surface); padding: 7px 12px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.browse-section-card { margin: 0; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; padding: 12px 4px 4px; }
+.browse-note { flex: 1 1 320px; min-width: 0; margin: 0; font-size: 12px; color: var(--text2); }
+.browse-head-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 10px; margin-left: auto; }
+.browse-section-row th { text-align: left; padding: 5px 8px 2px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); }
+.browse-section-card { margin: 0; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 0 1px; }
 .expand-btn { background: none; border: 0; padding: 4px; cursor: pointer; }
 .expand-btn:hover .expand-chevron, .expand-btn:focus-visible .expand-chevron { border-color: var(--accent); color: var(--accent); }
 /* The stored watched state in the read-only views: the Watched control's colours in a label's pill shape (not clickable). */
@@ -561,8 +572,8 @@ tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-a
 .ro-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
 .ro-labels { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
 .browse-controls { display: contents; }
-.browse-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
-.browse-subsection-row td { padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.browse-toggles { display: contents; }
+.browse-subsection-row td { padding: 1px 8px; border-bottom: 1px solid var(--border); }
 .browse-subsection-card { padding: 8px 0 2px; }
 .section-toggle { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 4px 0; min-height: 32px; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; }
 .section-toggle:hover .expand-chevron, .section-toggle:focus-visible .expand-chevron { border-color: var(--accent); color: var(--accent); }
@@ -600,7 +611,7 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   background: var(--surface2); color: var(--text2); font-size: 11px; flex: none; }
 .filter-chip:hover .chip-x, .filter-chip:focus-visible .chip-x { color: var(--text); }
 .filter-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (min-width: 701px) { .filters > .browse-controls { display: flex; flex: 1 0 100%; flex-wrap: wrap; gap: 8px; } } /* B10 corr1 (F5) */
+.collection-add-slot { display: contents; }
 .filter-more { order: 3; }
 .filter-chips { order: 4; }
 .show-title-main { min-width: 0; } /* the star, title, score and Low flow as one text, so they stay beside each other when a long title wraps */
@@ -616,6 +627,79 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .filter-chip .chip-na { font-size: 11px; font-weight: 600; color: var(--text2); border: 1px dashed var(--border2); border-radius: 4px; padding: 0 5px; white-space: nowrap; flex: none; }
 .filter-clear { font-size: 13px; }
 .empty-clear { margin-left: 8px; }
+
+/* Desktop: the toolbar's TMDB search, where there's room for two search fields. Below that, + Add reaches the
+   same search. In a collection the toggles take more of the row, so it needs a wider page. */
+.tmdb-quick { display: none; position: relative; order: 1; }
+@media (min-width: 1100px) {
+  .tmdb-quick { display: flex; flex: 0 1 210px; min-width: 180px; }
+  .tmdb-quick input { flex: 1; min-width: 0; height: 34px; padding: 6px 30px 6px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: inherit; font-size: 13px; outline: none; }
+  .tmdb-quick input:hover { border-color: var(--border2); }
+  .tmdb-quick input:focus { border-color: var(--accent); }
+  .tmdb-quick-go { position: absolute; inset: 2px 2px 2px auto; width: 28px; background: none; border: 0; border-radius: 4px; color: var(--text2); cursor: pointer; }
+  .tmdb-quick-go:hover { color: var(--accent); }
+  .filter-line .search-input { flex-basis: 170px; }
+  .filters:has(.browse-controls) .view-toggle-btn { padding: 6px 10px; }
+  .filters:has(.browse-controls) .filter-more-btn .more-label-wide { display: none; }
+  .filters:has(.browse-controls) .filter-more-btn .more-label-narrow { display: inline; }
+  .filters:has(.browse-controls) .search-input { flex-basis: 150px; }
+  .filters:has(.browse-controls) .tmdb-quick { flex-basis: 200px; }
+}
+@media (min-width: 1100px) and (max-width: 1239px) {
+  .filters:has(.browse-controls) .tmdb-quick { display: none; }
+}
+.tmdb-result-item:focus-visible, #tmdbInlinePreview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Lists: a table from here up; cards below, in two columns between the phone and table widths. */
+@media (min-width: 1100px) {
+  .expand-btn { padding: 2px; }
+  .more-btn { height: 26px; }
+  .watch-btn { padding-top: 3px; padding-bottom: 3px; }
+  td .status-pill.s-caughtup { background: none; border: 0; padding: 0 0 0 4px; color: var(--text2); } /* a state, not a control */
+  td:has(> .status-pill.s-caughtup) { white-space: nowrap; }
+}
+@media (max-width: 1099px) {
+  #desktopTable { display: none; }
+  .card-list { display: flex; gap: 6px; }
+  .section-toggle { min-height: 44px; width: 100%; }
+  .filter-pill { min-height: 32px; display: inline-flex; align-items: center; } /* each one its own usable target */
+  .ep-toggle { min-width: 44px; }
+  .item-card { padding: 4px 10px 6px; }
+  .card-top { align-items: center; min-height: 32px; margin-bottom: 0; }
+  .card-title-block { padding: 6px 0 2px; }
+  .show-group-card .card-title-block { padding: 0; }
+  /* The 44 px targets reach into the card's padding and past the title's line, and stay on top of what's beside them.
+     The chevron starts on the card's one left margin. */
+  .expand-btn { min-width: 44px; min-height: 44px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0; } /* Browse show cards; the chevron stays 20px */
+  .more-btn { width: 44px; height: 44px; font-size: 16px; }
+  .card-top > .expand-btn { position: relative; z-index: 1; margin: -6px 0 -6px -10px; padding-left: 10px; justify-content: flex-start; }
+  .card-top > .more-cell { margin: -6px -6px -6px 0; }
+  .card-top .more-btn { position: relative; z-index: 1; }
+  /* A film's row of two: the targets reach up, so they never cover a label on the line below. */
+  .card-top > .card-row-actions { margin: -12px -6px 0 0; align-self: flex-start; }
+  .card-row-actions .more-btn, .card-row-actions .card-del-btn { padding-top: 12px; }
+  .card-del-btn { min-width: 44px; min-height: 44px; }
+  /* One flow under the title. Progress follows the date on the same left margin, wrapping there when it doesn't
+     fit; the labels move together, so a line holds them all or they start the next. */
+  .card-meta { align-items: center; gap: 0 10px; margin-bottom: 0; min-height: 20px; }
+  .card-meta .card-season, .card-meta .card-date { font-size: 12px; line-height: 18px; }
+  .card-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; min-width: 0; }
+  .card-labels > .meta-chip.meta-genres:first-child { margin-left: -4px; } /* the name, not its box, sits on the margin */
+  .card-complete { display: inline-flex; margin-left: auto; }
+  .card-actions { gap: 2px 8px; }
+  .card-actions .status-select:not(.status-needs-choice):is(.s-confirmed, .s-skipped, .s-film-to_watch, .s-film-skipped) { border-left-width: 0; padding-left: 0; } /* the borderless ones too */
+  .card-actions .status-pill.s-caughtup { background: none; border: 0; padding: 0; color: var(--text2); } /* a state, not a control */
+  .card-actions .status-select, .card-actions .watch-btn, .card-complete .watch-btn, .skip-btn, .show-actions-inner .ended-check { min-height: 44px; }
+  .card-actions .status-select { border-radius: var(--radius); }
+  .card-actions .watch-btn { flex: 0 1 auto; margin-left: auto; min-width: 44px; }
+  .card-complete .watch-btn { min-width: 44px; padding: 7px 10px; }
+}
+@media (min-width: 701px) and (max-width: 1099px) {
+  .card-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; }
+  .card-list > * { grid-column: 1 / -1; }
+  .card-list > .item-card { grid-column: auto; }
+  .card-list > .item-card:has(.card-subseasons) { grid-column: 1 / -1; } /* an expanded show takes the whole row */
+}
 
 @media (max-width: 860px) {
   .logo-text { display: none; } /* between the phone layout and here, the bar's room goes to the areas */
@@ -634,50 +718,28 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .collection-tab { min-height: 44px; }
   .collections-retry, .collections-create { min-height: 44px; }
 
-  #desktopTable { display: none; }
-  .card-list { display: flex; }
-
   .add-form-grid { grid-template-columns: 1fr 1fr; }
 
   .view-toggle { display: flex; flex: 0 0 auto; }
   .view-toggle-btn { min-height: 44px; }
-  .browse-bar { padding: 8px 12px 0; }
+  .browse-bar { padding: 0 12px; }
   .browse-bar select { flex: 1; }
-  .browse-controls { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 0 100%; min-width: 0; }
-  .browse-controls .view-toggle { flex: 1 1 auto; }
-  .section-toggle { min-height: 44px; width: 100%; }
-  .expand-btn { min-width: 44px; min-height: 44px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0; } /* Browse show cards; the chevron stays 20px */
-  .more-btn { width: 44px; height: 44px; font-size: 16px; }
-  /* A card's information shares one left margin. The chevron starts on it and its title follows; the season line
-     drops to the margin below them (the title block dissolves into the grid). The 44 px targets reach into the
-     card's padding and past the title's line, and stay on top of the season line. */
-  .show-group-card > .card-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0; }
-  .show-group-card .card-title-block { display: contents; }
-  .show-group-card .card-title { grid-area: 1 / 2; }
-  .show-group-card .card-season { grid-column: 1 / -1; }
-  .card-top > .expand-btn { position: relative; z-index: 1; margin: -6px 0 -6px -10px; padding-left: 10px; justify-content: flex-start; }
-  .card-top > .more-cell { margin: -6px -6px -6px 0; }
-  .show-group-card > .card-top > .more-cell { grid-area: 1 / 3; }
-  .card-top > .card-row-actions { margin-right: -6px; }
-  .card-top .more-btn { position: relative; z-index: 1; }
-  .card-title-block { padding-top: 2px; }
-  .card-meta > .meta-chip.meta-genres:first-child { margin-left: -4px; } /* the name, not its box, sits on the margin */
-  .card-actions .status-select:not(.status-needs-choice):is(.s-confirmed, .s-skipped, .s-film-to_watch, .s-film-skipped) { border-left-width: 0; padding-left: 0; } /* the borderless ones too */
-  .card-actions .status-pill.s-caughtup { background: none; border: 0; padding: 0; color: var(--text2); } /* a state, not a control */
-  .card-actions .status-select, .card-actions .watch-btn, .skip-btn, .show-actions-inner .ended-check { min-height: 44px; }
-  .card-actions .watch-btn { flex: 0 1 auto; margin-left: auto; min-width: 44px; }
-  .card-del-btn { min-width: 44px; min-height: 44px; }
-  .ep-toggle { min-width: 44px; }
-  .browse-toggles { flex: 1 1 auto; min-width: 0; }
-  .browse-toggles .view-toggle { flex: 1 1 auto; width: auto; }
   .browse-title { font-size: 16px; }
   .view-toggle-btn { flex: 1; padding: 8px 12px; }
   /* B10 (D10): Search always visible. Every control is a 44 px target; they wrap in page order, Search
      keeping at least 150 px (below that it takes its own line), and nothing is squeezed or reordered. */
-  .list-toolbar { margin-bottom: 8px; }
+  .list-toolbar { margin-bottom: 6px; }
+  .browse-controls .view-toggle { flex: 0 1 auto; }
+  .browse-controls .view-toggle-btn { flex: 1 1 auto; min-width: 44px; padding: 8px 12px; }
+  .collection-tab { max-width: min(240px, 72vw); padding-left: 6px; padding-right: 6px; }
+  .collection-tab:first-child { padding-left: 0; }
+  .browse-head { margin: 0 0 4px; gap: 0 8px; }
+  .browse-head-actions { order: 2; margin-left: 0; }
+  .browse-note { order: 3; flex-basis: 100%; }
+  .browse-back { min-height: 44px; }
   .filter-line .search-input { flex: 1 1 150px; height: auto; min-height: 44px; }
   .filter-line select { flex: 1 1 150px; min-width: 0; min-height: 44px; }
-  .filter-line .season-vis-select { flex-basis: 260px; } /* F6: a collection's TV seasons choice stays readable */
+  .filter-line .season-vis-select { flex-basis: 165px; } /* F6: a collection's seasons choice stays readable, beside its neighbour where it fits */
   .filter-more-btn, .add-open-btn { min-height: 44px; flex: 0 0 auto; }
   .filter-more-btn { justify-content: center; }
   .add-open-btn { order: 0; }
@@ -686,9 +748,6 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .more-label-narrow { display: inline; }
   .filter-more { grid-template-columns: 1fr; }
   .filter-field select { min-height: 44px; }
-  .filter-pill { min-height: 32px; display: inline-flex; align-items: center; } /* each one its own usable target */
-  .card-meta .mini-progress-track { display: none; } /* the words say it, and the bar would take a line of its own */
-  .card-actions .status-select { border-radius: var(--radius); }
   .filter-chip { min-height: 32px; max-width: min(100%, calc(100vw - 24px)); } /* B10 corr1 (F2) */
   .filter-chip .chip-x { width: 28px; height: 28px; }
   .filter-clear { min-height: 44px; }
@@ -708,6 +767,8 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .filter-line select { flex-basis: 142px; padding-left: 6px; padding-right: 2px; }
   .filter-more-btn, .add-open-btn { padding: 6px; }
   .add-open-btn { flex: 1 0 auto; }
+  .browse-controls .view-toggle-btn { padding: 8px 6px; }
+  .browse-controls .view-toggle[aria-label="Media"] { flex: 1 0 100%; }
 }
 
 /* ─── Manage collections (Stage 3b-2) ─────────────────────────────────────── */
@@ -788,8 +849,9 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .tmdb-rating.r-mid { color: #8a6510; }
   .tmdb-rating.r-low { color: #b3261e; }
 }
-@media (max-width: 700px) {
-  .tmdb-rating { min-height: 44px; min-width: 44px; padding: 0 6px; }
+@media (max-width: 1099px) {
+  /* The score's 44 px target reaches past its line, so a one-line title stays one line. */
+  .tmdb-rating { position: relative; z-index: 1; min-height: 44px; min-width: 44px; margin-block: -6px; padding: 0 6px; }
 }
 /* Category chips (render.js metadataChipsHtml), button or text: explicit colours by kind, so a
    chip never shows the browser's default button face. Genres and any other kind: slate; forms:
@@ -814,7 +876,7 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .meta-chip.meta-genres { background: none; border-color: transparent; color: var(--text2); padding: 2px 3px; font-size: 12px; border-radius: 4px; }
 .meta-chip.meta-genres:has(+ .meta-chip.meta-genres):not([aria-pressed="true"])::after { content: '·'; display: inline-block; margin-left: 6px; text-decoration: none; }
 button.meta-chip.meta-genres { min-height: 24px; }
-@media (max-width: 700px) {
+@media (max-width: 1099px) {
   button.meta-chip.meta-genres { min-height: 32px; display: inline-flex; align-items: center; }
   /* A label's 32 px target with a smaller pill inside it: the transparent top and bottom borders are the rest of the
      target. The pill's colours stay its own (a network's are inline), without an outline. */
@@ -830,7 +892,7 @@ button.meta-chip.meta-genres:hover { filter: none; color: var(--text); text-deco
 .details-field .search-input, .details-field .search-input:focus { width: 100%; }
 .details-checks { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 12px; }
 .details-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text); }
-@media (max-width: 700px) {
+@media (max-width: 1099px) {
   .priority-select, .show-actions-inner .btn, .show-actions-inner .btn-link, .show-actions-inner .ended-check, .resume-picker .btn, .resume-picker select,
   .details-check, .details-field .search-input, #detailsModalBox .btn { min-height: 44px; }
 }
@@ -893,7 +955,7 @@ button.meta-chip.meta-genres:hover { filter: none; color: var(--text); text-deco
 /* Batch A: while a change is saved (write-lane.js) the list's controls look unavailable; they keep
    focus (no disabled attribute) and a second change is refused with a message. */
 body.saving #tbody :is(button:not([data-primary], [data-section]), select, input), body.saving #cardList :is(button:not([data-primary], [data-section]), select, input) { opacity: 0.55; cursor: progress; }
-@media (max-width: 700px) {
+@media (max-width: 1099px) {
   .season-delete-link, #effectModalBox .modal-actions .btn, #effectModalBox .modal-actions .btn-danger, .reread-status .btn { min-height: 44px; }
 }
 
@@ -901,7 +963,7 @@ body.saving #tbody :is(button:not([data-primary], [data-section]), select, input
 /* S4: a collection's Remove controls (membership only) and its notice with Undo. */
 .collection-remove { font-size: 12px; white-space: nowrap; }
 .collection-notice .btn { margin-left: 6px; }
-@media (max-width: 700px) {
+@media (max-width: 1099px) {
   .collection-remove, .collection-notice .btn, .more-popover .popover-action { min-height: 44px; }
   .tmdb-collection-note .btn-link { min-height: 44px; min-width: 44px; }
 }
@@ -911,7 +973,7 @@ body.saving #tbody :is(button:not([data-primary], [data-section]), select, input
 .add-results .manage-meta { white-space: normal; }
 @media (max-width: 700px) {
   .add-pick-label { min-height: 44px; }
-  #addPickerBox .modal-actions .btn, .browse-add-items, .collection-notice .btn { min-height: 44px; }
+  #addPickerBox .modal-actions .btn, .collection-notice .btn { min-height: 44px; }
 }
 
 /* M1: sign-in */
@@ -949,7 +1011,7 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .ep-through-select { font: inherit; padding: 2px 4px; }
 .ep-through-apply { font-size: 12px; }
 .ep-panel-card { border-left-style: dashed; }
-@media (max-width: 700px) {
+@media (max-width: 1099px) {
   /* Phone: each episode row and its controls are at least 44px tall. */
   .ep-check { min-height: 44px; flex: 1 1 auto; }
   .ep-check input { width: 22px; height: 22px; }

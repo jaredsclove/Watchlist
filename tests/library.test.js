@@ -124,7 +124,7 @@ test('the tab bars hold only the views; Settings offers Collection updates (S1, 
     }
   }
   app.ctx.openBrowseCollection(app.browseId('sheridan')); await settle();
-  assert.ok(!/source-badge|Stored in/.test(app.html()) && app.el('viewHead').innerHTML.includes('Remove takes it out of'));
+  assert.ok(!/source-badge|Stored in/.test(app.html()) && app.el('viewHead').innerHTML.includes('Remove takes a title out of'));
   assert.deepStrictEqual(app.writes(), []);
 });
 

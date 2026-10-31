@@ -226,7 +226,8 @@ function addCandidates() {
   return { list, unclassified };
 }
 
-// preselect: ids of films to start selected (the Pull rest follow-up); only ones that can be added.
+// preselect: picker keys to start selected (i:<film>, s:<show>); only ones that can be added.
+// Nothing is added until Add is pressed.
 function openAddPicker(opener, preselect) {
   if (addPicker) return;
   if (writeLane) { showError(LANE_BUSY_TEXT(writeLane.label)); return; } // refused before anything is shown
@@ -236,7 +237,7 @@ function openAddPicker(opener, preselect) {
   }
   const dest = currentBrowseDest();
   const can = new Set(addCandidates().list.filter(c => !c.member).map(c => c.key));
-  const selected = new Set((preselect || []).map(id => `i:${id}`).filter(k => can.has(k)));
+  const selected = new Set((preselect || []).filter(k => can.has(k)));
   addPicker = { session: ++addPickerSeq, viewId: activeViewId, epoch: orgEpoch, collectionId: dest.collectionId, name: dest.label,
     opener: opener || document.activeElement || null, query: '', selected, batch: null, details: false };
   const overlay = document.getElementById('addPickerOverlay');
@@ -249,7 +250,7 @@ function openAddPicker(opener, preselect) {
 // The Pull rest follow-up (collectionPullReport): the films it just added, preselected.
 function openAddPickerForPulled(opener) {
   const ids = pullPreselect && pullPreselect.viewId === activeViewId ? pullPreselect.ids : [];
-  openAddPicker(opener, ids);
+  openAddPicker(opener, ids.map(id => `i:${id}`));
 }
 
 function addBatchRunning(b) { return !!b && b.phase === 'submitting'; }

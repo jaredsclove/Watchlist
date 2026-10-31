@@ -160,7 +160,7 @@ async function searchTmdbMatch() {
       <div class="tmdb-result-list">${m.results.map((r, idx) => {
         const isMovie = r.mediaType === 'movie';
         const dateStr = isMovie ? r.release_date : r.first_air_date;
-        return `<div class="tmdb-result-item" onclick="chooseTmdbMatchResult(${idx})">
+        return `<div class="tmdb-result-item" role="button" tabindex="0" onkeydown="tmdbResultKeydown(event)" onclick="chooseTmdbMatchResult(${idx})">
           <div class="tmdb-result-info">
             <div class="tmdb-result-title">${esc(isMovie ? r.title : r.name)} <span class="tmdb-type-tag ${isMovie ? 'tmdb-type-movie' : 'tmdb-type-tv'}">${isMovie ? 'Film' : 'Series'}</span></div>
             <div class="tmdb-result-meta">${dateStr ? esc(dateStr.substring(0, 4)) : '—'}${r.origin_country?.length ? ' · ' + esc(r.origin_country.join(', ')) : ''} · TMDB ${r.id}</div>

@@ -323,15 +323,15 @@ test('B6: the status written from the expanded show is the same guarded call; re
   assert.deepStrictEqual(w[0].body.p_changes, { status: 'confirmed' });
 });
 
-test('B6: phone cards: in progress = title, season, categories, progress, shortcut; caught up collapsed = title and season only', async () => {
+test('B6: phone cards: in progress = title, then one flow of season, progress, categories, shortcut; caught up collapsed = title and season only', async () => {
   const { p, u, data } = cwLibrary();
   const app = await boot(data);
   const c = cardOf(app, p.show.id);
   const at = s => c.indexOf(s);
-  assert.ok(at('card-title') < at('card-season') && at('card-season') < at('card-meta') && at('card-meta') < at('1/2 seasons watched') && at('mini-progress') < at('show-shortcut'), 'in-progress order');
-  assert.ok(c.includes('<div class="card-actions shortcut-actions"'));
+  assert.ok(at('card-title') < at('card-meta') && at('card-meta') < at('card-season') && at('card-season') < at('1/2 seasons watched') && at('1/2 seasons watched') < at('card-labels') && at('card-labels') < at('show-shortcut'), 'in-progress order');
+  assert.ok(c.includes('<span class="card-complete"'), 'the shortcut shares the flow, with no row of its own');
   const cu = cardOf(app, u.show.id);
-  assert.ok(!cu.includes('card-meta') && !cu.includes('mini-progress') && !cu.includes('watched</span>'), 'caught up collapsed: no categories, no progress');
+  assert.ok(!cu.includes('card-labels') && !cu.includes('mini-progress') && !cu.includes('watched</span>'), 'caught up collapsed: no categories, no progress');
   app.ctx.toggleDerivedShow(u.show.id); await settle();
   const ex = cardOf(app, u.show.id);
   assert.ok(ex.includes('card-meta') && ex.includes('1 of 2 seasons watched'), 'expanded: categories and progress text');

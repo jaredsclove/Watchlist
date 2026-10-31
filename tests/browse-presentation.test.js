@@ -144,9 +144,9 @@ test('first use is All media + Shows + Separate; Shows/Seasons hides with Movies
   app.ctx.setBrowseMedia('all');
   app.ctx.setBrowsePresentation('seasons');
   assert.ok(at('id="fSeasonVis"') > inner() && at('id="fSeasonVis"') < at('id="filterMore"'), 'B10: TV seasons sits on the visible filter line, not in More filters');
-  assert.deepStrictEqual([...filters(app).matchAll(/<option value="(\w+)"[^>]*>(TV seasons: [^<]*)</g)].map(m => m[2]),
-    ['TV seasons: All (except Skipped)', 'TV seasons: All', 'TV seasons: To watch', 'TV seasons: Watched', 'TV seasons: Skipped']);
-  assert.ok(filters(app).includes('<option value="notskipped" selected>TV seasons: All (except Skipped)'), 'the default is selected');
+  assert.deepStrictEqual([...filters(app).matchAll(/<option value="(\w+)"[^>]*>(Seasons: [^<]*)</g)].map(m => m[2]),
+    ['Seasons: Not skipped', 'Seasons: All', 'Seasons: To watch', 'Seasons: Watched', 'Seasons: Skipped']);
+  assert.ok(filters(app).includes('<option value="notskipped" selected>Seasons: Not skipped'), 'the default is selected');
   assert.strictEqual(app.get('browseGrouping'), 'separate', 'kept while hidden');
 });
 
@@ -319,7 +319,7 @@ test('TV seasons narrows season entries only (never films), with the note; it is
   assert.deepStrictEqual(stats(app), ['4 Shows', '9 Season entries'], 'Shows lists every stored season of the 4 shows (Wonder Man hidden by Status)');
   app.ctx.setBrowseMedia('movie'); app.ctx.setBrowseMedia('all'); app.ctx.setBrowsePresentation('seasons');
   assert.strictEqual(app.get('browseSeasonVis'), 'skipped');
-  assert.ok(filters(app).includes('<option value="skipped" selected>TV seasons: Skipped'));
+  assert.ok(filters(app).includes('<option value="skipped" selected>Seasons: Skipped'));
   app.ctx.setBrowseSeasonVis('all');
   assert.ok(!html(app).includes('Films aren’t filtered'));
   app.ctx.setBrowseSeasonVis('watched');

@@ -272,7 +272,7 @@ test('phones: the rating is a 44 px target; desktop and phone cards both carry i
   const { app } = await boot({ width: 375, storage: memoryStorage(cached({ 900001: { a: 8.2, c: 500, t: now } })) });
   assert.match(card(app), /card-title"><span class="show-title-main"><span class="show-title">[^<]*<\/span> <span class="tmdb-rating-slot"[^>]*><button type="button" class="tmdb-rating r-high"/);
   const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
-  assert.match(css, /@media \(max-width: 700px\) \{\n  \.tmdb-rating \{ min-height: 44px; min-width: 44px; padding: 0 6px; \}/);
+  assert.match(css, /@media \(max-width: 1099px\) \{[^}]*\.tmdb-rating \{[^}]*min-height: 44px; min-width: 44px;/);
 });
 
 test('contrast: each band colour is 4.5:1 or more on the page, surface and surface2 in both schemes (calculated)', () => {

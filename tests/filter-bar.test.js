@@ -590,7 +590,7 @@ test('corr1 (F3, F4): More filters open keeps the text colour (rest and hover ba
   }
 });
 
-test('corr1 (F1, F2, F5): kept chips are a two-row grid inside their box; chips and their rows can shrink, phones bound a chip by the viewport; collection toggles take their own desktop line — source checks', () => {
+test('corr1 (F1, F2, F5): kept chips are a two-row grid inside their box; chips and their rows can shrink, phones bound a chip by the viewport; collection toggles flow in the toolbar — source checks', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   assert.ok(/\.filter-chip\.filter-chip-kept \{ display: inline-grid; grid-template-columns: auto minmax\(0, 1fr\) auto; grid-template-areas: "k v x" "na na x";/.test(css), 'F1: kind, value and ✕ on one row, the context below');
   for (const [part, area] of [['chip-k', 'k'], ['chip-v', 'v'], ['chip-x', 'x'], ['chip-na', 'na']]) {
@@ -600,7 +600,7 @@ test('corr1 (F1, F2, F5): kept chips are a two-row grid inside their box; chips 
   assert.ok(/\.filter-chips \{[^}]*min-width: 0; max-width: 100%;/.test(css) && /\.chip-group \{ display: flex;[^}]*min-width: 0; max-width: 100%;/.test(css), 'F2: rows and groups shrink');
   const phone = css.slice(css.indexOf('/* B10 (D10)'));
   assert.ok(/\.filter-chip \{ min-height: 32px; max-width: min\(100%, calc\(100vw - 24px\)\); \}/.test(phone), 'F2: phone bounds');
-  assert.ok(/@media \(min-width: 701px\) \{ \.filters > \.browse-controls \{ display: flex; flex: 1 0 100%;/.test(css), 'F5: desktop toggles on their own line');
+  assert.ok(/\.browse-controls \{ display: contents; \}/.test(css), 'the toggles flow in the toolbar in page order at every width (they had a line of their own until the density work)');
 });
 
 // B10 correction batch 2 (D11): All Movies' ↻ Refresh for a person collection tag sits beside the Collection
@@ -669,14 +669,14 @@ test('follow-up F6: only a collection\'s TV seasons select carries the marker cl
   const sel = fb(app).match(/<select id="fSeasonVis"[^>]*>[\s\S]*?<\/select>/)[0];
   assert.ok(sel.startsWith('<select id="fSeasonVis" class="season-vis-select" onchange="setBrowseSeasonVis(this.value)" aria-label="TV seasons">'), 'class added; handler and name unchanged');
   assert.deepStrictEqual([...sel.matchAll(/<option value="(\w+)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2]]),
-    [['notskipped', 'TV seasons: All (except Skipped)'], ['all', 'TV seasons: All'], ['towatch', 'TV seasons: To watch'], ['watched', 'TV seasons: Watched'], ['skipped', 'TV seasons: Skipped']], 'options unchanged');
+    [['notskipped', 'Seasons: Not skipped'], ['all', 'Seasons: All'], ['towatch', 'Seasons: To watch'], ['watched', 'Seasons: Watched'], ['skipped', 'Seasons: Skipped']], 'options unchanged');
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'fSeasonVis', 'filterMoreBtn'], 'line order unchanged');
   await allTv(app, 'seasons');
   const tvSel = fb(app).match(/<select id="fSeasonVis"[^>]*>/)[0];
   assert.ok(!tvSel.includes('season-vis-select') && tvSel.includes('aria-label="Seasons"'), 'All TV unchanged (outside scope)');
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   const phone = css.slice(css.indexOf('/* B10 (D10)'), css.indexOf('/* ─── Manage collections'));
-  assert.ok(/\.filter-line \.season-vis-select \{ flex-basis: 260px; \}/.test(phone), 'phone-only rule, 260 px wide');
+  assert.ok(/\.filter-line \.season-vis-select \{ flex-basis: 165px; \}/.test(phone), 'phone-only rule: readable, sharing a row where it fits');
   assert.strictEqual((css.match(/season-vis-select/g) || []).length, 1, 'no desktop rule');
 });
 
