@@ -12,7 +12,7 @@ const { makeMiniDom } = require('./mini-dom');
 const T = runner('compact-layout');
 const test = T.test;
 const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
-const phone = css.slice(css.indexOf('@media (max-width: 700px)'));
+const phone = css.slice(css.indexOf('@media (max-width: 1099px)'));
 
 function day(offset) {
   const d = new Date();
@@ -177,7 +177,8 @@ test('the toolbar: toggles, Search, scope, More filters, + Add in page order; th
 test('phone cards: labels are small pills in 32 px targets, Up to date is quiet text, and one margin holds the card', () => {
   assert.match(phone, /\.item-card \.filter-pill:not\(\.meta-genres\) \{[^}]*border-color: transparent !important;[^}]*background-clip: padding-box !important;[^}]*min-height: 32px;/);
   assert.match(phone, /\.card-actions \.status-pill\.s-caughtup \{ background: none; border: 0; padding: 0;/);
-  assert.match(phone, /\.show-group-card \.card-season \{ grid-column: 1 \/ -1; \}/, 'the season line sits on the margin, under the chevron');
+  assert.match(phone, /\.card-labels \{ display: flex; flex-wrap: wrap;/, 'the labels move together');
+  assert.ok(!/\.card-progress \{[^}]*margin-left: auto/.test(css), 'progress that wraps starts on the card\'s margin');
   assert.match(phone, /\.card-top > \.expand-btn \{[^}]*margin: -6px 0 -6px -10px;[^}]*padding-left: 10px;/, 'the chevron starts on the margin, in its whole target');
   assert.match(phone, /\.card-top \.more-btn \{ position: relative; z-index: 1; \}/, 'the season line never covers ⋯');
 });

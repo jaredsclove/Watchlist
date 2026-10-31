@@ -23,11 +23,16 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
 - **Layout (compact interface):** one app bar holds the title, TV · Movies · Collections and Settings (on phones, a
   non-sticky row of the areas and a gear, no logo); view tabs below it; then one list toolbar (`.list-toolbar`: toggles,
-  Search that grows, scope selects, More filters, + Add, the count), wrapping in page order on phones. Backup and its date
+  Search that grows, scope selects, More filters, + Add, the count), wrapping in page order. At 1100 px and wider it also
+  holds "Search TMDB to add" (1240 px in a collection, whose toggles need the room), sent only by Enter or its button: it fills
+  the + Add panel's own search, and adding stays that panel's, confirmed in its preview. Lists are tables from 1100 px, cards
+  below it, in two columns between 701 and 1099 px. A collection's title, note, Back and Edit share a compact header; its tabs
+  are one scrolling row at every width. In a collection, TMDB adds to the library first, then the existing "Add to collections"
+  step opens with that collection preselected: two steps, never atomic, and nothing joins the collection until that button. Backup and its date
   are only in Settings' Backup & Restore; no backup, or 14 days or more, puts ⚠ on the Settings control (with the status
   in its name) and it then opens on that section. Show rows read expand · title · ⋯. On a phone card the chevron starts on
-  the card's one left margin, the season line and everything below it sit on that margin, category labels are small pills
-  inside 32 px targets, and Up to date is quiet text. Status is a quiet directly editable
+  the card's one left margin, and the season line, progress, labels and actions flow below it from that margin, with progress
+  beside the date when it fits; category labels are small pills inside 32 px targets, and Up to date is quiet text. Status is a quiet directly editable
   select ("Choose a status…" is never quiet). Priority is edited in the row's ⋯ (shows and films; Seasons lists show it
   only); High shows ★ and Low the word, Normal nothing. The show-row shortcut reads "Mark watched" (its name and tooltip
   name the season; the episode list's offer keeps "Mark Season N watched"). Season progress reads "1/3 seasons watched".
@@ -105,7 +110,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261030-compact`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261031-density`). The tests
 check only that all 29 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
@@ -459,10 +464,6 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
   deletes still send no expected values (the lane and the out-of-date pause cover a stale list).
 
 ## Open items
-
-- **Compact interface, phones (seen in the release check; not blockers):** a very short collection name's tab is 44 px tall
-  but only about 40 px wide, since the release narrowed the tabs' padding. A collection's header is tall, so its first
-  item starts about 520 px down at 375 px. Both are possible follow-ups, for the owner to choose.
 
 - **Access (M1):** signed-out callers get nothing (no table, view or function; the `db/` scripts before
   M1 granted `anon` broad access, which M1 removes). Default privileges owned by `supabase_admin` can't

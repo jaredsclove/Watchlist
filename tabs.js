@@ -108,6 +108,7 @@ function switchView(id) {
   allTvSeasonVis = 'notskipped';
   derivedData = null;
   closeLibraryPanel(); // the "+ Add" panel belongs to the view it was opened in
+  tmdbQuickText = '';
   document.getElementById('addForm').style.display = 'none';
   document.getElementById('banner').innerHTML = '';
   const tmdbPanel = document.getElementById('tmdbPanel');

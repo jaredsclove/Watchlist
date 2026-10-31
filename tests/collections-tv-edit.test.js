@@ -930,7 +930,7 @@ test('G7: an edited-out entry disappears, counts follow, and chips, the More fil
 // V3.9 (E0 covers rule presence only; sizes and overflow are measured in a browser, not here).
 test('G7 V3.9: the phone rule gives the new controls (Delete…, the dialog’s buttons, the reread status’s Retry) at least 44px', () => {
   const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
-  const m = css.match(/@media \(max-width: 700px\) \{\s*([^{}]*)\{\s*min-height: 44px;\s*\}\s*\}/g) || [];
+  const m = css.match(/@media \(max-width: 1099px\) \{\s*([^{}]*)\{\s*min-height: 44px;\s*\}\s*\}/g) || [];
   const sels = m.flatMap(b => b.replace(/^@media[^{]*\{/, '').split('{')[0].split(',').map(s => s.trim()));
   for (const s of ['.season-delete-link', '#effectModalBox .modal-actions .btn', '#effectModalBox .modal-actions .btn-danger', '.reread-status .btn'])
     assert.ok(sels.includes(s), `phone min-height 44px for ${s}`);
@@ -941,7 +941,7 @@ test('G8: no S3 flow sends org_*; Edit collection opens Manage at the members un
   const L = lib();
   const app = await boot(L);
   await openTC(app);
-  assert.ok(app.el('viewHead').innerHTML.includes('The shows and films in your True Crime / Docs collection. Changing a show or film here changes it in your library everywhere; Remove takes it out of True Crime / Docs only.'));
+  assert.ok(app.el('viewHead').innerHTML.includes('Changes here apply everywhere in your library. Remove takes a title out of True Crime / Docs only.'));
   assert.ok(app.el('viewHead').innerHTML.includes(`openManage('members', '${app.browseId('truecrime').split(':')[1]}', this)`));
   // S3 flows send no org_* request.
   await app.ctx.setShowStateById(L.bravo.show.id, { status: 'watching' }); await app.ctx.toggleWatch(L.alpha.rows[1].id);

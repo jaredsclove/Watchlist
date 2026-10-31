@@ -107,7 +107,7 @@ const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"
 const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'renderTable', 'browseBack', 'openBrowseCollection',
   'loadBrowseView', 'switchView', 'switchTab', 'switchMediaType', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
   // S2: the Collections chooser's tabs and their arrow keys only navigate and move focus (tests/collections-nav.test.js)
-  'selectCollectionTab', 'collectionTabsKeydown',
+  'selectCollectionTab', 'collectionTabsKeydown', 'scrollCollectionTabs',
   // Stage 3b-2: opens the Manage collections dialog (organization only; it never changes tracking — tests/organization-manage.test.js)
   'openManage',
   // S5: opens the Add to <collection> picker (it reads nothing; adding is its own button — tests/collection-add.test.js)

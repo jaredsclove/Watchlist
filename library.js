@@ -228,7 +228,7 @@ function reloadOpenView() {
 // What a write started from: answers are reported in the panel only while the same
 // view and panel are open.
 function libraryContext() {
-  return { session: libraryPanel ? libraryPanel.session : 0, viewId: activeViewId };
+  return { session: libraryPanel ? libraryPanel.session : 0, viewId: activeViewId, quick: libraryPanel ? libraryPanel.quick : null };
 }
 
 function libraryLive(session) {
@@ -243,6 +243,13 @@ function libraryReport(ctx, text, isError, extraHtml = '') {
     if (el) { el.innerHTML = `<div class="${isError ? 'error-banner' : 'banner'}">${isError ? '⚠️ ' : ''}${esc(text)}</div>${extraHtml}`; return; }
   }
   if (isError) showError(text); else showNotice(text);
+}
+
+// A title just created: its optional next step in the panel. From a search begun in a collection, an
+// outcome reported after the panel closed says the title didn't reach that collection.
+function libraryReportCreated(ctx, text, target, title) {
+  const panelOpen = libraryLive(ctx.session);
+  libraryReport(ctx, !panelOpen && ctx.quick ? `${text} It isn’t in ${ctx.quick.label}.` : text, false, libraryMembershipHtml(ctx, target, title));
 }
 
 // A failed request: unknown (no clear answer: it may still have happened), or a
@@ -300,6 +307,47 @@ function openLibraryPanel(media, mode = 'search', extra = {}) {
   libraryLoad(libraryPanel.session);
 }
 
+// The Close button: focus goes back to what opened the panel, while it's on the page.
+function libraryPanelClose() {
+  const fromField = !!(libraryPanel && libraryPanel.fromField);
+  closeLibraryPanel();
+  const field = fromField ? document.getElementById('tmdbQuickQuery') : null;
+  const target = field && field.offsetParent !== null ? field : document.querySelector('.add-open-btn');
+  if (target && typeof target.focus === 'function') target.focus();
+}
+
+// ─── The toolbar's TMDB search (desktop; below that, + Add reaches the same search) ───
+// It only fills in the panel's search: searching and previewing read TMDB and nothing else, and
+// adding is the panel's own, confirmed in its preview. media: 'tv', 'movie' or, in a mixed collection,
+// 'mixed' (both kinds, each tagged; the result chosen decides the type).
+function tmdbQuickHtml(media, dest) {
+  const name = dest ? `Search TMDB to add to your library, then choose collections for ${dest.label}` : 'Search TMDB to add';
+  return `<form class="tmdb-quick" role="search" onsubmit="event.preventDefault(); tmdbQuickSubmit('${media}')"><input id="tmdbQuickQuery" type="search" placeholder="Search TMDB to add…" aria-label="${esc(name)}" value="${esc(tmdbQuickText)}" oninput="tmdbQuickText = this.value"><button type="submit" class="tmdb-quick-go" aria-label="Search TMDB">⏎</button></form>`;
+}
+function tmdbQuickSubmit(media) {
+  const field = document.getElementById('tmdbQuickQuery');
+  const query = field ? field.value.trim() : '';
+  if (!query) return;
+  const dest = isBrowseCollectionView(activeViewId) ? currentBrowseDest() : null;
+  openLibraryPanel(media === 'movie' ? 'movie' : 'tv', 'search', { mixed: media === 'mixed', fromField: true,
+    quick: dest ? { collectionId: dest.collectionId, label: dest.label } : null });
+  const input = document.getElementById('tmdbQuery');
+  if (input) input.value = query;
+  return searchTMDB({ focusResults: true });
+}
+
+// A title the panel didn't create, in the search that began in a collection: where it stands there.
+// Adding goes through the collection's own picker, with this title selected.
+function libraryCollectionFollowHtml(key, title) {
+  const p = libraryPanel;
+  if (!p || !p.quick || !isBrowseCollectionView(activeViewId) || !browseData || !browseData.members) return '';
+  const [kind, id] = key.split(':');
+  if ((kind === 's' ? browseData.members.showIds : browseData.members.filmIds).has(id)) return `<div class="tmdb-refresh-summary">Already in ${esc(p.quick.label)}.</div>`;
+  if (!collectionAddAllowed()) return `<div class="tmdb-refresh-summary">“${esc(title)}” isn’t in ${esc(p.quick.label)}. It can’t be added right now: the collection may be out of date.</div>`;
+  return `<div class="library-members"><span class="tmdb-refresh-summary">“${esc(title)}” isn’t in ${esc(p.quick.label)}.</span>
+    <button class="btn" onclick="openAddPicker(this, ['${esc(key)}'])">Add to ${esc(p.quick.label)}…</button></div>`;
+}
+
 function closeLibraryPanel() {
   libraryPanel = null;
   tmdbSelectedShow = null;
@@ -352,13 +400,14 @@ function renderLibraryPanel() {
   const modes = (LIBRARY_MODES[p.media] || []).map(([m, label]) =>
     `<button class="view-toggle-btn${p.mode === m ? ' active' : ''}" aria-pressed="${p.mode === m}" onclick="setLibraryMode('${m}')">${label}</button>`).join('');
   const pull = p.mode === 'pull'; // S4: Pull rest from a collection (no other modes)
-  const title = pull ? `Pull rest of ${p.pullName || 'the franchise'}` : p.media === 'movie' ? 'Add films' : 'Add TV';
+  const title = pull ? `Pull rest of ${p.pullName || 'the franchise'}` : p.quick ? 'Add to library, then choose collections' : p.media === 'movie' ? 'Add films' : 'Add TV';
   el.style.display = 'block';
   el.innerHTML = `<div class="library-head">
       <strong>${esc(title)}</strong>
-      ${pull ? '' : `<div class="view-toggle" role="group" aria-label="How to add">${modes}</div>`}
-      <button class="btn" onclick="closeLibraryPanel()">Close</button>
+      ${pull || p.quick ? '' : `<div class="view-toggle" role="group" aria-label="How to add">${modes}</div>`}
+      <button class="btn" onclick="libraryPanelClose()">Close</button>
     </div>
+    ${p.quick ? `<div class="tmdb-refresh-summary">Adding to your library comes first. ${esc(p.quick.label)} is preselected at the next step, and it’s only added when you confirm there.</div>` : ''}
     <div id="libraryState" class="tmdb-refresh-summary"></div>
     <div id="libraryOutcome" role="status"></div>
     <div id="libraryBody"></div>`;
@@ -371,10 +420,10 @@ function renderLibraryBody() {
   const p = libraryPanel;
   if (!el || !p) return;
   const searchRow = `<div class="tmdb-search-row">
-      <input id="tmdbQuery" type="text" placeholder="${p.media === 'movie' ? 'Search for a film…' : 'Search for a show…'}" onkeydown="if(event.key==='Enter'){searchTMDB();}">
+      <input id="tmdbQuery" type="text" placeholder="${p.mixed ? 'Search for a show or film…' : p.media === 'movie' ? 'Search for a film…' : 'Search for a show…'}" onkeydown="if(event.key==='Enter'){searchTMDB();}">
       <button class="btn btn-accent" onclick="searchTMDB()">Search</button>
     </div>`;
-  const results = '<div id="tmdbResults"></div><div id="tmdbPreview"></div>';
+  const results = '<div id="tmdbResults" aria-live="polite"></div><div id="tmdbPreview"></div>';
   if (p.mode === 'search') el.innerHTML = searchRow + results;
   else if (p.mode === 'match' || p.mode === 'pull') el.innerHTML = results;
   else if (p.mode === 'manual') el.innerHTML = p.media === 'movie' ? libraryManualFilmHtml() : libraryManualShowHtml();
@@ -413,7 +462,7 @@ function libraryRenderPreview() {
     const meta = `Film · ${d.release_date ? formatDisplayDate(d.release_date) : 'TBA'}`;
     if (route.kind === 'present') {
       p.bound = null;
-      previewEl.innerHTML = `<div class="tmdb-preview">${header(meta)}<div class="tmdb-refresh-summary">Already on your list${route.rows.length > 1 ? ` (${route.rows.length} records)` : ''}. Nothing to add.</div>${actions('', '')}</div>`;
+      previewEl.innerHTML = `<div class="tmdb-preview">${header(meta)}<div class="tmdb-refresh-summary">Already on your list${route.rows.length > 1 ? ` (${route.rows.length} records)` : ''}. Nothing to add.</div>${route.rows.length === 1 ? libraryCollectionFollowHtml(`i:${route.rows[0].id}`, sel.name) : ''}${actions('', '')}</div>`;
       return;
     }
     if (route.kind === 'similar') {
@@ -485,6 +534,7 @@ function libraryRenderPreview() {
       <div class="tmdb-preview-header"><div><div class="tmdb-preview-title">${esc(sel.name)}</div><div class="tmdb-result-meta">${esc(network)}</div></div>
         <label class="tmdb-specials-toggle"><input type="checkbox" id="tmdbSpecialsToggle" ${tmdbShowSpecials ? 'checked' : ''} onchange="toggleTMDBSpecials()"> Include specials</label></div>
       <div class="tmdb-refresh-summary">${existing ? `Adds seasons to “${esc(existing.title)}”, already on your list.` : 'Adds a new show to your list.'}</div>
+      ${existing ? libraryCollectionFollowHtml(`s:${existing.id}`, existing.title) : ''}
       ${rows || '<div class="tmdb-no-results">No seasons found.</div>'}
       ${actions(existing ? `Add to “${existing.title}”` : 'Add as a new show', 'addSelectedTMDBSeasons()')}
     </div>`;
@@ -589,7 +639,8 @@ async function librarySendToShow(ctx, show, seasons, network) {
     }
     if ((res.inserted || []).length) showSaved();
     await libraryAfterWrite(ctx);
-    libraryReport(ctx, libraryAddText(res, show.title), !!(res.rejected || []).length && !(res.inserted || []).length);
+    libraryReport(ctx, libraryAddText(res, show.title), !!(res.rejected || []).length && !(res.inserted || []).length,
+      libraryCollectionFollowHtml(`s:${show.id}`, show.title));
     return { res };
   }) || { failed: true };
 }
@@ -617,7 +668,7 @@ async function libraryNewShow(ctx, showInfo, seasons, unmapped = []) {
       return;
     }
     if ((res.inserted || []).length) showSaved();
-    libraryReport(ctx, [libraryAddText({ ...res, unmapped }, showInfo.title), networkNote].filter(Boolean).join(' '), false, libraryMembershipHtml(ctx, { show_id: res.show_id }, showInfo.title));
+    libraryReportCreated(ctx, [libraryAddText({ ...res, unmapped }, showInfo.title), networkNote].filter(Boolean).join(' '), { show_id: res.show_id }, showInfo.title);
   });
 }
 // A new TMDB show's network (CU1d): creation can't set one, so a sole TMDB network is confirmed straight after, in
@@ -668,8 +719,7 @@ async function libraryAddFilm(ctx, film, distinctFrom, unmapped = []) {
     }
     showSaved();
     await libraryAfterWrite(ctx);
-    libraryReport(ctx, `Added “${film.title}”.${unmapped.length ? ` TMDB categories not used: ${unmapped.join(', ')}.` : ''}`, false,
-      saved ? libraryMembershipHtml(ctx, { item_id: saved.id }, film.title) : '');
+    libraryReportCreated(ctx, `Added “${film.title}”.${unmapped.length ? ` TMDB categories not used: ${unmapped.join(', ')}.` : ''}`, saved ? { item_id: saved.id } : null, film.title);
   });
 }
 
@@ -687,12 +737,17 @@ async function libraryAfterWrite(ctx) {
 
 // ─── Collections after a creation (optional, separate) ────────────────────────
 function libraryMembershipHtml(ctx, target, title) {
-  if (!libraryLive(ctx.session) || orgState !== 'ready') return '';
-  const colls = activeBrowseCollections();
-  if (!colls.length) return '';
+  if (!target || !libraryLive(ctx.session)) return '';
+  const quick = libraryPanel.quick;
+  const notYet = quick ? `“${esc(title)}” is in your library but not in ${esc(quick.label)} yet.` : '';
+  const colls = orgState === 'ready' ? activeBrowseCollections() : [];
+  if (!colls.length || (quick && !colls.some(c => c.collectionId === quick.collectionId))) {
+    return notYet ? `<div class="library-members"><span class="tmdb-refresh-summary">${notYet} Your collections can’t be changed here right now.</span></div>` : '';
+  }
   libraryPanel.memberTarget = { ...target, title };
-  return `<div class="library-members"><span class="tmdb-refresh-summary">Also add “${esc(title)}” to collections (optional):</span>
-    ${colls.map(c => `<label class="ww-option"><input type="checkbox" data-collection-id="${esc(c.collectionId)}"> ${esc(c.label)}</label>`).join('')}
+  const preselected = c => quick && c.collectionId === quick.collectionId ? ' checked' : '';
+  return `<div class="library-members"><span class="tmdb-refresh-summary">${notYet ? `${notYet} Press Add to collections to add it:` : `Also add “${esc(title)}” to collections (optional):`}</span>
+    ${colls.map(c => `<label class="ww-option"><input type="checkbox" data-collection-id="${esc(c.collectionId)}"${preselected(c)}> ${esc(c.label)}</label>`).join('')}
     <button class="btn" onclick="libraryAddMemberships()">Add to collections</button></div>`;
 }
 

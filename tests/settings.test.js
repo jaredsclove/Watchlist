@@ -482,7 +482,7 @@ test('N5b Back to library keeps All TV\'s TV seasons choice and a collection\'s 
   app.ctx.openSettings(null);
   app.ctx.settingsBack(); await settle();
   assert.deepStrictEqual(JSON.parse(JSON.stringify(app.get('[browseMedia, browsePresentation, browseSeasonVis]'))), ['tv', 'seasons', 'towatch']);
-  assert.ok(app.el('filtersRow').innerHTML.includes('<option value="towatch" selected>TV seasons: To watch'), 'its control shows it');
+  assert.ok(app.el('filtersRow').innerHTML.includes('<option value="towatch" selected>Seasons: To watch'), 'its control shows it');
   assert.ok(!app.el('tbody').innerHTML.includes('Season 1'), 'and the listing is filtered by it');
   // A fresh entry to the collection still resets media and TV seasons.
   app.ctx.switchView('watching'); await settle();

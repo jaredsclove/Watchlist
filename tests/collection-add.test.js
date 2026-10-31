@@ -62,11 +62,11 @@ const resultsOf = app => JSON.parse(app.get('JSON.stringify((addBatch || {}).ite
 const args = (app, kind, id) => ({ p_collection_id: CID(app), p_show_id: kind === 'show' ? id : null, p_item_id: kind === 'film' ? id : null });
 
 // ═══ Entry and candidates (V5.1, V5.2, V5.3) ══════════════════════════════════
-test('V5.1 Add to <C>… is in the heading only for a complete, current, non-archived read; it opens Idle with focus on Search and reads nothing; Cancel returns focus', async () => {
+test('V5.1 + Add, named Add to <C>, is in the toolbar only for a complete, current, non-archived read; it opens Idle with focus on Search and reads nothing; Cancel returns focus', async () => {
   const L = lib();
   const app = await boot(L);
   await openTC(app);
-  assert.ok(app.el('viewHead').innerHTML.includes('id="collectionAddBtn"') && app.el('viewHead').innerHTML.includes('>Add to True Crime / Docs…</button>'));
+  assert.ok(app.el('filtersRow').innerHTML.includes('id="collectionAddBtn" aria-label="Add to True Crime / Docs"') && app.el('filtersRow').innerHTML.includes('>+ Add</button>'));
   const opener = { id: 'collectionAddBtn', isConnected: true, focus() { app.ctx.document.activeElement = this; } };
   const mark = app.requests.length;
   app.ctx.openAddPicker(opener);
@@ -78,13 +78,13 @@ test('V5.1 Add to <C>… is in the heading only for a complete, current, non-arc
   assert.strictEqual(app.ctx.document.activeElement, opener, 'focus back on the opener');
   // A read that missed a member, or a list marked out of date: no entry, and the picker refuses to open.
   app.run('listStale = true'); app.ctx.renderTable(); app.ctx.renderFilters();
-  assert.ok(!app.el('viewHead').innerHTML.includes('collectionAddBtn'));
+  assert.ok(!app.el('filtersRow').innerHTML.includes('collectionAddBtn'));
   app.ctx.openAddPicker(null);
   assert.strictEqual(app.get('addPicker'), null);
   app.run('listStale = false');
   app.store.collection_memberships.push({ id: 'zz-dangling', collection_id: CID(app), show_id: 'no-such-show', item_id: null, created_at: '2026-01-01T00:00:00Z' });
   await app.ctx.loadBrowseView(); await settle();
-  assert.ok(!app.el('viewHead').innerHTML.includes('collectionAddBtn'), 'an incomplete read has no Add');
+  assert.ok(!app.el('filtersRow').innerHTML.includes('collectionAddBtn'), 'an incomplete read has no Add');
   assert.deepStrictEqual(writes(app), []);
 });
 test('V5.2 candidates: every saved show and film A–Z; members “Already in” without a checkbox; Skipped noted; a show says its stored seasons; an unclassified row is counted, not offered', async () => {
