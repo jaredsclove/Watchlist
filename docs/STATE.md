@@ -122,9 +122,43 @@ Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6
 test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
-(CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29], the compact interface [#32].
+(CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29], the compact interface [#32],
+density and search [#34].
 
-- **Release:** `5d588f2`, the compact interface (item 8; PR #32, the branch's four commits rebased, same tree as the
+- **Release:** `9768284`, density and search (item 8 follow-up; PR #34, the branch's two commits rebased, same tree as the
+  reviewed head `7c125e7`), released 2026-10-31 UTC. Presentation and interaction only: no migration, and no backup-format
+  or saved-data change; writes use the existing functions. Validation: offline 1234/1234; a local browser check with
+  synthetic data from 1280 to 300 px in light and dark. Space above the first item at 1280 / 800 / 375 / 300 px, before →
+  after, on that synthetic data: Collections 297 → 221 / 315 → 255 / 501 → 402 / 619 → 454; All TV 178 → 158 / 215 → 172 /
+  244 → 234 / 244 → 234; Currently Watching 209 → 182 / 209 → 164 / 207 → 186 / 207 → 186; Movies 144 → 124 / 181 → 138 /
+  197 → 187 / 197 → 187. Sideways overflow at 800 px (102 px in Collections, 181 in All TV) is gone. Verified after
+  deployment: Pages built `9768284`; the 35 application files are byte-identical and all 29 versioned files carry
+  `20261031-density`. On the live site, signed in, read-only, in the owner's real library: Currently Watching, All TV,
+  Coming Soon, Movies and Collections in same-origin frames at 1280, 1100, 1099, 800, 701, 700, 430, 375 and 300 px, with no
+  sideways overflow and nothing off screen. Rows at 1100 px and up, cards from 1099 down: two columns confirmed at 800, one
+  at 375 and 300. The TMDB field shows at 1280 and 1100, except in Collections at 1100, and is hidden below that.
+  Card targets 44 px and labels 32 px; ratings displayed; every Collections tab one line at 44 px; ⋯ menus on
+  screen and closed by Escape; expanded cards with episode lists opened without overflow. On the main page with real
+  input at desktop width: ⋯ on screen, Escape returns focus and doesn't expand, an expanded row. One TMDB search through
+  the desktop field: typing sent nothing; Enter sent one TV and one film search and moved focus to the first result; Enter
+  opened a preview with focus on the preview, not its Add button (one TMDB read); Cancel returned to the result and Close
+  to the field. Nothing was added, and no status, priority, episode mark, identity or library row was changed; the library
+  counts were the same afterwards. No backup was taken, because nothing was to change.
+- **Network record for that check:** no write, and no authentication request, appears anywhere in it. The extension's log
+  covers the first load only after a reload (that load's browser record lists the same endpoints), showed 732 database
+  requests, all GET, from the layout passes, but dropped older entries and missed some frame requests, so it isn't
+  complete for those passes. Complete for the main page (39 database calls) and a final 375 px frame repeating menus,
+  expansions, episode lists and every Collections tab (97 calls), by the browser's own record, which gives URLs but not
+  methods: all are `select` reads or the `stage5_capabilities` read, which the log shows as GET. The two local-only
+  changes were the per-device rating cache filling in by 40 bytes and a remembered collection created by the check, removed
+  afterwards.
+- **Not verified on that release:** real phones and tablets, Safari, Firefox, native select popups by pointer, a live
+  status or priority change, a confirmed add, a collection membership, or the already-saved and stale-collection paths
+  (offline tests cover them). Dark mode was emulated in a frame on a light system, so colours the app picks from the system
+  theme, such as network pills, weren't seen in true dark. Real rows can stay taller than the synthetic ones: Movies has a
+  median of 55 px at 1280, and All TV 51 px at 1100. An older tab keeps working until reloaded.
+
+- **Earlier release:** `5d588f2`, the compact interface (item 8; PR #32, the branch's four commits rebased, same tree as the
   reviewed head `f254b62`), released 2026-10-30 UTC. Presentation and interaction only: no migration, and no write, backup-format or
   saved-data change. Validation: offline 1216/1216; a local browser check with synthetic data at 1280, 375 and 300 px in
   light and dark. Space above the first item at 1280 / 375 / 300 px, before → after: Currently Watching 261 → 178 /
@@ -376,6 +410,7 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
 [#27]: https://github.com/jaredsclove/Watchlist/pull/27
 [#29]: https://github.com/jaredsclove/Watchlist/pull/29
 [#32]: https://github.com/jaredsclove/Watchlist/pull/32
+[#34]: https://github.com/jaredsclove/Watchlist/pull/34
 
 ## How we work
 
