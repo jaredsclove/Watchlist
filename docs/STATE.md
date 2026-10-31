@@ -77,11 +77,20 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   TMDB-matched season lets Refresh shows add it back while TMDB lists it. Holds (standing decisions, protected values,
   identity holds) come from the setup file or are added and edited in Settings → Collections and rules (edits in
   place through `library_cu_update_hold`, CU1b; a hold changed meanwhile is refused).
+- **Research access (CU2; design `docs/ITEM4_DESIGN.md` §4.6):** per member, off by default, switched in the database only
+  (`private.library_members.research_enabled`; `docs/MEMBER_RECOVERY.md`). Without it, Settings' card is "Show updates" (Review
+  updates, Skipped shows), review lists TMDB findings only, and no research control or wording shows; ordinary collections,
+  Refresh shows and backup and restore are unchanged. It restricts research operations, not a member's own saved data: rows stay
+  readable and in backups, and existing holds keep governing TMDB operations. The page follows `stage5_capabilities().research`
+  (anything but true hides the controls) and a `research_not_enabled` refusal; the database decides. Review offers "Continue
+  applying imported updates", on a click only, for findings an interrupted import left unevaluated (research; new season, date or
+  alias; pending with no reason; record still present): the automatic rules (`p_review` false) on a fresh read.
 - **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
   `catalog_film_links`, `episode_marks` (watched episodes of TMDB-matched seasons; no dates or titles), and since
   CU1 `update_setup`, `collection_definitions`, `collection_exclusions`, `update_holds`, `record_aliases`,
-  `membership_removals`, `show_update_settings`, `update_findings`, `research_briefs`, `research_imports`.
+  `membership_removals`, `show_update_settings`, `update_findings`, `research_briefs`, `research_imports`. The research guard
+  (`private.research_write_guard`, CU2) sits on all of those except `membership_removals` and `show_update_settings`.
   Rows are owner-scoped: `user_id` is the signed-in member (`auth.uid()`), never sent
   by the client; membership is `private.library_members`.
 - **Writes** go mainly through database functions (the `library_*_b45` family, `org_*`,
@@ -108,9 +117,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Collection updates | `collection-updates.js` (Refresh shows, results, review), `collection-research.js` (briefs, findings import, the setup file), `collection-settings.js` (Settings section, definitions editor, dialogs) |
 | Backup / restore | `backup-restore.js` (formats 4–7; 4 → 5, 5 → 6 and 6 → 7 converters), `backup-format3.js` (format-3 → 4 converter) |
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
-| Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages) |
+| Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages, `cu2-local-auth-test.mjs` on a local Supabase stack) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261031-density`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261031-cu2`). The tests
 check only that all 29 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
@@ -365,6 +374,8 @@ density and search [#34].
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - CU2: the page can be reverted by a code revert (an older page works against the CU2 database, and the database still
+    refuses research writes without access); the column, guard and restore wrapper stay (fix-forward).
   - CU1d: the page can be reverted by a code revert of `0cac052` and `1ffd079`, newest first; the two functions stay
     (fix-forward), unused by older pages; networks and marks set with it stay as saved.
   - Date equivalence (CU1c): the page can be reverted by a code revert of its five commits, newest first; the

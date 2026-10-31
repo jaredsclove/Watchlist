@@ -9,6 +9,11 @@
 //   cu1d   db/cu1d_network_and_marks.sql (after CU1b and CU1c): refusals, failure injection, install, the network rules (one, several, none,
 //          saved in Details, cleared, stale, rematched), marks on a Watched season (add only, the identity guard, the lock kept), isolation,
 //          a backup round trip, the test reverse;
+//   cu2    db/cu2_research_access.sql (after CU1b to CU1d), members A (on), B (off) and non-member C: refusals, failure injection,
+//          install, no self-enablement, every gated function and direct write refused, a research finding sent as TMDB, source changes,
+//          parents row security hides and null references, holds still protecting, ordinary work and the two cascades, restore (saved
+//          data kept; the bypass gone after success, failure, a caught failure and a savepoint; the internal function called directly),
+//          the admin runbook, interrupted imports and every status path, the test reverse;
 //   CU     the migration: every existing row unchanged; only the intended catalog changes; the run record;
 //          a replay refused;
 //   anon   nothing on the new tables or functions; a non-member is refused;

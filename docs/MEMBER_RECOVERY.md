@@ -15,6 +15,20 @@ or review material.
 3. Give them the initial password privately. They sign in, then change it under Settings → Account → Change
    password.
 
+## Research access
+
+Collection research is per member, off by default, and changed only here. In the SQL Editor:
+
+```sql
+select user_id, note, research_enabled from private.library_members;
+update private.library_members set research_enabled = true where user_id = '<id>';   -- false to switch it off
+```
+
+Check that the update reports one row. It applies on the member's next request; no sign-out is needed. Switching it off keeps
+everything saved: their research rows stay in the library and in backups, and their holds keep protecting data. A page left open shows
+the controls until its next refusal or a reload, but the database refuses them from the next request. If an import was stopped part-way,
+Review findings offers "Continue applying imported updates" once access is back.
+
 ## A forgotten password
 
 1. Reset it:
@@ -28,7 +42,8 @@ or review material.
 
 The order matters. Membership is restored only once no access token issued before step 3 can still be valid.
 
-1. **Disable membership:**
+1. **Disable membership.** First note whether they have research access; the delete loses it, and a re-added member starts off.
+   `select research_enabled from private.library_members where user_id = '<id>';`
    `delete from private.library_members where user_id = '<id>';`
    From the next request, the account reads nothing and changes nothing, whatever token is used.
 2. **Reset the password** (as above).
@@ -44,7 +59,7 @@ The order matters. Membership is restored only once no access token issued befor
    - At the default 3,600 s, that is 1 hour 5 minutes.
    - The 5 minutes cover the API's clock-skew allowance.
 6. **Restore membership:**
-   `insert into private.library_members (user_id, note) values ('<id>', '<who>');`
+   `insert into private.library_members (user_id, note, research_enabled) values ('<id>', '<who>', <as noted in step 1>);`
    The person signs in afresh with the new password.
 
 ## Removing a member
