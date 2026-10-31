@@ -160,7 +160,7 @@ function cuPublishShowSettings(rows) {
 function cuEndedFlagHtml(show) {
   const st = show && cuShowSettings.get(show.id);
   return st && st.new_season_after_ended_at
-    ? ' <span class="state-tag cu-flag-tag" title="A new season was added after you marked this show ended (Settings → ${cuCardTitle()} clears it)">New season</span>' : '';
+    ? ` <span class="state-tag cu-flag-tag" title="A new season was added after you marked this show ended (Settings → ${cuCardTitle()} clears it)">New season</span>` : '';
 }
 
 // The anchors a show's collections give matching: TMDB person ids (creator rules), TMDB network ids

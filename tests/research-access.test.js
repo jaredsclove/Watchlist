@@ -163,6 +163,14 @@ test('without access: Refresh shows runs, leaves research findings alone and say
   assert.ok(!/announcement|research/i.test(t), t);
 });
 
+test('the New season tag names the card this member has', async () => {
+  const { app, live } = await library();
+  app.ctx.cuPublishShowSettings([{ show_id: live.id, new_season_after_ended_at: TS }]);
+  assert.match(app.ctx.cuEndedFlagHtml(live), /Settings → Collection updates clears it/);
+  off(app);
+  assert.match(app.ctx.cuEndedFlagHtml(live), /Settings → Show updates clears it/);
+});
+
 test('without access a backup is still complete, and restoring keeps research rows; the preview still says what goes', async () => {
   const { app, coll, live } = await library();
   alias(app, coll, live, 'ZZ Kept');
