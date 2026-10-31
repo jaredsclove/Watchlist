@@ -151,7 +151,7 @@ function formatNoteTime(iso) { const d = new Date(iso); return isNaN(d) ? String
 // ── Account changes and lost sessions ──
 function stopPageForAuth(text) {
   authStopped = true;
-  if (typeof stopB45Writes === 'function') { b45Stopped = true; stage5Phase = null; }
+  if (typeof stopB45Writes === 'function') { b45Stopped = true; stage5Phase = null; noteResearchAccess(null); }
   const el = document.getElementById('phaseBanner');
   if (el) el.innerHTML = `<div class="error-banner">⚠️ ${esc(text)}</div>`;
 }
@@ -349,7 +349,7 @@ function showNonMemberAccount() {
 // A change refused with not_a_member: the membership ended while this page was open. Nothing more is
 // sent from it; a reload shows the account without a library.
 function membershipEnded() {
-  if (typeof b45Stopped !== 'undefined') { b45Stopped = true; stage5Phase = null; }
+  if (typeof b45Stopped !== 'undefined') { b45Stopped = true; stage5Phase = null; noteResearchAccess(null); }
   const el = document.getElementById('phaseBanner');
   if (el) el.innerHTML = `<div class="error-banner">⚠️ ${esc(NOT_A_MEMBER_TEXT)} This page changes nothing more; reload it.</div>`;
 }

@@ -197,6 +197,7 @@ let detailsSessionSeq = 0; // bumped at each opening; an answer for an earlier o
 let resumePickerFor = null; // the show whose "Watch earlier seasons" picker is open (tv-shows.js); null while none is
 let shownNewRecords = []; // the New-from-catalog records the open view shows: [{ kind, id }] (Dismiss all, tv-shows.js)
 let cuModal = null; // item 4: the open collection-updates dialog (review, rules, brief, setup, results; collection-updates.js, collection-settings.js); null while closed
+let researchEnabled = false; // CU2: the database says this member has research access now (api.js noteResearchAccess); false until read, and whenever it can't be read
 let cuLastState = null; // item 4: the newest collection-updates state this page read (cuReadState), for Settings' status line without a read; null until read
 let cuShowSettings = new Map(); // item 4: per-show update settings read with each view: show id → { follow_when_skipped, new_season_after_ended_at } (collection-updates.js)
 let libraryPanel = null; // the open "+ Add" panel of a view (library.js); null while closed

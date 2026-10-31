@@ -868,7 +868,7 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null, access = 'members', session, episodeMarks = [], pageRoot = null, cu1 = null } = {}) {
+  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null, access = 'members', session, episodeMarks = [], pageRoot = null, cu1 = null, research = true } = {}) {
   // pageRoot: the page from another directory (a release exported from git), for old-page tests.
   const page = pageRoot ? pageOf(pageRoot) : PAGE;
   // The default phase is B4/B5 (production's schema once B4/B5 is installed); a database
@@ -882,7 +882,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   const consoleErrors = [];
   const selectors = {};
   let nextId = 1;
-  const app = { store, requests, selectors, consoleErrors, countOverride, configText, stage5, recoveryArchive };
+  // research: CU2's capability for this member: true, false, or null for a database that doesn't send it.
+  const app = { store, requests, selectors, consoleErrors, countOverride, configText, stage5, recoveryArchive, research };
   if (store.tv_shows) linkFixtureRows(store, () => `new-${nextId++}`);
   // B4/B5 (the default phase): the fixtures as db/b45_expand.sql would leave them.
   if (B45.isB45Schema(stage5) && store.tv_shows) B45.migrateFixtures(store, isFilmRow);
@@ -1173,7 +1174,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     if (u.pathname.includes('/rpc/') && table === 'stage5_capabilities') {
       if (!app.stage5) return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.stage5_capabilities in the schema cache' });
       return response(200, { stage5: 1, phase: app.stage5, backup_format: isCu1(app) ? 7 : ep1 ? 6 : b45 ? 5 : contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none',
-        ...(b45 ? { b45: 1 } : {}), ...(ep1 ? { ep1: 1 } : {}), ...(isCu1(app) ? { cu1: 1 } : {}), ...(app.access ? { access: app.access, member: app.member !== false } : {}) });
+        ...(b45 ? { b45: 1 } : {}), ...(ep1 ? { ep1: 1 } : {}), ...(isCu1(app) ? { cu1: 1 } : {}), ...(isCu1(app) && app.research !== null ? { research: app.research !== false } : {}), ...(app.access ? { access: app.access, member: app.member !== false } : {}) });
     }
     // EP1: library_set_episode_marks exists only once EP1 is installed.
     if (u.pathname.includes('/rpc/') && table === 'library_set_episode_marks' && !ep1) {

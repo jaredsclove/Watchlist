@@ -21,6 +21,16 @@ const CU_EXCLUSION_KINDS = [['title', 'This title only'], ['every_version', 'Eve
 
 // ── The Settings card ──
 function cuSettingsSectionHtml() {
+  // CU2: without research access the card keeps what Refresh shows needs, and nothing of the research.
+  if (!researchEnabled) return `<section class="settings-card" aria-labelledby="settingsCuTitle">
+        <h3 id="settingsCuTitle">Show updates</h3>
+        <p class="settings-text">TV → + Add → Refresh shows checks every show with TMDB (new seasons, dates, episode lists and matches). Anything uncertain waits for your review.</p>
+        <p class="settings-status" id="settingsCuStatus" role="status"></p>
+        <div class="settings-actions">
+          <button class="btn settings-cu-review" onclick="openCuReview(this)">Review updates…</button>
+          <button class="btn settings-cu-collections" onclick="openCuDialog('collections', this)">Skipped shows…</button>
+        </div>
+      </section>`;
   return `<section class="settings-card" aria-labelledby="settingsCuTitle">
         <h3 id="settingsCuTitle">Collection updates</h3>
         <p class="settings-text">TV → + Add → Refresh shows checks every show with TMDB (new seasons, dates, episode lists and matches). Announcements come from a research brief you give to Claude; you import the findings it returns. New shows and films always wait for your review.</p>
@@ -39,15 +49,31 @@ function cuSettingsSectionHtml() {
 function updateCuSettingsStatus() {
   const el = document.getElementById('settingsCuStatus');
   if (!el) return;
-  if (!cuLastState) { el.className = 'settings-status'; el.textContent = 'Review findings shows what waits for your decision.'; return; }
+  if (!cuLastState) { el.className = 'settings-status'; el.textContent = `${researchEnabled ? 'Review findings' : 'Review updates'} shows what waits for your decision.`; return; }
   const gated = !cuLastState.setup && (libraryGovernance.shows.size || libraryGovernance.films.size);
   const open = cuLastState.open, blocked = cuLastState.blocked || 0;
   el.className = `settings-status${gated ? ' warn' : ''}`;
-  el.textContent = `${gated ? 'Automatic updates for catalog shows are paused until the collection setup is imported. ' : ''}${open ? `${open} finding${open === 1 ? '' : 's'} wait${open === 1 ? 's' : ''} for your decision.` : 'Nothing waits for your decision.'}${blocked ? ` ${blocked} wait${blocked === 1 ? 's' : ''} for more research (blocked by the evidence standard).` : ''}`;
+  const noun = researchEnabled ? 'finding' : 'update';
+  el.textContent = `${gated ? (researchEnabled ? 'Automatic updates for catalog shows are paused until the collection setup is imported. ' : 'Automatic updates for some shows are paused. ') : ''}${open ? `${open} ${noun}${open === 1 ? '' : 's'} wait${open === 1 ? 's' : ''} for your decision.` : 'Nothing waits for your decision.'}${blocked ? ` ${blocked} wait${blocked === 1 ? 's' : ''} for ${researchEnabled ? 'more research (blocked by the evidence standard)' : 'more information'}.` : ''}`;
+}
+// CU2: this member's access changed (a capability read, or a refusal). Settings and the open dialog follow at once;
+// a dialog of research controls gives way to a message, so no draft stays open to be refused again.
+function researchAccessChanged() {
+  if (typeof isSettingsView === 'function' && isSettingsView()) renderSettings();
+  const m = cuModal;
+  if (researchEnabled || !m) return;
+  if (m.kind === 'review' || m.kind === 'collections') {
+    Object.assign(m, { message: CU_RESEARCH_ENDED_TEXT, messageError: true });
+    cuRenderModal();
+  } else if (m.kind !== 'message') {
+    cuModal = { kind: 'message', session: m.session + 1, opener: m.opener, title: 'Collection research', html: `<div class="modal-error">${esc(CU_RESEARCH_ENDED_TEXT)}</div>` };
+    cuRenderModal();
+  }
 }
 
 // ── Files ──
 function cuPickFile(kind) {
+  if (!researchEnabled) return;
   const input = document.getElementById('cuFileInput');
   if (!input) return;
   input.dataset.kind = kind;
@@ -57,7 +83,7 @@ async function handleCuFileSelected(event) {
   const file = event.target.files && event.target.files[0];
   const kind = event.target.dataset.kind;
   event.target.value = '';
-  if (!file) return;
+  if (!file || !researchEnabled) return;
   const text = await file.text();
   if (kind === 'findings') return cuRunFindingsImport(text);
   if (kind === 'setup') return cuPreviewSetup(text);
@@ -108,6 +134,7 @@ async function cuConfirmSetup() {
 
 // ── The dialogs (collections and rules, the definition editor, the brief, the setup preview) ──
 async function openCuDialog(kind, opener) {
+  if (!researchEnabled && kind !== 'collections') return;
   cuModal = { kind, session: (cuModal && cuModal.session || 0) + 1, opener: opener || null, state: 'loading' };
   cuRenderModal();
   const session = cuModal.session;
@@ -126,8 +153,8 @@ function cuSettingsModalHtml() {
   const head = t => `<div class="modal-title" id="cuTitle">${esc(t)}</div>`;
   const close = '<div class="modal-actions"><button class="btn" onclick="closeCuModal()">Close</button></div>';
   if (m.kind === 'message') return `${head(m.title)}${m.html}${close}`;
-  if (m.state === 'loading') return `${head('Collection updates')}<div class="modal-progress">Reading…</div>`;
-  if (m.state === 'failed') return `${head('Collection updates')}<div class="modal-error">Couldn’t read your collections (${esc(m.message)}). Nothing was changed.</div>${close}`;
+  if (m.state === 'loading') return `${head(cuCardTitle())}<div class="modal-progress">Reading…</div>`;
+  if (m.state === 'failed') return `${head(cuCardTitle())}<div class="modal-error">Couldn’t read your collections (${esc(m.message)}). Nothing was changed.</div>${close}`;
   if (m.kind === 'setup') return cuSetupPreviewHtml(m) + close;
   if (m.kind === 'brief') return cuBriefDialogHtml(m) + close;
   if (m.kind === 'editor') return cuEditorHtml(m);
@@ -136,7 +163,18 @@ function cuSettingsModalHtml() {
 }
 function cuModeLabel(mode) { return (CU_MODES.find(x => x[0] === mode) || [null, 'Manual'])[1]; }
 
+function cuSkippedShowsHtml(m) {
+  const skipped = m.lib.shows.filter(s => s.status === 'skipped');
+  const followed = skipped.filter(s => (m.st.settings.get(s.id) || {}).follow_when_skipped);
+  return `<div class="modal-label">Skipped shows still checked for new seasons</div>
+    <p class="settings-text">A Skipped show gets no new seasons automatically unless you choose it here.</p>
+    <ul class="cu-review-list">${followed.map(s => `<li class="cu-item">${esc(s.title)} <button class="btn" onclick="cuSetFollow('${esc(s.id)}', false)">Stop checking</button></li>`).join('') || '<li>None.</li>'}</ul>
+    ${skipped.length > followed.length ? `<div class="settings-actions"><select id="cuFollowPick" aria-label="A Skipped show">${skipped.filter(s => !followed.includes(s)).map(s => `<option value="${esc(s.id)}">${esc(s.title)}</option>`).join('')}</select>
+      <button class="btn" onclick="cuSetFollow((document.getElementById('cuFollowPick') || {}).value, true)">Keep checking this show</button></div>` : ''}`;
+}
 function cuCollectionsHtml(m) {
+  const notice = m.message ? `<div class="${m.messageError ? 'modal-error' : 'banner'}" role="status">${esc(m.message)}</div>` : '';
+  if (!researchEnabled) return `<div class="modal-title" id="cuTitle">Skipped shows</div>${notice}${cuSkippedShowsHtml(m)}`;
   const rows = m.colls.filter(c => !c.archived_at).map(c => {
     const d = m.st.definitions.get(c.id);
     return `<li class="cu-item"><div class="cu-item-text">${esc(c.name)}</div>
@@ -146,19 +184,13 @@ function cuCollectionsHtml(m) {
   const holds = m.st.holds.map(h => `<li class="cu-item"><div class="cu-item-text">${esc(cuHoldSubject(m, h))}</div>
       <div class="cu-item-why">${esc(h.kind.replace(/_/g, ' '))}${h.kind === 'protected_value' && h.field ? ` (${esc((CU_HOLD_FIELDS.find(f => f[0] === h.field) || [0, h.field])[1].toLowerCase())} kept as “${esc(h.protected_value || '')}”)` : ''}: ${esc(h.decision)}${h.reopen ? ` · reopens: ${esc(cuReopenText(h.reopen))}` : ''}</div>
       <div class="cu-item-actions"><button class="btn" onclick="cuOpenHoldEditor('${esc(h.id)}')">Edit hold…</button><button class="btn" onclick="cuDeleteHold('${esc(h.id)}')">Remove hold</button></div></li>`).join('');
-  const skipped = m.lib.shows.filter(s => s.status === 'skipped');
-  const followed = skipped.filter(s => (m.st.settings.get(s.id) || {}).follow_when_skipped);
   return `<div class="modal-title" id="cuTitle">Collections and rules</div>
-    ${m.message ? `<div class="${m.messageError ? 'modal-error' : 'banner'}" role="status">${esc(m.message)}</div>` : ''}
+    ${notice}
     <ul class="cu-review-list">${rows || '<li>No collections.</li>'}</ul>
     <div class="modal-label">Holds (${m.st.holds.length})</div>
     ${holds ? `<ul class="cu-review-list">${holds}</ul>` : '<p class="settings-text">No holds. The collection setup file brings the built-in collections’ decisions.</p>'}
     <div class="settings-actions"><button class="btn" onclick="cuOpenHoldEditor()">Add a hold…</button></div>
-    <div class="modal-label">Skipped shows still checked for new seasons</div>
-    <p class="settings-text">A Skipped show gets no new seasons automatically unless you choose it here.</p>
-    <ul class="cu-review-list">${followed.map(s => `<li class="cu-item">${esc(s.title)} <button class="btn" onclick="cuSetFollow('${esc(s.id)}', false)">Stop checking</button></li>`).join('') || '<li>None.</li>'}</ul>
-    ${skipped.length > followed.length ? `<div class="settings-actions"><select id="cuFollowPick" aria-label="A Skipped show">${skipped.filter(s => !followed.includes(s)).map(s => `<option value="${esc(s.id)}">${esc(s.title)}</option>`).join('')}</select>
-      <button class="btn" onclick="cuSetFollow((document.getElementById('cuFollowPick') || {}).value, true)">Keep checking this show</button></div>` : ''}`;
+    ${cuSkippedShowsHtml(m)}`;
 }
 function cuHoldSubject(m, h) {
   const show = h.show_id && m.lib.showsById.get(h.show_id), row = h.item_id && m.lib.rows.find(r => r.id === h.item_id);
@@ -189,7 +221,7 @@ const CU_HOLD_KEYS = ['kind', 'collection_id', 'show_id', 'item_id', 'subject_la
 const cuHoldValues = h => Object.fromEntries(CU_HOLD_KEYS.map(k => [k, h[k] === undefined ? null : h[k]]));
 function cuOpenHoldEditor(holdId) {
   const m = cuModal;
-  if (!m || !m.st) return;
+  if (!m || !m.st || !researchEnabled) return;
   const blank = { kind: 'standing_decision', collection_id: '', target: '', season: '', seasonLabel: '', titleLabel: '', seasonVia: 'label', field: 'display_date',
     effect: 'keep_value', reopen: 'official_date_or_window', sourceDomains: '', sourceName: '', decision: '', decided_on: cuToday() };
   const h = holdId ? m.st.holds.find(x => x.id === holdId) : null;
@@ -395,6 +427,7 @@ function cuShowMessage() {
 // ── The definition editor ──
 function cuOpenEditor(collectionId) {
   const m = cuModal;
+  if (!m || !m.st || !researchEnabled) return;
   const d = m.st.definitions.get(collectionId);
   Object.assign(m, { kind: 'editor', collectionId, message: '', preview: null,
     draft: { version: d ? d.version : 0, mode: d ? d.mode : 'manual', rules: JSON.parse(JSON.stringify(d ? d.rules : [])),
@@ -534,7 +567,7 @@ async function cuConfirmDefinition() {
   const rules = d.mode === 'discover' ? d.rules : d.rules;
   await cuDialogWrite('Confirm definition', () => sbRpc('library_cu_save_definition', { p_collection_id: m.collectionId, p_expected_version: d.version,
     p_mode: d.mode, p_rules: rules, p_evidence: d.evidence, p_summary: cuSummary(d, exclusions) }));
-  const now = cuModal && cuModal.st.definitions.get(m.collectionId);
+  const now = cuModal === m && m.st.definitions.get(m.collectionId);
   if (cuModal === m && now) m.draft.version = now.version;
   cuRenderModal();
 }

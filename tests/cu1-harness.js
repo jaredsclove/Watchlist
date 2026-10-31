@@ -570,6 +570,19 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
       return { definitions: p_doc.definitions.length, exclusions: ex, holds: p_doc.holds.length };
     }
   };
+  // CU2: the database's research guard (db/cu2_research_access.sql): any research write without access is refused
+  // and rolled back, whatever the function; findings by their stored source, never the caller's claim.
+  const notEnabled = () => refuse('research_not_enabled', 'Collection research isn’t enabled for this account, so nothing was changed.');
+  const storedResearch = f => !!f && T('update_findings').some(x => x.source === 'research' && (x.id === f.id || x.fingerprint === f.fingerprint));
+  for (const name of ['library_cu_register_brief', 'library_cu_record_findings', 'library_cu_import_setup', 'library_cu_save_definition', 'library_cu_set_exclusion',
+    'library_cu_save_hold', 'library_cu_update_hold', 'library_cu_delete_hold', 'library_cu_add_alias', 'library_cu_accept_finding',
+    'library_cu_reconcile_season', 'library_cu_set_season_date', 'library_cu_set_finding_status']) {
+    const fn = fns[name];
+    if (!fn) continue;
+    const research = name === 'library_cu_reconcile_season' || name === 'library_cu_set_season_date' ? a => storedResearch(a.p_finding)
+      : name === 'library_cu_set_finding_status' ? a => storedResearch({ id: a.p_id }) : () => true;
+    fns[name] = args => { if (app.research !== true && app.stage5 === CU1_PHASE && research(args)) notEnabled(); return fn(args); };
+  }
   return fns;
 }
 

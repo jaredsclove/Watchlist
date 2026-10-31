@@ -260,7 +260,7 @@ function libraryFailure(e, what, feature = 'Adding to an existing show') {
     return { unknown: true, text: `${what}: no clear answer came back (${info.message}), so it isn’t confirmed. The list may or may not show it now, and an earlier request may still complete. Check before adding again. If you reload, this page won’t know whether that request finished.` };
   }
   if (info.status === 404 && info.pgCode === 'PGRST202') return { text: `${feature} isn’t available on this database. Nothing was added.` };
-  if (/^(target_missing|target_changed|show_exists|create_conflict|film_exists|client_outdated|library_write_required|update_required|catalog_candidate)$/.test(info.code)) return { text: orgRefusalText(info) };
+  if (/^(target_missing|target_changed|show_exists|create_conflict|film_exists|client_outdated|library_write_required|update_required|catalog_candidate|research_not_enabled)$/.test(info.code)) return { text: orgRefusalText(info) };
   if (/^(55P03|57014)$/.test(info.pgCode)) return { text: `${what}: the database didn’t finish in time, so it was cancelled. Nothing was added.` };
   if (info.pgCode === '23505') return { text: `${what}: it’s already on your list (added somewhere else just now). Nothing was added.` };
   return { text: `${what} was refused (${info.message}). Nothing was added.` };
@@ -428,7 +428,7 @@ function renderLibraryBody() {
   else if (p.mode === 'match' || p.mode === 'pull') el.innerHTML = results;
   else if (p.mode === 'manual') el.innerHTML = p.media === 'movie' ? libraryManualFilmHtml() : libraryManualShowHtml();
   else if (p.mode === 'refresh') el.innerHTML = `<div class="tmdb-search-row"><button class="btn" onclick="cuRefreshShows()">↻ Check every show with TMDB</button>
-      <span class="tmdb-refresh-summary">Every show in your library, catalog and collection shows included (Skipped shows only when you keep checking them). New seasons, TBA and future dates, episode lists and matches are updated automatically; anything uncertain waits for your review. TMDB only: announcements come from research briefs (Settings → Collection updates).</span></div>${results}`;
+      <span class="tmdb-refresh-summary">Every show in your library, catalog and collection shows included (Skipped shows only when you keep checking them). New seasons, TBA and future dates, episode lists and matches are updated automatically; anything uncertain waits for your review.${researchEnabled ? ' TMDB only: announcements come from research briefs (Settings → Collection updates).' : ''}</span></div>${results}`;
   else if (p.mode === 'tools') el.innerHTML = `<div class="tmdb-search-row">
         <button class="btn" onclick="libraryMovieTool('collections')" title="Check your tracked collections/franchises for films you haven't added yet">↻ Refresh collections</button>
       </div>

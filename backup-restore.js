@@ -60,8 +60,9 @@ function sameTimestampInstant(a, b) {
 // The database's Stage 5 phase (stage5_capabilities, read with GET); null for a
 // database without Stage 5. Read-only.
 async function stage5Capabilities() {
-  try { return await sbFetch('GET', 'rpc/stage5_capabilities', null); }
+  try { const cap = await sbFetch('GET', 'rpc/stage5_capabilities', null); noteResearchAccess(cap); return cap; }
   catch (e) {
+    noteResearchAccess(null);
     if (/PGRST202|: 404 /.test(String(e && e.message))) return null; // a database before Stage 5
     throw e;
   }
@@ -498,7 +499,7 @@ function format6ConversionHtml(currentCounts) {
   const lost = CU1_TABLES.reduce((n, t) => n + (currentCounts[t] || 0), 0);
   return `<div class="modal-section"><div class="modal-label">This backup is converted to format 7 before restoring</div><ul class="manage-list">
     <li>Format 7 adds collection updates: collection definitions, exclusions, holds, aliases, remembered removals, show update settings and findings. This backup was made before them, so it has none.</li>
-    ${lost ? `<li>Restoring it removes the ${lost} collection-update record${lost === 1 ? '' : 's'} you have now (the safety backup keeps them). Automatic updates for catalog shows then pause until you import the collection setup file again (Settings → Collection updates).</li>` : ''}
+    ${lost ? `<li>Restoring it removes the ${lost} collection-update record${lost === 1 ? '' : 's'} you have now (the safety backup keeps them).${researchEnabled ? ' Automatic updates for catalog shows then pause until you import the collection setup file again (Settings → Collection updates).' : ''}</li>` : ''}
     <li>The file itself isn’t changed.</li></ul></div>`;
 }
 
