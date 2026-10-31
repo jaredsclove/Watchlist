@@ -23,6 +23,15 @@ function stopB45Writes() {
 function pageMayWrite(cap) {
   return !b45Stopped && !!cap && cap.phase === PAGE_PHASE && cap.access === 'members' && cap.member === true;
 }
+// CU2: research controls show only while the database says this member has access now: anything but an
+// explicit true (no answer, an older database, a refusal) hides them. This is presentation; the database
+// refuses research writes itself (db/cu2_research_access.sql), whatever this page shows.
+function noteResearchAccess(cap) {
+  const on = !!cap && cap.research === true;
+  if (on === researchEnabled) return;
+  researchEnabled = on;
+  if (typeof researchAccessChanged === 'function') researchAccessChanged();
+}
 const NOT_A_MEMBER_TEXT = 'This account has no library here (its membership isn’t active), so nothing was read, saved or changed. Ask the library owner.';
 function stage5Refusal(text) {
   return new Error(`Supabase error 412: ${JSON.stringify({ code: 'P0001', details: null, hint: null, message: `update_required: ${text}` })}`);
@@ -103,6 +112,7 @@ async function sbRequest(method, path, body, headers, onAnswer = () => {}) {
     if (confirmedAnswer(res.status, err)) onAnswer();
     if (res.status === 401 && typeof sessionLost === 'function') sessionLost();
     if (/not_a_member/.test(err) && typeof membershipEnded === 'function') membershipEnded();
+    if (/research_not_enabled/.test(err)) noteResearchAccess(null);
     // A B4/B5 function that doesn't exist, or an EP1 one (the marks function, or delete_tv_season with
     // its mark count): the database isn't (or is no longer) in this page's phase. Nothing ran; the
     // page stops writing until it is reloaded.

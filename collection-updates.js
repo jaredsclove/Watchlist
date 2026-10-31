@@ -15,6 +15,14 @@ const CU_OPEN_STATUSES = ['pending', 'needs_evidence', 'conflict', 'needs_resear
 // import whose evidence meets the standard reopens them (the database re-checks it on every application).
 const CU_BLOCKED_STATUSES = ['needs_evidence', 'conflict', 'needs_research'];
 const CU_BLOCKED_TEXT = 'Blocked by the evidence standard: they can’t be applied or added from review. A later research import whose evidence meets the standard reopens them; meanwhile you can set them aside (Not now) or dismiss them.';
+// CU2: the same surfaces for a member without research access: what they share with Refresh shows, in its own words.
+const CU_BLOCKED_TEXT_OFF = 'TMDB doesn’t have enough on these yet. Refresh shows checks them again; meanwhile you can set them aside (Not now) or dismiss them.';
+const CU_RESEARCH_ENDED_TEXT = 'Collection research isn’t enabled for this account, so nothing more was changed. Everything already saved is kept.';
+const cuBlockedText = () => (researchEnabled ? CU_BLOCKED_TEXT : CU_BLOCKED_TEXT_OFF);
+const cuBlockedHead = () => (researchEnabled ? 'Waiting for more research' : 'Waiting for more information');
+const cuCardTitle = () => (researchEnabled ? 'Collection updates' : 'Show updates');
+// What a member sees of the findings. Research findings stay saved (and backed up) without access, but aren't shown.
+const cuVisibleFindings = findings => (researchEnabled ? findings : findings.filter(f => f.source === 'tmdb'));
 const CU_TBA_SORT = '2099-01-01';
 const CU_REASON_TEXT = {
   setup_required: 'automatic updates for catalog shows wait for the collection setup (Settings → Collection updates)',
@@ -49,7 +57,11 @@ const CU_REASON_TEXT = {
   evidence_named_source_missing: 'the decision reopens only on a named source, which isn’t among the evidence',
   record_missing: 'the record it names is no longer in your library'
 };
-const cuReasonText = r => CU_REASON_TEXT[r] || (r ? r.replace(/_/g, ' ') : '');
+const CU_REASON_TEXT_OFF = {
+  setup_required: 'automatic updates for this show are paused',
+  tmdb_undated_empty: 'TMDB lists it without a date or episodes yet'
+};
+const cuReasonText = r => (!researchEnabled && CU_REASON_TEXT_OFF[r]) || CU_REASON_TEXT[r] || (r ? r.replace(/_/g, ' ') : '');
 
 // ── Shared rules (the database's private.cu1_norm and private.cu1_evidence_ok, for routing) ──
 function cuNorm(t) {
@@ -90,7 +102,7 @@ function cuSameDay(row, proposed) {
 // Open date findings (TMDB or research) whose proposed exact date is within a day of the stored exact date: sent
 // once so the database resolves them as the same date (set aside, the stored date kept), never applied.
 function cuSameDayPlan(lib, st) {
-  return st.findings.filter(f => f.kind === 'date' && f.status === 'pending').map(f => {
+  return cuVisibleFindings(st.findings).filter(f => f.kind === 'date' && f.status === 'pending').map(f => {
     const row = lib.rows.find(r => r.id === (f.season_id || f.item_id)), p = f.proposed || {};
     if (!cuSameDay(row, p)) return null;
     return { type: 'date', fn: 'library_cu_set_season_date', what: `${row.title}${row.show_id ? ` · ${row.season}` : ''}`, newDate: p,
@@ -129,8 +141,9 @@ async function cuReadState() {
   const definitions = new Map();
   defs.forEach(d => { const c = definitions.get(d.collection_id); if (!c || d.version > c.version) definitions.set(d.collection_id, d); });
   cuPublishShowSettings(settings);
-  cuLastState = { setup: setup.length > 0, open: findings.filter(f => f.status === 'pending').length,
-    blocked: findings.filter(f => CU_OPEN_STATUSES.includes(f.status) && f.status !== 'pending').length };
+  const shown = cuVisibleFindings(findings);
+  cuLastState = { setup: setup.length > 0, open: shown.filter(f => f.status === 'pending').length,
+    blocked: shown.filter(f => CU_OPEN_STATUSES.includes(f.status) && f.status !== 'pending').length };
   if (typeof updateCuSettingsStatus === 'function') updateCuSettingsStatus(); // Settings' status line, if it is shown
   return { setup: setup[0] || null, definitions, allDefinitions: defs, exclusions, holds, aliases,
     settings: new Map(settings.map(s => [s.show_id, s])), findings, memberships, removals };
@@ -147,7 +160,7 @@ function cuPublishShowSettings(rows) {
 function cuEndedFlagHtml(show) {
   const st = show && cuShowSettings.get(show.id);
   return st && st.new_season_after_ended_at
-    ? ' <span class="state-tag cu-flag-tag" title="A new season was added after you marked this show ended (Settings → Collection updates clears it)">New season</span>' : '';
+    ? ' <span class="state-tag cu-flag-tag" title="A new season was added after you marked this show ended (Settings → ${cuCardTitle()} clears it)">New season</span>' : '';
 }
 
 // The anchors a show's collections give matching: TMDB person ids (creator rules), TMDB network ids
@@ -207,8 +220,9 @@ function cuEmptyResults(source) {
 }
 function cuResultsHtml(r) {
   const li = items => items.map(x => `<li>${esc(x)}</li>`).join('');
-  const coverage = r.source === 'tmdb'
-    ? `TMDB only: announcements weren’t checked. Checked ${r.checked} show${r.checked === 1 ? '' : 's'} (${r.matched} matched to TMDB, ${r.unmatched} not yet matched)${r.skipped ? `; ${r.skipped} Skipped show${r.skipped === 1 ? '' : 's'} not checked` : ''}.`
+  const coverage = r.source === 'continued' ? `Checked ${r.checked} imported update${r.checked === 1 ? '' : 's'} against your library as it is now.`
+    : r.source === 'tmdb'
+    ? `${researchEnabled ? 'TMDB only: announcements weren’t checked. ' : ''}Checked ${r.checked} show${r.checked === 1 ? '' : 's'} (${r.matched} matched to TMDB, ${r.unmatched} not yet matched)${r.skipped ? `; ${r.skipped} Skipped show${r.skipped === 1 ? '' : 's'} not checked` : ''}.`
     : `From the imported research file: ${r.checked} finding${r.checked === 1 ? '' : 's'}${r.unchanged ? ` (${r.unchanged} already applied or decided earlier, left as they are)` : ''}. Evidence was assessed in Claude research; links are kept with each finding.`
       + (r.coverage ? ` Coverage: ${r.coverage.checked} of ${r.coverage.reported} reported check${r.coverage.reported === 1 ? '' : 's'} completed${r.coverage.missing.length ? `; ${r.coverage.missing.length} the brief asked for ${r.coverage.missing.length === 1 ? 'isn’t' : 'aren’t'} reported` : ''}.` : '');
   const episodes = r.episodes.map(e => `${e.title} · ${e.season}: ${e.added} new episode${e.added === 1 ? '' : 's'} listed (this device)`);
@@ -223,7 +237,7 @@ function cuResultsHtml(r) {
       <div class="settings-actions"><button class="btn" onclick="openCuReview(this)">Review…</button></div>` : '<p class="cu-none">None.</p>'}
     ${r.networkChoices.length ? `<h4 class="cu-results-head">Choose a network (${r.networkChoices.length})</h4><p class="cu-none">Nothing was guessed; each stays unset until you choose in Details.</p>
       <ul class="cu-list">${r.networkChoices.map(cuNetworkChoiceHtml).join('')}</ul>` : ''}
-    ${r.blocked.length ? `<h4 class="cu-results-head">Waiting for more research (${r.blocked.length})</h4><p class="cu-none">${esc(CU_BLOCKED_TEXT)}</p><ul class="cu-list">${li(r.blocked)}</ul>` : ''}
+    ${r.blocked.length ? `<h4 class="cu-results-head">${cuBlockedHead()} (${r.blocked.length})</h4><p class="cu-none">${esc(cuBlockedText())}</p><ul class="cu-list">${li(r.blocked)}</ul>` : ''}
     <h4 class="cu-results-head">Couldn’t check or apply (${notChecked.length})</h4>${notChecked.length ? `<ul class="cu-list">${li(notChecked)}</ul>` : '<p class="cu-none">None.</p>'}
   </div>`;
 }
@@ -277,6 +291,8 @@ async function cuApplyPlan(plan, results, label) {
       catch (e) {
         const fl = libraryFailure(e, op.what, 'Collection updates');
         if (fl.unknown) { results.unknown = `${fl.text} Nothing more was sent.`; break; }
+        // CU2: access ended part-way. Every later call would be refused too; what wasn't applied stays saved and can be continued.
+        if (orgErrorInfo(e).code === 'research_not_enabled') { results.failed.push(`${op.what}: ${CU_RESEARCH_ENDED_TEXT} Nothing more was sent.`); break; }
         results.failed.push(`${op.what}: ${fl.text}`);
         continue;
       }
@@ -507,10 +523,13 @@ function cuFindingSentence(lib, f) {
 }
 function cuReviewHtml() {
   const m = cuModal;
-  if (m.state === 'loading') return `<div class="modal-title" id="cuTitle">Review collection updates</div><div class="modal-progress">Reading…</div>`;
-  if (m.state === 'failed') return `<div class="modal-title" id="cuTitle">Review collection updates</div><div class="modal-error">Couldn’t read the findings (${esc(m.message)}). Nothing was changed.</div>
+  const title = researchEnabled ? 'Review collection updates' : 'Review show updates';
+  if (m.state === 'loading') return `<div class="modal-title" id="cuTitle">${title}</div><div class="modal-progress">Reading…</div>`;
+  if (m.state === 'failed') return `<div class="modal-title" id="cuTitle">${title}</div><div class="modal-error">Couldn’t read the findings (${esc(m.message)}). Nothing was changed.</div>
     <div class="modal-actions"><button class="btn" onclick="closeCuModal()">Close</button></div>`;
-  const open = m.st.findings.filter(f => CU_OPEN_STATUSES.includes(f.status)).sort((a, b) => cmpStr(a.first_seen_at, b.first_seen_at) || cmpStr(a.id, b.id));
+  const open = cuVisibleFindings(m.st.findings).filter(f => CU_OPEN_STATUSES.includes(f.status)).sort((a, b) => cmpStr(a.first_seen_at, b.first_seen_at) || cmpStr(a.id, b.id));
+  const unfinished = cuUnfinishedFindings(m.lib, m.st);
+  m.unfinishedIds = new Set(unfinished.map(f => f.id));
   const flagged = m.lib.shows.filter(s => (m.st.settings.get(s.id) || {}).new_season_after_ended_at);
   const itemsOf = list => list.map(f => `<li class="cu-item" data-finding="${esc(f.id)}">
       <div class="cu-item-text">${esc(cuFindingSentence(m.lib, f))}</div>
@@ -518,11 +537,16 @@ function cuReviewHtml() {
         : cuReasonText(f.reason) || f.status.replace(/_/g, ' '))}</div>
       ${cuEvidenceHtml(f)}
       <div class="cu-item-actions">${cuReviewActionsHtml(m, f)}</div></li>`).join('');
-  const decide = open.filter(f => f.status === 'pending'), blocked = open.filter(f => f.status !== 'pending');
-  return `<div class="modal-title" id="cuTitle">Review collection updates</div>
+  const decide = open.filter(f => f.status === 'pending' && !m.unfinishedIds.has(f.id)), blocked = open.filter(f => f.status !== 'pending');
+  return `<div class="modal-title" id="cuTitle">${title}</div>
     ${m.message ? `<div class="${m.messageError ? 'modal-error' : 'banner'}">${esc(m.message)}</div>` : ''}
+    ${m.continued ? cuResultsHtml(m.continued) : ''}
+    ${unfinished.length ? `<div class="modal-label">Imported updates not applied yet (${unfinished.length})</div>
+      <p class="settings-text">An import stopped before these were applied. Continuing checks each one against your library as it is now: it may apply the update or leave it for your review, so it doesn’t guarantee that every one will apply.</p>
+      <div class="settings-actions"><button class="btn cu-continue" onclick="cuContinueImported()"${m.continuing ? ' disabled' : ''}>${m.continuing ? 'Applying…' : 'Continue applying imported updates'}</button></div>
+      <ul class="cu-review-list">${itemsOf(unfinished)}</ul>` : ''}
     ${decide.length ? `<div class="modal-label">Waiting for your decision (${decide.length})</div><ul class="cu-review-list">${itemsOf(decide)}</ul>` : '<p class="settings-text">Nothing waits for your decision.</p>'}
-    ${blocked.length ? `<div class="modal-label">Waiting for more research (${blocked.length})</div><p class="settings-text">${esc(CU_BLOCKED_TEXT)}</p><ul class="cu-review-list">${itemsOf(blocked)}</ul>` : ''}
+    ${blocked.length ? `<div class="modal-label">${cuBlockedHead()} (${blocked.length})</div><p class="settings-text">${esc(cuBlockedText())}</p><ul class="cu-review-list">${itemsOf(blocked)}</ul>` : ''}
     ${flagged.length ? `<div class="modal-label">New seasons after Ended</div><ul class="cu-review-list">${flagged.map(s => `<li class="cu-item">${esc(s.title)}
       <button class="btn" onclick="cuClearEndedFlag('${esc(s.id)}')">Clear flag</button></li>`).join('')}</ul>` : ''}
     <div class="modal-actions"><button class="btn" onclick="closeCuModal()">Close</button></div>`;
@@ -530,7 +554,7 @@ function cuReviewHtml() {
 function cuReviewActionsHtml(m, f) {
   const id = esc(f.id), btn = (label, call) => `<button class="btn" onclick="${call}">${esc(label)}</button>`;
   const decide = `${btn('Not now', `cuDecide('${id}', 'not_now')`)}${btn('Dismiss', `cuDecide('${id}', 'dismissed')`)}`;
-  if (f.status !== 'pending') return decide;
+  if (f.status !== 'pending' || m.unfinishedIds.has(f.id)) return decide;
   if (f.kind === 'new_season') {
     const cands = ((f.result || {}).candidates || []).map(rid => m.lib.rows.find(r => r.id === rid)).filter(Boolean);
     return (cands.length ? cands.map(r => btn(`It’s “${r.season}”`, `cuReviewSeason('${id}', '${esc(r.id)}')`)).join('') : btn('Apply', `cuReviewSeason('${id}', null)`)) + decide;

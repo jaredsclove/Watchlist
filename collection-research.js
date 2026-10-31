@@ -245,7 +245,9 @@ async function cuImportFindings(text) {
   const brief = briefs.find(b => b.id === doc.brief_id);
   if (!brief) return { problems: ['This findings file answers a brief this account didn’t export, so nothing was imported.'] };
   const sha = await cuSha256(text);
-  if ((await fetchAllRowsStrict('research_imports')).some(r => r.file_sha256 === sha)) return { problems: ['This findings file was already imported, so nothing changed.'] };
+  if ((await fetchAllRowsStrict('research_imports')).some(r => r.file_sha256 === sha)) {
+    return { problems: [`This findings file was already imported, so nothing changed.${cuUnfinishedFindings(lib, st).length ? ' Updates not applied yet can be continued from Review findings.' : ''}`] };
+  }
   const ageDays = (Date.now() - Date.parse(brief.exported_at)) / 86400000;
   const prepared = await cuPrepareFindings(doc, brief, lib, st);
   if (prepared.problems.length) return { problems: prepared.problems.slice(0, 30) };
@@ -281,25 +283,79 @@ async function cuImportFindings(text) {
       else results.unchanged++; // applied, accepted, dismissed or Not now earlier: the finding stands as decided
       continue;
     }
-    if (f.kind === 'new_season') {
-      const show = lib.showsById.get(f.show_id);
-      if (!show) { results.failed.push(`${label}: the show it names is no longer in your library`); continue; }
-      plan.push({ type: 'season', fn: 'library_cu_reconcile_season', what: `${show.title} · Season ${f.subject.season_number}`,
-        args: { p_show_id: show.id, p_expected: { tmdb_id: show.tmdb_id, show_key: show.show_key }, p_season: { season_number: f.subject.season_number },
-          p_finding: { id: rec.id }, p_review: false, p_row_id: null } });
-    } else if (f.kind === 'date') {
-      const row = lib.rows.find(r => r.id === (f.season_id || f.item_id));
-      if (!row) { results.failed.push(`${label}: the season or film it names is no longer in your library`); continue; }
-      plan.push({ type: 'date', fn: 'library_cu_set_season_date', what: `${row.title}${row.show_id ? ` · ${row.season}` : ''}`, newDate: f.proposed,
-        args: { p_row_id: row.id, p_expected: { display_date: row.display_date, date_sort: row.date_sort },
-          p_new: { display_date: f.proposed.display_date, date_sort: f.proposed.date_sort }, p_finding: { id: rec.id }, p_review: false } });
-    } else if (f.kind === 'alias') {
-      plan.push({ type: 'alias', fn: 'library_cu_add_alias', what: label, alias: f.proposed.alias,
-        args: { p_show_id: f.show_id, p_item_id: f.show_id ? null : f.item_id, p_alias: f.proposed.alias, p_finding: { id: rec.id } } });
-    } else results.review.push(`${cuFindingSentence(lib, f)}: waits for your decision`);
+    if (!CU_AUTOMATIC_KINDS.includes(f.kind)) { results.review.push(`${cuFindingSentence(lib, f)}: waits for your decision`); continue; }
+    const op = cuAutomaticOp(lib, f, rec.id);
+    if (op) plan.push(op);
+    else results.failed.push(`${label}: the record it names is no longer in your library`);
   }
   await cuApplyPlan(plan, results, 'Import findings');
   return { results };
+}
+
+// The kinds an import applies automatically (a new title, a cancellation and the like always wait for the owner).
+const CU_AUTOMATIC_KINDS = ['new_season', 'date', 'alias'];
+// One finding's automatic application, by the same call whether it comes from a file just imported or a stored
+// finding; null when the record it names is gone. Never a review decision (p_review false): the database applies its
+// automatic rules, to the library as it is at that moment.
+function cuAutomaticOp(lib, f, findingId) {
+  if (f.kind === 'new_season') {
+    const show = lib.showsById.get(f.show_id);
+    if (!show) return null;
+    return { type: 'season', fn: 'library_cu_reconcile_season', what: `${show.title} · Season ${f.subject.season_number}`,
+      args: { p_show_id: show.id, p_expected: { tmdb_id: show.tmdb_id, show_key: show.show_key }, p_season: { season_number: f.subject.season_number },
+        p_finding: { id: findingId }, p_review: false, p_row_id: null } };
+  }
+  if (f.kind === 'date') {
+    const row = lib.rows.find(r => r.id === (f.season_id || f.item_id));
+    if (!row) return null;
+    return { type: 'date', fn: 'library_cu_set_season_date', what: `${row.title}${row.show_id ? ` · ${row.season}` : ''}`, newDate: f.proposed,
+      args: { p_row_id: row.id, p_expected: { display_date: row.display_date, date_sort: row.date_sort },
+        p_new: { display_date: f.proposed.display_date, date_sort: f.proposed.date_sort }, p_finding: { id: findingId }, p_review: false } };
+  }
+  if (f.kind === 'alias') {
+    if (!(f.show_id ? lib.showsById.has(f.show_id) : lib.rows.some(r => r.id === f.item_id))) return null;
+    return { type: 'alias', fn: 'library_cu_add_alias', what: cuRecordTitle(lib, f), alias: f.proposed.alias,
+      args: { p_show_id: f.show_id, p_item_id: f.show_id ? null : f.item_id, p_alias: f.proposed.alias, p_finding: { id: findingId } } };
+  }
+  return null;
+}
+
+// ── Continuing an interrupted import ──
+// An import records its findings, then applies them one call at a time, so it can stop in between: access ended, a
+// lost answer, a busy lane, a closed tab. The file can't be imported again, and review's Apply is an owner override,
+// not these rules (and has none for an alias). A finding is unfinished while no applying function has evaluated it:
+// pending with no reason, because every evaluation that leaves a finding pending records why (a refused call
+// changes nothing and is still unfinished). Its decision time doesn't enter into it: an import that reopens Not now
+// keeps that time and still leaves the finding to be applied. A finding whose record has gone can't be continued.
+function cuUnfinishedFindings(lib, st) {
+  if (!researchEnabled) return [];
+  return st.findings.filter(f => f.source === 'research' && f.status === 'pending' && !f.reason && CU_AUTOMATIC_KINDS.includes(f.kind) && cuAutomaticOp(lib, f, f.id))
+    .sort((a, b) => cmpStr(a.first_seen_at, b.first_seen_at) || cmpStr(a.id, b.id));
+}
+// Only ever from the owner's click. Everything is read afresh first, so a finding an earlier unclear call did apply
+// isn't sent; the database re-checks each one under lock, and an unclear answer stops the rest (cuApplyPlan).
+async function cuContinueImported() {
+  const m = cuModal;
+  if (!researchEnabled || !m || m.kind !== 'review' || m.continuing) return;
+  const session = m.session;
+  Object.assign(m, { continuing: true, continued: null, message: '', messageError: false });
+  cuRenderModal();
+  let lib, st;
+  try { [lib, st] = await Promise.all([readLibrary(), cuReadState()]); }
+  catch (e) {
+    if (!cuModal || cuModal.session !== session) return;
+    Object.assign(m, { continuing: false, message: `Couldn’t read your library (${e.message}), so nothing was sent.`, messageError: true });
+    cuRenderModal();
+    return;
+  }
+  const plan = cuUnfinishedFindings(lib, st).map(f => cuAutomaticOp(lib, f, f.id));
+  const results = cuEmptyResults('continued');
+  results.checked = plan.length;
+  await cuApplyPlan(plan, results, 'Continue applying imported updates');
+  try { [lib, st] = await Promise.all([readLibrary(), cuReadState()]); } catch (e) { /* the results stand; Close and open again to read */ }
+  if (!cuModal || cuModal.session !== session) { showNotice(`Imported updates: ${results.applied.length} applied, ${results.review.length} to review, ${results.blocked.length} blocked, ${results.failed.length} not applied.`); return; }
+  Object.assign(m, { continuing: false, continued: results, lib, st });
+  cuRenderModal();
 }
 
 // ── The setup file ──
