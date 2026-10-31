@@ -353,6 +353,7 @@ a research new season, date or alias, `pending`, with an empty `reason`, and its
 | An import reopened it from `needs_*` or `set_aside` | empty | null | yes |
 | An import reopened it from Not now (newer evidence) | empty | **kept** | yes |
 | A refused or lost call | unchanged | unchanged | yes, until read as applied |
+| `library_cu_set_finding_status` from Not now to pending with an empty note (no page sends this today) | empty | kept | yes |
 | Any evaluation that left it pending (`date_needs_review`, `standing_decision`, `protected_value`, `setup_required`, …) | set | any | no: review |
 
 So `decided_at` can't be part of the test (the third row). The action reads the library and findings afresh, then sends the same calls
