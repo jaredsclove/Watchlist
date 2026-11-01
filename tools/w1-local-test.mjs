@@ -486,7 +486,18 @@ info(`a direct write ${viaLeak.ok ? 'WENT THROUGH' : 'was refused'} on such a co
 ok(s4.bad > 0, 'the limit is real: a session-level SET in a function survives the request');
 const flagged = tryPsql(sql('db/test/w1_catalog_check.sql'));
 ok(!flagged.ok && /zz_leak\(\)/.test(flagged.message) && /zz_leak2\(\)/.test(flagged.message), 'and the standing check names both spellings of such a function', flagged.message);
-psql(`drop function public.zz_leak(); drop function public.zz_leak2(); drop function public.zz_sleep(double precision); drop function public.zz_probe(); notify pgrst, 'reload schema';`);
+psql(`drop function public.zz_leak(); drop function public.zz_leak2();
+  create function public.zz_atomic() returns text begin atomic select set_config('xmloption', 'document', false); end;
+  grant execute on function public.zz_atomic() to authenticated;`);
+const atomic = tryPsql(sql('db/test/w1_catalog_check.sql'));
+ok(!atomic.ok && /zz_atomic\(\)/.test(atomic.message), 'and one with a SQL-standard body', atomic.message);
+psql(`drop function public.zz_atomic();`);
+psql(`drop function public.zz_sleep(double precision); drop function public.zz_probe(); notify pgrst, 'reload schema';`);
+psql(`create function public.zz_named(p text) returns text language sql as $$ select set_config(p, 'document', false) $$;
+  grant execute on function public.zz_named(text) to authenticated;`);
+const named = tryPsql(sql('db/test/w1_catalog_check.sql'));
+ok(!named.ok && /zz_named\(text\)/.test(named.message), 'and one that takes a setting’s name from its caller', named.message);
+psql(`drop function public.zz_named(text);`);
 psql(`begin; set local xmloption = 'document'; update public.tv_shows set ended = false where id = '${S.show.id}'; commit;`);
 await restartRest();
 await healthy('the pool restarted');
@@ -537,11 +548,16 @@ await h.run(`select set_config('watchlist.w1_reset_ok', 'forged', true);`);
 const f1 = await h.run(`${toggle};`);
 ok(misconfigured(f1), 'reset_val poisoned, a wrong marker: refused, the cause named', f1.err);
 await h.run(`rollback;`);
-await h.run(`select set_config('watchlist.w1_reset_ok', (pg_current_xact_id()::bigint + 1)::text || '/' || extract(epoch from pg_conf_load_time())::text, false);`);
+await h.run(`select set_config('watchlist.w1_reset_ok', (pg_current_xact_id()::text::bigint + 1)::text || '/' || extract(epoch from pg_conf_load_time())::text, false);`);
 await h.run(`begin;`); await h.run(`set local xmloption = 'document';`);
 const f2 = await h.run(`${toggle};`);
 await h.run(`rollback;`);
-ok(misconfigured(f2), 'a value guessed for an earlier transaction id: refused', f2.err);
+ok(f2.ok, 'the limit: a session that can run SQL can predict its next transaction too', f2.err);
+await h.run(`select set_config('watchlist.w1_reset_ok', '1/' || extract(epoch from pg_conf_load_time())::text, false);`);
+await h.run(`begin;`); await h.run(`set local xmloption = 'document';`);
+const f2b = await h.run(`${toggle};`);
+await h.run(`rollback;`);
+ok(misconfigured(f2b), 'a marker for another transaction: refused', f2b.err);
 await h.run(`begin;`); await h.run(`set local xmloption = 'document';`);
 await h.run(`select set_config('watchlist.w1_reset_ok', pg_current_xact_id()::text || '/' || extract(epoch from pg_conf_load_time())::text, true);`);
 const f3 = await h.run(`${toggle};`);
@@ -677,7 +693,7 @@ const repairing = r => /library_under_repair/.test(r.text || '');
 const denied = r => r.status === 403 || /permission denied/.test(r.text || '');
 const expectAll = async (n, f, pred) => (await Promise.all(Array.from({ length: n }, f))).every(pred);
 const waitFor = async (f, pred, ms = 9000) => { let r; for (let t = 0; t < ms; t += 300) { try { r = await f(); if (pred(r)) return r; } catch (e) { r = { text: String(e) }; } await sleep(300); } return r; };
-const aclBefore = Q(`select nspacl::text from pg_namespace where nspname = 'private'`);
+const aclBefore = Q(`select string_agg(x::text, ',' order by x::text) from pg_namespace n, unnest(n.nspacl) x where n.nspname = 'private'`);
 const recover = async (label, remove) => {
   // 1. Close.
   const closed = tryPsql(sql('db/admin/w1_recovery_1_close.sql'));
@@ -691,7 +707,7 @@ const recover = async (label, remove) => {
   ok(repairing(await rest(B.token, 'GET', 'tv_shows?select=id&limit=1')), `${label}: an ordinary member’s read is refused by the gate`);
   ok(repairing(await rest(B.token, 'DELETE', `tv_shows?id=eq.${B0.show.id}`)) && Q(`select count(*) from public.tv_shows where id = '${B0.show.id}'`) === '1', `${label}: and its direct delete, which no write guard covers (item 11)`);
   const ng = await gql(B.token, `mutation { b: updatetv_showsCollection(set: { ended: true }, filter: { id: { eq: "${B0.show.id}" } }, atMost: 1) { affectedCount } }`);
-  ok(repairing(ng) || /errors/.test(ng.text), `${label}: GraphQL too`, ng.text);
+  ok(repairing(ng), `${label}: GraphQL too`, ng.text);
   // 2. Remove and replace.
   await remove();
   const replaced = tryPsql(sql('db/admin/w1_recovery_2_replace.sql'));
@@ -700,7 +716,7 @@ const recover = async (label, remove) => {
   // 3. Owner only: prove the path before anyone else returns.
   const gatedStill = await waitFor(directB, repairing);
   ok(repairing(gatedStill), `${label}: the gate still holds before step 3`, gatedStill.text);
-  ok(tryPsql(sql('db/admin/w1_recovery_3_owner_only.sql')).ok && Q(`select nspacl::text from pg_namespace where nspname = 'private'`) === aclBefore, `${label}: step 3 gives schema access back exactly`);
+  ok(tryPsql(sql('db/admin/w1_recovery_3_owner_only.sql')).ok && Q(`select string_agg(x::text, ',' order by x::text) from pg_namespace n, unnest(n.nspacl) x where n.nspname = 'private'`) === aclBefore, `${label}: step 3 gives schema access back exactly`);
   const oneOwn = await waitFor(directA, r => required(r));
   ok(required(oneOwn) && net0() === n0, `${label}: the owner’s direct write is refused by the write guard`, oneOwn.text);
   ok(await expectAll(40, directA, r => required(r)) && net0() === n0, `${label}: on forty requests, across the pool`);
@@ -747,7 +763,11 @@ await recover('a role default still configured', async () => {
 
 await sysOn();
 await restartRest();
-await recover('a server default', async () => { await sysOff(); });
+await recover('a server default', async () => {
+  const early = tryPsql(sql('db/admin/w1_recovery_2_replace.sql'));
+  ok(!early.ok && /still configured/.test(early.message), 'step 2 refuses while a server default is there', early.message);
+  await sysOff();
+});
 
 psql(`create function public.zz_leak() returns void language plpgsql as $$ begin set xmloption = 'document'; end $$;
   grant execute on function public.zz_leak() to authenticated; notify pgrst, 'reload schema';`);

@@ -14,7 +14,11 @@ begin
   if (select count(*) from private.app_owner where singleton) <> 1 then raise exception 'w1 recovery: no single owner; nothing was changed'; end if;
 end $$;
 create table private.w1_recovery as
-select (select nspacl::text from pg_namespace where nspname = 'private') as private_acl;
+select (select array_agg(x::text order by x::text) from pg_namespace n, unnest(n.nspacl) x where n.nspname = 'private') as private_acl;
+do $$
+begin
+  if not has_schema_privilege('authenticated', 'private', 'usage') then raise exception 'w1 recovery: authenticated has no usage of private to give back; nothing was changed'; end if;
+end $$;
 do $$
 begin
   execute format($f$

@@ -6,7 +6,8 @@
 do $$
 begin
   if to_regclass('private.w1_recovery') is null then raise exception 'w1 recovery: step 1 has not run; nothing was changed'; end if;
-  if exists (select 1 from pg_db_role_setting s, unnest(s.setconfig) x where lower(x) like 'xmloption=%' or lower(x) like 'watchlist.w1_reset_ok=%') then
+  if exists (select 1 from pg_db_role_setting s, unnest(s.setconfig) x where lower(x) like 'xmloption=%' or lower(x) like 'watchlist.w1_reset_ok=%')
+     or (select reset_val from pg_settings where name = 'xmloption') <> 'content' then
     raise exception 'w1 recovery: the default is still configured; remove it first. Nothing was changed';
   end if;
 end $$;
