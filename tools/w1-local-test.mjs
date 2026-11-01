@@ -832,6 +832,8 @@ const printAll = () => Q(`select md5(string_agg(t, '|' order by t)) from (
 const printBefore = printAll();
 const s0 = status();
 ok(s0.xmloption_defaults === 0 && s0.xmloption_reset_val === 'content' && !s0.closed && !s0.gate_setting && s0.authenticated_uses_private, 'the status read starts clean', JSON.stringify(s0));
+const shape0 = await probes.shape();
+ok(shape0.status === 401 && shape0.code === '42501', 'the signed-out answer’s shape is recorded', JSON.stringify(shape0));
 ok(s0.postgrest_connections >= 1 && s0.other_authenticator === 0, 'PostgREST’s connections are identified by name');
 // An authenticator connection under another name stays.
 const other = spawn('docker', ['exec', '-i', '-e', 'PGPASSWORD=postgres', CONTAINER, 'psql', '-X', '-q', '-h', '127.0.0.1', '-U', 'authenticator', '-d', 'postgres', '-c', `set application_name = 'zz other'; select pg_sleep(12)`]);
@@ -853,6 +855,7 @@ const firstOut = JSON.parse(first.out.match(/W1R\|(\{.*\})/)[1]);
 ok(first.ok && firstOut.may_end && firstOut.found >= 1 && firstOut.ended === firstOut.found, 'the connections script ends what it found', first.out);
 await sleep(2000);
 ok((await probes.signedOut('gate')).answer === 'gate', 'the gate holds on new connections');
+ok((await probes.shape()).code === 'PT503', 'and its shape differs from the signed-out answer');
 const s1 = status();
 ok(s1.closed && s1.gate_function && s1.gate_setting && !s1.authenticated_uses_private && s1.other_authenticator === 1, 'the status read shows it closed, and another authenticator connection left alone', JSON.stringify(s1));
 ok(new Date(s1.oldest_postgrest_connection) > new Date(firstOut.at), 'every PostgREST connection is newer than the script');
@@ -892,6 +895,9 @@ let refused = ''; await p2.legitimate().catch(e => { refused = String(e.message)
 ok(/stopped earlier/.test(refused), 'nothing further runs after it', refused);
 const p3 = vmCtx.W1Probes(probeEnv); p3.adopt(rec2);
 psql(`alter table public.tv_shows disable trigger tv_shows_b45_guard; update public.tv_shows set priority = 'high' where id = '${rec2.showId}'; alter table public.tv_shows enable trigger tv_shows_b45_guard;`);
+const lost = vmCtx.W1Probes({ ...probeEnv, owner: async () => { throw new Error('no answer'); } }); lost.adopt(rec2);
+await lost.restore().catch(() => {}); let afterLost = ''; await lost.cleanup().catch(e => { afterLost = String(e.message); });
+ok(/stopped earlier/.test(afterLost), 'a restore that gets no answer still stops the page', afterLost);
 const viaFn = await p3.restore();
 ok(viaFn.how === 'function' && viaFn.confirmed, 'with the guard back on, the restore goes through the library function', JSON.stringify(viaFn));
 const p3b = vmCtx.W1Probes(probeEnv); p3b.adopt(rec2);

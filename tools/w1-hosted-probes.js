@@ -84,6 +84,7 @@
       // Only for a direct write that went through: its own exact change, with the attempted value as the filter. Tried by
       // the direct path, then the library function. Whatever happens, nothing further runs on this page.
       async restore() {
+        halted = 'a direct write went through; its restore did not finish';
         const r = await owner('PATCH', `tv_shows?id=eq.${record.showId}&priority=eq.${ATTEMPTED}`, { priority: ORIGINAL }, { Prefer: 'return=representation' });
         let how = 'direct';
         if (!(r.ok && Array.isArray(r.json) && r.json.length === 1)) { how = 'function'; await setState(ATTEMPTED, ORIGINAL).catch(() => {}); }
@@ -112,6 +113,8 @@
       },
       // What a signed-out request answers now, for polling after a reload. Never stops.
       async peek() { return kind(await call('GET', 'tv_shows?select=id&limit=1', undefined, { apikey: env.key })); },
+      // The same request's status and error code, to tell a gate that didn't load from an answer kind can't read.
+      async shape() { const r = await call('GET', 'tv_shows?select=id&limit=1', undefined, { apikey: env.key }); return { status: r.status, code: r.json && !Array.isArray(r.json) ? r.json.code || null : null, json: !!r.json }; },
       // Removes the record with delete_tv_season: its last season takes the show. Refused if the record isn't as created.
       async cleanup() {
         live();

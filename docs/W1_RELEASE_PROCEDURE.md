@@ -18,7 +18,7 @@ page's session and never prints a token.
 | `functions` | 38 of 38, 3 enrichment, 0 public writers outside the list | The migration's set |
 | `settings` | `content`, `content`, source default, context `user`; 0 defaults; 0 functions naming either; `pre_request_set` false | Nothing already in the way |
 | `grants` | No application role can create; `authenticated` uses `private`, `anon` doesn't; `pg_graphql` false | The gate's first half has something to revoke |
-| `capabilities` | `postgres` not superuser, `may_signal` true, `admin_of_authenticator` or `postgres_createrole` true, `private_owner` postgres, one owner | `postgres` can end the connections, set the gate and revoke usage |
+| `capabilities` | `postgres` not superuser, `may_signal` true, `admin_of_authenticator` true (on PostgreSQL before 16, `postgres_createrole` is enough), `private_owner` postgres, one owner | `postgres` can end the connections, set the gate and revoke usage |
 | `connections` | At least one `PostgREST…` name; any other name is noted and left alone | The connections script ends PostgREST's only |
 | `recovery_absent` | True | No earlier repair is open |
 
@@ -70,7 +70,7 @@ proof before the next. A poll waits up to 60 seconds. `P` here is one page; afte
 
 | # | Run | Proof before moving on |
 |---|---|---|
-| 0 | `w1_recovery_status.sql` | Nothing closed, no defaults. Note `oldest_postgrest_connection` |
+| 0 | `w1_recovery_status.sql`, then `P.shape()` | Nothing closed, no defaults. Note `oldest_postgrest_connection`, and the signed-out status and code |
 | 1 | `w1_recovery_1_close.sql` | `P.peek()` answers `gate`: **access is blocked** |
 | 2 | Checks | `P.signedOut('gate')`; `P.direct('denied')`; `P.noWrite('denied')`: the owner stops at schema access. The page's reads may fail here, which is expected |
 | 3 | `w1_recovery_connections.sql` | `may_end` true, `ended` equals `found` |
@@ -98,11 +98,12 @@ one exception is a refusal that fails.
 | What happens | Do this | Then |
 |---|---|---|
 | Step 1 fails or is refused | Nothing changed (one transaction). Stop the drill | Report |
-| Step 1 ran, the gate isn't seen in 60 s | Step 3 (connections), wait 60 s | Still no gate: one project restart, then check. Still none: the gate isn't proved on hosted; finish by steps 9, 11, 12 and report |
+| Step 1 ran, the gate isn't seen in 60 s | `P.shape()` against step 0's answer: an unchanged PostgREST answer means the gate didn't load, a new one means the check can't read it. Then step 3 (connections), wait 60 s | Still no gate: one project restart, then check. Still none: the gate isn't proved on hosted. Run steps 9 and 11, then the connections script and its status proof, so PostgREST has read its configuration again, and only then step 12. If that proof fails, leave step 12 undone. Report |
 | `may_end` false or `ended` short of `found` | One project restart in place of the connections script | `w1_recovery_status.sql` and the row's proof. Starting is not proof |
 | A connection stays older than the script | Run it once more | Then one project restart |
 | After step 1, `P.signedOut` answers anything but `gate` or `denied` | Stop the drill | Finish by steps 9, 11, 12 |
 | Steps 9 or 12 refuse | Read the status and the error; run no other SQL | Report. The API stays as the last proof left it |
+| Step 2: a direct write goes through | `P.restore` can't reach the row with schema access gone, so its answer is unconfirmed. Write nothing more. Run steps 9 and 11 for access only | Stop and report. The owner decides the restore |
 | Step 10: a direct write goes through | `P.restore` has already run. Confirm the value. Turn Enable Data API off in the Dashboard, confirm requests fail | Stop and report, with the API closed |
 | Step 10: any other unexpected answer | Stop. The gate stays on, the API closed for everyone but the owner | Report |
 | Step 11: the gate is still on after 60 s | Connections script, 60 s | One project restart. Still on: report, and leave step 12 undone: dropping the function under a live gate fails every request |

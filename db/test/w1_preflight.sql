@@ -45,7 +45,7 @@ select 'W1P|' || (jsonb_build_object(
     'pg_graphql', exists (select 1 from pg_extension where extname = 'pg_graphql')),
   'capabilities', jsonb_build_object(
     'postgres_super', (select rolsuper from pg_roles where rolname = 'postgres'), 'postgres_createrole', (select rolcreaterole from pg_roles where rolname = 'postgres'),
-    'runs_as', current_user, 'may_signal', pg_has_role('postgres', 'pg_signal_backend', 'usage'),
+    'pg_version', current_setting('server_version_num')::int, 'runs_as', current_user, 'may_signal', pg_has_role('postgres', 'pg_signal_backend', 'usage'),
     'may_alter_system_xmloption', has_parameter_privilege('postgres', 'xmloption', 'ALTER SYSTEM'),
     'admin_of_authenticator', exists (select 1 from pg_auth_members a where a.roleid = 'authenticator'::regrole and a.member = 'postgres'::regrole and a.admin_option),
     'private_owner', (select nspowner::regrole::text from pg_namespace where nspname = 'private'),
