@@ -57,7 +57,7 @@ test('a hold keeps it out and says so; removing the hold lets the next Refresh r
   assert.strictEqual(has(app, show, 3), 1);
 });
 
-for (const [status, re] of [['dismissed', /Season 3: not added — you dismissed it; add the season by hand if you want it/], ['not_now', /Season 3: not added — you set it to Not now/]]) {
+for (const [status, re] of [['dismissed', /Season 3: not added — you dismissed it; add the season by hand if you want it/], ['not_now', /Season 3: not added — you set it to Not now; add the season by hand if you want it/]]) {
   test(`${status}: the season stays out, Refresh says so, and nothing is added or changed`, async () => {
     const { app, show } = await library();
     remove(app, show, 3); await refresh(app); remove(app, show, 3);
@@ -76,6 +76,8 @@ test('“already on your list” appears only for the database’s answer about 
   const op = { type: 'season', what: 'Listed · Season 3', args: { p_finding: { source: 'tmdb' } } };
   const a = r(); app.ctx.cuRecordOutcome(op, { outcome: 'not_pending', status: 'applied', reason: '' }, a);
   assert.deepStrictEqual(Array.from(a.applied), ['Listed · Season 3: already on your list']);
+  const a2 = r(); app.ctx.cuRecordOutcome(op, { outcome: 'already', status: 'applied', reason: 'existing' }, a2);
+  assert.deepStrictEqual(Array.from(a2.applied), ['Listed · Season 3: already on your list'], 'the database’s own “it exists” answer');
   const b = r(); app.ctx.cuRecordOutcome({ ...op, args: { p_finding: { id: 'x' } } }, { outcome: 'not_pending', status: 'applied', reason: '' }, b);
   assert.strictEqual(b.applied.length, 0, 'a research finding’s answer says nothing about the season');
   const c = r(); app.ctx.cuRecordOutcome({ type: 'date', what: 'Listed · Season 3', args: { p_finding: { source: 'tmdb' } } }, { outcome: 'not_pending', status: 'applied', reason: '' }, c);

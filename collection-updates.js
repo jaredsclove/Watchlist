@@ -272,11 +272,11 @@ function cuRecordOutcome(op, res, results) {
   } else if (res.outcome === 'already' || res.outcome === 'not_pending') {
     if (res.outcome === 'not_pending' && CU_OPEN_STATUSES.includes(res.status)) (CU_BLOCKED_STATUSES.includes(res.status) ? results.blocked : results.review).push(`${op.what}: ${cuReasonText(res.reason) || 'waits for review'}`);
     // A TMDB season is sent only when this page saw it missing, so its answer always says something (CU1e). `applied`
-    // here means the database found the season, under the show's lock: an applied finding alone never reaches this.
-    else if (res.outcome === 'not_pending' && op.type === 'season' && (op.args.p_finding || {}).source === 'tmdb') {
+    // here means the database found the season, under the show's lock: an applied finding alone is reopened instead.
+    else if (op.type === 'season' && (op.args.p_finding || {}).source === 'tmdb') {
       if (res.status === 'applied') results.applied.push(`${op.what}: already on your list`);
       else if (res.status === 'dismissed') results.setAside.push(`${op.what}: not added — you dismissed it; add the season by hand if you want it`);
-      else if (res.status === 'not_now') results.setAside.push(`${op.what}: not added — you set it to Not now`);
+      else if (res.status === 'not_now') results.setAside.push(`${op.what}: not added — you set it to Not now; add the season by hand if you want it`);
       else results.setAside.push(`${op.what}: not added — ${why || res.status.replace(/_/g, ' ')}`);
     }
   } else if (res.outcome === 'policy') {

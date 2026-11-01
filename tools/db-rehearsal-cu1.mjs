@@ -1719,6 +1719,18 @@ section('cu1e: a missing season comes back (db/cu1e_missing_season.sql)');
   await asSuper(db, `insert into public.watchlist_items (user_id, item_key, title, season, theme, display_date, date_sort, watched, status, show_id, skipped) values ('${A}', '${U.key}|season 3', 'ZZ CU1e Announced', 'Season 3', 'ZZ', 'TBA', '2099-01-01', false, 'confirmed', '${U.id}', false)`);
   const um = await ref(U, 3);
   ok(um.outcome === 'applied' && um.result.outcome === 'mapped' && (await count(U, 3)) === 1, 'an announced row with that label is matched, not duplicated', JSON.stringify(um));
+  // A review names its finding: it never reopens an applied one, so it can't pass a hold.
+  const W = await seed('ZZ CU1e Review', 992009);
+  await del(W, 3); await ref(W, 3); const fw = await finding(W, 3); await del(W, 3); await holdOn(W, 3);
+  const rv1 = await tryCall(db, 'library_cu_reconcile_season', [W.id, { tmdb_id: W.tmdb, show_key: W.key }, { season_number: 3 }, { id: fw.id }, true, null]);
+  ok(!rv1.ok && /finding_not_pending/.test(rv1.message) && (await count(W, 3)) === 0, 'a review by id of an applied finding is refused, past no hold', rv1.message || 'it ran');
+  ok((await ref(W, 3)).reason === 'standing_decision', 'while Refresh reopens it, under the hold');
+  // A row with that number but another identity isn't the corresponding season: review, not “already there”.
+  const X = await seed('ZZ CU1e Other Identity', 992010);
+  await del(X, 3); await ref(X, 3);
+  await asSuper(db, `update public.watchlist_items set tmdb_id = 992099 where show_id = '${X.id}' and season_number = 3`);
+  const xr = await ref(X, 3);
+  ok(xr.status === 'pending' && xr.reason === 'key_conflict', 'a row with another TMDB identity goes to review, never “already on your list”', JSON.stringify(xr));
   // A finding whose subject has no number is left alone.
   const V = await seed('ZZ CU1e No Number', 992008);
   await del(V, 3); await ref(V, 3); await del(V, 3);
