@@ -8,7 +8,8 @@
 -- and listed again meets its own `applied` finding, and the call answered not_pending with the season gone. Now an
 -- applied TMDB new_season finding whose season is missing is reopened (pending, no reason, no decision or result), and
 -- the same call decides it under every current rule. Nothing else changes:
---   the season exists (Skipped included, or a stored row with that number): the finding stays applied, no duplicate;
+--   the season exists (Skipped included): the finding stays applied, no duplicate;
+--   a review names its finding by id and never reopens one: an applied finding stays refused there;
 --   Dismissed and Not now are the owner's decisions: they keep their status;
 --   a Skipped show, a hold, a stale write or a research finding behaves as before, in library_cu_reconcile_season.
 -- Lock order stays finding, then show, as in that function; delete_tv_season takes the show and no finding, so neither
@@ -40,6 +41,9 @@ begin
   if (select prosrc from pg_proc where oid = 'private.cu1_finding_take(uuid, jsonb, text[])'::regprocedure) like '%A TMDB season applied earlier%' then
     raise exception 'cu1e: already installed; nothing was changed';
   end if;
+  if (select md5(prosrc) from pg_proc where oid = 'private.cu1_finding_take(uuid, jsonb, text[])'::regprocedure) is distinct from 'f3e3735cf663662f2a8993bd5ab3da0d' then
+    raise exception 'cu1e: private.cu1_finding_take is not CU1''s version; nothing was changed';
+  end if;
   if exists (select 1 from private.migration_runs r where r.run_id = c.run_id) then raise exception 'cu1e: run id % is already recorded; use a fresh one. Nothing was changed', c.run_id; end if;
   if public.stage5_capabilities() ->> 'phase' is distinct from 'contracted-cu1' or (public.stage5_capabilities() ->> 'backup_format') is distinct from '7' then
     raise exception 'cu1e: expected phase contracted-cu1 with backup format 7; nothing was changed';
@@ -52,7 +56,7 @@ end $$;
 -- ── 2. The function ────────────────────────────────────────────────────────────
 create or replace function private.cu1_finding_take(p_owner uuid, p_finding jsonb, p_kinds text[]) returns public.update_findings
 language plpgsql set search_path = '' as $$
-declare f public.update_findings; v_id uuid;
+declare f public.update_findings; v_id uuid; v_tmdb integer;
 begin
   if jsonb_typeof(p_finding) is distinct from 'object' then raise exception 'invalid_input: finding' using errcode = '22023'; end if;
   if p_finding ? 'id' then
@@ -74,22 +78,24 @@ begin
     exception when invalid_text_representation then raise exception 'invalid_input: TMDB finding ids' using errcode = '22023';
     end;
     select * into f from public.update_findings where user_id = p_owner and fingerprint = p_finding ->> 'fingerprint' for update;
+    -- A TMDB season applied earlier and now missing: this Refresh is a fresh check, not a repeat. Deleting a season is
+    -- no decision about it: only an explicit one (Skip, a hold, Dismiss, Not now) keeps it out, and those keep their status
+    -- here. The show lock comes before the look at its seasons, so a delete in flight is waited for, not missed. The test
+    -- is the one reconciliation uses for an identified season. A review, which names the finding by id, never comes here.
+    if f.source = 'tmdb' and f.kind = 'new_season' and f.status = 'applied' and f.show_id is not null and coalesce(f.subject ->> 'season_number', '') ~ '^[0-9]{1,4}$' then
+      select tmdb_id into v_tmdb from public.tv_shows where id = f.show_id and user_id = p_owner for update;
+      if not exists (select 1 from public.watchlist_items w where w.user_id = p_owner and w.show_id = f.show_id and w.media_type = 'tv'
+                     and w.tmdb_id = v_tmdb and w.season_number = (f.subject ->> 'season_number')::integer) then
+        update public.update_findings set status = 'pending', reason = '', result = null, decided_at = null, applied_at = null, last_seen_at = now()
+        where id = f.id returning * into f;
+      end if;
+    end if;
     -- A TMDB finding a policy outcome parked (needs_evidence, set_aside) and the owner hasn't decided is
     -- checked again with what TMDB says now (a later date and episodes, a show no longer Skipped);
     -- owner decisions (Not now, Dismiss) and final outcomes stand.
     if f.source = 'tmdb' and f.status in ('needs_evidence', 'set_aside') and f.decided_at is null then
       update public.update_findings set status = 'pending', reason = '', subject = coalesce(p_finding -> 'subject', subject),
         proposed = coalesce(p_finding -> 'proposed', proposed), expected = coalesce(p_finding -> 'expected', expected), last_seen_at = now()
-      where id = f.id returning * into f;
-    end if;
-  end if;
-  -- A TMDB season applied earlier and now missing: this call is a fresh check, not a repeat. Deleting a season is
-  -- no decision about it: only an explicit one (Skip, a hold, Dismiss, Not now) keeps it out, and those keep their
-  -- status here. The show lock comes before the look at its seasons, so a delete in flight is waited for, not missed.
-  if f.source = 'tmdb' and f.kind = 'new_season' and f.status = 'applied' and f.show_id is not null and coalesce(f.subject ->> 'season_number', '') ~ '^[0-9]{1,4}$' then
-    perform 1 from public.tv_shows where id = f.show_id and user_id = p_owner for update;
-    if not exists (select 1 from public.watchlist_items w where w.user_id = p_owner and w.show_id = f.show_id and w.season_number = (f.subject ->> 'season_number')::integer) then
-      update public.update_findings set status = 'pending', reason = '', result = null, decided_at = null, applied_at = null, last_seen_at = now()
       where id = f.id returning * into f;
     end if;
   end if;

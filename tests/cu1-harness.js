@@ -91,7 +91,7 @@ function cu1Handlers({ app, store, DbError, isFilmRow }) {
     }
     // CU1e: an applied TMDB season that's missing now is a fresh check.
     if (f.source === 'tmdb' && f.kind === 'new_season' && f.status === 'applied' && f.show_id && /^[0-9]{1,4}$/.test(String((f.subject || {}).season_number))
-        && !items().some(r => r.show_id === f.show_id && r.season_number === Number(f.subject.season_number))) {
+        && !p.id && !items().some(r => r.show_id === f.show_id && r.media_type === 'tv' && r.tmdb_id === (shows().find(s => s.id === f.show_id) || {}).tmdb_id && r.season_number === Number(f.subject.season_number))) {
       Object.assign(f, { status: 'pending', reason: '', result: null, decided_at: null, applied_at: null, last_seen_at: now() });
     }
     if (!kinds.includes(f.kind)) invalid(`a ${f.kind} finding can't be applied here`);
