@@ -213,7 +213,18 @@ async function setApproval(db, { reportSha, lossy, p1Sha, digests, token, base =
     set_config('watchlist.b45_rollback_p1_digests', $5, false), set_config('watchlist.b45_rollback_approval', $6, false)`,
     [reportSha, lossy ? 'accepted' : '', b, p1Sha ?? '', digests ? JSON.stringify(digests) : '', token ?? '']);
 }
+// REHEARSE_W1=1 runs every check under W1's guards: its core comes off before a script that replaces functions, since a
+// migration refuses settings it doesn't expect, and goes back on after it.
+const W1_CORE = process.env.REHEARSE_W1 ? sql('db/w1_write_scope.sql').match(/-- w1-core-begin\n([\s\S]*)-- w1-core-end/)[1] : null;
+const W1_OFF = W1_CORE && sql('db/test/w1_reverse.sql').replace(/do \$\$ begin[\s\S]*?end \$\$;\n/, '');
 async function tryExec(db, text) {
+  const hook = W1_CORE && /function/.test(text);
+  if (hook && Object.values((await db.query(`select to_regprocedure('private.lib_authorized()') is not null as on`)).rows[0])[0]) await db.exec(W1_OFF);
+  const r = await tryExec0(db, text);
+  if (hook) await db.exec(`begin;\n${W1_CORE}\ncommit;`);
+  return r;
+}
+async function tryExec0(db, text) {
   try { const out = await db.exec(text); return { ok: true, out }; }
   catch (e) { await db.exec('rollback').catch(() => {}); return { ok: false, message: e.message }; }
 }
@@ -518,10 +529,10 @@ for (const [what, change] of drifts) {
   const p1before = JSON.stringify(await exportDoc(db3, 5)); // P1 of the dry-run state
   const appr = associate(p1before, dr3, { lossy: true });
   await db3.exec('begin');
-  await db3.query(`select set_config('watchlist.library_write', 'on', true)`);
+  await db3.query(`select set_config('watchlist.library_write', 'on', true), set_config('xmloption', 'document', true)`);
   const applied = await db3.exec(change).then(() => true, e => { console.log(`  info ${what}: ${e.message}`); return false; });
   if (!applied) { await db3.exec('rollback'); b4.push([what, false, false, false]); continue; }
-  await db3.query(`select set_config('watchlist.library_write', '', true)`);
+  await db3.query(`select set_config('watchlist.library_write', '', true), set_config('xmloption', 'content', true)`);
   const drifted = await state(db3);
   await setApproval(db3, { reportSha: appr.reportSha, lossy: true, p1Sha: appr.p1Sha, digests: appr.digests, token: appr.token });
   const x = await (async () => { try { await db3.exec(sql('db/rollback/b45.sql').replace(/^begin;/m, 'savepoint zz_rb;').replace(/^commit;\s*$/m, 'release savepoint zz_rb;')); return { ok: true }; }
@@ -588,11 +599,11 @@ for (const c of cfg.__C.filter(x => ['disney', '90day', 'sheridan'].includes(x.i
 }
 ok(sameState(before8w, await state(db3)) && w8.every(x => x[1] === 'preview' && x[2] === 'b45.1'), `W8 previews of the three catalogs (version b45.1) write nothing: ${JSON.stringify(w8)}`);
 // Remove one catalog film and one catalog season so an apply has work, then apply and replay.
-await db3.query(`select set_config('watchlist.library_write', 'on', false)`);
+await db3.query(`select set_config('watchlist.library_write', 'on', false), set_config('xmloption', 'document', false)`);
 const goneFilm = await val(db3, `select w.item_key from public.watchlist_items w join public.catalog_film_links l on l.item_id = w.id where l.catalog = 'sheridan' order by w.item_key desc limit 1`);
 await db3.exec(`delete from public.collection_memberships where item_id in (select w.id from public.watchlist_items w where w.item_key = '${goneFilm.replace(/'/g, "''")}');
   delete from public.catalog_film_links where entry_key = '${goneFilm.replace(/'/g, "''")}'; delete from public.watchlist_items where item_key = '${goneFilm.replace(/'/g, "''")}'`);
-await db3.query(`select set_config('watchlist.library_write', '', false)`);
+await db3.query(`select set_config('watchlist.library_write', '', false), set_config('xmloption', 'content', false)`);
 const sher = cfg.__C.find(x => x.id === 'sheridan').defaults;
 const pv = (await an3(db3, `select public.library_catalog_apply_b45('sheridan', $1::jsonb) r`, [JSON.stringify(sher)]))[0].r;
 const ap = (await an3(db3, `select public.library_catalog_apply_b45('sheridan', $1::jsonb, $2) r`, [JSON.stringify(sher), pv.hash]))[0].r;

@@ -76,7 +76,7 @@ async function replica() {
   await asAnon(db, `select public.restore_backup($1::jsonb, false)`, [doc]);
   // Synthetic recovery-archive rows for the bootstrap owner (production's archive is not in a backup):
   // one record entry per show and item, one collection entry per personal collection, one meta row.
-  await db.exec(`begin; select set_config('watchlist.library_write', 'on', true);
+  await db.exec(`begin; select set_config('watchlist.library_write', 'on', true); set local xmloption = 'document';
     insert into private.stage5_recovery_records (user_id, kind, id, collection)
       select user_id, 'show', id, 'synthetic' from public.tv_shows union all select user_id, 'item', id, 'synthetic' from public.watchlist_items;
     insert into private.stage5_recovery_collections (user_id, id, legacy_source) select user_id, id, null from public.personal_collections;
@@ -153,7 +153,18 @@ function statements(text) {
   return out;
 }
 const stmtHead = s => s.replace(/--[^\n]*\n/g, '').trim().split(/\s+/).slice(0, 4).join(' ');
+// REHEARSE_W1=1 runs every check under W1's guards: its core comes off before a script that replaces functions, since a
+// migration refuses settings it doesn't expect, and goes back on after it.
+const W1_CORE = process.env.REHEARSE_W1 ? sql('db/w1_write_scope.sql').match(/-- w1-core-begin\n([\s\S]*)-- w1-core-end/)[1] : null;
+const W1_OFF = W1_CORE && sql('db/test/w1_reverse.sql').replace(/do \$\$ begin[\s\S]*?end \$\$;\n/, '');
 async function tryExec(db, text) {
+  const hook = W1_CORE && /function/.test(text);
+  if (hook && Object.values((await db.query(`select to_regprocedure('private.lib_authorized()') is not null as on`)).rows[0])[0]) await db.exec(W1_OFF);
+  const r = await tryExec0(db, text);
+  if (hook) await db.exec(`begin;\n${W1_CORE}\ncommit;`);
+  return r;
+}
+async function tryExec0(db, text) {
   try { const out = await db.exec(text); return { ok: true, out }; }
   catch (e) { await db.exec('rollback').catch(() => {}); return { ok: false, message: e.message }; }
 }

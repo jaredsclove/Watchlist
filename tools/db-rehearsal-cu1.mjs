@@ -76,7 +76,7 @@ async function replica() {
   await db.query(`select set_config('watchlist.b45_choices', $1, false)`, [JSON.stringify({ shows: {}, films: {} })]);
   await db.exec(sql('db/b45_expand.sql'));
   await db.exec(`insert into auth.users (id, email) values ('${A}', 'a@test.invalid'), ('${B}', 'b@test.invalid'), ('${C}', 'c@test.invalid')`);
-  await db.exec(`begin; select set_config('watchlist.library_write', 'on', true);
+  await db.exec(`begin; select set_config('watchlist.library_write', 'on', true); set local xmloption = 'document';
     insert into private.stage5_recovery_meta (user_id, origin, counts, hashes)
       select bootstrap_owner_id, 'contraction', '{}'::jsonb, '{}'::jsonb from private.app_owner; commit;`);
   await db.exec(`select set_config('watchlist.m1_owner', '${A}', false), set_config('watchlist.m1_run', 'rehearsal-m1', false);\n` + sql('db/m1_access.sql'));
@@ -101,7 +101,7 @@ const one = async (db, who, s, p) => { const r = await asUser(db, who, s, p); re
 // An RPC as A (or another member), its JSON answer.
 const call = (db, fn, args, who = A) => one(db, who, `select public.${fn}(${args.map((_, i) => `$${i + 1}`).join(', ')}) r`, args);
 const tryCall = (db, fn, args, who = A) => attempt(() => call(db, fn, args, who));
-const asSuper = async (db, s) => db.exec(`begin; select set_config('watchlist.library_write', 'on', true); select set_config('watchlist.catalog_date_write', 'on', true); ${s}; commit;`);
+const asSuper = async (db, s) => db.exec(`begin; select set_config('watchlist.library_write', 'on', true); set local xmloption = 'document'; select set_config('watchlist.catalog_date_write', 'on', true); ${s}; commit;`);
 
 // ── Snapshots ──
 const OLD_TABLES = [['public', 'watchlist_items'], ['public', 'tv_shows'], ['public', 'custom_collections'], ['public', 'personal_collections'],
@@ -161,7 +161,18 @@ function statements(text) {
   return out;
 }
 const stmtHead = s => s.replace(/--[^\n]*\n/g, '').trim().split(/\s+/).slice(0, 4).join(' ');
+// REHEARSE_W1=1 runs every check under W1's guards: its core comes off before a script that replaces functions, since a
+// migration refuses settings it doesn't expect, and goes back on after it.
+const W1_CORE = process.env.REHEARSE_W1 ? sql('db/w1_write_scope.sql').match(/-- w1-core-begin\n([\s\S]*)-- w1-core-end/)[1] : null;
+const W1_OFF = W1_CORE && sql('db/test/w1_reverse.sql').replace(/do \$\$ begin[\s\S]*?end \$\$;\n/, '');
 async function tryExec(db, text) {
+  const hook = W1_CORE && /function/.test(text);
+  if (hook && Object.values((await db.query(`select to_regprocedure('private.lib_authorized()') is not null as on`)).rows[0])[0]) await db.exec(W1_OFF);
+  const r = await tryExec0(db, text);
+  if (hook) await db.exec(`begin;\n${W1_CORE}\ncommit;`);
+  return r;
+}
+async function tryExec0(db, text) {
   try { const out = await db.exec(text); return { ok: true, out }; }
   catch (e) { await db.exec('rollback').catch(() => {}); return { ok: false, message: e.message }; }
 }
