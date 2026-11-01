@@ -13,15 +13,20 @@
 -- The guards read the setting through private.lib_authorized, which also requires that nothing configures it as a
 -- default: a value in pg_db_role_setting (PostgREST applies a role's settings to each request's transaction) or a
 -- reset_val other than content (the server's or the connection's). A default there would make every write look like
--- a library function's. A poisoned default refuses every write, under its own library_write_misconfigured error, until
--- it's removed and connections restart: reset_val keeps a connection's starting value.
+-- a library function's. A poisoned default refuses every write, under its own library_write_misconfigured error.
+-- Removing one needs PostgREST reloaded or restarted in the same step: a connection keeps its starting reset_val, which
+-- fails closed, but PostgREST also caches a role's settings, and until it reloads, a role default it still applies is
+-- no longer in the catalog, so direct writes pass.
 --
 -- What the guard can't see is a session-level SET inside a function: a pooled connection keeps it for later requests,
 -- and it looks exactly like the clause. No function may do that (db/README.md, write scope), and this file refuses
 -- if an application role can execute a function whose source names the setting.
 --
 -- org_add_membership and org_remove_membership still set watchlist.library_write: nothing reads it now.
--- Any later `create or replace` of a function in the set drops its clause, so it must set it again.
+-- Any later `create or replace` of a function in the set drops its clause, so it must set it again;
+-- db/test/w1_catalog_check.sql checks both rules after such a migration.
+-- A direct write by service_role is refused with a permission error (it has no usage on private), not the guard's.
+-- A library function already waiting on lib_write_on's lock when this commits fails once with library_write_required.
 --
 -- Completion: committed if and only if private.migration_runs holds its run id (a fresh read in a separate execution).
 -- Never rerun to find out; a rerun is refused once this committed. No rollback (fix-forward); db/test/w1_reverse.sql is
@@ -100,8 +105,8 @@ begin
   if v_extra is not null then raise exception 'w1: library functions the set doesn''t name: %; nothing was changed', v_extra; end if;
   if exists (select 1 from pg_proc p, unnest(p.proconfig) x where lower(x) like 'xmloption=%') then raise exception 'w1: a function already sets xmloption; nothing was changed'; end if;
   if exists (select 1 from pg_db_role_setting s, unnest(s.setconfig) x where lower(x) like 'xmloption=%') then raise exception 'w1: xmloption is configured for a database or role; nothing was changed'; end if;
-  if current_setting('xmloption') <> 'content' or (select reset_val <> 'content' or source <> 'default' from pg_settings where name = 'xmloption') then
-    raise exception 'w1: xmloption is not at its default in this session; nothing was changed';
+  if current_setting('xmloption') <> 'content' or (select reset_val from pg_settings where name = 'xmloption') <> 'content' then
+    raise exception 'w1: xmloption isn''t content in this session; nothing was changed';
   end if;
   if exists (select 1 from pg_proc p where p.prosrc ~* 'xml\s*_?option') then raise exception 'w1: a function''s source names xmloption; nothing was changed'; end if;
 end $$;
@@ -186,8 +191,8 @@ begin
     and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('service_role', p.oid, 'execute'));
   if v_bad is not null then raise exception 'w1: an application role can execute a function that names xmloption: %', v_bad; end if;
   if exists (select 1 from pg_db_role_setting s, unnest(s.setconfig) x where lower(x) like 'xmloption=%')
-     or current_setting('xmloption') <> 'content' or (select reset_val <> 'content' or source <> 'default' from pg_settings where name = 'xmloption') then
-    raise exception 'w1: xmloption is not at its default outside a function';
+     or current_setting('xmloption') <> 'content' or (select reset_val from pg_settings where name = 'xmloption') <> 'content' then
+    raise exception 'w1: xmloption isn''t content outside a function';
   end if;
   if has_schema_privilege('anon', 'public', 'create') or has_schema_privilege('authenticated', 'public', 'create')
      or has_schema_privilege('anon', 'private', 'create') or has_schema_privilege('authenticated', 'private', 'create') then

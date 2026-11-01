@@ -127,9 +127,8 @@ const trigWriters = fnRows.filter(f => f.trig && !/guard/.test(f.name) && writes
 info(`trigger functions that write a guarded table run inside the writing statement: ${trigWriters.join(', ') || 'none'}`);
 const deferred = Q(`select count(*) from pg_trigger t join pg_proc p on p.oid = t.tgfoid where t.tgdeferrable and p.proname !~ '^RI_FKey_(noaction|check)_'`);
 ok(deferred === '0', 'no deferred trigger writes (it would fire at commit, after every function)', deferred);
-const namesIt = Q(`select coalesce(string_agg(p.oid::regprocedure::text, ', '), '') from pg_proc p where p.prosrc ~* 'xml\\s*_?option' and p.oid not in ('private.lib_authorized()'::regprocedure, 'private.lib_write_on()'::regprocedure)
-  and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('service_role', p.oid, 'execute'))`);
-ok(namesIt === '', 'no function an application role can execute names the setting, in any schema', namesIt);
+const standing = tryPsql(sql('db/test/w1_catalog_check.sql'));
+ok(standing.ok, 'the standing check passes: no function an application role can execute names the setting, in any schema', standing.message);
 ok(Q(`select current_setting('xmloption') || '|' || (select reset_val || '|' || source from pg_settings where name = 'xmloption') || '|' || (select count(*) from pg_db_role_setting s, unnest(s.setconfig) x where lower(x) like 'xmloption=%')`) === 'content|content|default|0',
   'outside a function: content, at its default, configured nowhere');
 ok(Q(`select bool_or(has_schema_privilege(r, s, 'create')) from unnest(array['anon', 'authenticated', 'service_role']) r, unnest(array['public', 'private']) s`) === 'f', 'no application role can create functions');
@@ -255,6 +254,7 @@ const noClause = tryPsql(asA(`select private.lib_write_on();`));
 ok(!noClause.ok && /library_write_scope/.test(noClause.message), 'lib_write_on outside a function: a clear refusal', noClause.message);
 
 section('direct writes through the API');
+const net0Now = id => Q(`select ended from public.tv_shows where id = '${id}'`);
 const before = JSON.stringify((await rest(A.token, 'GET', `watchlist_items?select=*&id=eq.${R0}`)).json);
 const u = await rest(A.token, 'PATCH', `watchlist_items?id=eq.${R0}`, { season_number: 99 }, { Prefer: 'return=representation' });
 ok(!u.ok && required(u), 'REST update of a season: refused', u.text);
@@ -264,6 +264,8 @@ const ins = await rest(A.token, 'POST', 'update_setup', { source: 'setup_file' }
 ok(!ins.ok && (required(ins) || /research/.test(ins.text)), 'REST insert into a guarded table: refused', ins.text);
 const dl = await rest(A.token, 'DELETE', `membership_removals?collection_id=eq.${coll}`);
 ok(!dl.ok && required(dl), 'REST delete from a guarded table: refused', dl.text);
+const svc = await fetch(`${API}/rest/v1/tv_shows?id=eq.${S.show.id}`, { method: 'PATCH', headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json' }, body: '{"ended": true}' });
+ok(!svc.ok && net0Now(S.show.id) === 'f', 'service_role: refused (a permission error, not the guard’s)', await svc.text());
 const hdr = await rest(A.token, 'GET', 'tv_shows?select=id&limit=1', undefined, { 'Accept-Profile': 'private' });
 ok(!hdr.ok, 'the private schema can’t be selected by a header', hdr.text);
 for (const f of ['set_config', 'lib_write_on', 'lib_authorized']) {
@@ -371,6 +373,19 @@ ok(!stale.ok && misconfigured(stale) && !staleD.ok, 'pooled connections opened u
 await restartRest();
 await healthy('restarted');
 
+section('a role default removed before PostgREST reloads');
+// Open until it reloads: PostgREST still applies the cached role setting, and the catalog and reset_val no longer show it.
+psqlAs('supabase_admin', `alter role authenticated set xmloption = 'document';`);
+await reloadConfig(); await restartRest();
+ok(misconfigured(await reachA()), 'while the default is there: refused');
+psqlAs('supabase_admin', `alter role authenticated reset xmloption;`);
+ok(await state() === 'document/content/session', 'removed, not reloaded: the connection still gets it, and it looks like a function’s scope', await state());
+const staleOpen = await directA();
+ok(staleOpen.ok && net0() === 't', 'the limit is real: a direct write goes through until PostgREST reloads', staleOpen.text);
+psql(`begin; set local xmloption = 'document'; update public.tv_shows set ended = false where id = '${S.show.id}'; commit;`);
+await reloadConfig();
+await healthy('reloaded');
+
 section('the migration refuses a state it can’t trust');
 psql(`drop function public.zz_state(); notify pgrst, 'reload schema';`);
 ok(tryPsql(sql('db/test/w1_reverse.sql')).ok, 'W1 reversed (test environment)');
@@ -441,8 +456,8 @@ info(`a function with a session-level SET leaked to ${s4.bad}/60 later requests`
 const viaLeak = await directA();
 info(`a direct write ${viaLeak.ok ? 'WENT THROUGH' : 'was refused'} on such a connection`);
 ok(s4.bad > 0, 'the limit is real: a session-level SET in a function survives the request');
-const flagged = Q(`select string_agg(proname, ', ' order by proname) from pg_proc p where p.prosrc ~* 'xml\\s*_?option' and p.oid not in ('private.lib_authorized()'::regprocedure, 'private.lib_write_on()'::regprocedure) and has_function_privilege('authenticated', p.oid, 'execute')`);
-ok(/zz_leak, zz_leak2/.test(flagged), 'and the catalog check names both spellings of such a function', flagged);
+const flagged = tryPsql(sql('db/test/w1_catalog_check.sql'));
+ok(!flagged.ok && /zz_leak\(\)/.test(flagged.message) && /zz_leak2\(\)/.test(flagged.message), 'and the standing check names both spellings of such a function', flagged.message);
 psql(`drop function public.zz_leak(); drop function public.zz_leak2(); drop function public.zz_sleep(double precision); drop function public.zz_probe(); notify pgrst, 'reload schema';`);
 psql(`begin; set local xmloption = 'document'; update public.tv_shows set ended = false where id = '${S.show.id}'; commit;`);
 await restartRest();

@@ -1,0 +1,15 @@
+-- W1's standing check, for a test run or a release preflight after any migration that touches functions: read-only.
+-- Fails if a function an application role can execute names xmloption (its session-level SET would stay on a pooled
+-- connection, and the guard can't see that), or if a library function has lost the clause.
+do $$
+declare v_bad text;
+begin
+  select string_agg(p.oid::regprocedure::text, ', ') into v_bad from pg_proc p
+  where p.prosrc ~* 'xml\s*_?option' and p.oid not in ('private.lib_authorized()'::regprocedure, 'private.lib_write_on()'::regprocedure)
+    and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('service_role', p.oid, 'execute'));
+  if v_bad is not null then raise exception 'w1 check: an application role can execute a function that names xmloption: %', v_bad; end if;
+  select string_agg(p.oid::regprocedure::text, ', ') into v_bad from pg_proc p
+  where p.pronamespace = 'public'::regnamespace and (p.prosrc like '%lib_write_on%' or p.prosrc like '%watchlist.library_write%' or p.proname = 'restore_backup')
+    and not coalesce(p.proconfig @> array['xmloption=document'], false);
+  if v_bad is not null then raise exception 'w1 check: the clause is missing from: %', v_bad; end if;
+end $$;
