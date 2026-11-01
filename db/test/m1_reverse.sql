@@ -41,6 +41,7 @@ set constraints all deferred;
 alter table public.catalog_show_links drop constraint catalog_show_links_show_fkey;
 alter table public.catalog_film_links drop constraint catalog_film_links_item_fkey;
 select set_config('watchlist.library_write', 'on', true);
+set local xmloption = 'document';
 do $$
 declare v_to uuid := ((select s from rv_snap) ->> 'bootstrap')::uuid; v_from uuid := (select user_id from private.library_members); t record;
 begin
@@ -51,6 +52,7 @@ begin
   update private.app_owner set bootstrap_owner_id = v_to where singleton;
 end $$;
 select set_config('watchlist.library_write', '', true);
+set local xmloption = 'content';
 set constraints all immediate;
 alter table public.catalog_show_links add constraint catalog_show_links_show_fkey
   foreign key (show_id, user_id) references public.tv_shows (id, user_id) on delete cascade;

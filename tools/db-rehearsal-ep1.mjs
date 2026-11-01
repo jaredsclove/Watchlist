@@ -74,7 +74,7 @@ async function replica() {
   await db.exec(sql('db/b45_expand.sql'));
   await db.exec(`insert into auth.users (id, email) values ('${A}', 'a@test.invalid'), ('${B}', 'b@test.invalid'), ('${C}', 'c@test.invalid')`);
   await asAnon(db, `select public.restore_backup($1::jsonb, false)`, [doc5]);
-  await db.exec(`begin; select set_config('watchlist.library_write', 'on', true);
+  await db.exec(`begin; select set_config('watchlist.library_write', 'on', true); set local xmloption = 'document';
     insert into private.stage5_recovery_records (user_id, kind, id, collection)
       select user_id, 'show', id, 'synthetic' from public.tv_shows union all select user_id, 'item', id, 'synthetic' from public.watchlist_items;
     insert into private.stage5_recovery_collections (user_id, id, legacy_source) select user_id, id, null from public.personal_collections;
@@ -160,7 +160,18 @@ function statements(text) {
   return out;
 }
 const stmtHead = s => s.replace(/--[^\n]*\n/g, '').trim().split(/\s+/).slice(0, 4).join(' ');
+// REHEARSE_W1=1 runs every check under W1's guards: its core comes off before a script that replaces functions, since a
+// migration refuses settings it doesn't expect, and goes back on after it.
+const W1_CORE = process.env.REHEARSE_W1 ? sql('db/w1_write_scope.sql').match(/-- w1-core-begin\n([\s\S]*)-- w1-core-end/)[1] : null;
+const W1_OFF = W1_CORE && sql('db/test/w1_reverse.sql').replace(/do \$\$ begin[\s\S]*?end \$\$;\n/, '');
 async function tryExec(db, text) {
+  const hook = W1_CORE && /function/.test(text);
+  if (hook && Object.values((await db.query(`select to_regprocedure('private.lib_authorized()') is not null as on`)).rows[0])[0]) await db.exec(W1_OFF);
+  const r = await tryExec0(db, text);
+  if (hook) await db.exec(`begin;\n${W1_CORE}\ncommit;`);
+  return r;
+}
+async function tryExec0(db, text) {
   try { const out = await db.exec(text); return { ok: true, out }; }
   catch (e) { await db.exec('rollback').catch(() => {}); return { ok: false, message: e.message }; }
 }
@@ -190,6 +201,8 @@ const counts0 = Object.fromEntries(Object.entries(doc5.tables).map(([t, r]) => [
 const countsA = {};
 for (const t of T5) countsA[t] = Number(await val(db, `select count(*) from public.${t} where user_id = $1`, [A]));
 ok(same(counts0, countsA), 'A holds the backup’s row counts; B holds a copy under new ids');
+// Under W1 every comparison starts from W1 on, so a function's text only differs if a migration really changed it.
+if (W1_CORE) await db.exec(`begin;\n${W1_CORE}\ncommit;`);
 const s0 = await state(db);
 const FN_SIG = `select md5(prosrc) || ' ' || prosecdef || ' ' || coalesce(array_to_string(proconfig, ','), '') || ' ' || ${ACL('proacl', "acldefault('f', proowner)")} from pg_proc where oid = $1::regprocedure`;
 const restore5Sig = await val(db, FN_SIG, ['public.restore_backup(jsonb, boolean)']);
@@ -246,7 +259,8 @@ ok((await val(db, `select string_agg(run_id || '/' || migration, ',' order by ru
     JSON.stringify({ before: before('functions'), after: after('functions') }));
   // The format-5 function's body, settings, security and grants are exactly the old public.restore_backup's.
   const v5 = await val(db, FN_SIG, ['private.restore_backup_v5(jsonb, boolean)']);
-  ok(v5 === restore5Sig, 'private.restore_backup_v5 has the old public.restore_backup’s body, settings, security and grants', JSON.stringify({ restore5Sig, v5 }));
+  // Under W1 the clause belongs to the public entry point, so the moved function lacks it and nothing else differs.
+  ok(v5 === (W1_CORE ? restore5Sig.replace(',xmloption=document', '') : restore5Sig), 'private.restore_backup_v5 has the old public.restore_backup’s body, settings, security and grants', JSON.stringify({ restore5Sig, v5 }));
   ok(same(c0.policies, (c1.policies || []).filter(x => !x.startsWith('public.episode_marks.'))), 'policies: only episode_marks’ added');
 }
 const replay = await tryExec(db, preamble('ep1-rehearsal-2') + EP1);
@@ -325,10 +339,10 @@ for (const [label, s, p, re] of [
   ok(!r.ok && re.test(r.message) && (await marksDigest(db)) === d2, `A: ${label} → refused`, r.message || 'succeeded');
 }
 {
-  const r = await tryExec(db, `begin; select set_config('watchlist.library_write', 'on', true);
+  const r = await tryExec(db, `begin; select set_config('watchlist.library_write', 'on', true); set local xmloption = 'document';
     update public.watchlist_items set season_number = season_number + 100 where id = '${aSeason}'; commit;`);
   ok(!r.ok && /episode_marks_kept/.test(r.message), 'a marked season’s identity can’t change (even with library_write, as postgres)', r.message || 'committed');
-  const r2 = await tryExec(db, `begin; select set_config('watchlist.library_write', 'on', true);
+  const r2 = await tryExec(db, `begin; select set_config('watchlist.library_write', 'on', true); set local xmloption = 'document';
     insert into public.episode_marks (user_id, season_id, tmdb_episode_id, episode_number) values ('${A}', '${unmatched || film}', 5, 1); commit;`);
   ok(!r2.ok && /season_unmatched/.test(r2.message), 'a mark on an unmatched season or a film is refused by the table itself', r2.message || 'committed');
 }
@@ -371,6 +385,13 @@ ok(Number(await val(db, `select count(*) from pg_proc where proname = 'delete_tv
 
 section('iso: B and a non-member C');
 const bSeason = await val(db, `select id::text from public.watchlist_items where user_id = '${B}' and not is_film and media_type = 'tv' and tmdb_id is not null and not watched and not skipped order by id limit 1`);
+if (W1_CORE) {
+  const flagOnly = await attempt(() => db.transaction(async tx => {
+    await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true), set_config('watchlist.library_write', 'on', true)`, [JSON.stringify({ sub: B, role: 'authenticated' })]);
+    return (await tx.query(`insert into public.episode_marks (season_id, tmdb_episode_id, episode_number) values ($1, 930002, 1)`, [aSeason])).rows;
+  }));
+  ok(!flagOnly.ok && /^library_write_required: /.test(flagOnly.message), 'under W1, the old flag alone is refused at the guard', flagOnly.message || 'it ran');
+}
 const sIso = await state(db);
 for (const [label, fn, re] of [
   ['set marks on A’s season', () => setMarks(B, aSeason, true, [ep(930001, 1)]), /target_missing/],
@@ -378,7 +399,7 @@ for (const [label, fn, re] of [
   ['delete A’s marked season (new form)', () => del(B, aSeason, 2), /not_found/],
   ['delete A’s marked season (old form)', () => del(B, aSeason), /not_found/],
   ['insert a mark on A’s season with library_write', () => attempt(() => db.transaction(async tx => {
-    await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true), set_config('watchlist.library_write', 'on', true)`, [JSON.stringify({ sub: B, role: 'authenticated' })]);
+    await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true), set_config('watchlist.library_write', 'on', true)${W1_CORE ? `, set_config('xmloption', 'document', true)` : ''}`, [JSON.stringify({ sub: B, role: 'authenticated' })]);
     return (await tx.query(`insert into public.episode_marks (season_id, tmdb_episode_id, episode_number) values ($1, 930002, 1)`, [aSeason])).rows;
   })), /violates|season_unmatched|row-level security/],
   ['delete A’s marks directly with library_write', () => attempt(() => db.transaction(async tx => {
