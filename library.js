@@ -1196,7 +1196,7 @@ function deleteEffectText(row, show) {
     + (marks ? ` Its ${marks} episode mark${marks === 1 ? ' is' : 's are'} deleted with it.` : '')
     + (last ? ' This is the show’s last season, so the show is deleted too, along with its place in every collection.' : '')
     // CU1: Refresh shows adds a season TMDB still lists, so a deleted matched season comes back; Skip keeps it unwatched.
-    + (!last && row.tmdb_id != null && row.season_number != null ? ' While TMDB still lists this season, Refresh shows will add it again. To keep it without it counting as something to watch, use Skip instead.' : '')
+    + (!last && row.tmdb_id != null && row.season_number != null ? ' While TMDB still lists this season, Refresh shows will add it again, unless a hold or a decision you made on it keeps it out. To keep it without it counting as something to watch, use Skip instead.' : '')
     + (endsRange ? ` The earlier-seasons choice for “${show.title}” ends too.` : '')
     + (dest ? ` To keep it but take the show out of ${dest.label} only, use Remove show from ${dest.label} instead.` : '');
 }

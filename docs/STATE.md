@@ -74,7 +74,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   and applied under each collection's definition (Manual / Follow / Discover), exclusions and holds. Coverage is
   compared with the checks stored with the brief; insufficient or conflicting evidence stays blocked ("waiting for
   more research"); new titles always wait for the owner. Catalog-governed entries are skip-only; deleting another
-  TMDB-matched season lets Refresh shows add it back while TMDB lists it. Holds (standing decisions, protected values,
+  TMDB-matched season lets Refresh shows add it back while TMDB lists it, each time, unless a hold or the owner's decision keeps it out (CU1e). Holds (standing decisions, protected values,
   identity holds) come from the setup file or are added and edited in Settings → Collections and rules (edits in
   place through `library_cu_update_hold`, CU1b; a hold changed meanwhile is refused).
 - **Research access (CU2; design `docs/ITEM4_DESIGN.md` §4.6):** per member, off by default, switched in the database only
@@ -119,7 +119,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages, `cu2-local-auth-test.mjs` on a local Supabase stack) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261031-cu2`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261101-seasons`). The tests
 check only that all 29 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
@@ -132,9 +132,28 @@ test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 epi
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
 (CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29], the compact interface [#32],
-density and search [#34], research access (CU2) [#37].
+density and search [#34], research access (CU2) [#37], a missing season comes back (CU1e) [#40].
 
-- **Release:** `799ff32`, per-member research access (CU2, item 4; PR #37, the branch's four commits rebased, same tree as the
+- **Release:** `a3436a8`, a missing TMDB season comes back on every Refresh shows (CU1e, item 10; PR #40, the branch's three commits
+  rebased, same tree as the reviewed head `2d0e6dc`), released 2026-11-01 UTC with database migration `db/cu1e_missing_season.sql`
+  (replaces `private.cu1_finding_take` only; no table, grant, capability, phase or backup-format change, and no backfill). The page says
+  why a season sent wasn't added, lists Dismissed and Not now under "Left out by your decision", and the delete dialog names holds and
+  decisions. Validation: offline 1259/1259; the rehearsals, including real PostgreSQL concurrency; a local browser check with synthetic
+  data; one focused review, with its findings closed before the heading commit. Release: in a quiet window, a read-only recheck
+  (phase `contracted-cu1`, format 7, the five run records, CU1e absent, the replaced function's exact source); a pre-release format-7
+  backup validated; the SQL Editor's contents checked against the run file's hash and run once as written (its RLS prompt concerned the
+  migration's own temp table); the run record confirmed by a separate read, with one CU1e record, the new function in place, security
+  invoker, grants as designed, no temp table left and `pg_graphql` absent. The post-migration backup validated and equals the pre-release
+  one field by field (19 tables, 1,393 rows, no differences). Merged only after that. Verified after deployment: Pages built `a3436a8`; the
+  35 application files are byte-identical and all 29 versioned files carry `20261101-seasons`. On the live site, signed in, read-only:
+  member and research access true, phase `contracted-cu1`, Currently Watching, All TV, Coming Soon, Movies, Collections and the Collection
+  updates card load, a page-memory log started after load recorded no write, and a separate fresh load showed no console error. A final
+  backup validated and equals both earlier ones field by field, with three distinct export times. Refresh shows, research imports and
+  restore weren't run. **The preflight found no existing findings in the owner's library that CU1e would newly reopen at that snapshot.
+  That doesn't mean an ordinary Refresh can't add new TMDB seasons.** **Not verified on production:** the restored season itself, until
+  the owner runs Refresh shows, and the delete dialog opened on the live page (its file is byte-identical). Not tested: real phones,
+  Safari, Firefox and true dark mode. An older tab keeps working until reloaded.
+- **Earlier release:** `799ff32`, per-member research access (CU2, item 4; PR #37, the branch's four commits rebased, same tree as the
   reviewed head `32475e3`), released 2026-11-01 UTC with database migration `db/cu2_research_access.sql` (a column on
   `private.library_members`, the permission function, the research guard on eight tables, `restore_backup` as a wrapper around the
   unchanged `private.restore_backup_v7`, `research` in the capability; no `library_cu_*` function, phase or backup-format change).
@@ -463,6 +482,7 @@ density and search [#34], research access (CU2) [#37].
 [#32]: https://github.com/jaredsclove/Watchlist/pull/32
 [#34]: https://github.com/jaredsclove/Watchlist/pull/34
 [#37]: https://github.com/jaredsclove/Watchlist/pull/37
+[#40]: https://github.com/jaredsclove/Watchlist/pull/40
 
 ## How we work
 
@@ -560,8 +580,8 @@ density and search [#34], research access (CU2) [#37].
   resolved (PR #25, CU1b); dates within a day are the same date (PR #27, CU1c). The owner ran the first production
   Refresh shows and research import before CU1c, and Refresh shows again after CU1d. Still open: a page can't detect CU1b before calling it (a page deployed before its migration stops its
   writes on Edit until reloaded).
-- **Research access (CU2):** Continue isn't verified on production. Item 9 (function-only writes) and item 10 (a season deleted twice
-  isn't re-added by Refresh shows) stay open and separate.
+- **Research access (CU2):** Continue isn't verified on production. Item 9 (function-only writes) stays open and separate.
+- **Missing seasons (CU1e):** closed on database and page (PR #40). Its behaviour isn't verified on production until the owner runs Refresh shows.
 - **Optional, not scheduled:** on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
   instead of a sentence (polish, not a blocker).

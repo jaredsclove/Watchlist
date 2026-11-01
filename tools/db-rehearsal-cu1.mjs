@@ -14,6 +14,8 @@
 //          parents row security hides and null references, holds still protecting, ordinary work and the two cascades, restore (saved
 //          data kept; the bypass gone after success, failure, a caught failure and a savepoint; the internal function called directly),
 //          the admin runbook, interrupted imports and every status path, the test reverse;
+//   cu1e   db/cu1e_missing_season.sql (after CU2): refusals, failure injection, install, repeated delete → Refresh cycles, retries, stale
+//          calls, holds, Skipped shows and seasons, Dismissed and Not now, research findings, announced rows, the test reverse;
 //   CU     the migration: every existing row unchanged; only the intended catalog changes; the run record;
 //          a replay refused;
 //   anon   nothing on the new tables or functions; a non-member is refused;
@@ -1602,6 +1604,163 @@ section('cu2: research access (db/cu2_research_access.sql)');
   ok(rv.ok && same(cr, c0), 'the test-only reverse gives back the catalog exactly', rv.message || catDiff(JSON.stringify(c0), JSON.stringify(cr)).join('\n'));
   ok((await tryExec(db, pre2('cu2-rehearsal-3') + CU2)).ok, 'CU2 applies again after the reverse');
   await db.exec(`select set_config('watchlist.cu2_run', '', false), set_config('watchlist.cu2_owner', '', false)`);
+  await tryExec(db, sql('db/test/cu2_reverse.sql'));
+  await tryExec(db, sql('db/test/cu1d_reverse.sql'));
+  await tryExec(db, sql('db/test/cu1c_reverse.sql'));
+  await tryExec(db, sql('db/test/cu1b_reverse.sql'));
+}
+
+section('cu1e: a missing season comes back (db/cu1e_missing_season.sql)');
+{
+  for (const [g, f, run] of [['cu1b', 'db/cu1b_hold_edit.sql', 'cu1e-base-b'], ['cu1c', 'db/cu1c_date_equivalence.sql', 'cu1e-base-c'], ['cu1d', 'db/cu1d_network_and_marks.sql', 'cu1e-base-d']]) {
+    ok((await tryExec(db, `select set_config('watchlist.${g}_run', '${run}', false);\n` + sql(f))).ok, `${g} is installed first`);
+  }
+  ok((await tryExec(db, `select set_config('watchlist.cu2_run', 'cu1e-base-2', false), set_config('watchlist.cu2_owner', '${A}', false);\n` + sql('db/cu2_research_access.sql'))).ok, 'CU2 is installed first');
+  const CU1E = sql('db/cu1e_missing_season.sql');
+  const pre1e = run => `select set_config('watchlist.cu1e_run', '${run}', false);\n`;
+  const s0e = await state(db);
+  for (const [label, run, re] of [['no run id', '', /set watchlist\.cu1e_run/], ['a recorded run id', 'cu1-rehearsal-1', /already recorded/]]) {
+    const x = await tryExec(db, pre1e(run) + CU1E);
+    ok(!x.ok && re.test(x.message) && same(s0e, await state(db)), `${label}: refused, state unchanged`, x.message || 'committed');
+  }
+  if (inject) {
+    const st = statements(CU1E);
+    const bi = st.findIndex(x => /^begin\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim())), ci = st.findIndex(x => /^commit\s*;/i.test(x.replace(/--[^\n]*\n/g, '').trim()));
+    const bad = [];
+    for (let k = bi; k < ci; k++) {
+      const text = pre1e(`inject1e-${k}`) + st.slice(0, k + 1).join('') + `\ndo $zz$ begin raise exception 'zz injected after %', ${k}; end $zz$;\n` + st.slice(k + 1).join('');
+      const x = await tryExec(db, text);
+      if (x.ok || !/zz injected/.test(x.message) || !same(s0e, await state(db))) bad.push(`${k}: ${stmtHead(st[k])} ${x.message || 'committed'}`);
+    }
+    ok(bad.length === 0, `a failure after each of CU1e's ${ci - bi} statements leaves the state unchanged and no run record`, bad.join('\n'));
+  }
+  const inst = await tryExec(db, pre1e('cu1e-rehearsal-1') + CU1E);
+  ok(inst.ok && /CU1E\|/.test(JSON.stringify(inst.out)), 'db/cu1e_missing_season.sql commits, with its synthetic checks', inst.message);
+  const s1e = await state(db);
+  ok(same(s0e.rows, s1e.rows), 'no row changed: no backfill');
+  const cd = catDiff(s0e.cat, s1e.cat);
+  ok(cd.length === 2 && cd.some(x => /^functions:.*private\.cu1_finding_take/.test(x)) && cd.some(x => /^runs:/.test(x)), 'the catalog gains only the replaced function and the run record', cd.join('\n'));
+  const rep = await tryExec(db, pre1e('cu1e-rehearsal-2') + CU1E);
+  ok(!rep.ok && /already installed/.test(rep.message) && same(s1e, await state(db)), 'a replay is refused', rep.message || 'committed');
+  await db.exec(`select set_config('watchlist.cu1e_run', '', false)`);
+
+  const seed = async (title, tmdb, who = A) => {
+    const key = title.toLowerCase();
+    const o = await call(db, 'library_create_show_b45', [{ tmdb_id: tmdb, title, show_key: key, network: 'ZZ' }, [1, 2, 3].map(n => ({ item_key: `${key}|season ${n}`, title, season: `Season ${n}`, theme: 'ZZ', display_date: `Jan 1, 20${10 + n}`, date_sort: `20${10 + n}-01-01`, season_number: n }))], who);
+    return { id: o.show.id, tmdb, key, who };
+  };
+  const fpS = (S, n) => `new_season:${sha(JSON.stringify(['new_season', S.id, S.tmdb, n]))}`;
+  const row = async (S, n) => (await asUser(db, S.who, `select id from public.watchlist_items where show_id = $1 and season_number = $2`, [S.id, n]))[0];
+  const count = async (S, n) => (await asUser(db, S.who, `select count(*)::int c from public.watchlist_items where show_id = $1 and season_number = $2`, [S.id, n]))[0].c;
+  const finding = async (S, n) => (await asUser(db, S.who, `select id, status, reason, decided_at, applied_at, result from public.update_findings where fingerprint = $1`, [fpS(S, n)]))[0];
+  const del = async (S, n) => call(db, 'delete_tv_season', [(await row(S, n)).id, 0], S.who);
+  const ref = (S, n, expected) => call(db, 'library_cu_reconcile_season', [S.id, expected || { tmdb_id: S.tmdb, show_key: S.key }, { season_number: n, display_date: `Jan 1, 20${10 + n}`, date_sort: `20${10 + n}-01-01`, episode_count: 8 },
+    { source: 'tmdb', kind: 'new_season', fingerprint: fpS(S, n), show_id: S.id, subject: { title: 'x', season_number: n, label: `Season ${n}` } }, false, null], S.who);
+  const created = r => r.outcome === 'applied' && r.result && r.result.outcome === 'created';
+  const holdOn = (S, n, who = S.who) => call(db, 'library_cu_save_hold', [{ kind: 'standing_decision', show_id: S.id, subject_label: `Season ${n}`, decision: `zz ${n}`, effect: 'do_not_add', reopen: { on: 'owner_only' }, decided_on: '2026-01-01' }], who);
+  const holdOff = (h, n, who = A) => call(db, 'library_cu_delete_hold', [h.id, `zz ${n}`], who);
+
+  const S = await seed('ZZ CU1e Cycles', 992001);
+  let cycles = true;
+  for (let i = 0; i < 4; i++) { await del(S, 3); const r = await ref(S, 3); cycles = cycles && created(r) && (await count(S, 3)) === 1; }
+  ok(cycles, 'four delete → Refresh cycles each restore the season, one row each time');
+  const dup = await ref(S, 3);
+  ok(dup.outcome === 'not_pending' && dup.status === 'applied' && (await count(S, 3)) === 1, 'the season exists: no duplicate, the finding left as applied', JSON.stringify(dup));
+  await del(S, 3);
+  const r1 = await ref(S, 3), r2 = await ref(S, 3);
+  ok(created(r1) && r2.outcome === 'not_pending' && (await count(S, 3)) === 1, 'a retry of the same call adds nothing');
+  await del(S, 3);
+  const before = await finding(S, 3);
+  const stale = await tryCall(db, 'library_cu_reconcile_season', [S.id, { tmdb_id: 1, show_key: S.key }, { season_number: 3, display_date: 'Jan 1, 2013', date_sort: '2013-01-01', episode_count: 8 }, { source: 'tmdb', kind: 'new_season', fingerprint: fpS(S, 3), show_id: S.id, subject: { season_number: 3 } }, false, null]);
+  ok(!stale.ok && /target_changed/.test(stale.message) && same(before, await finding(S, 3)) && (await count(S, 3)) === 0, 'a stale call refuses and rolls the reopening back', stale.message);
+  // Holds.
+  const h = await holdOn(S, 3);
+  const held = await ref(S, 3);
+  ok(held.status === 'pending' && held.reason === 'standing_decision' && (await count(S, 3)) === 0, 'a hold keeps it out, with its reason', JSON.stringify(held));
+  await holdOff(h, 3);
+  ok(created(await ref(S, 3)) && (await count(S, 3)) === 1, 'the hold removed, the next Refresh restores it');
+  // Skipped show, then not.
+  const T = await seed('ZZ CU1e Skip', 992002);
+  await del(T, 3); ok(created(await ref(T, 3)), 'first return, for the Skipped-show case');
+  await del(T, 3);
+  await asSuper(db, `update public.tv_shows set status = 'skipped' where id = '${T.id}'`);
+  const skp = await ref(T, 3);
+  ok(skp.status === 'set_aside' && skp.reason === 'skipped' && (await count(T, 3)) === 0, 'a Skipped show keeps it out', JSON.stringify(skp));
+  await asSuper(db, `update public.tv_shows set status = 'confirmed' where id = '${T.id}'`);
+  ok(created(await ref(T, 3)) && (await count(T, 3)) === 1, 'no longer Skipped: the next Refresh restores it (the reopening cleared the decision time)');
+  // A season the owner skipped exists: it stays as it is.
+  await call(db, 'set_season_skipped', [(await row(T, 3)).id, true]);
+  const skS = await ref(T, 3);
+  ok(skS.outcome === 'not_pending' && (await count(T, 3)) === 1 && (await asUser(db, A, `select skipped from public.watchlist_items where id = $1`, [(await row(T, 3)).id]))[0].skipped === true, 'a Skipped season stays, Skipped, with no second row', JSON.stringify(skS));
+  // Dismissed and Not now are decisions.
+  const D = await seed('ZZ CU1e Decide', 992003);
+  await del(D, 3); const hd = await holdOn(D, 3); const pd = await ref(D, 3);
+  await call(db, 'library_cu_set_finding_status', [pd.finding_id, 'pending', 'dismissed', '']); await holdOff(hd, 3);
+  const rd = await ref(D, 3);
+  ok(rd.outcome === 'not_pending' && rd.status === 'dismissed' && (await count(D, 3)) === 0, 'Dismissed stands: the season stays out', JSON.stringify(rd));
+  await del(D, 2); const hn = await holdOn(D, 2); const pn = await ref(D, 2);
+  await call(db, 'library_cu_set_finding_status', [pn.finding_id, 'pending', 'not_now', '']); await holdOff(hn, 2);
+  const rn = await ref(D, 2);
+  ok(rn.outcome === 'not_pending' && rn.status === 'not_now' && (await count(D, 2)) === 0, 'Not now stands: the season stays out', JSON.stringify(rn));
+  // Dismissed after an earlier return: the decision outlives the history.
+  const E = await seed('ZZ CU1e Later Decision', 992004);
+  await del(E, 3); ok(created(await ref(E, 3)), 'an earlier return');
+  const fe = await finding(E, 3);
+  await del(E, 3); const he = await holdOn(E, 3); const pe = await ref(E, 3);
+  ok(pe.status === 'pending' && pe.finding_id === fe.id, 'the same finding reopened to review');
+  await call(db, 'library_cu_set_finding_status', [pe.finding_id, 'pending', 'dismissed', '']); await holdOff(he, 3);
+  ok((await ref(E, 3)).status === 'dismissed' && (await count(E, 3)) === 0, 'dismissed after a return: it stays out');
+  // Research findings aren't reopened, and research access is unaffected.
+  const G = await seed('ZZ CU1e Research', 992005);
+  const cG = (await call(db, 'org_create_collection', [crypto.randomUUID(), 'ZZ CU1e R'])).collection.id;
+  await call(db, 'library_cu_save_definition', [cG, 0, 'follow', [], EVIDENCE, 'x']); await call(db, 'org_add_membership', [cG, G.id, null]);
+  await del(G, 3);
+  const bR = crypto.randomUUID(); await call(db, 'library_cu_register_brief', [bR, [cG]]);
+  const fR = fp('new_season', 'cu1e-research');
+  const iR = await call(db, 'library_cu_record_findings', [bR, sha('cu1e-r'), [{ fingerprint: fR, kind: 'new_season', collection_id: cG, show_id: G.id, subject: { title: 'x', season_number: 3 }, proposed: { display_date: 'TBA', date_sort: '2099-01-01' }, evidence: official(), assessment: assessed(), routed_status: 'pending' }]]);
+  const fid = iR.findings[0].id;
+  await call(db, 'library_cu_reconcile_season', [G.id, { tmdb_id: G.tmdb, show_key: G.key }, { season_number: 3 }, { id: fid }, false, null]);
+  await call(db, 'delete_tv_season', [(await asUser(db, A, `select id from public.watchlist_items where show_id = $1 and season = 'Season 3'`, [G.id]))[0].id, 0]); // research adds it unidentified
+  const rr = await call(db, 'library_cu_reconcile_season', [G.id, { tmdb_id: G.tmdb, show_key: G.key }, { season_number: 3 }, { id: fid }, false, null]);
+  ok(rr.outcome === 'not_pending' && rr.status === 'applied' && (await count(G, 3)) === 0, 'an applied research finding isn’t reopened', JSON.stringify(rr));
+  ok(created(await ref(G, 3)), 'and TMDB’s own finding still restores the season');
+  // A member without research access.
+  const B3 = await seed('ZZ CU1e Member B', 992006, B);
+  await del(B3, 3); await ref(B3, 3); await del(B3, 3);
+  ok(created(await ref(B3, 3)) && (await val(db, `select research_enabled from private.library_members where user_id = '${B}'`)) === false, 'a member without research access gets the same result');
+  ok(!(await tryCall(db, 'library_cu_reconcile_season', [S.id, { tmdb_id: S.tmdb, show_key: S.key }, { season_number: 3 }, { source: 'tmdb', kind: 'new_season', fingerprint: fpS(S, 3), show_id: S.id, subject: { season_number: 3 } }, false, null], B)).ok, 'another member can’t reach A’s show');
+  ok((await asUser(db, B, `select count(*)::int c from public.update_findings where fingerprint = $1`, [fpS(S, 3)]))[0].c <= 1, 'and any finding of their own stays theirs');
+  // An unidentified row for that number: matched, not duplicated.
+  const U = await seed('ZZ CU1e Announced', 992007);
+  await del(U, 3); await ref(U, 3); await del(U, 3);
+  await asSuper(db, `insert into public.watchlist_items (user_id, item_key, title, season, theme, display_date, date_sort, watched, status, show_id, skipped) values ('${A}', '${U.key}|season 3', 'ZZ CU1e Announced', 'Season 3', 'ZZ', 'TBA', '2099-01-01', false, 'confirmed', '${U.id}', false)`);
+  const um = await ref(U, 3);
+  ok(um.outcome === 'applied' && um.result.outcome === 'mapped' && (await count(U, 3)) === 1, 'an announced row with that label is matched, not duplicated', JSON.stringify(um));
+  // A review names its finding: it never reopens an applied one, so it can't pass a hold.
+  const W = await seed('ZZ CU1e Review', 992009);
+  await del(W, 3); await ref(W, 3); const fw = await finding(W, 3); await del(W, 3); await holdOn(W, 3);
+  const rv1 = await tryCall(db, 'library_cu_reconcile_season', [W.id, { tmdb_id: W.tmdb, show_key: W.key }, { season_number: 3 }, { id: fw.id }, true, null]);
+  ok(!rv1.ok && /finding_not_pending/.test(rv1.message) && (await count(W, 3)) === 0, 'a review by id of an applied finding is refused, past no hold', rv1.message || 'it ran');
+  ok((await ref(W, 3)).reason === 'standing_decision', 'while Refresh reopens it, under the hold');
+  // A row with that number but another identity isn't the corresponding season: review, not “already there”.
+  const X = await seed('ZZ CU1e Other Identity', 992010);
+  await del(X, 3); await ref(X, 3);
+  await asSuper(db, `update public.watchlist_items set tmdb_id = 992099 where show_id = '${X.id}' and season_number = 3`);
+  const xr = await ref(X, 3);
+  ok(xr.status === 'pending' && xr.reason === 'key_conflict', 'a row with another TMDB identity goes to review, never “already on your list”', JSON.stringify(xr));
+  // A finding whose subject has no number is left alone.
+  const V = await seed('ZZ CU1e No Number', 992008);
+  await del(V, 3); await ref(V, 3); await del(V, 3);
+  await asSuper(db, `select set_config('watchlist.research_restore', 'on', true); update public.update_findings set subject = '{}' where fingerprint = '${fpS(V, 3)}'`);
+  const nn = await ref(V, 3);
+  ok(nn.outcome === 'not_pending' && (await count(V, 3)) === 0, 'a finding with no season number isn’t reopened', JSON.stringify(nn));
+
+  const rv = await tryExec(db, sql('db/test/cu1e_reverse.sql'));
+  ok(rv.ok && (await val(db, `select prosrc from pg_proc where oid = 'private.cu1_finding_take(uuid, jsonb, text[])'::regprocedure`)).includes('A TMDB season applied earlier') === false, 'the test-only reverse puts the function back', rv.message);
+  ok((await tryExec(db, pre1e('cu1e-rehearsal-3') + CU1E)).ok, 'CU1e applies again after the reverse');
+  await db.exec(`select set_config('watchlist.cu1e_run', '', false)`);
+  await tryExec(db, sql('db/test/cu1e_reverse.sql'));
+  await asSuper(db, `select set_config('watchlist.research_restore', 'on', true); delete from public.update_findings; delete from public.research_imports; delete from public.research_briefs; delete from public.record_aliases; delete from public.update_holds; delete from public.collection_exclusions; delete from public.collection_definitions; delete from public.update_setup`);
   await tryExec(db, sql('db/test/cu2_reverse.sql'));
   await tryExec(db, sql('db/test/cu1d_reverse.sql'));
   await tryExec(db, sql('db/test/cu1c_reverse.sql'));
