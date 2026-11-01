@@ -74,7 +74,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   and applied under each collection's definition (Manual / Follow / Discover), exclusions and holds. Coverage is
   compared with the checks stored with the brief; insufficient or conflicting evidence stays blocked ("waiting for
   more research"); new titles always wait for the owner. Catalog-governed entries are skip-only; deleting another
-  TMDB-matched season lets Refresh shows add it back while TMDB lists it. Holds (standing decisions, protected values,
+  TMDB-matched season lets Refresh shows add it back while TMDB lists it, each time, unless a hold or the owner's decision keeps it out (CU1e). Holds (standing decisions, protected values,
   identity holds) come from the setup file or are added and edited in Settings → Collections and rules (edits in
   place through `library_cu_update_hold`, CU1b; a hold changed meanwhile is refused).
 - **Research access (CU2; design `docs/ITEM4_DESIGN.md` §4.6):** per member, off by default, switched in the database only
@@ -119,7 +119,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 | Database | `db/` (migrations, rollbacks, self-checks; run order in `db/README.md`), `docs/STAGE5.md` |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (rehearsals, identity audit, admin restore, the hosted test pages, `cu2-local-auth-test.mjs` on a local Supabase stack) |
 
-Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261031-cu2`). The tests
+Every release bumps the `?v=` cache token in `watchlist.html` (current: `20261101-seasons`). The tests
 check only that all 29 versioned files share one token; before releasing, check that it differs from
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
