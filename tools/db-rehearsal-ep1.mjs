@@ -201,6 +201,8 @@ const counts0 = Object.fromEntries(Object.entries(doc5.tables).map(([t, r]) => [
 const countsA = {};
 for (const t of T5) countsA[t] = Number(await val(db, `select count(*) from public.${t} where user_id = $1`, [A]));
 ok(same(counts0, countsA), 'A holds the backup’s row counts; B holds a copy under new ids');
+// Under W1 every comparison starts from W1 on, so a function's text only differs if a migration really changed it.
+if (W1_CORE) await db.exec(`begin;\n${W1_CORE}\ncommit;`);
 const s0 = await state(db);
 const FN_SIG = `select md5(prosrc) || ' ' || prosecdef || ' ' || coalesce(array_to_string(proconfig, ','), '') || ' ' || ${ACL('proacl', "acldefault('f', proowner)")} from pg_proc where oid = $1::regprocedure`;
 const restore5Sig = await val(db, FN_SIG, ['public.restore_backup(jsonb, boolean)']);
@@ -257,7 +259,8 @@ ok((await val(db, `select string_agg(run_id || '/' || migration, ',' order by ru
     JSON.stringify({ before: before('functions'), after: after('functions') }));
   // The format-5 function's body, settings, security and grants are exactly the old public.restore_backup's.
   const v5 = await val(db, FN_SIG, ['private.restore_backup_v5(jsonb, boolean)']);
-  ok(v5 === restore5Sig, 'private.restore_backup_v5 has the old public.restore_backup’s body, settings, security and grants', JSON.stringify({ restore5Sig, v5 }));
+  // Under W1 the clause belongs to the public entry point, so the moved function lacks it and nothing else differs.
+  ok(v5 === (W1_CORE ? restore5Sig.replace(',xmloption=document', '') : restore5Sig), 'private.restore_backup_v5 has the old public.restore_backup’s body, settings, security and grants', JSON.stringify({ restore5Sig, v5 }));
   ok(same(c0.policies, (c1.policies || []).filter(x => !x.startsWith('public.episode_marks.'))), 'policies: only episode_marks’ added');
 }
 const replay = await tryExec(db, preamble('ep1-rehearsal-2') + EP1);
@@ -382,6 +385,13 @@ ok(Number(await val(db, `select count(*) from pg_proc where proname = 'delete_tv
 
 section('iso: B and a non-member C');
 const bSeason = await val(db, `select id::text from public.watchlist_items where user_id = '${B}' and not is_film and media_type = 'tv' and tmdb_id is not null and not watched and not skipped order by id limit 1`);
+if (W1_CORE) {
+  const flagOnly = await attempt(() => db.transaction(async tx => {
+    await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true), set_config('watchlist.library_write', 'on', true)`, [JSON.stringify({ sub: B, role: 'authenticated' })]);
+    return (await tx.query(`insert into public.episode_marks (season_id, tmdb_episode_id, episode_number) values ($1, 930002, 1)`, [aSeason])).rows;
+  }));
+  ok(!flagOnly.ok && /^library_write_required: /.test(flagOnly.message), 'under W1, the old flag alone is refused at the guard', flagOnly.message || 'it ran');
+}
 const sIso = await state(db);
 for (const [label, fn, re] of [
   ['set marks on A’s season', () => setMarks(B, aSeason, true, [ep(930001, 1)]), /target_missing/],
@@ -389,7 +399,7 @@ for (const [label, fn, re] of [
   ['delete A’s marked season (new form)', () => del(B, aSeason, 2), /not_found/],
   ['delete A’s marked season (old form)', () => del(B, aSeason), /not_found/],
   ['insert a mark on A’s season with library_write', () => attempt(() => db.transaction(async tx => {
-    await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true), set_config('watchlist.library_write', 'on', true)`, [JSON.stringify({ sub: B, role: 'authenticated' })]);
+    await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', 'authenticated', true), set_config('watchlist.library_write', 'on', true)${W1_CORE ? `, set_config('xmloption', 'document', true)` : ''}`, [JSON.stringify({ sub: B, role: 'authenticated' })]);
     return (await tx.query(`insert into public.episode_marks (season_id, tmdb_episode_id, episode_number) values ($1, 930002, 1)`, [aSeason])).rows;
   })), /violates|season_unmatched|row-level security/],
   ['delete A’s marks directly with library_write', () => attempt(() => db.transaction(async tx => {

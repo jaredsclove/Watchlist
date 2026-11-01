@@ -13,14 +13,23 @@
 -- The guards read the setting through private.lib_authorized, which also requires that nothing configures it as a
 -- default: a value in pg_db_role_setting (PostgREST applies a role's settings to each request's transaction) or a
 -- reset_val other than content (the server's or the connection's). A default there would make every write look like
--- a library function's. A poisoned default refuses every write, under its own library_write_misconfigured error.
--- Removing one needs PostgREST reloaded or restarted in the same step: a connection keeps its starting reset_val, which
--- fails closed, but PostgREST also caches a role's settings, and until it reloads, a role default it still applies is
--- no longer in the catalog, so direct writes pass.
+-- a library function's. A default these checks can see refuses every write, under its own library_write_misconfigured
+-- error.
 --
--- What the guard can't see is a session-level SET inside a function: a pooled connection keeps it for later requests,
--- and it looks exactly like the clause. No function may do that (db/README.md, write scope), and this file refuses
--- if an application role can execute a function whose source names the setting.
+-- reset_val costs about 350 microseconds a read, so a restore would hit the statement timeout near 20,000 rows. Only
+-- its successful result is remembered, in the transaction-local watchlist.w1_reset_ok, as the full transaction id and
+-- this backend's configuration load time. The value isn't secret and authorizes nothing: it only skips that one read.
+-- The setting and pg_db_role_setting are still read for every row. A reload this backend has taken changes the load
+-- time, so reset_val is read again; a rolled-back savepoint and the transaction's end clear the marker.
+--
+-- Accepted administrative limitations (owner, 2026-11-01). This design doesn't fail closed in every state. Each case
+-- below needs database administrator access, and the guard can't tell it from a library function:
+--   a role default removed while PostgREST still caches it: not in the catalog, not in reset_val, and PostgREST still
+--     applies it, so direct writes pass until PostgREST reloads;
+--   a session-level SET inside a function: a pooled connection keeps it for later requests, and direct writes pass on
+--     that connection. No function may do that (db/README.md, write scope), and this file refuses if an application
+--     role can execute a function whose source names the setting.
+-- Recovery from either is the procedure in db/README.md, write scope: a reload notification alone proves nothing.
 --
 -- org_add_membership and org_remove_membership still set watchlist.library_write: nothing reads it now.
 -- Any later `create or replace` of a function in the set drops its clause, so it must set it again;
@@ -109,18 +118,28 @@ begin
     raise exception 'w1: xmloption isn''t content in this session; nothing was changed';
   end if;
   if exists (select 1 from pg_proc p where p.prosrc ~* 'xml\s*_?option') then raise exception 'w1: a function''s source names xmloption; nothing was changed'; end if;
+  if exists (select 1 from pg_proc p where p.prosrc like '%w1_reset_ok%') then raise exception 'w1: a function''s source names watchlist.w1_reset_ok; nothing was changed'; end if;
+  if exists (select 1 from pg_db_role_setting s, unnest(s.setconfig) x where lower(x) like 'watchlist.w1_reset_ok=%') then raise exception 'w1: watchlist.w1_reset_ok is configured for a database or role; nothing was changed'; end if;
 end $$;
 
 -- ── 2. The guards, lib_write_on and the clause ────────────────────────────────
 -- w1-core-begin
 create or replace function private.lib_authorized() returns boolean
-language plpgsql stable set search_path = '' as $$
+language plpgsql volatile set search_path = '' as $$
+declare v_mark text;
 begin
   if current_setting('xmloption') <> 'document' then return false; end if;
-  if (select reset_val from pg_catalog.pg_settings where name = 'xmloption') <> 'content'
-     or exists (select 1 from pg_catalog.pg_db_role_setting s, unnest(s.setconfig) c where lower(c) like 'xmloption=%') then
+  if exists (select 1 from pg_catalog.pg_db_role_setting s, unnest(s.setconfig) c where lower(c) like 'xmloption=%') then
     raise exception 'library_write_misconfigured: xmloption is configured as a default on this database, so a library function can''t be told from a direct write. Nothing was changed.'
       using errcode = 'P0001';
+  end if;
+  v_mark := pg_catalog.pg_current_xact_id()::text || '/' || extract(epoch from pg_catalog.pg_conf_load_time())::text;
+  if current_setting('watchlist.w1_reset_ok', true) is distinct from v_mark then
+    if (select reset_val from pg_catalog.pg_settings where name = 'xmloption') <> 'content' then
+      raise exception 'library_write_misconfigured: xmloption is configured as a default on this database, so a library function can''t be told from a direct write. Nothing was changed.'
+        using errcode = 'P0001';
+    end if;
+    perform set_config('watchlist.w1_reset_ok', v_mark, true);
   end if;
   return true;
 end $$;
@@ -190,6 +209,9 @@ begin
   where p.prosrc ~* 'xml\s*_?option' and p.oid <> 'private.lib_authorized()'::regprocedure and p.oid <> 'private.lib_write_on()'::regprocedure
     and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('service_role', p.oid, 'execute'));
   if v_bad is not null then raise exception 'w1: an application role can execute a function that names xmloption: %', v_bad; end if;
+  select string_agg(p.oid::regprocedure::text, ', ') into v_bad from pg_proc p
+  where p.prosrc like '%w1_reset_ok%' and p.oid <> 'private.lib_authorized()'::regprocedure;
+  if v_bad is not null then raise exception 'w1: a function other than lib_authorized names watchlist.w1_reset_ok: %', v_bad; end if;
   if exists (select 1 from pg_db_role_setting s, unnest(s.setconfig) x where lower(x) like 'xmloption=%')
      or current_setting('xmloption') <> 'content' or (select reset_val from pg_settings where name = 'xmloption') <> 'content' then
     raise exception 'w1: xmloption isn''t content outside a function';

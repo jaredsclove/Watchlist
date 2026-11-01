@@ -4,6 +4,8 @@
 //   scope            nested calls, exceptions, savepoints, chained GraphQL mutations, direct REST and GraphQL writes
 //   defaults         database, role, server and connection defaults refuse every write, each with its own cause
 //   pool             a pooled connection after success, failure and cancellation; a leak the guard can't see
+//   the cache        lib_authorized's remembered reset_val: forgery, its lifetime, configuration changes in a transaction
+//   recovery         db/admin/w1_recovery_*.sql, through the real API, for each state the guard can't see or that blocks writes
 //
 //   LOCAL_SERVICE_KEY=… node tools/w1-local-test.mjs --api http://127.0.0.1:54321 --key <anon key> --container <db container>
 //     --backup <format6.json> [--cu1e <file>] [--cu1e-first]
@@ -13,7 +15,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -35,8 +37,26 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const psqlAs = (user, text, env = {}) => execFileSync('docker', ['exec', '-i', ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), CONTAINER, 'psql', '-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', '-U', user, '-d', 'postgres'],
   { input: text, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 1 << 26 });
 const psql = text => psqlAs('postgres', text);
+const psqlAsync = text => new Promise((resolve, reject) => { const p = spawn('docker', ['exec', '-i', CONTAINER, 'psql', '-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres']); let o = '', e = ''; p.stdout.on('data', d => { o += d; }); p.stderr.on('data', d => { e += d; }); p.on('close', code => code ? reject(new Error(e)) : resolve(o)); p.stdin.end(text); });
 const tryPsql = (text, user = 'postgres', env = {}) => { try { return { ok: true, out: psqlAs(user, text, env) }; } catch (e) { return { ok: false, message: String(e.stderr || e.message) }; } };
 const Q = text => psql(text).trim();
+// One connection kept open, to hold a transaction while another session changes the configuration.
+class Held {
+  constructor() {
+    this.n = 0; this.out = ''; this.err = '';
+    this.p = spawn('docker', ['exec', '-i', CONTAINER, 'psql', '-X', '-q', '-At', '-U', 'postgres', '-d', 'postgres']);
+    this.p.stdout.on('data', d => { this.out += d; }); this.p.stderr.on('data', d => { this.err += d; });
+  }
+  async run(text) {
+    const tag = `zz-done-${++this.n}`;
+    this.out = ''; this.err = '';
+    this.p.stdin.write(`${text}\n\\echo ${tag}\n`);
+    while (!this.out.includes(tag)) await sleep(20);
+    await sleep(60);
+    return { out: this.out.replace(tag, '').trim(), err: this.err, ok: !this.err, text: this.err, message: this.err };
+  }
+  close() { this.p.stdin.end(); }
+}
 
 async function call(token, method, p, body, extra = {}) {
   const res = await fetch(`${API}/${p}`, { method, headers: { apikey: KEY, Authorization: `Bearer ${token || KEY}`, 'Content-Type': 'application/json', ...extra },
@@ -317,7 +337,7 @@ await healthy('before any default');
 const stateFn = `create function public.zz_state() returns jsonb language sql as $$ select jsonb_build_object('cur', current_setting('xmloption'), 'reset', (select reset_val from pg_settings where name = 'xmloption'), 'source', (select source from pg_settings where name = 'xmloption')) $$;
   grant execute on function public.zz_state() to authenticated; notify pgrst, 'reload schema';`;
 psql(stateFn); await sleep(1800);
-const state = async () => { const r = await rpc(A.token, 'zz_state', {}); return r.ok ? `${r.json.cur}/${r.json.reset}/${r.json.source}` : scrub(r.text); };
+const state = async () => { const r = await rpc(A.token, 'zz_state', {}); return r.ok ? [r.json.cur, r.json.reset, r.json.source].filter(Boolean).join('/') : scrub(r.text); };
 ok(await state() === 'content/content/default', 'a healthy connection: content, content, default', await state());
 section('poisoned defaults: database and roles');
 const poisons = [
@@ -401,6 +421,14 @@ psql(`create function public.zz_stray() returns void language plpgsql as $$ begi
 const ps = tryPsql(W1('local-w1-s'));
 ok(!ps.ok && /doesn't name/.test(ps.message), 'a library function outside the list: refused', ps.message);
 psql(`drop function public.zz_stray();`);
+psql(`create function private.zz_marks_it() returns void language sql as $$ select set_config('watchlist.w1_reset_ok', 'x', true) $$;`);
+const pm = tryPsql(W1('local-w1-m'));
+ok(!pm.ok && /source names watchlist\.w1_reset_ok/.test(pm.message), 'a function that names the cache marker: refused', pm.message);
+psql(`drop function private.zz_marks_it();`);
+psqlAs('supabase_admin', `alter role authenticated set "watchlist.w1_reset_ok" = 'x';`);
+const pd = tryPsql(W1('local-w1-d'));
+ok(!pd.ok && /w1_reset_ok is configured/.test(pd.message), 'the cache marker configured for a role: refused', pd.message);
+psqlAs('supabase_admin', `alter role authenticated reset "watchlist.w1_reset_ok";`);
 const inst2 = tryPsql(W1('local-w1-2'));
 ok(inst2.ok, 'and it installs once the state is clean', inst2.message);
 await sleep(1500);
@@ -462,6 +490,287 @@ psql(`drop function public.zz_leak(); drop function public.zz_leak2(); drop func
 psql(`begin; set local xmloption = 'document'; update public.tv_shows set ended = false where id = '${S.show.id}'; commit;`);
 await restartRest();
 await healthy('the pool restarted');
+
+// ═══ The cache ═══
+const MARK = `current_setting('watchlist.w1_reset_ok', true)`;
+const asAset = `select set_config('request.jwt.claims', '{"sub": "${A.id}", "role": "authenticated"}', true); set local role authenticated;`;
+const libCall = `select public.library_cu_set_show_settings('${S.show.id}', '{"follow_when_skipped": false, "flagged": false}'::jsonb, false, false)`;
+const write = v => `update public.tv_shows set ended = ${v} where id = '${S.show.id}'`;
+const toggle = `update public.tv_shows set ended = not ended where id = '${S.show.id}'`; // the guard fires only on a real change
+const reload = async () => { psqlAs('supabase_admin', `select pg_reload_conf();`); await sleep(900); };
+const sysOn = async () => { psqlAs('supabase_admin', `alter system set xmloption = 'document';`); await reload(); };
+const sysOff = async () => { psqlAs('supabase_admin', `alter system reset xmloption;`); await reload(); };
+const fresh = async () => { const h = new Held(); await h.run(`select 1;`); return h; };
+const clearEnded = () => psql(`begin; set local xmloption = 'document'; ${write(false)}; commit;`);
+
+section('the cache: what it holds');
+const authDef = Q(`select pg_get_functiondef('private.lib_authorized()'::regprocedure)`);
+ok(authDef.indexOf(`current_setting('xmloption')`) < authDef.indexOf('pg_db_role_setting') && authDef.indexOf('pg_db_role_setting') < authDef.indexOf('w1_reset_ok') && authDef.indexOf('w1_reset_ok') < authDef.indexOf('reset_val'),
+  'the setting and the catalog are read before the marker, and only reset_val sits behind it');
+let h = await fresh();
+await h.run(`begin;`); await h.run(`set local xmloption = 'document';`);
+await h.run(`${toggle};`);
+const m1 = (await h.run(`select ${MARK}, pg_current_xact_id()::text, extract(epoch from pg_conf_load_time())::text;`)).out.split('|');
+ok(m1[0] === `${m1[1]}/${m1[2]}`, 'the marker is the full transaction id and this backend’s load time', m1.join(' '));
+await h.run(`rollback;`);
+ok(['', ' '].includes((await h.run(`select coalesce(${MARK}, '');`)).out), 'it ends with the transaction', (await h.out));
+
+section('the cache: forgery');
+// Writing a wrong or stale value only causes a recheck.
+await h.run(`begin;`); await h.run(`set local xmloption = 'document';`);
+await h.run(`select set_config('watchlist.w1_reset_ok', 'forged', true);`);
+await h.run(`${toggle};`);
+ok(/^\d+\/\d/.test((await h.run(`select ${MARK};`)).out), 'a preset wrong marker is checked again and replaced');
+await h.run(`rollback;`);
+const old = m1[0];
+await h.run(`select set_config('watchlist.w1_reset_ok', '${old}', false);`);
+await h.run(`begin;`); await h.run(`set local xmloption = 'document';`);
+await h.run(`${toggle};`);
+ok((await h.run(`select ${MARK};`)).out !== old, 'an earlier transaction’s marker, set for the session: checked again', old);
+await h.run(`rollback;`); h.close();
+// With reset_val poisoned, the only thing a forged marker could buy.
+await sysOn();
+h = await fresh();
+await h.run(`begin;`);
+await h.run(`set local xmloption = 'document';`);
+await h.run(`select set_config('watchlist.w1_reset_ok', 'forged', true);`);
+const f1 = await h.run(`${toggle};`);
+ok(misconfigured(f1), 'reset_val poisoned, a wrong marker: refused, the cause named', f1.err);
+await h.run(`rollback;`);
+await h.run(`select set_config('watchlist.w1_reset_ok', (pg_current_xact_id()::bigint + 1)::text || '/' || extract(epoch from pg_conf_load_time())::text, false);`);
+await h.run(`begin;`); await h.run(`set local xmloption = 'document';`);
+const f2 = await h.run(`${toggle};`);
+await h.run(`rollback;`);
+ok(misconfigured(f2), 'a value guessed for an earlier transaction id: refused', f2.err);
+await h.run(`begin;`); await h.run(`set local xmloption = 'document';`);
+await h.run(`select set_config('watchlist.w1_reset_ok', pg_current_xact_id()::text || '/' || extract(epoch from pg_conf_load_time())::text, true);`);
+const f3 = await h.run(`${toggle};`);
+ok(f3.ok, 'the limit: a session that can run SQL can match its own transaction, and skip this one read (it could set the setting anyway)', f3.err);
+await h.run(`rollback;`); h.close();
+ok(net0() === n0, 'that test changed nothing');
+const fsame = await gql(A.token, `mutation { b: updatetv_showsCollection(set: { ended: true }, filter: { id: { eq: "${S.show.id}" } }, atMost: 1) { affectedCount } }`);
+ok(net0() === n0 && misconfigured(fsame), 'through the API at that moment: GraphQL refused', fsame.text);
+const frest = await directA();
+ok(!frest.ok && misconfigured(frest), 'through the API at that moment: REST refused', frest.text);
+await sysOff(); await restartRest();
+await healthy('the poison removed');
+// What an API request can reach: nothing that writes a setting.
+psql(`create function public.zz_gucs() returns jsonb language sql as $$ select coalesce(jsonb_object_agg(name, setting), '{}') from pg_settings where name like 'watchlist.%' $$;
+  grant execute on function public.zz_gucs() to authenticated; notify pgrst, 'reload schema';`);
+await sleep(1800);
+const hdrs = { 'watchlist.w1_reset_ok': 'forged', 'x-watchlist-w1-reset-ok': 'forged', Prefer: 'tx=commit, timezone=UTC', 'Accept-Profile': 'public' };
+const seen = await call(A.token, 'POST', 'rest/v1/rpc/zz_gucs', {}, hdrs);
+ok(seen.ok && !seen.text.includes('forged'), 'headers and Prefer don’t reach it', seen.text);
+const seenQ = await call(A.token, 'POST', 'rest/v1/rpc/zz_gucs?watchlist.w1_reset_ok=forged', {});
+ok(!seenQ.ok, 'a query string is read as a filter, and refused', seenQ.text);
+const claimed = await call(A.token, 'POST', 'rest/v1/rpc/zz_gucs', {});
+ok(claimed.ok && !claimed.json['watchlist.w1_reset_ok'], 'a request starts with no marker, on a pool that has served library functions', claimed.text);
+psql(`drop function public.zz_gucs(); notify pgrst, 'reload schema';`);
+await sleep(1800);
+const appFns = fnRows.filter(f => (f.exec || f.schema === 'public') && !f.trig);
+const dynSet = appFns.filter(f => /set_config\s*\(\s*[^'\s]/i.test(f.src)).map(f => f.sig);
+ok(dynSet.length === 0, 'no application function takes a setting’s name from its caller', dynSet.join(', '));
+const dynSql = appFns.filter(f => /\bexecute\s+(format|'|\w)/i.test(f.src) && !/execute\s+function/i.test(f.src)).map(f => f.sig).sort();
+ok(JSON.stringify(dynSql) === JSON.stringify(['private.restore_backup_v5(jsonb,boolean)', 'private.restore_backup_v7(jsonb,boolean)']), 'dynamic SQL is only in restore, on its own table and column lists', dynSql.join(', '));
+psqlAs('supabase_admin', `alter role authenticated set "watchlist.w1_reset_ok" = 'preset';`);
+await reloadConfig(); await restartRest();
+await healthy('a role default presets the marker: a wrong value only costs a recheck');
+await sysOn();
+const fp = await reachA(), fd2 = await directA();
+ok(!fp.ok && misconfigured(fp) && !fd2.ok && net0() === n0, 'and with reset_val poisoned too: refused', `${fp.text} | ${fd2.text}`);
+await sysOff();
+psqlAs('supabase_admin', `alter role authenticated reset "watchlist.w1_reset_ok";`);
+await reloadConfig(); await restartRest();
+await healthy('the preset removed');
+
+section('the cache: its lifetime');
+h = await fresh();
+const sawMark = async () => (await h.run(`select coalesce(${MARK}, '');`)).out;
+await h.run(`begin;`); await h.run(asAset);
+await h.run(`${libCall};`);
+const mn = await sawMark();
+ok(/^\d+\//.test(mn), 'it outlives the function that set it, for the transaction', mn);
+await h.run(`${libCall};`);
+ok(await sawMark() === mn, 'a second function in the transaction keeps it');
+await h.run(`select public.library_cu_set_show_settings('${S.show.id}', '{"follow_when_skipped": false, "flagged": false}'::jsonb, false, false) from generate_series(1, 3);`);
+ok(await sawMark() === mn, 'several calls in one statement keep it');
+const dl2 = await h.run(`${toggle};`);
+ok(required(dl2) && net0() === n0, 'and it authorizes nothing: a direct write after them is refused', dl2.err);
+await h.run(`rollback;`);
+ok(await sawMark() === '', 'a rolled-back transaction clears it');
+await h.run(`begin;`); await h.run(asAset);
+await h.run(`savepoint s;`); await h.run(`${libCall};`);
+ok(/^\d+\//.test(await sawMark()), 'set inside a savepoint');
+await h.run(`rollback to savepoint s;`);
+ok(await sawMark() === '', 'a savepoint rollback clears it, so the next call checks again');
+await h.run(`${libCall};`);
+const ms = await sawMark();
+await h.run(`savepoint t;`); await h.run(`${libCall};`); await h.run(`rollback to savepoint t;`);
+ok(await sawMark() === ms, 'a rollback to a later savepoint keeps one set before it');
+await h.run(`commit;`);
+await h.run(`begin;`); await h.run(asAset);
+await h.run(`do $$ begin perform public.library_cu_set_show_settings('${S.show.id}', '{"follow_when_skipped": false, "flagged": false}'::jsonb, false, false); raise exception 'x'; exception when others then null; end $$;`);
+ok(await sawMark() === '', 'a caught exception clears it too');
+await h.run(`commit;`); h.close();
+const many = await Promise.all(Array.from({ length: 30 }, () => reachA()));
+ok(many.every(r => r.ok), 'pooled connections reuse fine after thirty calls');
+await sysOn();
+const after = await Promise.all(Array.from({ length: 30 }, () => reachA()));
+ok(after.every(r => !r.ok && misconfigured(r)), 'a server default on a reused pool, no restart: every call refused, none served by an old marker', after.find(r => r.ok)?.text);
+const chainPoison = await gql(A.token, `mutation { ${fnA}\n b: updatetv_showsCollection(set: { ended: true }, filter: { id: { eq: "${S.show.id}" } }, atMost: 1) { affectedCount } }`);
+ok(net0() === n0 && misconfigured(chainPoison), 'and a chained GraphQL request on it', chainPoison.text);
+await sysOff(); await restartRest();
+await healthy('removed');
+
+section('the cache: configuration changes in an open transaction');
+const open = async () => { const c = await fresh(); await c.run(`begin;`); await c.run(`set local xmloption = 'document';`); await c.run(`${toggle};`); return c; };
+let c = await open();
+const c0 = (await c.run(`select ${MARK};`)).out;
+await reload();
+const c1 = await c.run(`${toggle};`);
+const c1m = (await c.run(`select ${MARK};`)).out;
+ok(c1.ok && c1m !== c0 && /^\d+\//.test(c1m), 'a harmless reload, once this backend takes it: checked again, and the write goes on', `${c0} ${c1m}`);
+await sysOn();
+const c2 = await c.run(`${toggle};`);
+ok(misconfigured(c2), 'alter system during the transaction, reloaded: the next write is refused', c2.err);
+await c.run(`rollback;`); c.close();
+await sysOff();
+c = await open();
+psqlAs('supabase_admin', `alter system set xmloption = 'document';`);
+const c3 = await c.run(`${toggle};`);
+ok(c3.ok, 'alter system not yet reloaded isn’t visible, to the cache or to reset_val', c3.err);
+ok((await c.run(`select reset_val from pg_settings where name = 'xmloption';`)).out === 'content', 'reset_val itself still says content');
+await reload();
+const c4 = await c.run(`${toggle};`);
+ok(misconfigured(c4), 'and refused as soon as the reload is visible', c4.err);
+await c.run(`rollback;`); c.close();
+await sysOff();
+c = await open();
+psqlAs('supabase_admin', `alter role authenticated set xmloption = 'document';`);
+const c5 = await c.run(`${toggle};`);
+ok(misconfigured(c5), 'a role default during the transaction: refused at the next write, with no reload (read for every row)', c5.err);
+await c.run(`rollback;`); c.close();
+psqlAs('supabase_admin', `alter role authenticated reset xmloption;`);
+// Inside one statement: a backend takes a reload only between commands, so reset_val can't change there, cached or not.
+psql(`create function public.zz_rv() returns text language plpgsql volatile as $$ begin perform pg_sleep(0.03); return (select reset_val from pg_settings where name = 'xmloption'); end $$;`);
+const rvRun = psqlAsync(`select string_agg(distinct public.zz_rv(), ',') from generate_series(1, 120);`);
+await sleep(700); await sysOn();
+ok((await rvRun).trim() === 'content', 'within one statement, a reload doesn’t reach reset_val at all, so the cache misses nothing there');
+await sysOff();
+psql(`drop function public.zz_rv();`);
+const longRows = Number(Q(`select count(*) from public.tv_shows where user_id = '${A.id}'`));
+ok(longRows >= 6, `enough rows for a long statement (${longRows})`);
+const lr = psqlAsync(`begin; set local xmloption = 'document'; update public.tv_shows set ended = not ended where user_id = '${A.id}' and pg_sleep(${(2.4 / longRows).toFixed(3)}) is not null; rollback;`);
+await sleep(700); psqlAs('supabase_admin', `alter role authenticated set xmloption = 'document';`);
+const lrr = await lr.catch(e => String(e));
+ok(misconfigured({ message: lrr }), 'a role default during a long statement: refused on a later row of it', lrr);
+psqlAs('supabase_admin', `alter role authenticated reset xmloption;`);
+await reloadConfig(); await restartRest();
+await healthy('after the open-transaction tests');
+
+// ═══ Recovery ═══
+section('recovery');
+const B0 = await fixture(B, 'ZZ W1 B', 990951);
+const directB = () => rest(B.token, 'PATCH', `tv_shows?id=eq.${B0.show.id}`, { ended: true }, { Prefer: 'return=representation' });
+const anon = () => rest(null, 'GET', 'tv_shows?select=id&limit=1');
+const repairing = r => /library_under_repair/.test(r.text || '');
+const denied = r => r.status === 403 || /permission denied/.test(r.text || '');
+const expectAll = async (n, f, pred) => (await Promise.all(Array.from({ length: n }, f))).every(pred);
+const waitFor = async (f, pred, ms = 9000) => { let r; for (let t = 0; t < ms; t += 300) { try { r = await f(); if (pred(r)) return r; } catch (e) { r = { text: String(e) }; } await sleep(300); } return r; };
+const aclBefore = Q(`select nspacl::text from pg_namespace where nspname = 'private'`);
+const recover = async (label, remove) => {
+  // 1. Close.
+  const closed = tryPsql(sql('db/admin/w1_recovery_1_close.sql'));
+  ok(closed.ok, `${label}: step 1 closes`, closed.message);
+  const w = await waitFor(directB, repairing);
+  ok(repairing(w), `${label}: an ordinary member is refused, by the gate`, w.text);
+  ok(repairing(await anon()), `${label}: a request with no sign-in too`);
+  const own = await waitFor(directA, denied);
+  ok(denied(own) && net0() === n0, `${label}: the owner passes the gate and is stopped by schema access: nothing can write`, own.text);
+  ok(denied(await reachA()), `${label}: a library function too`);
+  ok(repairing(await rest(B.token, 'GET', 'tv_shows?select=id&limit=1')), `${label}: an ordinary member’s read is refused by the gate`);
+  ok(repairing(await rest(B.token, 'DELETE', `tv_shows?id=eq.${B0.show.id}`)) && Q(`select count(*) from public.tv_shows where id = '${B0.show.id}'`) === '1', `${label}: and its direct delete, which no write guard covers (item 11)`);
+  const ng = await gql(B.token, `mutation { b: updatetv_showsCollection(set: { ended: true }, filter: { id: { eq: "${B0.show.id}" } }, atMost: 1) { affectedCount } }`);
+  ok(repairing(ng) || /errors/.test(ng.text), `${label}: GraphQL too`, ng.text);
+  // 2. Remove and replace.
+  await remove();
+  const replaced = tryPsql(sql('db/admin/w1_recovery_2_replace.sql'));
+  ok(replaced.ok, `${label}: step 2 removes nothing itself, and refuses until the default is gone`, replaced.message);
+  await sleep(1500);
+  // 3. Owner only: prove the path before anyone else returns.
+  const gatedStill = await waitFor(directB, repairing);
+  ok(repairing(gatedStill), `${label}: the gate still holds before step 3`, gatedStill.text);
+  ok(tryPsql(sql('db/admin/w1_recovery_3_owner_only.sql')).ok && Q(`select nspacl::text from pg_namespace where nspname = 'private'`) === aclBefore, `${label}: step 3 gives schema access back exactly`);
+  const oneOwn = await waitFor(directA, r => required(r));
+  ok(required(oneOwn) && net0() === n0, `${label}: the owner’s direct write is refused by the write guard`, oneOwn.text);
+  ok(await expectAll(40, directA, r => required(r)) && net0() === n0, `${label}: on forty requests, across the pool`);
+  ok(await expectAll(40, reachA, r => r.ok), `${label}: a library function works on all forty`);
+  ok(await expectAll(20, directB, repairing), `${label}: everyone else is still refused`);
+  // 4. Open, and prove it; 5. clean up.
+  ok(tryPsql(sql('db/admin/w1_recovery_4_open.sql')).ok, `${label}: step 4 runs`);
+  const opened = await waitFor(directB, r => required(r));
+  ok(required(opened), `${label}: an ordinary member is back, and refused by the write guard, not the gate`, opened.text);
+  ok(await expectAll(40, directB, r => required(r)), `${label}: on forty requests, across the pool`);
+  ok(tryPsql(sql('db/admin/w1_recovery_5_clean.sql')).ok, `${label}: step 5 removes the gate`);
+  ok((await rest(B.token, 'GET', `tv_shows?select=id&id=eq.${B0.show.id}`)).json.length === 1, `${label}: ordinary reads work`);
+  await healthy(`${label}, recovered`);
+  ok(Q(`select to_regprocedure('public.w1_repair_gate()') is null and to_regclass('private.w1_recovery') is null`) === 't', `${label}: nothing of the procedure is left`);
+};
+psql(`create function public.zz_state() returns jsonb language sql as $$ select jsonb_build_object('cur', current_setting('xmloption'), 'reset', (select reset_val from pg_settings where name = 'xmloption')) $$;
+  grant execute on function public.zz_state() to authenticated; notify pgrst, 'reload schema';`);
+await sleep(1800);
+// What each notification does to a connection that started under a default. Neither is proof, so the procedure checks.
+psqlAs('supabase_admin', `alter role authenticator set xmloption = 'document';`);
+await restartRest();
+psqlAs('supabase_admin', `alter role authenticator reset xmloption;`);
+psql(`notify pgrst, 'reload config';`); await sleep(1800);
+const afterConfig = await state();
+ok(afterConfig === 'document/document', 'reload config alone leaves the connections stale', afterConfig);
+ok(misconfigured(await reachA()), 'so a library function is still refused');
+await recover('a stale authenticator default', async () => {});
+
+psqlAs('supabase_admin', `alter role authenticated set xmloption = 'document';`);
+await reloadConfig(); await restartRest();
+psqlAs('supabase_admin', `alter role authenticated reset xmloption;`);
+const gap = await directA();
+ok(gap.ok && net0() === 't', 'the accepted limitation: a role default removed without a reload lets a direct write through', gap.text);
+clearEnded();
+await recover('a role default PostgREST still caches', async () => {});
+
+psqlAs('supabase_admin', `alter role authenticated set xmloption = 'document';`);
+await reloadConfig(); await restartRest();
+await recover('a role default still configured', async () => {
+  const early = tryPsql(sql('db/admin/w1_recovery_2_replace.sql'));
+  ok(!early.ok && /still configured/.test(early.message), 'step 2 refuses while the default is there', early.message);
+  psqlAs('supabase_admin', `alter role authenticated reset xmloption;`);
+});
+
+await sysOn();
+await restartRest();
+await recover('a server default', async () => { await sysOff(); });
+
+psql(`create function public.zz_leak() returns void language plpgsql as $$ begin set xmloption = 'document'; end $$;
+  grant execute on function public.zz_leak() to authenticated; notify pgrst, 'reload schema';`);
+await sleep(1800);
+await Promise.all(Array.from({ length: 40 }, () => rpc(A.token, 'zz_leak', {})));
+const leakS = await Promise.all(Array.from({ length: 40 }, () => rpc(A.token, 'zz_state', {})));
+const leaked = leakS.filter(r => r.json && r.json.cur === 'document').length;
+const leakD = await Promise.all(Array.from({ length: 20 }, () => directA()));
+ok(leaked > 0 && leakD.some(r => r.ok), `the accepted limitation: a session-level SET in a function passes direct writes on the connections it reached (${leaked}/40)`, leakD[0].text);
+clearEnded();
+psql(`notify pgrst, 'reload config';`); await sleep(1800);
+const leakCfg = (await Promise.all(Array.from({ length: 40 }, () => rpc(A.token, 'zz_state', {})))).filter(r => r.json && r.json.cur === 'document').length;
+ok(leakCfg > 0, `reload config alone leaves it on the connections (${leakCfg}/40)`);
+await Promise.all(Array.from({ length: 40 }, () => rpc(A.token, 'zz_leak', {})));
+await recover('a session-level SET', async () => { psql(`drop function public.zz_leak();`); });
+const leakS2 = await Promise.all(Array.from({ length: 40 }, () => rpc(A.token, 'zz_state', {})));
+ok(leakS2.every(r => r.json && r.json.cur === 'content'), 'every connection is back at content', leakS2.map(r => r.json && r.json.cur).join(','));
+psql(`drop function public.zz_state(); notify pgrst, 'reload schema';`);
+await sleep(1800);
+
+const dup = tryPsql(sql('db/admin/w1_recovery_2_replace.sql'));
+ok(!dup.ok && /step 1 has not run/.test(dup.message), 'a later step can’t run first', dup.message);
+ok(Q(`select count(*) from pg_db_role_setting s, unnest(s.setconfig) x where x like 'pgrst.db_pre_request=%'`) === '0', 'the gate setting is gone');
 
 section('end state');
 ok(Q(`select count(*) from pg_db_role_setting s, unnest(s.setconfig) x where lower(x) like 'xmloption=%'`) === '0', 'no default left behind');

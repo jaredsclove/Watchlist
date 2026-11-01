@@ -185,6 +185,8 @@ const fp = (kind, x) => `${kind}:${sha(String(x))}`;
 section('replica');
 const db = await replica();
 ok((await val(db, `select public.stage5_capabilities() ->> 'phase'`)) === 'contracted-ep1', 'the replica is contracted-ep1 with A and B restored');
+// Under W1 every comparison starts from W1 on, so a function's text only differs if a migration really changed it.
+if (W1_CORE) await db.exec(`begin;\n${W1_CORE}\ncommit;`);
 const s0 = await state(db);
 
 section('pre: refusals change nothing');
@@ -1537,7 +1539,11 @@ section('cu2: research access (db/cu2_research_access.sql)');
     });
     ok(!inner.ok && /^research_not_enabled: /.test(inner.message), 'a success inside an outer block, then a research write: refused', inner.message || 'it ran');
     // The internal function gains nothing: the flag is the wrapper's.
-    await refused('the internal restore called directly', () => attempt(() => asUser(db, B, `select private.restore_backup_v7($1::jsonb, false)`, [expB])));
+    await refused('the internal restore called directly', () => attempt(() => asUser(db, B, `select ${W1_CORE ? `set_config('xmloption', 'document', true), ` : ''}private.restore_backup_v7($1::jsonb, false)`, [expB])));
+    if (W1_CORE) {
+      const noScope = await attempt(() => asUser(db, B, `select private.restore_backup_v7($1::jsonb, false)`, [expB]));
+      ok(!noScope.ok && /^library_write_scope: /.test(noScope.message), 'under W1, outside its wrapper it stops earlier, at lib_write_on', noScope.message || 'it ran');
+    }
     // Only a member's own setting of a name it can't reach would matter; a caller outside restore has no way to set it.
     ok((await val(db, `select array_agg(p.proname::text order by p.proname)::text from pg_proc p where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace) and p.prosrc like '%watchlist.research_restore%'`)) === '{research_write_guard,restore_backup}',
       'only the wrapper and the guard name the flag');
