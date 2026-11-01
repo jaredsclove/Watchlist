@@ -57,7 +57,8 @@ test('a hold keeps it out and says so; removing the hold lets the next Refresh r
   assert.strictEqual(has(app, show, 3), 1);
 });
 
-for (const [status, re] of [['dismissed', /Season 3: not added — you dismissed it; add the season by hand if you want it/], ['not_now', /Season 3: not added — you set it to Not now; add the season by hand if you want it/]]) {
+for (const [status, re] of [['dismissed', /Left out by your decision \(1\) Listed · Season 3: you dismissed it; add the season by hand if you want it Couldn't check or apply \(0\)/],
+  ['not_now', /Left out by your decision \(1\) Listed · Season 3: you set it to Not now; add the season by hand if you want it Couldn't check or apply \(0\)/]]) {
   test(`${status}: the season stays out, Refresh says so, and nothing is added or changed`, async () => {
     const { app, show } = await library();
     remove(app, show, 3); await refresh(app); remove(app, show, 3);
@@ -84,6 +85,10 @@ test('“already on your list” appears only for the database’s answer about 
   assert.strictEqual(c.applied.length, 0, 'nor does a date’s');
   const d = r(); app.ctx.cuRecordOutcome(op, { outcome: 'not_pending', status: 'set_aside', reason: 'skipped' }, d);
   assert.match(d.setAside[0], /not added — the show is Skipped/);
+  assert.strictEqual(d.decisions.length, 0, 'a Skipped show is no decision on the finding');
+  const e = r(); app.ctx.cuRecordOutcome(op, { outcome: 'not_pending', status: 'dismissed', reason: '' }, e);
+  assert.strictEqual(e.setAside.length + e.failed.length, 0, 'a decision isn’t filed as a failure');
+  assert.strictEqual(e.decisions.length, 1);
 });
 
 test('an existing Skipped season isn’t sent, and stays Skipped', async () => {

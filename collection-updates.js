@@ -216,7 +216,7 @@ function cuSeasonFinished(details, seasonNumber, cached, today) {
 
 // ── Results ──
 function cuEmptyResults(source) {
-  return { source, checked: 0, matched: 0, unmatched: 0, skipped: 0, applied: [], review: [], blocked: [], failed: [], setAside: [], episodes: [], networkConfirmed: [], networkChoices: [], unknown: null, laneRefused: null };
+  return { source, checked: 0, matched: 0, unmatched: 0, skipped: 0, applied: [], review: [], blocked: [], failed: [], setAside: [], decisions: [], episodes: [], networkConfirmed: [], networkChoices: [], unknown: null, laneRefused: null };
 }
 function cuResultsHtml(r) {
   const li = items => items.map(x => `<li>${esc(x)}</li>`).join('');
@@ -238,6 +238,7 @@ function cuResultsHtml(r) {
     ${r.networkChoices.length ? `<h4 class="cu-results-head">Choose a network (${r.networkChoices.length})</h4><p class="cu-none">Nothing was guessed; each stays unset until you choose in Details.</p>
       <ul class="cu-list">${r.networkChoices.map(cuNetworkChoiceHtml).join('')}</ul>` : ''}
     ${r.blocked.length ? `<h4 class="cu-results-head">${cuBlockedHead()} (${r.blocked.length})</h4><p class="cu-none">${esc(cuBlockedText())}</p><ul class="cu-list">${li(r.blocked)}</ul>` : ''}
+    ${r.decisions.length ? `<h4 class="cu-results-head">Left out by your decision (${r.decisions.length})</h4><ul class="cu-list">${li(r.decisions)}</ul>` : ''}
     <h4 class="cu-results-head">Couldn’t check or apply (${notChecked.length})</h4>${notChecked.length ? `<ul class="cu-list">${li(notChecked)}</ul>` : '<p class="cu-none">None.</p>'}
   </div>`;
 }
@@ -275,8 +276,8 @@ function cuRecordOutcome(op, res, results) {
     // here means the database found the season, under the show's lock: an applied finding alone is reopened instead.
     else if (op.type === 'season' && (op.args.p_finding || {}).source === 'tmdb') {
       if (res.status === 'applied') results.applied.push(`${op.what}: already on your list`);
-      else if (res.status === 'dismissed') results.setAside.push(`${op.what}: not added — you dismissed it; add the season by hand if you want it`);
-      else if (res.status === 'not_now') results.setAside.push(`${op.what}: not added — you set it to Not now; add the season by hand if you want it`);
+      else if (res.status === 'dismissed') results.decisions.push(`${op.what}: you dismissed it; add the season by hand if you want it`);
+      else if (res.status === 'not_now') results.decisions.push(`${op.what}: you set it to Not now; add the season by hand if you want it`);
       else results.setAside.push(`${op.what}: not added — ${why || res.status.replace(/_/g, ' ')}`);
     }
   } else if (res.outcome === 'policy') {
