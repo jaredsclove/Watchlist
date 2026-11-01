@@ -122,3 +122,14 @@ policy change. A failure outside these rows stops the drill for the owner's deci
   real default, or anything about a server-level default, which stays unconfirmed and would need Supabase Support.
 - An ordinary second member isn't tested on hosted. A restart, if unused, stays unproved there.
 - The hosted API path is tested with `priority` on one synthetic show. The rest of the guards are tested locally.
+
+## 7. As run on production (2026-11-01)
+
+The drill ran as written, with no fallback. Three things it taught, for any later run:
+
+- The SQL Editor asks before step 1 (the RLS prompt, about `private.w1_recovery`: Run without RLS) and before step 5 (destructive
+  operations: Run query). Neither has run until it's answered, so read each script's own result before moving on. "Success" on screen can be
+  the previous run's. Step 5 needs the status read after it.
+- PostgREST took 11 to 13 seconds to answer after its connections ended. Poll with `P.peek()`, which never stops the page, before
+  `P.signedOut`, which does.
+- The probe file can be loaded at an exact commit from the raw file, with its SHA-256 checked, instead of pasted.
