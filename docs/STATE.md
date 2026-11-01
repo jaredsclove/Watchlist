@@ -132,9 +132,41 @@ test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 epi
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
 (CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29], the compact interface [#32],
-density and search [#34], research access (CU2) [#37], a missing season comes back (CU1e) [#40].
+density and search [#34], research access (CU2) [#37], a missing season comes back (CU1e) [#40], write scope (W1) [#42].
 
-- **Release:** `a3436a8`, a missing TMDB season comes back on every Refresh shows (CU1e, item 10; PR #40, the branch's three commits
+- **Release:** `963b96e`, library writes are authorized by the function's own scope (W1, item 9; PR #42, a merge commit of the reviewed
+  head `b54f1fd`, whose migration and application files equal the reviewed implementation at `5d4fdac`), released 2026-11-01 UTC. Database only:
+  `db/w1_write_scope.sql` puts `set xmloption = 'document'` on 35 public and 3 enrichment functions and makes the guards read it through
+  `private.lib_authorized`. No table, policy, capability, phase, backup-format or application file changed; the token stays
+  `20261101-seasons`. Validation: offline 1259/1259; a local Supabase stack with real PostgREST and Auth (384/384); the rehearsals; one
+  focused review of the implementation and one of the hosted procedure, each with its findings closed. Release: a read-only preflight
+  (`db/test/w1_preflight.sql`, hosted capabilities included); a pre-release format-7 backup validated; the SQL Editor's contents checked
+  against the run file's hash and run once (its RLS prompt concerned the migration's temp tables); one run record confirmed by a separate
+  read, with the clause on exactly 35 + 3 functions, `lib_authorized` volatile, execute for `authenticated` only, no temp table left and
+  `pg_graphql` absent; `db/test/w1_catalog_check.sql` passed. Verified through the hosted API, signed in, on a synthetic `ZZ` show created
+  through `library_create_show_b45`: direct `PATCH`es of `tv_shows.priority` from normal to high, 16 of 16 refused with
+  `library_write_required` and the value unchanged; the no-write check answered `target_missing`; a real write through
+  `library_set_show_state_b45` went there and back; `delete_tv_season` removed the record. Merged only after that. Pages built `963b96e`; the
+  35 application files are byte-identical and all 29 versioned files carry the token. The fresh page loaded all views as the owner, with
+  member and research access true, and no console error.
+- **Recovery drill, H2 (owner-approved, 2026-11-01, `docs/W1_RELEASE_PROCEDURE.md`):** run on production right after the release, with
+  nothing poisoned, on PostgREST 14.5 and PostgreSQL 17 (the local stack is 16.4). The pre-request gate took effect within seconds of step 1's
+  notification, and a signed-out request answered 503 `PT503`. With schema access revoked, the owner's direct writes and library functions
+  stopped with permission errors. `postgres` ended PostgREST's connections, 8 and then 2, all that were found; the status read showed each
+  newer than the script, and PostgREST was back within about 13 seconds with the gate still holding. After step 3, five rounds: 40 of 40 direct
+  writes refused by the guard, the no-write check reaching the scope, a real library write working, and signed-out requests still at the
+  gate. Step 4 reopened the API within seconds (40 of 40 signed-out requests back to the ordinary 401), step 5 removed the gate, and the
+  same proofs passed again on a further synthetic record. API closed under three minutes. No fallback was used: no project restart, and the
+  Data API stayed on. Preservation: four format-7 backups (baseline, post-migration, post-verification, final) validated, with four
+  distinct export times, 19 tables and 1,393 rows each; each later one equals the baseline field by field, and no test record is left. No
+  production GraphQL request was sent. **Not proved on hosted:** removing a real default, a server-level default (`postgres` can't set one,
+  and only Supabase Support could remove one; unconfirmed), a project restart, and any second member, since no other account has a session.
+- **Write-scope limits (W1):** W1 doesn't fail closed in every state. A role default PostgREST still caches, and a session-level `SET` in a
+  function, let direct writes through; each needs database administrator access (`db/README.md`, write scope), and recovery is that
+  procedure. A later migration that replaces a listed function must set the clause again, then run the catalog check. Direct deletes and title
+  updates stay unguarded (item 11). A restore's largest local success under the 8 s timeout was 36,123 rows, up to 7.5 s, on a
+  synthetic library. That isn't a guaranteed capacity, and hosted timing wasn't measured.
+- **Earlier release:** `a3436a8`, a missing TMDB season comes back on every Refresh shows (CU1e, item 10; PR #40, the branch's three commits
   rebased, same tree as the reviewed head `2d0e6dc`), released 2026-11-01 UTC with database migration `db/cu1e_missing_season.sql`
   (replaces `private.cu1_finding_take` only; no table, grant, capability, phase or backup-format change, and no backfill). The page says
   why a season sent wasn't added, lists Dismissed and Not now under "Left out by your decision", and the delete dialog names holds and
@@ -191,7 +223,7 @@ density and search [#34], research access (CU2) [#37], a missing season comes ba
   but its password still works: a new sign-in is possible and would read and write nothing. Re-adding its membership would restore access.
   It isn't banned. Removing it is deferred with other member libraries (`docs/MEMBER_RECOVERY.md`).
 - **GraphQL, observed 2026-11-01 (a dated observation, not a guarantee):** `pg_graphql` was not installed, by a catalog read; no
-  GraphQL request was sent. This can change, and item 9 in `NEXT_GEN_FEATURES.md` stays open: resolve it before anyone enables GraphQL.
+  GraphQL request was sent. This can change. Item 9's chained-mutation path is closed by W1, on a local stack; enabling GraphQL still needs its own decision.
 
 - **Earlier release:** `9768284`, density and search (item 8 follow-up; PR #34, the branch's two commits rebased, same tree as the
   reviewed head `7c125e7`), released 2026-10-31 UTC. Presentation and interaction only: no migration, and no backup-format
@@ -433,6 +465,8 @@ density and search [#34], research access (CU2) [#37], a missing season comes ba
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
+  - W1: no page to revert; fix-forward. `db/test/w1_reverse.sql` is for test environments only. A production reversal would be a new, separately
+    approved script.
   - CU2: the page can be reverted by a code revert (an older page works against the CU2 database, and the database still
     refuses research writes without access); the column, guard and restore wrapper stay (fix-forward).
   - CU1d: the page can be reverted by a code revert of `0cac052` and `1ffd079`, newest first; the two functions stay
@@ -483,6 +517,7 @@ density and search [#34], research access (CU2) [#37], a missing season comes ba
 [#34]: https://github.com/jaredsclove/Watchlist/pull/34
 [#37]: https://github.com/jaredsclove/Watchlist/pull/37
 [#40]: https://github.com/jaredsclove/Watchlist/pull/40
+[#42]: https://github.com/jaredsclove/Watchlist/pull/42
 
 ## How we work
 
@@ -580,7 +615,7 @@ density and search [#34], research access (CU2) [#37], a missing season comes ba
   resolved (PR #25, CU1b); dates within a day are the same date (PR #27, CU1c). The owner ran the first production
   Refresh shows and research import before CU1c, and Refresh shows again after CU1d. Still open: a page can't detect CU1b before calling it (a page deployed before its migration stops its
   writes on Edit until reloaded).
-- **Research access (CU2):** Continue isn't verified on production. Item 9 (function-only writes) stays open and separate.
+- **Research access (CU2):** Continue isn't verified on production.
 - **Missing seasons (CU1e):** closed on database and page (PR #40). Its behaviour isn't verified on production until the owner runs Refresh shows.
 - **Optional, not scheduled:** on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
