@@ -16,6 +16,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import vm from 'vm';
 import { execFileSync, spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
@@ -813,6 +814,91 @@ await sleep(1800);
 
 const dup = batch(sql('db/admin/w1_recovery_2_replace.sql'));
 ok(!dup.ok && /step 1 has not run/.test(dup.message), 'a later step can’t run first', dup.message);
+
+// The hosted drill as docs/W1_RELEASE_PROCEDURE.md runs it: nothing poisoned, the same probe file, one owner and no other account.
+section('hosted drill');
+const vmCtx = { fetch, console, crypto, setTimeout }; vm.createContext(vmCtx);
+vm.runInContext(fs.readFileSync(path.join(ROOT, 'tools/w1-hosted-probes.js'), 'utf8'), vmCtx);
+const probeEnv = { url: API, key: KEY, owner: async extra => ({ apikey: KEY, Authorization: `Bearer ${A.token}`, ...(extra || {}) }), uuid: () => crypto.randomUUID() };
+const probes = vmCtx.W1Probes(probeEnv);
+{
+const status = () => JSON.parse(batch(sql('db/admin/w1_recovery_status.sql')).out.match(/W1S\|(\{.*\})/)[1]);
+const peekFor = async want => { for (let t = 0; t < 9000; t += 300) { if (await probes.peek() === want) return true; await sleep(300); } return false; };
+const printAll = () => Q(`select md5(string_agg(t, '|' order by t)) from (
+  select to_jsonb(x)::text t from public.tv_shows x union all select to_jsonb(x)::text from public.watchlist_items x union all select to_jsonb(x)::text from public.update_findings x
+  union all select to_jsonb(x)::text from public.show_update_settings x union all select to_jsonb(x)::text from public.membership_removals x union all select to_jsonb(x)::text from public.record_aliases x
+  union all select to_jsonb(x)::text from public.collection_memberships x union all select to_jsonb(x)::text from public.episode_marks x
+  union all select to_jsonb(x)::text from private.stage5_recovery_records x union all select to_jsonb(x)::text from private.stage5_recovery_othertv x) s`);
+const printBefore = printAll();
+const s0 = status();
+ok(s0.xmloption_defaults === 0 && s0.xmloption_reset_val === 'content' && !s0.closed && !s0.gate_setting && s0.authenticated_uses_private, 'the status read starts clean', JSON.stringify(s0));
+ok(s0.postgrest_connections >= 1 && s0.other_authenticator === 0, 'PostgREST’s connections are identified by name');
+// An authenticator connection under another name stays.
+const other = spawn('docker', ['exec', '-i', '-e', 'PGPASSWORD=postgres', CONTAINER, 'psql', '-X', '-q', '-h', '127.0.0.1', '-U', 'authenticator', '-d', 'postgres', '-c', `set application_name = 'zz other'; select pg_sleep(12)`]);
+await sleep(1200);
+const rec = await probes.create();
+ok(rec.original === 'normal' && Q(`select title || '|' || priority from public.tv_shows where id = '${rec.showId}'`) === 'ZZ W1 Release Test|normal', 'the synthetic record is created through the library function');
+const firstDirect = await probes.direct('guard');
+ok(firstDirect.counts.guard === 8 && firstDirect.value === 'normal', 'stage 7: a direct write is refused by the guard, eight at once, and the value is unchanged');
+ok((await probes.legitimate()).value === 'normal', 'stage 7: a real write through a library function goes there and back');
+ok((await probes.noWrite()).answer === 'target_missing', 'stage 7: the no-write check answers target_missing');
+ok((await probes.signedOut('denied')).answer === 'denied', 'a signed-out request is refused as usual');
+// H2.
+ok(batch(sql('db/admin/w1_recovery_1_close.sql')).ok, 'step 1 closes');
+ok(await peekFor('gate'), 'a signed-out request meets the gate');
+ok((await probes.direct('denied')).counts.denied === 8, 'the owner’s direct write stops at schema access');
+ok((await probes.noWrite('denied')).answer === 'denied', 'a library function too');
+const first = batch(sql('db/admin/w1_recovery_connections.sql'));
+const firstOut = JSON.parse(first.out.match(/W1R\|(\{.*\})/)[1]);
+ok(first.ok && firstOut.may_end && firstOut.found >= 1 && firstOut.ended === firstOut.found, 'the connections script ends what it found', first.out);
+await sleep(2000);
+ok((await probes.signedOut('gate')).answer === 'gate', 'the gate holds on new connections');
+const s1 = status();
+ok(s1.closed && s1.gate_function && s1.gate_setting && !s1.authenticated_uses_private && s1.other_authenticator === 1, 'the status read shows it closed, and another authenticator connection left alone', JSON.stringify(s1));
+ok(new Date(s1.oldest_postgrest_connection) > new Date(firstOut.at), 'every PostgREST connection is newer than the script');
+ok(batch(sql('db/admin/w1_recovery_2_replace.sql')).ok, 'step 2 passes with nothing to remove');
+ok(batch(sql('db/admin/w1_recovery_connections.sql')).ok, 'connections again');
+await sleep(2000);
+ok((await probes.signedOut('gate')).answer === 'gate', 'still closed');
+ok(batch(sql('db/admin/w1_recovery_3_owner_only.sql')).ok, 'step 3 runs');
+let rounds = true;
+for (let i = 0; i < 5; i++) rounds = rounds && (await probes.direct('guard')).counts.guard === 8 && (await probes.noWrite()).answer === 'target_missing';
+ok(rounds, 'five rounds: the owner’s direct writes refused by the guard, the no-write check reaches the scope');
+ok((await probes.legitimate()).value === 'normal', 'a real write through a library function works, owner only');
+ok((await probes.signedOut('gate')).answer === 'gate', 'everyone else is still at the gate');
+ok(batch(sql('db/admin/w1_recovery_4_open.sql')).ok, 'step 4 opens');
+ok(await peekFor('denied'), 'a signed-out request no longer meets the gate');
+ok((await probes.signedOut('denied', 40)).answer === 'denied', 'on forty requests');
+ok(batch(sql('db/admin/w1_recovery_5_clean.sql')).ok, 'step 5 cleans up');
+ok((await probes.direct('guard')).counts.guard === 8 && (await probes.legitimate()).value === 'normal', 'after cleanup: a direct write refused, a library function working');
+ok((await probes.cleanup()).removed, 'the record is removed through delete_tv_season');
+ok(printAll() === printBefore, 'the drill and its record leave nothing: shows, seasons, findings, settings, removals, aliases, memberships, marks, the recovery archive');
+const s2 = status();
+ok(!s2.closed && !s2.gate_function && !s2.gate_setting && s2.authenticated_uses_private, 'the status read ends clean', JSON.stringify(s2));
+await new Promise(r => { other.on('exit', r); other.kill(); setTimeout(r, 500); });
+
+}
+// A direct write that goes through: only a state the procedure doesn't create, so the guard is switched off here, on purpose.
+section('a refusal that fails');
+{
+const p2 = vmCtx.W1Probes(probeEnv);
+const rec2 = await p2.create();
+psql(`alter table public.tv_shows disable trigger tv_shows_b45_guard;`);
+const went = await p2.direct('guard', 1);
+psql(`alter table public.tv_shows enable trigger tv_shows_b45_guard;`);
+ok(went.wrote && went.restored.confirmed && went.restored.how === 'direct', 'a write that went through is reported and restored', JSON.stringify(went));
+ok(Q(`select priority from public.tv_shows where id = '${rec2.showId}'`) === 'normal', 'the exact change is back');
+let refused = ''; await p2.legitimate().catch(e => { refused = String(e.message); });
+ok(/stopped earlier/.test(refused), 'nothing further runs after it', refused);
+const p3 = vmCtx.W1Probes(probeEnv); p3.adopt(rec2);
+psql(`alter table public.tv_shows disable trigger tv_shows_b45_guard; update public.tv_shows set priority = 'high' where id = '${rec2.showId}'; alter table public.tv_shows enable trigger tv_shows_b45_guard;`);
+const viaFn = await p3.restore();
+ok(viaFn.how === 'function' && viaFn.confirmed, 'with the guard back on, the restore goes through the library function', JSON.stringify(viaFn));
+const p3b = vmCtx.W1Probes(probeEnv); p3b.adopt(rec2);
+ok((await p3b.cleanup()).removed, 'the record is removed from a fresh page, by its recorded ids');
+let leftover = ''; const p4 = vmCtx.W1Probes(probeEnv); await p4.create(); const p5 = vmCtx.W1Probes(probeEnv); await p5.create().catch(e => { leftover = String(e.message); }); await p4.cleanup();
+ok(/test key/.test(leftover), 'a leftover record stops the next create', leftover);
+}
 ok(Q(`select count(*) from pg_db_role_setting s, unnest(s.setconfig) x where x like 'pgrst.db_pre_request=%'`) === '0', 'the gate setting is gone');
 
 section('end state');
