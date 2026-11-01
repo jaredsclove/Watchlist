@@ -153,9 +153,24 @@ density and search [#34], research access (CU2) [#37].
   card as before, review opens with its six waiting findings and no Continue action (nothing unfinished), Collections and rules lists
   the 22 holds, and Currently Watching, All TV, Coming Soon, Movies and Collections load. A page-memory log started after load
   recorded no write, and there was no console error. A final backup validated and equals the post-migration one field by field.
-  Refresh shows, research imports and findings weren't run. **Not verified on production:** research-off behaviour, revocation,
-  refusals and Continue (a separate two-account test is not yet approved); the page's first load wasn't in that log. Not tested: real
+  Refresh shows, research imports and findings weren't run on that account. **Not verified on production at release:** research-off
+  behaviour, revocation and refusals (since verified, below) and Continue; the page's first load wasn't in that log. Not tested: real
   phones, Safari, Firefox and true dark mode. An older tab keeps working until reloaded.
+- **Production two-account test (owner-approved, 2026-11-01):** a temporary member with synthetic `ZZ` data and one public TMDB
+  title, its rows recorded privately as they were created. With access off: an empty library, no research controls or wording;
+  a collection, a manual show, a TMDB show, memberships and Refresh shows worked; a hold by RPC and by direct REST was refused
+  (`research_not_enabled`) and `library_members` wasn't reachable. With access on, two holds saved through the form. Revoked on an open
+  page: Remove hold was refused, the page followed at once and the holds stayed. With access off, one Refresh restored a deleted
+  season (the control) and left out one a standing decision held. Deleting the show took its hold and left the label-only hold.
+  Membership removal took effect at once on an already-issued token (member false, no rows, writes refused). After sign-outs: no
+  sessions or live refresh tokens, and refresh refused; that access token still passed signature checks but reached no data. The owner's
+  backups before and after match field by field (19 tables, 1,393 rows, no differences); a fingerprint of everything outside the test
+  account is unchanged; the owner's access is on and `pg_graphql` was still absent. Driven by script through the page and the same
+  database functions, not by hand. Not exercised: Continue, imports, restore and a new sign-in by that account.
+- **Retained test account (owner-approved exception to returning production to baseline):** one Auth user and seven rows (a collection, a
+  manual show, its season, a membership, a hold and two TMDB findings). It has no membership and no sessions, so it reaches no library,
+  but its password still works: a new sign-in is possible and would read and write nothing. Re-adding its membership would restore access.
+  It isn't banned. Removing it is deferred with other member libraries (`docs/MEMBER_RECOVERY.md`).
 - **GraphQL, observed 2026-11-01 (a dated observation, not a guarantee):** `pg_graphql` was not installed, by a catalog read; no
   GraphQL request was sent. This can change, and item 9 in `NEXT_GEN_FEATURES.md` stays open: resolve it before anyone enables GraphQL.
 
@@ -545,7 +560,8 @@ density and search [#34], research access (CU2) [#37].
   resolved (PR #25, CU1b); dates within a day are the same date (PR #27, CU1c). The owner ran the first production
   Refresh shows and research import before CU1c, and Refresh shows again after CU1d. Still open: a page can't detect CU1b before calling it (a page deployed before its migration stops its
   writes on Edit until reloaded).
-- **Research access (CU2):** a production two-account test isn't approved. Item 9 (function-only writes) stays open and separate.
+- **Research access (CU2):** Continue isn't verified on production. Item 9 (function-only writes) and item 10 (a season deleted twice
+  isn't re-added by Refresh shows) stay open and separate.
 - **Optional, not scheduled:** on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
   instead of a sentence (polish, not a blocker).
