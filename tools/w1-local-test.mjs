@@ -321,6 +321,8 @@ const g5 = await gql(A.token, `mutation { b: updatetv_showsCollection(set: { end
 ok(required(g5) && net0() === n0, 'a direct GraphQL update alone: refused', g5.text);
 
 // ═══ Defaults ═══
+// What a live check can use: a show id that matches nothing reaches lib_write_on, then stops, and can't touch a real row.
+const noWrite = () => rpc(A.token, 'library_cu_set_show_settings', { p_show_id: crypto.randomUUID(), p_expected: {}, p_follow_when_skipped: false, p_clear_ended_flag: false });
 const reachA = () => rpc(A.token, 'library_cu_set_show_settings', { p_show_id: S.show.id, p_expected: { follow_when_skipped: false, flagged: false }, p_follow_when_skipped: false, p_clear_ended_flag: false });
 const directA = () => rest(A.token, 'PATCH', `tv_shows?id=eq.${S.show.id}`, { ended: true }, { Prefer: 'return=representation' });
 const restartRest = async () => {
@@ -613,7 +615,7 @@ ok(await sawMark() === mn, 'a second function in the transaction keeps it');
 await h.run(`select public.library_cu_set_show_settings('${S.show.id}', '{"follow_when_skipped": false, "flagged": false}'::jsonb, false, false) from generate_series(1, 3);`);
 ok(await sawMark() === mn, 'several calls in one statement keep it');
 const dl2 = await h.run(`${toggle};`);
-ok(required(dl2) && net0() === n0, 'and it authorizes nothing: a direct write after them is refused', dl2.err);
+ok(required(dl2) && net0() === n0, 'and it doesn’t authorize a write: a direct write after them is refused', dl2.err);
 await h.run(`rollback;`);
 ok(await sawMark() === '', 'a rolled-back transaction clears it');
 await h.run(`begin;`); await h.run(asAset);
@@ -635,6 +637,7 @@ ok(many.every(r => r.ok), 'pooled connections reuse fine after thirty calls');
 await sysOn();
 const after = await Promise.all(Array.from({ length: 30 }, () => reachA()));
 ok(after.every(r => !r.ok && misconfigured(r)), 'a server default on a reused pool, no restart: every call refused, none served by an old marker', after.find(r => r.ok)?.text);
+ok(misconfigured(await noWrite()), 'the no-write check names the cause too, so a passing one is real evidence');
 const chainPoison = await gql(A.token, `mutation { ${fnA}\n b: updatetv_showsCollection(set: { ended: true }, filter: { id: { eq: "${S.show.id}" } }, atMost: 1) { affectedCount } }`);
 ok(net0() === n0 && misconfigured(chainPoison), 'and a chained GraphQL request on it', chainPoison.text);
 await sysOff(); await restartRest();
@@ -696,7 +699,6 @@ const denied = r => r.status === 403 || /permission denied/.test(r.text || '');
 const expectAll = async (n, f, pred) => (await Promise.all(Array.from({ length: n }, f))).every(pred);
 const waitFor = async (f, pred, ms = 9000) => { let r; for (let t = 0; t < ms; t += 300) { try { r = await f(); if (pred(r)) return r; } catch (e) { r = { text: String(e) }; } await sleep(300); } return r; };
 const aclBefore = Q(`select string_agg(x::text, ',' order by x::text) from pg_namespace n, unnest(n.nspacl) x where n.nspname = 'private'`);
-const noWrite = () => rpc(A.token, 'delete_tv_season', { p_row_id: R0, p_marks_expected: 5 }); // reaches lib_write_on, then stops: what a live check can use
 const dbReady = async () => { for (let i = 0; i < 60; i++) { await sleep(500); if (tryPsql('select 1').ok) return; } throw new Error('the database did not come back'); };
 const replaceConnections = async how => {
   if (how === 'restart') { // what a hosted project's Restart does: the database and PostgREST, nothing kept in memory
@@ -736,7 +738,7 @@ const recover = async (label, remove, how) => {
   ok(required(oneOwn) && net0() === n0, `${label}: the owner’s direct write is refused by the write guard`, oneOwn.text);
   ok(await expectAll(40, directA, r => required(r)) && net0() === n0, `${label}: on forty requests, across the pool`);
   ok(await expectAll(40, reachA, r => r.ok), `${label}: a library function works on all forty`);
-  ok(await expectAll(40, noWrite, r => /target_changed/.test(r.text)), `${label}: and a check that writes nothing reaches the write scope on all forty`);
+  ok(await expectAll(40, noWrite, r => /target_missing/.test(r.text)), `${label}: and a check that writes nothing reaches the write scope on all forty`);
   ok(await expectAll(20, directB, repairing), `${label}: everyone else is still refused`);
   // 4. Open, and prove it; 5. clean up.
   ok(batch(sql('db/admin/w1_recovery_4_open.sql')).ok, `${label}: step 4 runs`);
