@@ -169,10 +169,14 @@ Each function verifies before returning that the show's status, priority and End
   every governed row.
 - **Other TMDB-matched shows.** Deleting a season removes it, but Refresh shows reconciles each matched show
   against TMDB's season list and adds any listed season the library lacks. While TMDB still lists the deleted
-  season, the next Refresh shows adds it again (a new unwatched, unskipped season row, without the deleted row's episode marks). Skip
-  keeps the season in the library without it counting as something to watch, and Refresh leaves it as it is. The
+  season, the next Refresh shows adds it again (a new unwatched, unskipped season row, without the deleted row's episode marks), however
+  many times it was deleted before: deleting isn't a decision about the season (CU1e, `db/cu1e_missing_season.sql`). An applied TMDB
+  finding whose season is missing is reopened and decided again under every current rule, so a hold, a Skipped show or a stale write
+  behaves as usual, and a finding the owner Dismissed or set to Not now keeps the season out and Refresh says so. A season that exists
+  is left alone. Skip keeps the season in the library without it counting as something to watch, and Refresh leaves it as it is. The
   delete dialog says this for a matched season that isn't the show's last; deleting the last season deletes the
-  show, which Refresh then no longer checks. An unmatched season isn't re-added.
+  show, which Refresh then no longer checks. An unmatched season isn't re-added. No backfill: Refresh sends only missing seasons, so an
+  old finding corrects itself the first time its season is missing.
 
 ### 4.2 Page-side reads and reports (validation pass)
 
