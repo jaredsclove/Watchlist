@@ -124,7 +124,7 @@ check only that all 29 versioned files share one token; before releasing, check 
 the previous release's: `git show <previous release>:watchlist.html | grep -oE '[?]v=[A-Za-z0-9_-]+' | sort -u`.
 Pages serves files with `max-age=600`; a deployed change can take about 10 minutes to reach a browser.
 
-## Where things stand (2026-10-31)
+## Where things stand (2026-11-01)
 
 GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
 Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
@@ -132,9 +132,34 @@ test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 epi
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
 (CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29], the compact interface [#32],
-density and search [#34].
+density and search [#34], research access (CU2) [#37].
 
-- **Release:** `9768284`, density and search (item 8 follow-up; PR #34, the branch's two commits rebased, same tree as the
+- **Release:** `799ff32`, per-member research access (CU2, item 4; PR #37, the branch's four commits rebased, same tree as the
+  reviewed head `32475e3`), released 2026-11-01 UTC with database migration `db/cu2_research_access.sql` (a column on
+  `private.library_members`, the permission function, the research guard on eight tables, `restore_backup` as a wrapper around the
+  unchanged `private.restore_backup_v7`, `research` in the capability; no `library_cu_*` function, phase or backup-format change).
+  Design: `docs/ITEM4_DESIGN.md` §4.6. Validation: offline 1253/1253; the rehearsal on PGlite (388 checks, a failure injected
+  after each of CU2's 32 statements); a local Supabase stack with real Auth, PostgREST and GraphQL (38 checks, run before the final
+  one-line tooltip fix, with members on and off and a non-member); a local browser check with synthetic data at desktop, 375 and
+  300 px; one Fable review of the completed change (nothing blocking; one worth-fixing tooltip bug fixed with a test; no closure
+  check needed). Release: a read-only preflight, refreshed before the run (phase `contracted-cu1`, format 7, the run records, CU2
+  absent, one member, no other account's research data); a pre-release format-7 backup validated; the SQL Editor's contents checked
+  against the run file's hash and run once as written, the owner chosen from the database rather than pasted (its RLS prompt concerned
+  the migration's own temp tables); the run record confirmed by a separate read, with the column default false, exactly one member on
+  and that member the `app_owner`, eight guards enabled, grants as designed, and no application-role access to `library_members`. The
+  post-migration backup validated and equals the pre-release one field by field (19 tables, 1,393 rows, no differences). Merged only
+  after that. Verified after deployment: Pages built `799ff32`; the 35 application files are byte-identical and all 29 versioned files
+  carry `20261031-cu2`. On the live site, signed in, read-only: research access true, phase `contracted-cu1`, the Collection updates
+  card as before, review opens with its six waiting findings and no Continue action (nothing unfinished), Collections and rules lists
+  the 22 holds, and Currently Watching, All TV, Coming Soon, Movies and Collections load. A page-memory log started after load
+  recorded no write, and there was no console error. A final backup validated and equals the post-migration one field by field.
+  Refresh shows, research imports and findings weren't run. **Not verified on production:** research-off behaviour, revocation,
+  refusals and Continue (a separate two-account test is not yet approved); the page's first load wasn't in that log. Not tested: real
+  phones, Safari, Firefox and true dark mode. An older tab keeps working until reloaded.
+- **GraphQL, observed 2026-11-01 (a dated observation, not a guarantee):** `pg_graphql` was not installed, by a catalog read; no
+  GraphQL request was sent. This can change, and item 9 in `NEXT_GEN_FEATURES.md` stays open: resolve it before anyone enables GraphQL.
+
+- **Earlier release:** `9768284`, density and search (item 8 follow-up; PR #34, the branch's two commits rebased, same tree as the
   reviewed head `7c125e7`), released 2026-10-31 UTC. Presentation and interaction only: no migration, and no backup-format
   or saved-data change; writes use the existing functions. Validation: offline 1234/1234; a local browser check with
   synthetic data from 1280 to 300 px in light and dark. Space above the first item at 1280 / 800 / 375 / 300 px, before →
@@ -345,13 +370,13 @@ density and search [#34].
   only): verified deployed, with the owner's phone checks and an owner-operated write smoke test. `45f12d9`, EP1
   episode progress (PR #9, 2026-10-21): `db/ep1_episode_marks.sql` applied once, original tables preserved in the
   first format-6 backup, signed-out access refused, a desktop mark / clear smoke test. Each PR holds the details.
-- **Database (as observed at the CU1d release, 2026-10-30):** phase `contracted-cu1` (B4/B5 with M1 owner-only
-  access, `access = members`, episode marks and collection updates), backup format 7, recovery archive active, the
+- **Database (as observed at the CU2 release, 2026-11-01):** phase `contracted-cu1` (B4/B5 with M1 owner-only
+  access, `access = members`, episode marks, collection updates and research access), backup format 7, recovery archive active, the
   collection setup imported. G9 (archive retirement) is paused. The API exposes only `public` and `graphql_public`;
   the format-5 and format-6 restores are kept as `private.restore_backup_v5` and `private.restore_backup_v6`,
   reachable only through `restore_backup`. **Repairs are fix-forward:** the B4/B5 and D2 rollbacks are retired,
-  EP1, CU1, CU1b, CU1c and CU1d have none (`db/test/cu1_reverse.sql`, `cu1b_reverse.sql`, `cu1c_reverse.sql` and
-  `cu1d_reverse.sql` are for test environments only; CU1d's run record confirmed 2026-10-30), and reopening anonymous access
+  EP1, CU1, CU1b, CU1c, CU1d and CU2 have none (`db/test/cu1_reverse.sql`, `cu1b_reverse.sql`, `cu1c_reverse.sql`,
+  `cu1d_reverse.sql` and `cu2_reverse.sql` are for test environments only; CU2's run record confirmed 2026-11-01), and reopening anonymous access
   is never a recovery step. Data recovery is a format-7 restore through the signed-in page, or
   `docs/ADMIN_RESTORE.md` (its tool exports and checks the database's own format); accounts,
   `docs/MEMBER_RECOVERY.md`.
@@ -422,6 +447,7 @@ density and search [#34].
 [#29]: https://github.com/jaredsclove/Watchlist/pull/29
 [#32]: https://github.com/jaredsclove/Watchlist/pull/32
 [#34]: https://github.com/jaredsclove/Watchlist/pull/34
+[#37]: https://github.com/jaredsclove/Watchlist/pull/37
 
 ## How we work
 
@@ -519,6 +545,7 @@ density and search [#34].
   resolved (PR #25, CU1b); dates within a day are the same date (PR #27, CU1c). The owner ran the first production
   Refresh shows and research import before CU1c, and Refresh shows again after CU1d. Still open: a page can't detect CU1b before calling it (a page deployed before its migration stops its
   writes on Edit until reloaded).
+- **Research access (CU2):** a production two-account test isn't approved. Item 9 (function-only writes) stays open and separate.
 - **Optional, not scheduled:** on an
   unknown database phase, a refused season toggle shows the raw refusal text (`Supabase error 412: {…}`)
   instead of a sentence (polish, not a blocker).
