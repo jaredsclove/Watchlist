@@ -6,7 +6,7 @@
 --   a pre-request gate refuses everyone but the owner, every kind of request, once PostgREST has reloaded. A request has
 --   to prove that. Nothing counts as closed until one has.
 -- The first holds until step 3. The second holds until step 4, and lets the owner's token test the real API path before
--- anyone else returns. Then every API connection is ended, so that nothing in flight keeps the old state.
+-- anyone else returns. Then run w1_recovery_connections.sql on its own, so that nothing in flight keeps the old state.
 begin;
 do $$
 begin
@@ -35,4 +35,3 @@ revoke usage on schema private from authenticated;
 alter role authenticator set pgrst.db_pre_request = 'public.w1_repair_gate';
 notify pgrst, 'reload config';
 commit;
-select pg_terminate_backend(pid) from pg_stat_activity where usename = 'authenticator' and pid <> pg_backend_pid();

@@ -5,7 +5,8 @@
 //   defaults         database, role, server and connection defaults refuse every write, each with its own cause
 //   pool             a pooled connection after success, failure and cancellation; a leak the guard can't see
 //   the cache        lib_authorized's remembered reset_val: forgery, its lifetime, configuration changes in a transaction
-//   recovery         db/admin/w1_recovery_*.sql, through the real API, for each state the guard can't see or that blocks writes
+//   recovery         db/admin/w1_recovery_*.sql, through the real API, for each state the guard can't see or that blocks writes,
+//                    each script run as one batch, the way the SQL Editor sends it
 //
 //   LOCAL_SERVICE_KEY=… node tools/w1-local-test.mjs --api http://127.0.0.1:54321 --key <anon key> --container <db container>
 //     --backup <format6.json> [--cu1e <file>] [--cu1e-first]
@@ -40,6 +41,7 @@ const psql = text => psqlAs('postgres', text);
 const psqlAsync = text => new Promise((resolve, reject) => { const p = spawn('docker', ['exec', '-i', CONTAINER, 'psql', '-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres']); let o = '', e = ''; p.stdout.on('data', d => { o += d; }); p.stderr.on('data', d => { e += d; }); p.on('close', code => code ? reject(new Error(e)) : resolve(o)); p.stdin.end(text); });
 const tryPsql = (text, user = 'postgres', env = {}) => { try { return { ok: true, out: psqlAs(user, text, env) }; } catch (e) { return { ok: false, message: String(e.stderr || e.message) }; } };
 const Q = text => psql(text).trim();
+const batch = text => { try { return { ok: true, out: execFileSync('docker', ['exec', CONTAINER, 'psql', '-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', text], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }; } catch (e) { return { ok: false, message: String(e.stderr || e.message) }; } };
 // One connection kept open, to hold a transaction while another session changes the configuration.
 class Held {
   constructor() {
@@ -694,10 +696,23 @@ const denied = r => r.status === 403 || /permission denied/.test(r.text || '');
 const expectAll = async (n, f, pred) => (await Promise.all(Array.from({ length: n }, f))).every(pred);
 const waitFor = async (f, pred, ms = 9000) => { let r; for (let t = 0; t < ms; t += 300) { try { r = await f(); if (pred(r)) return r; } catch (e) { r = { text: String(e) }; } await sleep(300); } return r; };
 const aclBefore = Q(`select string_agg(x::text, ',' order by x::text) from pg_namespace n, unnest(n.nspacl) x where n.nspname = 'private'`);
-const recover = async (label, remove) => {
+const noWrite = () => rpc(A.token, 'delete_tv_season', { p_row_id: R0, p_marks_expected: 5 }); // reaches lib_write_on, then stops: what a live check can use
+const dbReady = async () => { for (let i = 0; i < 60; i++) { await sleep(500); if (tryPsql('select 1').ok) return; } throw new Error('the database did not come back'); };
+const replaceConnections = async how => {
+  if (how === 'restart') { // what a hosted project's Restart does: the database and PostgREST, nothing kept in memory
+    execFileSync('docker', ['restart', CONTAINER], { stdio: 'ignore' }); await dbReady();
+    execFileSync('docker', ['restart', REST_CONTAINER], { stdio: 'ignore' }); await sleep(2500);
+    return;
+  }
+  const r = batch(sql('db/admin/w1_recovery_connections.sql'));
+  ok(r.ok && /W1R\|.*"may_end" ?: ?true/.test(r.out), 'its connections end', r.message || r.out);
+  await sleep(1500);
+};
+const recover = async (label, remove, how) => {
   // 1. Close.
-  const closed = tryPsql(sql('db/admin/w1_recovery_1_close.sql'));
+  const closed = batch(sql('db/admin/w1_recovery_1_close.sql'));
   ok(closed.ok, `${label}: step 1 closes`, closed.message);
+  await replaceConnections(how);
   const w = await waitFor(directB, repairing);
   ok(repairing(w), `${label}: an ordinary member is refused, by the gate`, w.text);
   ok(repairing(await anon()), `${label}: a request with no sign-in too`);
@@ -710,24 +725,25 @@ const recover = async (label, remove) => {
   ok(repairing(ng), `${label}: GraphQL too`, ng.text);
   // 2. Remove and replace.
   await remove();
-  const replaced = tryPsql(sql('db/admin/w1_recovery_2_replace.sql'));
+  const replaced = batch(sql('db/admin/w1_recovery_2_replace.sql'));
   ok(replaced.ok, `${label}: step 2 removes nothing itself, and refuses until the default is gone`, replaced.message);
-  await sleep(1500);
+  await replaceConnections(how);
   // 3. Owner only: prove the path before anyone else returns.
   const gatedStill = await waitFor(directB, repairing);
   ok(repairing(gatedStill), `${label}: the gate still holds before step 3`, gatedStill.text);
-  ok(tryPsql(sql('db/admin/w1_recovery_3_owner_only.sql')).ok && Q(`select string_agg(x::text, ',' order by x::text) from pg_namespace n, unnest(n.nspacl) x where n.nspname = 'private'`) === aclBefore, `${label}: step 3 gives schema access back exactly`);
+  ok(batch(sql('db/admin/w1_recovery_3_owner_only.sql')).ok && Q(`select string_agg(x::text, ',' order by x::text) from pg_namespace n, unnest(n.nspacl) x where n.nspname = 'private'`) === aclBefore, `${label}: step 3 gives schema access back exactly`);
   const oneOwn = await waitFor(directA, r => required(r));
   ok(required(oneOwn) && net0() === n0, `${label}: the owner’s direct write is refused by the write guard`, oneOwn.text);
   ok(await expectAll(40, directA, r => required(r)) && net0() === n0, `${label}: on forty requests, across the pool`);
   ok(await expectAll(40, reachA, r => r.ok), `${label}: a library function works on all forty`);
+  ok(await expectAll(40, noWrite, r => /target_changed/.test(r.text)), `${label}: and a check that writes nothing reaches the write scope on all forty`);
   ok(await expectAll(20, directB, repairing), `${label}: everyone else is still refused`);
   // 4. Open, and prove it; 5. clean up.
-  ok(tryPsql(sql('db/admin/w1_recovery_4_open.sql')).ok, `${label}: step 4 runs`);
+  ok(batch(sql('db/admin/w1_recovery_4_open.sql')).ok, `${label}: step 4 runs`);
   const opened = await waitFor(directB, r => required(r));
   ok(required(opened), `${label}: an ordinary member is back, and refused by the write guard, not the gate`, opened.text);
   ok(await expectAll(40, directB, r => required(r)), `${label}: on forty requests, across the pool`);
-  ok(tryPsql(sql('db/admin/w1_recovery_5_clean.sql')).ok, `${label}: step 5 removes the gate`);
+  ok(batch(sql('db/admin/w1_recovery_5_clean.sql')).ok, `${label}: step 5 removes the gate`);
   ok((await rest(B.token, 'GET', `tv_shows?select=id&id=eq.${B0.show.id}`)).json.length === 1, `${label}: ordinary reads work`);
   await healthy(`${label}, recovered`);
   ok(Q(`select to_regprocedure('public.w1_repair_gate()') is null and to_regclass('private.w1_recovery') is null`) === 't', `${label}: nothing of the procedure is left`);
@@ -755,8 +771,13 @@ await recover('a role default PostgREST still caches', async () => {});
 
 psqlAs('supabase_admin', `alter role authenticated set xmloption = 'document';`);
 await reloadConfig(); await restartRest();
+psqlAs('supabase_admin', `alter role authenticated reset xmloption;`);
+await recover('a project restart in place of ending connections', async () => {}, 'restart');
+
+psqlAs('supabase_admin', `alter role authenticated set xmloption = 'document';`);
+await reloadConfig(); await restartRest();
 await recover('a role default still configured', async () => {
-  const early = tryPsql(sql('db/admin/w1_recovery_2_replace.sql'));
+  const early = batch(sql('db/admin/w1_recovery_2_replace.sql'));
   ok(!early.ok && /still configured/.test(early.message), 'step 2 refuses while the default is there', early.message);
   psqlAs('supabase_admin', `alter role authenticated reset xmloption;`);
 });
@@ -764,7 +785,7 @@ await recover('a role default still configured', async () => {
 await sysOn();
 await restartRest();
 await recover('a server default', async () => {
-  const early = tryPsql(sql('db/admin/w1_recovery_2_replace.sql'));
+  const early = batch(sql('db/admin/w1_recovery_2_replace.sql'));
   ok(!early.ok && /still configured/.test(early.message), 'step 2 refuses while a server default is there', early.message);
   await sysOff();
 });
@@ -788,7 +809,7 @@ ok(leakS2.every(r => r.json && r.json.cur === 'content'), 'every connection is b
 psql(`drop function public.zz_state(); notify pgrst, 'reload schema';`);
 await sleep(1800);
 
-const dup = tryPsql(sql('db/admin/w1_recovery_2_replace.sql'));
+const dup = batch(sql('db/admin/w1_recovery_2_replace.sql'));
 ok(!dup.ok && /step 1 has not run/.test(dup.message), 'a later step can’t run first', dup.message);
 ok(Q(`select count(*) from pg_db_role_setting s, unnest(s.setconfig) x where x like 'pgrst.db_pre_request=%'`) === '0', 'the gate setting is gone');
 
