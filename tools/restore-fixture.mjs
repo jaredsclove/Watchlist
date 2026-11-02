@@ -75,9 +75,9 @@ export function library(seed = 1, scale = 8) {
     t.tv_shows.push({ id: id(1000 + s), title: `ZZ Show ${seed}.${s}`, show_key: `zz show ${seed} ${s}`, tmdb_id: tmdb(s), status: ['confirmed', 'watching', 'skipped'][s % 3], created_at: ts(s),
       priority: ['normal', 'high', 'low'][s % 3], ended: s % 4 === 0, catalog_new: s % 5 === 2, status_review: s % 5 === 3, legacy_status: s % 5 === 2 ? 'pending' : s % 5 === 3 ? 'complete' : null,
       genres: s % 2 ? ['Drama'] : [], forms: [], franchises: s % 3 ? [] : ['ZZ Universe'], companies: [], genre_candidates: s % 2 ? [] : ['Comedy', 'Crime'], network: s % 2 ? 'ZZ Net' : null, network_candidates: s % 2 ? ['ZZ Net'] : ['ZZ Net', 'ZZ Other'],
-      metadata_owner_set: s % 2 === 0, resume_start_season_id: s % 3 === 1 ? id(2000 + (s * 10) + 1) : null, resume_end_season_id: s % 3 === 1 ? id(2000 + (s * 10) + 3) : null });
-    for (let n = 1; n <= 4; n++) t.watchlist_items.push(season(s, 2000 + s * 10 + n, n, n === 4 ? { display_date: 'TBA', date_sort: '9999-12-31', watched: false } : {}));
-    for (let e = 1; e <= 3; e++) t.episode_marks.push({ id: id(500000 + s * 10 + e), season_id: id(2000 + s * 10 + 2), tmdb_episode_id: tmdb(1000 + s * 10 + e), episode_number: e });
+      metadata_owner_set: s % 2 === 0, resume_start_season_id: s % 3 === 1 ? id(10000000 + (s * 10) + 1) : null, resume_end_season_id: s % 3 === 1 ? id(10000000 + (s * 10) + 3) : null });
+    for (let n = 1; n <= 4; n++) t.watchlist_items.push(season(s, 10000000 + s * 10 + n, n, n === 4 ? { display_date: 'TBA', date_sort: '9999-12-31', watched: false } : {}));
+    for (let e = 1; e <= 3; e++) t.episode_marks.push({ id: id(500000 + s * 10 + e), season_id: id(10000000 + s * 10 + 2), tmdb_episode_id: tmdb(1000 + s * 10 + e), episode_number: e });
     t.collection_memberships.push({ id: id(600000 + s), collection_id: id(12), show_id: id(1000 + s), item_id: null, created_at: ts(s) });
   }
   // An unmatched show with an unmatched season.
@@ -110,7 +110,7 @@ export function library(seed = 1, scale = 8) {
   t.show_update_settings.push({ id: id(69), show_id: id(1003), follow_when_skipped: true, new_season_after_ended_at: ts(9), updated_at: ts(1) });
   t.research_briefs.push({ id: id(70), exported_at: ts(1), collections: [{ collection_id: id(12), name: 'ZZ Mine' }], checks: [{ show_id: id(1001) }] });
   t.research_imports.push({ id: id(71), brief_id: id(70), file_sha256: sha(`zz import ${seed}`), imported_at: ts(2), counts: { applied: 1 } });
-  t.update_findings.push({ id: id(72), fingerprint: `new_season:${sha(`zz a ${seed}`)}`, source: 'tmdb', kind: 'new_season', status: 'applied', reason: '', collection_id: null, show_id: id(1001), item_id: null, season_id: id(2011), subject: { season_number: 1 }, proposed: {}, expected: {}, evidence: [], assessment: {},
+  t.update_findings.push({ id: id(72), fingerprint: `new_season:${sha(`zz a ${seed}`)}`, source: 'tmdb', kind: 'new_season', status: 'applied', reason: '', collection_id: null, show_id: id(1001), item_id: null, season_id: id(10000011), subject: { season_number: 1 }, proposed: {}, expected: {}, evidence: [], assessment: {},
     rule_id: null, definition_version: null, rule_hash: null, evidence_hash: null, brief_id: null, first_seen_at: ts(1), last_seen_at: ts(2), decided_at: null, applied_at: ts(3), result: { outcome: 'applied' } },
     { id: id(73), fingerprint: `date:${sha(`zz b ${seed}`)}`, source: 'research', kind: 'date', status: 'needs_evidence', reason: 'evidence_insufficient', collection_id: id(12), show_id: id(1002), item_id: null, season_id: null, subject: { title: 'ZZ' }, proposed: { display_date: 'TBA' }, expected: { a: 1 }, evidence: [{ url: 'https://zz.example.com/b' }], assessment: { standard: 'official' },
       rule_id: 'r1', definition_version: 1, rule_hash: 'x', evidence_hash: 'y', brief_id: id(70), first_seen_at: ts(4), last_seen_at: ts(5), decided_at: ts(6), applied_at: null, result: null });

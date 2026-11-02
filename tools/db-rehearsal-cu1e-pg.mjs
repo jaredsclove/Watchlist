@@ -63,7 +63,8 @@ psql(`select set_config('watchlist.ep1_run', 'pg-ep1-run', false);\n` + file('db
 for (const [g, f] of [['cu1', 'db/cu1_collection_updates.sql'], ['cu1b', 'db/cu1b_hold_edit.sql'], ['cu1c', 'db/cu1c_date_equivalence.sql'], ['cu1d', 'db/cu1d_network_and_marks.sql']]) psql(`select set_config('watchlist.${g}_run', 'pg-${g}-run', false);\n` + file(f));
 psql(`select set_config('watchlist.cu2_run', 'pg-cu2-run', false), set_config('watchlist.cu2_owner', '${A}', false);\n` + file('db/cu2_research_access.sql'));
 psql(`select set_config('watchlist.cu1e_run', 'pg-cu1e-run', false);\n` + file('db/cu1e_missing_season.sql'));
-ok(psql(`select count(*) from private.migration_runs where migration = 'cu1e'`) === '1', 'a real server up to CU1e');
+psql(`select set_config('watchlist.simplify_run', 'pg-simplify-run', false);\n` + file('db/simplify_restore_cleanup.sql'));
+ok(psql(`select count(*) from private.migration_runs where migration = 'cu1e'`) === '1', 'a real server at the final state');
 
 const s1 = session(), s2 = session();
 await s1.run(as); await s2.run(as);

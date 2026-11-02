@@ -28,7 +28,6 @@ const COLUMNS = P('backupSpec')(7).columns;
 // ── PGlite ──
 const db = new PGlite();
 await replay(t => db.exec(t));
-if (FINAL) await db.exec(`select set_config('watchlist.simplify_run', 'local-simplify', false);\n` + file(finalStep));
 
 const as = (who, sql, params = [], role = 'authenticated') => db.transaction(async tx => {
   await tx.query(`select set_config('request.jwt.claims', $1, true), set_config('role', $2, true)`, [who ? JSON.stringify({ sub: who, role }) : '', role]);
@@ -62,6 +61,29 @@ const differences = async (who, doc) => {
 };
 
 const L1 = library(1), L2 = library(2), L3 = library(3, 3);
+
+if (FINAL) {
+  section('the migration');
+  await restore(A, L1); await restore(B, L2);
+  const catalog = () => val(`select md5(coalesce(string_agg(x, '|' order by x), '')) from (
+    select pg_get_functiondef(p.oid) x from pg_proc p where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace) and p.prokind = 'f'
+    union all select c.oid::regclass::text from pg_class c where c.relnamespace in ('public'::regnamespace, 'private'::regnamespace)
+    union all select pg_get_triggerdef(t.oid) from pg_trigger t where not t.tgisinternal) q`);
+  const step = file(finalStep), go = run => `select set_config('watchlist.simplify_run', '${run}', false);\n` + step;
+  const attempt = text => db.exec(text).then(() => null, async e => { await db.exec('rollback'); return e.message; });
+  const data = await fp(), cat = await catalog();
+  ok(/set watchlist.simplify_run/.test(await attempt(`select set_config('watchlist.simplify_run', '', false);\n` + step)) && same(data, await fp()) && cat === await catalog(), 'without a run id: refused, nothing changed');
+  const late = go('local-late').replace("select 'SIMPLIFY|'", () => `do $$ begin raise exception 'zz failure before commit'; end $$;\nselect 'SIMPLIFY|'`);
+  const lateError = await attempt(late);
+  ok(/zz failure before commit/.test(lateError) && same(data, await fp()) && cat === await catalog() && (await val(`select count(*)::int from private.migration_runs where migration = 'simplify'`)) === 0,
+    'a failure just before commit leaves the old chain, the archive and every row in place', [lateError, same(data, await fp()), cat === await catalog()].join(' / '));
+  ok(!(await attempt(go('local-simplify'))), 'the exact migration commits on a database holding libraries');
+  ok(same(data, await fp()), 'installing it changes no library row');
+  ok(await catalog() !== cat && (await val(`select count(*)::int from private.migration_runs where migration = 'simplify'`)) === 1, 'it changes the catalog and records one run');
+  ok(/already installed/.test(await attempt(go('local-again'))) && same(data, await fp()), 'a rerun is refused');
+  const gone = await val(`select count(*)::int from pg_class c where c.relnamespace = 'private'::regnamespace and c.relname ~ '^(stage5_recovery_|b45_)'`);
+  ok(gone === 0, 'the archive and rollback tables are gone');
+}
 section('the fixture');
 ok(!Array.from(P('validateBackupObject')(L1)).length && !Array.from(P('validateBackupObject')(L2)).length, 'the library passes the page’s validation', Array.from(P('validateBackupObject')(L1)).join('; '));
 ok(TABLES.length === 19 && TABLES.every(t => L1.tables[t].length > 0), 'it has rows in all nineteen tables', TABLES.filter(t => !L1.tables[t].length).join());
@@ -430,7 +452,7 @@ else {
     ok(await waiting(), 'a write to a row the restore removes waits');
     await s1.run('commit;');
     const out = await s2.done(m);
-    ok(/ERROR/.test(out) && fp17() === base, 'then it is refused, and the row doesn’t come back', out);
+    ok(fp17() === base, 'then it changes nothing, and the row doesn’t come back', out);
   }
   {
     // Two restores of one library, the second file different.
@@ -465,6 +487,7 @@ else {
 
   section('real PostgreSQL 17: local timing');
   const big = library(1, 2500), fBig = docFile('big.json', big);
+  psql('analyze');
   const rows = Object.values(big.rowCounts).reduce((a, b) => a + b, 0);
   const times = [];
   for (let i = 0; i < 3; i++) {

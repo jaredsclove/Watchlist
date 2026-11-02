@@ -48,7 +48,7 @@ function library() {
     show({ title: 'Bravo', collection: 'disney', priority: 'high', catalog_new: true, genres: ['Comedy'], network: 'Netflix' }, [{ date: day(-30) }]),
     show({ title: 'Charlie', status: 'skipped', genres: ['Drama'] }, [{ date: day(-40) }]),
     show({ title: 'Delta', status: 'watching', genres: ['Drama'] }, [{ w: true, date: day(-200) }, { date: day(20) }]),
-    film({ id: 'f-a', title: 'Film A', collection: 'disney', media_type: null, tmdb_id: null, genres: ['Drama'], collections: ['Saga Collection'], watch_with: ['Rina'] }),
+    film({ id: 'f-a', title: 'Film A', collection: 'disney', media_type: null, tmdb_id: null, genres: ['Drama'], collections: ['Saga Collection'], watch_with: ['Robin'] }),
     film({ id: 'f-b', title: 'Film B', watched: true, genres: ['Comedy'] }),
     film({ id: 'f-c', title: 'Film C', status: 'skipped', genres: ['Drama'] })
   );
@@ -186,9 +186,9 @@ test('§4.3: every non-default value has one chip ("Kind: value", full-text name
 test('§4.3: value texts follow the controls (unresolved genre, watch-with label, Watched, collection Status and TV seasons)', async () => {
   const app = await boot();
   await movies(app);
-  setFilter(app, 'fWatch', ''); setFilter(app, 'fWatchWith', 'Rina'); setFilter(app, 'fStatus', 'to_watch'); setFilter(app, 'fGenre', 'cand:Sci-Fi & Fantasy');
+  setFilter(app, 'fWatch', ''); setFilter(app, 'fWatchWith', 'Robin'); setFilter(app, 'fStatus', 'to_watch'); setFilter(app, 'fGenre', 'cand:Sci-Fi & Fantasy');
   assert.strictEqual(chipName(app, 'fWatch'), 'Remove filter: Watched, Any watched state');
-  assert.strictEqual(chipName(app, 'fWatchWith'), 'Remove filter: Watch with, Rina');
+  assert.strictEqual(chipName(app, 'fWatchWith'), 'Remove filter: Watch with, Robin');
   assert.strictEqual(chipName(app, 'fStatus'), 'Remove filter: Status, To Watch');
   assert.strictEqual(chipName(app, 'fGenre'), 'Remove filter: Genre, Sci-Fi &amp; Fantasy (unresolved)');
   await collection(app);
@@ -236,11 +236,11 @@ test('§4.3.1: the Seasons choice kept in Shows and a collection\'s TV seasons i
 test('§4.3.1: a collection\'s Collection tag / Watch with kept while media is TV are "Not applied (while films are shown)"', async () => {
   const app = await boot();
   await collection(app);
-  setFilter(app, 'fWatchWith', 'Rina');
+  setFilter(app, 'fWatchWith', 'Robin');
   assert.deepStrictEqual(groups(app), [['Active filters', ['fWatchWith']]]);
   app.ctx.setBrowseMedia('tv');
   assert.deepStrictEqual(groups(app), [['Kept, not applied', ['fWatchWith']]]);
-  assert.strictEqual(chipName(app, 'fWatchWith'), 'Not applied: Watch with, Rina. Applies while films are shown. Remove.');
+  assert.strictEqual(chipName(app, 'fWatchWith'), 'Not applied: Watch with, Robin. Applies while films are shown. Remove.');
   app.ctx.setBrowseMedia('all');
   assert.deepStrictEqual(groups(app), [['Active filters', ['fWatchWith']]], 'applies again when films are shown (unchanged memory rule)');
 });
@@ -313,7 +313,7 @@ test('§4.4 / AC6: Clear filters returns every filter to its starting value (Unw
   const focused = spyDom(app);
   app.ctx.toggleFilterPanel(true);
   setFilter(app, 'fSearch', 'film'); setFilter(app, 'fStatus', 'all'); setFilter(app, 'fWatch', ''); setFilter(app, 'fGenre', 'Drama');
-  setFilter(app, 'fCollection', 'Saga Collection'); setFilter(app, 'fWatchWith', 'Rina'); setFilter(app, 'fTheme', 'Drama');
+  setFilter(app, 'fCollection', 'Saga Collection'); setFilter(app, 'fWatchWith', 'Robin'); setFilter(app, 'fTheme', 'Drama');
   const before = app.requests.length;
   app.ctx.clearViewFilters();
   assert.deepStrictEqual(['fSearch', 'fStatus', 'fWatch', 'fGenre', 'fCollection', 'fWatchWith', 'fTheme'].map(id => app.el(id).value), ['', '', 'unwatched', '', '', '', '']);
@@ -338,7 +338,7 @@ test('§4.4: Clear in All TV Seasons and a collection resets the seasons choices
   assert.strictEqual(app.el('fProgress').value, '');
   await collection(app);
   app.ctx.setBrowsePresentation('seasons'); app.ctx.setBrowseGrouping('combined'); app.ctx.setBrowseSeasonVis('towatch');
-  setFilter(app, 'fWatchWith', 'Rina'); app.ctx.setBrowseMedia('tv');
+  setFilter(app, 'fWatchWith', 'Robin'); app.ctx.setBrowseMedia('tv');
   const key = app.get('[...tvShowsById.keys()][0]');
   app.ctx.toggleBrowseShow(key);
   app.ctx.clearViewFilters();

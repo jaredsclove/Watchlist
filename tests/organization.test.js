@@ -38,7 +38,7 @@ function library() {
     show({ title: 'Tulsa King', collection: 'sheridan' }, ['Season 1']),
     show({ title: 'Severance', collection: 'othertv', tmdb_id: 95396 }, ['Season 1']),
     film({ title: 'Sicario', collection: 'sheridan', media_type: null, tmdb_id: null }),
-    film({ title: 'Wind River', watch_with: ['Rina', 'Kids'] }),
+    film({ title: 'Wind River', watch_with: ['Robin', 'Kids'] }),
     film({ title: 'Dune', watch_with: ['Sam'] })
   );
 }
@@ -146,27 +146,27 @@ test('the membership-based view equals the storage-based one while memberships m
 test('watch-with: labels from your choices, tokens in the data; an archived choice isn’t offered but stays visible where used; an undefined value is refused and rolled back', async () => {
   const data = library();
   const app = await boot(data);
-  app.store.watch_with_choices.find(c => c.token === 'Rina').label = 'Rina S.';
+  app.store.watch_with_choices.find(c => c.token === 'Robin').label = 'Robin S.';
   app.store.watch_with_choices.find(c => c.token === 'Kids').archived_at = TS;
   await app.ctx.loadOrganization(); await settle();
   app.ctx.switchMediaType('movie'); await settle();
   app.ctx.switchView('allmovies'); await settle();
   const body = app.el('tbody').innerHTML;
-  assert.ok(body.includes('>Rina S.</button>') && !body.includes('>Rina</button>'), 'the tag shows the label');
-  assert.ok(/<option value="Rina">Rina S\.<\/option>/.test(app.el('filtersRow').innerHTML), 'the filter offers the label and filters by token');
+  assert.ok(body.includes('>Robin S.</button>') && !body.includes('>Robin</button>'), 'the tag shows the label');
+  assert.ok(/<option value="Robin">Robin S\.<\/option>/.test(app.el('filtersRow').innerHTML), 'the filter offers the label and filters by token');
   // Stage 3b-2: an archived choice still used in the list can be filtered on (Archived group), never assigned.
   // (All Movies' filter lists only choices in use, an archived one marked: tests/browse-views.test.js.)
   assert.ok(/<option value="Kids">Kids \(archived\)<\/option>/.test(app.el('filtersRow').innerHTML), 'an archived choice in use is listed, marked, for filtering');
   const wind = data.rows.find(r => r.title === 'Wind River');
-  const picker = app.get(`watchWithPickerHtml('${wind.id}', ['Rina', 'Kids'])`);
+  const picker = app.get(`watchWithPickerHtml('${wind.id}', ['Robin', 'Kids'])`);
   assert.ok(picker.includes('value="Kids" checked') && picker.includes('> Kids (archived)</label>'), 'still visible (marked, untickable) where it is used');
-  assert.ok(!app.get(`watchWithPickerHtml('${wind.id}', ['Rina'])`).includes('value="Kids"'), 'not offered on a row that doesn’t have it');
+  assert.ok(!app.get(`watchWithPickerHtml('${wind.id}', ['Robin'])`).includes('value="Kids"'), 'not offered on a row that doesn’t have it');
   await app.ctx.toggleWatchWith(wind.id, 'Sam', true); await settle();
   const patch = writes(app).at(-1);
-  assert.deepStrictEqual(patch.body, { watch_with: ['Rina', 'Kids', 'Sam'] }, 'tokens are written');
+  assert.deepStrictEqual(patch.body, { watch_with: ['Robin', 'Kids', 'Sam'] }, 'tokens are written');
   await app.ctx.toggleWatchWith(wind.id, 'Nobody', true); await settle();
   assert.match(app.el('errorBanner') ? app.el('errorBanner').innerHTML : app.get('document.getElementById("errorBanner").innerHTML'), /watch_with_invalid/);
-  assert.deepStrictEqual(Array.from(app.store.watchlist_items.find(r => r.id === wind.id).watch_with), ['Rina', 'Kids', 'Sam']);
+  assert.deepStrictEqual(Array.from(app.store.watchlist_items.find(r => r.id === wind.id).watch_with), ['Robin', 'Kids', 'Sam']);
 });
 
 // ── backup format 3 ──
@@ -254,7 +254,7 @@ async function restoredBackup(app) {
   const fresh = uuid('0c', 77);
   b.tables.personal_collections = b.tables.personal_collections.map(c => c.id === old.id ? { ...c, id: fresh, name: 'Disney+ (restored)' } : c);
   b.tables.collection_memberships = b.tables.collection_memberships.map(m => m.collection_id === old.id ? { ...m, collection_id: fresh } : m);
-  b.tables.watch_with_choices = b.tables.watch_with_choices.map(c => c.token === 'Rina' ? { ...c, label: 'Rina (restored)' } : c);
+  b.tables.watch_with_choices = b.tables.watch_with_choices.map(c => c.token === 'Robin' ? { ...c, label: 'Robin (restored)' } : c);
   return { b, oldId: old.id, freshId: fresh };
 }
 async function restoreThrough(app, b) {
@@ -273,8 +273,8 @@ test('after a restore the selector and watch-with labels come from the restored 
   app.ctx.switchMediaType('movie'); await settle();
   assert.ok(options(app).some(([v, t]) => v === `browse:${freshId}` && t === 'Disney+ (restored)'), JSON.stringify(options(app)));
   assert.ok(!options(app).some(([v]) => v === `browse:${oldId}`), 'the restored-away collection is gone from the selector');
-  assert.ok(app.el('tbody').innerHTML.includes('>Rina (restored)</button>'), 'All Movies shows the restored label');
-  assert.ok(/<option value="Rina">Rina \(restored\)<\/option>/.test(app.el('filtersRow').innerHTML));
+  assert.ok(app.el('tbody').innerHTML.includes('>Robin (restored)</button>'), 'All Movies shows the restored label');
+  assert.ok(/<option value="Robin">Robin \(restored\)<\/option>/.test(app.el('filtersRow').innerHTML));
 });
 
 test('a restored-away collection that is still open (or chosen from a stale selector) says it isn’t available, with Back', async () => {
@@ -430,7 +430,7 @@ for (const withBrowse of [false, true]) {
     assert.strictEqual(app.get('watchWithState'), 'unavailable');
     assert.strictEqual(app.get('watchWithChoiceList().length'), 0, 'no choice list at all (not the configured one)');
     const writesBefore = writes(app).length;
-    await app.ctx.toggleWatchWith(dune.id, 'Rina', true); await settle();
+    await app.ctx.toggleWatchWith(dune.id, 'Robin', true); await settle();
     assert.strictEqual(writes(app).length, writesBefore, 'no watch-with write while choices are unavailable');
     await app.ctx.loadOrganization(); await settle();
     assert.strictEqual(app.get('watchWithState'), 'ready');
@@ -477,7 +477,7 @@ test('a delayed startup choices read doesn’t erase an open “+ Add” panel o
   const loading = app.ctx.loadOrganization();
   await moviesWithUnfinishedWork(app);
   g.release(); await loading; await settle();
-  assert.ok(/<option value="Rina">Rina<\/option>/.test(wwFilter(app)), 'the filter offers the choices in use');
+  assert.ok(/<option value="Robin">Robin<\/option>/.test(wwFilter(app)), 'the filter offers the choices in use');
   assertWorkKept(app, 'after the delayed read');
 });
 
@@ -514,7 +514,7 @@ test('views without watch-with controls aren’t redrawn when choices arrive or 
     const real = app.ctx.renderTable, realF = app.ctx.renderFilters;
     app.ctx.renderTable = (...a) => { draws++; return real(...a); };
     app.ctx.renderFilters = (...a) => { draws++; return realF(...a); };
-    app.store.watch_with_choices.find(c => c.token === 'Rina').label = `Rina ${Math.random()}`;
+    app.store.watch_with_choices.find(c => c.token === 'Robin').label = `Robin ${Math.random()}`;
     await app.ctx.loadOrganization(); await settle();
     app.ctx.renderTable = real; app.ctx.renderFilters = realF;
     assert.strictEqual(draws, 0, 'no redraw');

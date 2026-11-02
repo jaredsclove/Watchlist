@@ -97,11 +97,11 @@ test('C2 unchanged names on 5c: an open page sends exactly the arguments the 5c 
   assert.ok(del.store.watchlist_items.some(r => r.season === 'Season 2'), 'nothing deleted');
   assert.match(banners(del.app), /This page and the database don’t match/);
   assert.strictEqual(del.app.get('b45Stopped'), true, 'the page stops until it is reloaded');
-  const film = await run('movie', async (app, lib) => { await app.ctx.toggleWatchWith(lib.film.id, 'Rina', true); await settle(); });
-  assert.deepStrictEqual(film.shapes, [['PATCH', `watchlist_items?id=eq.${film.lib.film.id}`, { watch_with: ['Rina'] }]]);
+  const film = await run('movie', async (app, lib) => { await app.ctx.toggleWatchWith(lib.film.id, 'Robin', true); await settle(); });
+  assert.deepStrictEqual(film.shapes, [['PATCH', `watchlist_items?id=eq.${film.lib.film.id}`, { watch_with: ['Robin'] }]]);
   const s1 = tv.store.watchlist_items.find(r => r.season === 'Season 1'), s3 = tv.store.watchlist_items.find(r => r.season === 'Season 3');
   assert.deepStrictEqual([s1.watched, s3.skipped], [true, true], 'they succeeded');
-  assert.deepStrictEqual(film.store.watchlist_items.find(r => r.title === 'Dune').watch_with, ['Rina']);
+  assert.deepStrictEqual(film.store.watchlist_items.find(r => r.title === 'Dune').watch_with, ['Robin']);
 });
 
 // ─── GA-1 review 4: stop until reload ─────────────────────────────────────────

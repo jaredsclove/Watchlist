@@ -27,10 +27,10 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: `224dfbb`, W1's removal (PR #44), released 2026-11-02
-  UTC, database only. Cache token `20261101-seasons`.
-- Database phase `contracted-cu1`, backup format 7 (nineteen tables, no `user_id`), `access = members`, research per member, the recovery
-  archive present. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: the simplification (PRs #46 and #47), the flat restore and
+  retired-object cleanup, released 2026-11-02 UTC. Cache token `20261102-simplify`.
+- Database phase `contracted-cu1`, backup format 7 (nineteen tables, no `user_id`), `access = members`, research per member. One flat
+  `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one
   retained test account has no membership and reaches nothing (`docs/MEMBER_RECOVERY.md`).
 - **Standing decisions:** W1 is removed; item 11 is abandoned; item 10 (CU1e) stays. `pg_graphql` stays disabled: enabling it needs a new explicit
   decision (`db/README.md`). A member's crafted request on their own records is an accepted limitation; it can't reach another account.

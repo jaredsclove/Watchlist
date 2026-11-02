@@ -32,13 +32,13 @@ function library() {
     show({ title: 'Tulsa King', collection: 'sheridan' }, ['Season 1']),
     show({ title: 'Severance', collection: 'othertv', tmdb_id: 95396 }, ['Season 1', 'Season 2', 'Specials']),
     film({ title: 'Sicario', collection: 'sheridan', media_type: null, tmdb_id: null }),
-    film({ title: 'Wind River', watch_with: ['Rina'] }),
-    film({ title: 'Dune', watch_with: ['Sam', 'Rina'] }),
+    film({ title: 'Wind River', watch_with: ['Robin'] }),
+    film({ title: 'Dune', watch_with: ['Sam', 'Robin'] }),
     film({ title: 'Skipped Film', status: 'skipped' })
   ];
   const rows = parts.flatMap(x => x.rows || [x]);
   // a TV season carrying a watch-with value too (usage counts cover every tab)
-  rows.find(r => r.title === 'Andor').watch_with = ['Rina'];
+  rows.find(r => r.title === 'Andor').watch_with = ['Robin'];
   // a row that is neither a TV season nor a film (unclassified)
   rows.push({ ...film({ title: 'Severance Notes', collection: 'movies' }), media_type: null, season: 'Notes', tmdb_id: null });
   return { rows, shows: parts.filter(x => x.show).map(x => x.show) };
@@ -110,7 +110,7 @@ test('counts: stored seasons from the rows (Specials included); watch-with usage
   typeInto(app, 'manageMemberSearch', 'sev'); await settle();
   assert.match(text(app), /Add show \(all 3 stored seasons, and any added later\)/);
   app.ctx.manageShow('choices'); await settle();
-  assert.match(text(app), /Rina used on 3 saved items/, 'two films and a TV season');
+  assert.match(text(app), /Robin used on 3 saved items/, 'two films and a TV season');
   assert.match(text(app), /Sam used on 1 saved item\b/);
 });
 
@@ -559,11 +559,11 @@ test('watch-with choices: create (token ww:<id>), rename, archive; an archived o
   app.ctx.manageCreate('choice'); await settle();
   const g = app.store.watch_with_choices.find(c => c.label === 'Grandma');
   assert.strictEqual(g.token, `ww:${g.id}`);
-  const rina = app.store.watch_with_choices.find(c => c.token === 'Rina');
+  const rina = app.store.watch_with_choices.find(c => c.token === 'Robin');
   app.ctx.manageSetArchived('w', rina.id, true); await settle();
   app.ctx.manageToggleArchived(); await settle();
-  assert.match(text(app), /Archived \(1\).*Rina used on 3 saved items Unarchive/);
-  assert.ok(app.get('watchWithChoiceList()').every(c => c.token !== 'Rina'), 'no longer offered');
+  assert.match(text(app), /Archived \(1\).*Robin used on 3 saved items Unarchive/);
+  assert.ok(app.get('watchWithChoiceList()').every(c => c.token !== 'Robin'), 'no longer offered');
 });
 
 test('a stale page offering an archived choice: the database refuses the update, the row is unchanged, the choices are read again', async () => {
@@ -574,7 +574,7 @@ test('a stale page offering an archived choice: the database refuses the update,
   const i = app.requests.length;
   await app.ctx.toggleWatchWith(wind.id, 'Sam', true); await settle();
   assert.match(app.el('errorBanner').innerHTML, /“Sam” is archived, so it can’t be added\. Nothing was changed/);
-  assert.deepStrictEqual(Array.from(rowByTitle(app, 'Wind River').watch_with), ['Rina']);
+  assert.deepStrictEqual(Array.from(rowByTitle(app, 'Wind River').watch_with), ['Robin']);
   assert.ok(app.requests.slice(i).some(r => r.method === 'GET' && r.url.includes('watch_with_choices')), 'choices read again');
 });
 

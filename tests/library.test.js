@@ -543,10 +543,10 @@ test('All Movies: status, Watched and watch-with by the film’s id, for a film 
   app.el('fWatch').value = ''; app.el('fStatus').value = 'all'; app.ctx.renderTable();
   assert.ok(app.html().includes(`toggleWatchWith('f-lamp'`), 'watch-with for a film stored in Disney+ (D2)');
   // B4/B5: status and Watched through the guarded film function (a status choice, then a watched-only change); watch-with as before.
-  await app.ctx.setStatus('f-lamp', 'watched'); await app.ctx.toggleWatch('f-lamp'); await app.ctx.toggleWatchWith('f-lamp', 'Rina', true); await settle();
+  await app.ctx.setStatus('f-lamp', 'watched'); await app.ctx.toggleWatch('f-lamp'); await app.ctx.toggleWatchWith('f-lamp', 'Robin', true); await settle();
   assert.deepStrictEqual(app.writes().map(r => [r.method, r.url.split('/rest/v1/')[1], JSON.stringify(r.body.p_changes || r.body)]),
     [['POST', 'rpc/library_set_film_state_b45', '{"state":"watched"}'], ['POST', 'rpc/library_set_film_state_b45', '{"watched":false}'],
-      ['PATCH', 'watchlist_items?id=eq.f-lamp', '{"watch_with":["Rina"]}']]);
+      ['PATCH', 'watchlist_items?id=eq.f-lamp', '{"watch_with":["Robin"]}']]);
   assert.deepStrictEqual(app.writes().slice(0, 2).map(r => r.body.p_item_id), ['f-lamp', 'f-lamp']);
   assert.ok(app.html().includes('title="Skip (built-in catalog film)"'));
   await app.ctx.delRow('f-cat'); await settle();
