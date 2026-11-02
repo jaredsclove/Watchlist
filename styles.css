@@ -684,7 +684,6 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .card-meta { align-items: center; gap: 0 10px; margin-bottom: 0; min-height: 20px; }
   .card-meta .card-season, .card-meta .card-date { font-size: 12px; line-height: 18px; }
   .card-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; min-width: 0; }
-  .card-labels > .meta-chip.meta-genres:first-child { margin-left: -4px; } /* the name, not its box, sits on the margin */
   .card-complete { display: inline-flex; margin-left: auto; }
   .card-actions { gap: 2px 8px; }
   .card-actions .status-select:is(.s-confirmed, .s-skipped, .s-film-to_watch, .s-film-skipped) { border-left-width: 0; padding-left: 0; } /* the borderless ones too */
@@ -852,16 +851,19 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .tmdb-rating { position: relative; z-index: 1; min-height: 44px; min-width: 44px; margin-block: -6px; padding: 0 6px; }
 }
 /* Category chips (render.js metadataChipsHtml), button or text: explicit colours by kind, so a
-   chip never shows the browser's default button face. Genres and any other kind: slate; forms:
-   teal; franchises: amber. The network chip carries an inline style (networkChipStyle). */
+   chip never shows the browser's default button face. Genres: neutral gray; forms: teal;
+   franchises: amber; any other kind: slate. The network chip carries an inline style
+   (networkChipStyle). */
 :root {
   --chip-bg: #222938; --chip-fg: #c8d0e0; --chip-border: #343c50;
+  --chip-genre-bg: #24262a; --chip-genre-fg: #b2b5bb; --chip-genre-border: #383a40;
   --chip-form-bg: #0e2b2a; --chip-form-fg: #6fd6c9; --chip-form-border: #1d4a46;
   --chip-fr-bg: #2e2408; --chip-fr-fg: #e6c25a; --chip-fr-border: #554314;
 }
 @media (prefers-color-scheme: light) {
   :root {
     --chip-bg: #eceff4; --chip-fg: #3b4357; --chip-border: #d2d8e3;
+    --chip-genre-bg: #eeeff1; --chip-genre-fg: #4a4d55; --chip-genre-border: #d9dbdf;
     --chip-form-bg: #e3f4f2; --chip-form-fg: #135f57; --chip-form-border: #b3ddd7;
     --chip-fr-bg: #fbf2d9; --chip-fr-fg: #6e5208; --chip-fr-border: #e6d4a0;
   }
@@ -869,18 +871,18 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .meta-chip { background: var(--chip-bg); color: var(--chip-fg); border-color: var(--chip-border); }
 .meta-chip.meta-forms { background: var(--chip-form-bg); color: var(--chip-form-fg); border-color: var(--chip-form-border); }
 .meta-chip.meta-franchises { background: var(--chip-fr-bg); color: var(--chip-fr-fg); border-color: var(--chip-fr-border); }
-/* Genres are subdued text ("Crime · Drama"). A clickable one stays a filter button: underlined on hover, the
-   filter pills' focus ring and pressed mark, and a box of its own. A label that isn't a filter here stays plain. */
-.meta-chip.meta-genres { background: none; border-color: transparent; color: var(--text2); padding: 2px 3px; font-size: 12px; border-radius: 4px; }
-.meta-chip.meta-genres:has(+ .meta-chip.meta-genres):not([aria-pressed="true"])::after { content: '·'; display: inline-block; margin-left: 6px; text-decoration: none; }
-button.meta-chip.meta-genres { min-height: 24px; }
+.meta-chip.meta-genres { background: var(--chip-genre-bg); color: var(--chip-genre-fg); border-color: var(--chip-genre-border); }
+td > :is(.meta-chip, .meta-more):not(:last-child) { margin-right: 4px; }
+@media (min-width: 1100px) {
+  /* A genre keeps its 24 px target on a row without making the pill or the row taller. */
+  button.meta-chip.meta-genres { position: relative; }
+  button.meta-chip.meta-genres::before { content: ''; position: absolute; inset: -3px 0; }
+}
 @media (max-width: 1099px) {
-  button.meta-chip.meta-genres { min-height: 32px; display: inline-flex; align-items: center; }
   /* A label's 32 px target with a smaller pill inside it: the transparent top and bottom borders are the rest of the
      target. The pill's colours stay its own (a network's are inline), without an outline. */
-  .item-card .filter-pill:not(.meta-genres) { border-width: 5px 0; border-color: transparent !important; background-clip: padding-box !important; padding: 0 8px; min-height: 32px; }
+  .item-card .filter-pill { border-width: 5px 0; border-color: transparent !important; background-clip: padding-box !important; padding: 0 8px; min-height: 32px; }
 }
-button.meta-chip.meta-genres:hover { filter: none; color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 .caught-ended { font-size: 12px; color: var(--text2); }
 .gap-note { display: block; font-size: 11px; color: var(--text3); margin-top: 2px; }
 .show-actions-inner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }

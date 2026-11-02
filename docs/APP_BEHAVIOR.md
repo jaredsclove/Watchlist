@@ -29,7 +29,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   select. Priority is edited in the row's ⋯ (shows and films; Seasons lists show it
   only); High shows ★ and Low the word, Normal nothing. The show-row shortcut reads "Mark watched" (its name and tooltip
   name the season; the episode list's offer keeps "Mark Season N watched"). Season progress reads "1/3 seasons watched".
-  Clickable genres are subdued filter buttons ("Crime · Drama"), underlined on hover, 32 px tall on phones.
+  Genres are neutral-gray pills, the same shape and size as the form, franchise and network pills and filter buttons like them.
 - **Film collections (TMDB):** a film TMDB places in a collection keeps that identity. Its ⋯ menu offers Check
   collection while the collection's contents are unknown on this page, then Pull rest only when another film can be
   added, "All collection films are already in your library." when none can, nothing for a collection of one, or a

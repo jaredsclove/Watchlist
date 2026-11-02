@@ -75,7 +75,7 @@ test('per-kind palette: text reads at 4.5:1 or more on its chip in both schemes'
   assert.strictEqual(blocks.length, 2, 'both schemes define the palette');
   for (const b of blocks) {
     const v = name => b.match(new RegExp(`${name}: (#[0-9a-f]{6})`))[1];
-    for (const k of ['chip', 'chip-form', 'chip-fr']) assert.ok(ratio(rgb(v(`--${k}-fg`)), rgb(v(`--${k}-bg`))) >= 4.5, k);
+    for (const k of ['chip', 'chip-genre', 'chip-form', 'chip-fr']) assert.ok(ratio(rgb(v(`--${k}-fg`)), rgb(v(`--${k}-bg`))) >= 4.5, k);
   }
 });
 
