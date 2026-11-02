@@ -753,24 +753,24 @@ function seasonSubRowHtml(r, opts) {
   const rowClass = isSkipped ? 'row-skipped' : '';
   const hooks = ` data-season-row="${esc(r.id)}"${opts.showOf ? ` data-show-of="${esc(opts.showOf)}"` : ''}`;
   // EP1: a matched season's episode progress and its Episodes toggle; the open list follows the row.
-  const label = `<td style="padding-left:28px">
+  // The label takes the empty cell beside it, so the next-unwatched line has the width up to the date.
+  const label = span => `<td style="padding-left:28px"${span ? ' colspan="2"' : ''}>
           <span class="season-lbl">${esc(r.season)}</span>
-          ${opts.isNew?'<span class="new-tag">New</span>':''}${episodeProgressHtml(r)} ${episodeToggleHtml(r)}
+          ${opts.isNew?'<span class="new-tag">New</span>':''}${episodeProgressHtml(r, episodeToggleHtml(r))}
         </td>`;
   const watch = seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, false));
   const control = seasonActionHtml('season-control', seasonRowControlHtml(r));
   if (opts.cwOrder) {
     return `<tr class="${rowClass} sub-row"${hooks}>
-        ${label}
-        <td></td>
+        ${label(true)}
         <td class="date-cell">${esc(r.display_date)}</td>
         <td>${watch}</td>
         <td>${control}</td>
       </tr>` + episodePanelHtml(r, { showOf: opts.showOf, colspan: 5 });
   }
   return `<tr class="${rowClass} sub-row"${hooks}>
-        ${label}
-        <td>${opts.showMatch ? seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`) : ''}</td>
+        ${label(!opts.showMatch)}
+        ${opts.showMatch ? `<td>${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}</td>` : ''}
         <td class="date-cell">${seasonDateHtml(r, opts)}</td>
         <td>${control}</td>
         <td>${watch}</td>
@@ -780,9 +780,8 @@ function seasonSubRowHtml(r, opts) {
 
 function seasonSubCardHtml(r, opts) {
   return `<div class="card-subseason-row" data-season-row="${esc(r.id)}"${opts.showOf ? ` data-show-of="${esc(opts.showOf)}"` : ''}>
-          <span class="card-season">${esc(r.season)} · ${seasonDateHtml(r, opts)}${opts.showMatch ? ` ${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}` : ''}${episodeProgressHtml(r)}</span>
+          <span class="card-season"><span class="season-lbl">${esc(r.season)}</span> · ${seasonDateHtml(r, opts)}${opts.showMatch ? ` ${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}` : ''}${episodeProgressHtml(r, episodeToggleHtml(r))}</span>
           <div class="card-actions">
-            ${episodeToggleHtml(r)}
             ${seasonActionHtml('season-control', seasonRowControlHtml(r))}
             ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, true))}
             ${opts.showDelete ? seasonActionHtml('season-delete', seasonDeleteHtml(r, opts, 'card-del-btn')) : ''}

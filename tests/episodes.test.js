@@ -64,10 +64,10 @@ async function open(app, s) { app.ctx.toggleEpisodes(s.id); await settle(); }
 const marksIn = (app, s) => app.store.episode_marks.filter(m => m.season_id === s.id).map(m => m.tmdb_episode_id).sort();
 
 // ── Collapsed progress ──
-test('collapsed: no marks, no text; marks without a cached list → "In progress · N marked"; Episodes only on matched seasons', async () => {
+test('collapsed: no marks, no text; marks without a cached list → "N episodes marked"; Episodes only on matched seasons', async () => {
   const { app, lib } = await boot({ marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2)] });
   assert.ok(!/ep-progress/.test(seasonRow(app, lib.s3)), 'no marks: nothing');
-  assert.match(text(seasonRow(app, lib.s2)), /In progress · 2 marked/);
+  assert.match(text(seasonRow(app, lib.s2)), /2 episodes marked/);
   assert.ok(seasonRow(app, lib.s2).includes(`toggleEpisodes('${lib.s2.id}')`));
   app.ctx.toggleDerivedShow(lib.loc.id); await settle();
   assert.ok(!seasonRow(app, lib.l1).includes('toggleEpisodes'), 'an unmatched season has no episode list');
@@ -79,19 +79,19 @@ test('collapsed: against the cached list "N/T watched" counts only listed marks,
   const { app, lib } = await boot({ storage, marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 7777, 9), mark(l.s1, 8001, 1)] });
   await open(app, lib.s2); // the list is cached on this device (its ids)
   app.ctx.toggleEpisodes(lib.s2.id); await settle(); // closed again
-  assert.match(text(seasonRow(app, lib.s2)), /In progress · 1\/4 watched · 1 not listed/);
+  assert.match(text(seasonRow(app, lib.s2)), /· 1\/4 episodes watched · 1 not listed/);
   const cacheKey = userKeyOf('watchlist-episode-lists');
   assert.deepStrictEqual(JSON.parse(storage.getItem(cacheKey))['95396:2'], { ids: [9001, 9002, 9003, 9004], numbers: [1, 2, 3, 4],
     names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'], last: { type: null, air: null } }, 'with each episode’s number and title (the next-unwatched line), and the last episode’s type and air date');
   // A count only (Refresh shows / Add season): N/T while the marks are fewer; never a complete-looking T/T.
   storage.setItem(cacheKey, JSON.stringify({ '95396:2': { count: 4 }, '95396:1': { count: 1 } }));
   app.ctx.renderTable();
-  assert.match(text(seasonRow(app, lib.s2)), /In progress · 2\/4 watched/);
-  assert.match(text(seasonRow(app, lib.s1)), /1 marked/, 'marks not fewer than the count: no total');
+  assert.match(text(seasonRow(app, lib.s2)), /· 2\/4 episodes watched/);
+  assert.match(text(seasonRow(app, lib.s1)), /1 episode marked/, 'marks not fewer than the count: no total');
   assert.doesNotMatch(text(seasonRow(app, lib.s1)), /In progress|1\/1/, 'a watched season isn’t in progress');
   storage.setItem(cacheKey, '{"95396:2":{"ids":[9001,9002]}}');
   app.ctx.renderTable();
-  assert.match(text(seasonRow(app, lib.s2)), /1\/2 watched · 1 not listed/, 'a stale list is shown as it is (accepted)');
+  assert.match(text(seasonRow(app, lib.s2)), /1\/2 episodes watched · 1 not listed/, 'a stale list is shown as it is (accepted)');
   await app.ctx.setSeasonSkipped(lib.s2.id, true); await settle();
   assert.ok(!/ep-progress/.test(seasonRow(app, lib.s2)), 'skipped: no progress shown');
   assert.deepStrictEqual(marksIn(app, lib.s2), [7777, 9001], 'skipping kept the marks');
@@ -100,12 +100,12 @@ test('collapsed: against the cached list "N/T watched" counts only listed marks,
 test('collapsed: unreadable storage leaves "N marked"; a corrupt cache is ignored', async () => {
   const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() {} };
   const { app, lib } = await boot({ storage: broken, marks: l => [mark(l.s2, 9001, 1)] });
-  assert.match(text(seasonRow(app, lib.s2)), /In progress · 1 marked/);
+  assert.match(text(seasonRow(app, lib.s2)), /1 episode marked/);
   await open(app, lib.s2);
   assert.match(panel(app), /1\/4 watched/, 'the open list still counts');
   const s = memoryStorage(); s.setItem(userKeyOf('watchlist-episode-lists'), 'not json');
   const b = await boot({ storage: s, marks: l => [mark(l.s2, 9001, 1)] });
-  assert.match(text(seasonRow(b.app, b.lib.s2)), /In progress · 1 marked/);
+  assert.match(text(seasonRow(b.app, b.lib.s2)), /1 episode marked/);
 });
 
 // ── The list ──
@@ -150,7 +150,7 @@ test('a mark: one guarded call (the season’s watched / skipped as expected); t
     p_episodes: [{ tmdb_episode_id: 9002, episode_number: 2 }] });
   assert.deepStrictEqual(marksIn(app, lib.s2), [9002]);
   assert.match(panel(app), /1\/4 watched/);
-  assert.match(text(seasonRow(app, lib.s2)), /In progress · 1\/4 watched/);
+  assert.match(text(seasonRow(app, lib.s2)), /· 1\/4 episodes watched/);
   await app.ctx.setEpisodeMark(lib.s2.id, 9001, true); await settle();
   await app.ctx.setEpisodeMark(lib.s2.id, 9002, false); await settle();
   assert.deepStrictEqual(JSON.parse(JSON.stringify(rpcs(app, 'library_set_episode_marks')[2].body.p_episodes)), [{ tmdb_episode_id: 9002 }]);
@@ -467,9 +467,9 @@ test('next unwatched: the first listed episode without a mark (gaps included), f
   await open(app, lib.s2);
   assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E2', 'the open list: E2, not E3 from the count of marks');
   app.ctx.toggleEpisodes(lib.s2.id); await settle();
-  assert.match(text(seasonRow(app, lib.s2)), /In progress · 2\/4 watched Next unwatched: E2/, 'beside the progress, from the cache once closed');
+  assert.match(text(seasonRow(app, lib.s2)), /· 2\/4 episodes watched ▸ Episodes Next unwatched: E2/, 'with Episodes on the progress line, then its own, from the cache once closed');
   assert.doesNotMatch(html(app) + card(app), /Title 2/, 'no title while titles are hidden by default');
-  assert.ok(/ep-next">Next unwatched: E2</.test(card(app)), 'the phone card has it too');
+  assert.match(card(app), /· 2\/4 episodes watched<\/span> <span class="season-action" data-action="episodes">[^]*?<\/span> <span class="ep-next">Next unwatched: E2</, 'the phone card has the same order');
   await open(app, lib.s2); // a mark is set from the open list
   await app.ctx.setEpisodeMark(lib.s2.id, 9002, true); await settle();
   assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E4', 'marking E2 moves it past the marked E3');
@@ -549,7 +549,7 @@ test('a collection’s show entry has the same progress, list and marks; the pho
     memberships: [{ id: '0d000000-0000-4000-8000-000000000001', collection_id: '0c000000-0000-4000-8000-000000000001', show_id: lib.sev.id, item_id: null, created_at: TS }] });
   app.ctx.openBrowseCollection('browse:0c000000-0000-4000-8000-000000000001'); await settle();
   app.ctx.toggleBrowseShow(lib.sev.id); await settle();
-  assert.match(text(seasonRow(app, lib.s2)), /In progress · 1 marked/);
+  assert.match(text(seasonRow(app, lib.s2)), /1 episode marked/);
   await open(app, lib.s2);
   assert.match(panel(app), /1\/4 watched/);
   await app.ctx.setEpisodeMark(lib.s2.id, 9002, true); await settle();

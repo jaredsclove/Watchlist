@@ -41,8 +41,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   it (marks only the unmarked episodes up to N; starts on the first unmarked, keeps the choice). Titles are hidden
   behind a Show title button per episode unless Settings' "Show episode titles by default" is on (per account,
   this browser only; a choice that can't be saved holds for the open page). A season with
-  marks reads "In progress · N/T watched" (T from a per-device cache of the list; "N marked" when unknown).
-  Beside that progress (EP3), "Next unwatched: E6" names the first listed episode without a mark, with " — Title" only
+  marks reads "N/T episodes watched" (T from a per-device cache of the list; "N episodes marked" when unknown). An expanded
+  season shows the season, that progress and Episodes on one line, with the next-unwatched text on a smaller line below.
+  After that progress (EP3), "Next unwatched: E6" names the first listed episode without a mark, with " — Title" only
   while titles are shown by default; it comes from the open list or the per-device cache and is hidden when the list is
   unknown, empty or fully marked, or the season is watched or skipped. That cache (replaceable device storage, not
   library data or backups) holds each list's episode ids and, since EP3, numbers and titles; a list cached before EP3
