@@ -342,6 +342,8 @@ research rows included: they're stored, verified and inert until access is on; r
 in a backup, and restore's exact table and field lists refuse a file that tries to carry it. A restore can also remove holds (the
 replace contract; its preview and safety backup apply).
 
+Hosted restore performance has not been measured.
+
 **Revocation.** Research rows stay. Later research writes are refused; a call already running can still commit. A page left open shows its
 controls until its next capability read or first refusal, then follows: a research dialog gives way to a message (an unsaved draft is
 lost), and a running plan stops. Access returning shows on reload or the next capability read.

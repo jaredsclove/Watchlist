@@ -1,5 +1,8 @@
 # Stage 5 — the library without storage
 
+**History.** This was the implementation contract for Stage 5, moved here from `docs/` when it stopped being current. Nothing here is an
+instruction: its rollbacks, the recovery archive it describes and G9 are superseded. Current rules: `docs/STATE.md` and `db/README.md`.
+
 Stage 5 removes "storage" (`watchlist_items.collection`, `tv_shows.collection`,
 `personal_collections.legacy_source`, `othertv_shows`) as a concept. What decided how a
 record may be edited becomes **catalog governance** (the built-in catalog that governs a

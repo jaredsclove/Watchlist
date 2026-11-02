@@ -1,0 +1,418 @@
+# Release history
+
+The release records from `docs/STATE.md` up to 2026-11-02 UTC, moved here unchanged when that file was shortened. They describe each
+release as it was at the time: later releases may have replaced what they say. Nothing here is a current instruction.
+Earlier history: `docs/history/HANDOFF-2026-10-18.md`.
+
+## Where things stand (2026-11-01)
+
+GitHub `main` is the source of truth; check it with `git ls-remote origin main` at the start of a session.
+Each release's PR holds its review, validation and limits: Batch A [#1], S4–S6 [#2], Batch B [#3],
+test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 episode progress [#9],
+admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
+TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
+(CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29], the compact interface [#32],
+density and search [#34], research access (CU2) [#37], a missing season comes back (CU1e) [#40], write scope (W1) [#42], its removal [#44].
+
+- **Release:** `224dfbb`, W1 is removed from the active architecture (owner's decision; PR #44, a merge commit of the reviewed head `2a8cf7d`),
+  released 2026-11-02 UTC. Database only: `db/w1_removal.sql` took the `xmloption` clause off W1's 38 functions, restored `lib_write_on`,
+  `library_write_guard` and `b45_show_guard` word for word, and dropped `private.lib_authorized`. Writes are authorized as before W1:
+  `lib_write_on` sets the transaction-local `watchlist.library_write`, and the guards read it. No page file changed, and the token stays
+  `20261101-seasons`. W1's recovery scripts, procedure, probes and test hooks are gone; its migration, run record and release notes stay as
+  history. Validation: offline 1259/1259; the transition on a local stack, 67/67, where the catalog after removal equalled one taken before
+  W1 across 366 entries; the CU2 local test and the rehearsals; the real page against a local database; one focused review with its findings
+  closed. Release: a read-only status query (W1 recorded once, the clause on 38 functions, no repair or configured default, `pg_graphql`
+  absent); a pre-release format-7 backup validated; the SQL Editor's contents checked against the run file's hash and run once (its prompts
+  concerned the migration's temp tables and the dropped function). A separate read showed the `w1` and `w1_removal` run records once each, no
+  clause and no helper, nothing naming W1, the three functions reading the flag, and counts unchanged. The post-migration backup validated
+  and equals the pre-release one field by field (19 tables, 1,393 rows, no differences). Verified through the hosted API, signed in, on one
+  synthetic `ZZ` show created through a library function: 16 of 16 direct `priority` writes refused with `library_write_required` and the value
+  unchanged, the no-write check answered `target_missing`, a real library write went there and back, signed-out requests were refused, and
+  `delete_tv_season` removed the record. Merged only after that. Pages built `224dfbb`; the 35 application files are byte-identical to the commit
+  and unchanged from before, and all 29 versioned files carry the token. The fresh page loaded all views as the owner, with member and
+  research access true and no console error. A final backup validated and equals the baseline field by field, with three distinct export
+  times, and no test record is left. Account isolation, CU2, item 10, backups and restore are intact. No production GraphQL request was sent.
+  Item 11 is intentionally abandoned and unreleased.
+- **Historical: W1, removed since.** `963b96e`, library writes are authorized by the function's own scope (W1, item 9; PR #42, a merge commit of the reviewed
+  head `b54f1fd`, whose migration and application files equal the reviewed implementation at `5d4fdac`), released 2026-11-01 UTC. Database only:
+  `db/w1_write_scope.sql` puts `set xmloption = 'document'` on 35 public and 3 enrichment functions and makes the guards read it through
+  `private.lib_authorized`. No table, policy, capability, phase, backup-format or application file changed; the token stays
+  `20261101-seasons`. Validation: offline 1259/1259; a local Supabase stack with real PostgREST and Auth (384/384); the rehearsals; one
+  focused review of the implementation and one of the hosted procedure, each with its findings closed. Release: a read-only preflight
+  (`db/test/w1_preflight.sql`, hosted capabilities included); a pre-release format-7 backup validated; the SQL Editor's contents checked
+  against the run file's hash and run once (its RLS prompt concerned the migration's temp tables); one run record confirmed by a separate
+  read, with the clause on exactly 35 + 3 functions, `lib_authorized` volatile, execute for `authenticated` only, no temp table left and
+  `pg_graphql` absent; `db/test/w1_catalog_check.sql` passed (both since removed). Verified through the hosted API, signed in, on a synthetic `ZZ` show created
+  through `library_create_show_b45`: direct `PATCH`es of `tv_shows.priority` from normal to high, 16 of 16 refused with
+  `library_write_required` and the value unchanged; the no-write check answered `target_missing`; a real write through
+  `library_set_show_state_b45` went there and back; `delete_tv_season` removed the record. Merged only after that. Pages built `963b96e`; the
+  35 application files are byte-identical and all 29 versioned files carry the token. The fresh page loaded all views as the owner, with
+  member and research access true, and no console error.
+- **Historical: recovery drill, H2 (owner-approved, 2026-11-01; its procedure and scripts are in git at `20c0433`):** run on production right after the release, with
+  nothing poisoned, on PostgREST 14.5 and PostgreSQL 17 (the local stack is 16.4). The pre-request gate took effect within seconds of step 1's
+  notification, and a signed-out request answered 503 `PT503`. With schema access revoked, the owner's direct writes and library functions
+  stopped with permission errors. `postgres` ended PostgREST's connections, 8 and then 2, all that were found; the status read showed each
+  newer than the script, and PostgREST was back within about 13 seconds with the gate still holding. After step 3, five rounds: 40 of 40 direct
+  writes refused by the guard, the no-write check reaching the scope, a real library write working, and signed-out requests still at the
+  gate. Step 4 reopened the API within seconds (40 of 40 signed-out requests back to the ordinary 401), step 5 removed the gate, and the
+  same proofs passed again on a further synthetic record. API closed under three minutes. No fallback was used: no project restart, and the
+  Data API stayed on. Preservation: four format-7 backups (baseline, post-migration, post-verification, final) validated, with four
+  distinct export times, 19 tables and 1,393 rows each; each later one equals the baseline field by field, and no test record is left. No
+  production GraphQL request was sent. **Not proved on hosted:** removing a real default, a server-level default (`postgres` can't set one,
+  and only Supabase Support could remove one; unconfirmed), a project restart, and any second member, since no other account has a session.
+- **Accepted limitations (owner, 2026-11-01; `db/README.md`):** this is an app for trusted people. A member's crafted request can bypass product
+  rules on their own records: direct deletes and title changes (item 11, abandoned), and, if GraphQL were ever enabled, a chained write. It can't
+  reach another account. A restore's largest local success under the 8 s timeout was 36,123 rows, up to 7.5 s, on a synthetic library, and with W1
+  in place; that isn't a guaranteed capacity, and hosted timing wasn't measured.
+- **Earlier release:** `a3436a8`, a missing TMDB season comes back on every Refresh shows (CU1e, item 10; PR #40, the branch's three commits
+  rebased, same tree as the reviewed head `2d0e6dc`), released 2026-11-01 UTC with database migration `db/cu1e_missing_season.sql`
+  (replaces `private.cu1_finding_take` only; no table, grant, capability, phase or backup-format change, and no backfill). The page says
+  why a season sent wasn't added, lists Dismissed and Not now under "Left out by your decision", and the delete dialog names holds and
+  decisions. Validation: offline 1259/1259; the rehearsals, including real PostgreSQL concurrency; a local browser check with synthetic
+  data; one focused review, with its findings closed before the heading commit. Release: in a quiet window, a read-only recheck
+  (phase `contracted-cu1`, format 7, the five run records, CU1e absent, the replaced function's exact source); a pre-release format-7
+  backup validated; the SQL Editor's contents checked against the run file's hash and run once as written (its RLS prompt concerned the
+  migration's own temp table); the run record confirmed by a separate read, with one CU1e record, the new function in place, security
+  invoker, grants as designed, no temp table left and `pg_graphql` absent. The post-migration backup validated and equals the pre-release
+  one field by field (19 tables, 1,393 rows, no differences). Merged only after that. Verified after deployment: Pages built `a3436a8`; the
+  35 application files are byte-identical and all 29 versioned files carry `20261101-seasons`. On the live site, signed in, read-only:
+  member and research access true, phase `contracted-cu1`, Currently Watching, All TV, Coming Soon, Movies, Collections and the Collection
+  updates card load, a page-memory log started after load recorded no write, and a separate fresh load showed no console error. A final
+  backup validated and equals both earlier ones field by field, with three distinct export times. Refresh shows, research imports and
+  restore weren't run. **The preflight found no existing findings in the owner's library that CU1e would newly reopen at that snapshot.
+  That doesn't mean an ordinary Refresh can't add new TMDB seasons.** **Not verified on production:** the restored season itself, until
+  the owner runs Refresh shows, and the delete dialog opened on the live page (its file is byte-identical). Not tested: real phones,
+  Safari, Firefox and true dark mode. An older tab keeps working until reloaded.
+- **Earlier release:** `799ff32`, per-member research access (CU2, item 4; PR #37, the branch's four commits rebased, same tree as the
+  reviewed head `32475e3`), released 2026-11-01 UTC with database migration `db/cu2_research_access.sql` (a column on
+  `private.library_members`, the permission function, the research guard on eight tables, `restore_backup` as a wrapper around the
+  unchanged `private.restore_backup_v7`, `research` in the capability; no `library_cu_*` function, phase or backup-format change).
+  Design: `docs/ITEM4_DESIGN.md` §4.6. Validation: offline 1253/1253; the rehearsal on PGlite (388 checks, a failure injected
+  after each of CU2's 32 statements); a local Supabase stack with real Auth, PostgREST and GraphQL (38 checks, run before the final
+  one-line tooltip fix, with members on and off and a non-member); a local browser check with synthetic data at desktop, 375 and
+  300 px; one Fable review of the completed change (nothing blocking; one worth-fixing tooltip bug fixed with a test; no closure
+  check needed). Release: a read-only preflight, refreshed before the run (phase `contracted-cu1`, format 7, the run records, CU2
+  absent, one member, no other account's research data); a pre-release format-7 backup validated; the SQL Editor's contents checked
+  against the run file's hash and run once as written, the owner chosen from the database rather than pasted (its RLS prompt concerned
+  the migration's own temp tables); the run record confirmed by a separate read, with the column default false, exactly one member on
+  and that member the `app_owner`, eight guards enabled, grants as designed, and no application-role access to `library_members`. The
+  post-migration backup validated and equals the pre-release one field by field (19 tables, 1,393 rows, no differences). Merged only
+  after that. Verified after deployment: Pages built `799ff32`; the 35 application files are byte-identical and all 29 versioned files
+  carry `20261031-cu2`. On the live site, signed in, read-only: research access true, phase `contracted-cu1`, the Collection updates
+  card as before, review opens with its six waiting findings and no Continue action (nothing unfinished), Collections and rules lists
+  the 22 holds, and Currently Watching, All TV, Coming Soon, Movies and Collections load. A page-memory log started after load
+  recorded no write, and there was no console error. A final backup validated and equals the post-migration one field by field.
+  Refresh shows, research imports and findings weren't run on that account. **Not verified on production at release:** research-off
+  behaviour, revocation and refusals (since verified, below) and Continue; the page's first load wasn't in that log. Not tested: real
+  phones, Safari, Firefox and true dark mode. An older tab keeps working until reloaded.
+- **Production two-account test (owner-approved, 2026-11-01):** a temporary member with synthetic `ZZ` data and one public TMDB
+  title, its rows recorded privately as they were created. With access off: an empty library, no research controls or wording;
+  a collection, a manual show, a TMDB show, memberships and Refresh shows worked; a hold by RPC and by direct REST was refused
+  (`research_not_enabled`) and `library_members` wasn't reachable. With access on, two holds saved through the form. Revoked on an open
+  page: Remove hold was refused, the page followed at once and the holds stayed. With access off, one Refresh restored a deleted
+  season (the control) and left out one a standing decision held. Deleting the show took its hold and left the label-only hold.
+  Membership removal took effect at once on an already-issued token (member false, no rows, writes refused). After sign-outs: no
+  sessions or live refresh tokens, and refresh refused; that access token still passed signature checks but reached no data. The owner's
+  backups before and after match field by field (19 tables, 1,393 rows, no differences); a fingerprint of everything outside the test
+  account is unchanged; the owner's access is on and `pg_graphql` was still absent. Driven by script through the page and the same
+  database functions, not by hand. Not exercised: Continue, imports, restore and a new sign-in by that account.
+- **Retained test account (owner-approved exception to returning production to baseline):** one Auth user and seven rows (a collection, a
+  manual show, its season, a membership, a hold and two TMDB findings). It has no membership and no sessions, so it reaches no library,
+  but its password still works: a new sign-in is possible and would read and write nothing. Re-adding its membership would restore access.
+  It isn't banned. Removing it is deferred with other member libraries (`docs/MEMBER_RECOVERY.md`).
+- **GraphQL stays disabled, a standing decision (2026-11-01):** `pg_graphql` isn't installed, and the page uses REST only. Enabling it needs a new
+  explicit decision: the write flag lasts for a transaction, so one GraphQL request could chain a library function with a direct write on the caller's own rows.
+
+- **Earlier release:** `9768284`, density and search (item 8 follow-up; PR #34, the branch's two commits rebased, same tree as the
+  reviewed head `7c125e7`), released 2026-10-31 UTC. Presentation and interaction only: no migration, and no backup-format
+  or saved-data change; writes use the existing functions. Validation: offline 1234/1234; a local browser check with
+  synthetic data from 1280 to 300 px in light and dark. Space above the first item at 1280 / 800 / 375 / 300 px, before →
+  after, on that synthetic data: Collections 297 → 221 / 315 → 255 / 501 → 402 / 619 → 454; All TV 178 → 158 / 215 → 172 /
+  244 → 234 / 244 → 234; Currently Watching 209 → 182 / 209 → 164 / 207 → 186 / 207 → 186; Movies 144 → 124 / 181 → 138 /
+  197 → 187 / 197 → 187. Sideways overflow at 800 px (102 px in Collections, 181 in All TV) is gone. Verified after
+  deployment: Pages built `9768284`; the 35 application files are byte-identical and all 29 versioned files carry
+  `20261031-density`. On the live site, signed in, read-only, in the owner's real library: Currently Watching, All TV,
+  Coming Soon, Movies and Collections in same-origin frames at 1280, 1100, 1099, 800, 701, 700, 430, 375 and 300 px, with no
+  sideways overflow and nothing off screen. Rows at 1100 px and up, cards from 1099 down: two columns confirmed at 800, one
+  at 375 and 300. The TMDB field shows at 1280 and 1100, except in Collections at 1100, and is hidden below that.
+  Card targets 44 px and labels 32 px; ratings displayed; every Collections tab one line at 44 px; ⋯ menus on
+  screen and closed by Escape; expanded cards with episode lists opened without overflow. On the main page with real
+  input at desktop width: ⋯ on screen, Escape returns focus and doesn't expand, an expanded row. One TMDB search through
+  the desktop field: typing sent nothing; Enter sent one TV and one film search and moved focus to the first result; Enter
+  opened a preview with focus on the preview, not its Add button (one TMDB read); Cancel returned to the result and Close
+  to the field. Nothing was added, and no status, priority, episode mark, identity or library row was changed; the library
+  counts were the same afterwards. No backup was taken, because nothing was to change.
+- **Network record for that check:** no write, and no authentication request, appears anywhere in it. The extension's log
+  covers the first load only after a reload (that load's browser record lists the same endpoints), showed 732 database
+  requests, all GET, from the layout passes, but dropped older entries and missed some frame requests, so it isn't
+  complete for those passes. Complete for the main page (39 database calls) and a final 375 px frame repeating menus,
+  expansions, episode lists and every Collections tab (97 calls), by the browser's own record, which gives URLs but not
+  methods: all are `select` reads or the `stage5_capabilities` read, which the log shows as GET. The two local-only
+  changes were the per-device rating cache filling in by 40 bytes and a remembered collection created by the check, removed
+  afterwards.
+- **Not verified on that release:** real phones and tablets, Safari, Firefox, native select popups by pointer, a live
+  status or priority change, a confirmed add, a collection membership, or the already-saved and stale-collection paths
+  (offline tests cover them). Dark mode was emulated in a frame on a light system, so colours the app picks from the system
+  theme, such as network pills, weren't seen in true dark. Real rows can stay taller than the synthetic ones: Movies has a
+  median of 55 px at 1280, and All TV 51 px at 1100. An older tab keeps working until reloaded.
+
+- **Earlier release:** `5d588f2`, the compact interface (item 8; PR #32, the branch's four commits rebased, same tree as the
+  reviewed head `f254b62`), released 2026-10-30 UTC. Presentation and interaction only: no migration, and no write, backup-format or
+  saved-data change. Validation: offline 1216/1216; a local browser check with synthetic data at 1280, 375 and 300 px in
+  light and dark. Space above the first item at 1280 / 375 / 300 px, before → after: Currently Watching 261 → 178 /
+  412 → 207 / 412 → 207; All TV 293 → 178 / 502 → 244 / 522 → 244; Coming Soon 292 → 178 / 429 → 217 / 449 → 217; All
+  Movies 312 → 144 / 538 → 197 / 576 → 197. Verified after deployment: Pages built `5d588f2`; the 35 application files
+  are byte-identical and all 29 versioned files carry `20261030-compact`. On the live site, signed in, read-only: desktop
+  navigation, ⋯ (opens, Escape closes and returns focus, doesn't expand), an expanded show, and Settings' Backup &
+  Restore (no Backup button or date in the header; the ⚠ correctly absent after a same-day backup). At 375 and 300 px, in
+  same-origin frames, one in light and one in dark for each check: Currently Watching, All TV and All Movies at the measured space (All Movies
+  215 at 300 px, its longer count wrapping), no sideways overflow, no clipped card content, labels 32 px, ⋯ on screen, an expanded card,
+  Coming Soon and a collection. No status, priority, episode mark or library row was changed. The network log, kept
+  only for the last part of the check, shows only GET requests to the database; the opened and closed menus and the
+  expansions sent no write. No backup was taken, because nothing was to change. Not verified: real phones, Safari, Firefox, native select popups by
+  pointer, a live status or priority change (offline tests cover them), the Download backup button itself, and the live
+  ⚠ states (offline, and "No backup yet" with synthetic data). An older tab keeps working until reloaded.
+
+- **Since the CU1d release (owner's use, 2026-10-30; compared in a valid format-7 backup against the post-deploy one):**
+  the owner ran Refresh shows, chose networks from its results and used Mark all. 27 shows gained a network (17 automatic
+  with the Details flag still off, 10 through Details, 9 of them from several candidates), each one of its saved
+  candidates; no confirmed network was replaced or cleared, and no show waits with candidates (25 have no network: 22
+  unmatched and 3 matched with none from TMDB). Mark all added 28 marks on 3 Watched seasons, whose status stayed
+  Watched; no mark was removed and no season's Watched changed. Refresh also matched one show and one season to TMDB
+  and set one date (two findings, both applied). No row was added or removed in the library tables. Findings: 23 (14
+  applied, 6 waiting for more research, 1 accepted, 2 dismissed), none waiting for a decision. Not yet seen in use:
+  the completion suggestion and Not now.
+
+- **Release:** `0cac052`, sole-network confirmation, Watched-season episode lists, the completion suggestion and Mark all
+  episodes watched (items 1 and 4; PR #29, the branch's two commits rebased, same tree as the reviewed head), released
+  2026-10-30 UTC with database migration `db/cu1d_network_and_marks.sql` (two functions; no table, column, trigger,
+  policy, status, capability or backup-format change). Design: `docs/ITEM4_DESIGN.md` §4.5. Behaviour: a sole TMDB network
+  is confirmed at Add and in Refresh shows without being recorded as the owner's choice; several networks, or a show saved
+  in Details, are listed under "Choose a network" (also when nothing needs writing); a confirmed network is never
+  replaced and missing TMDB data blanks nothing. A Watched season without marks shows its list as reference. A fully
+  checked list reads TMDB afresh and, on strict evidence, strengthens the existing Mark season watched offer; Watched
+  changes only when the owner confirms, and Not now is per account on the device. Mark all episodes watched is explicit
+  and literal on a Watched season, guarded by the identity the list was read for; `library_set_episode_marks` keeps the
+  lock; Watched and marks otherwise stay separate. Before release: offline 1203/1203; the CU1 → CU1b → CU1c → CU1d
+  rehearsal on PGlite (262 checks, a failure injected after each of CU1d's 14 statements, rematches, stale writes,
+  isolation, a format-7 backup round trip, the test reverse); a local browser check with synthetic data at desktop, 375
+  and 300 px; a Fable review of the two functions and their page callers (nothing blocking or worth fixing). Release: a
+  pre-release format-7 backup validated; a read-only preflight (phase `contracted-cu1`, format 7, CU1 to CU1c's run
+  records, CU1d absent, its dependencies present, 22 holds, 21 findings, no other writers); the SQL Editor's contents
+  checked against the run file's hash and run as written (its RLS prompt concerned the migration's own temp table); the
+  run record confirmed by a separate read (both functions' sources equal the file, security invoker, members only, anon
+  and PUBLIC none). The post-migration backup validated and equals the pre-release one field by field (19 tables, 1,363
+  rows, no differences). Merged only after that, because merging deploys. Verified after deployment: Pages built `0cac052`
+  (delayed by a GitHub incident); the 35 application files are byte-identical and all 29 versioned files carry
+  `20261030-cu1d`; the reloaded page runs in `contracted-cu1` without console errors; two Watched seasons without marks
+  show their lists read-only (no checkboxes) with Mark all offered. Those reads sent no writes, and a third backup equals
+  the post-migration one. No production network, mark, status, hold or finding was changed; Refresh shows was not run
+  and Mark all, Not now and "Choose a network" weren't used on the live site, so they're verified offline and with
+  synthetic data only. Limits: TMDB's status, finale tags and counts are contributor data, so the suggestion is not a
+  guarantee, and real finale and network data were not sampled; an automatic network is TMDB's current one, not always
+  the original; a blank network on a show saved in Details is offered again on each Refresh; Mark all has no single undo.
+
+- **Earlier release:** `697d123`, date equivalence (item 4; PR #27, the branch's five commits rebased, same tree as the
+  reviewed head), released 2026-10-29 UTC with database migration `db/cu1c_date_equivalence.sql` (replaces
+  `library_cu_set_season_date`, adds `private.cu1c_exact_date`; no table, status, capability or backup-format
+  change). Behaviour (design §4.4): an exact date is a full display date whose `date_sort` is that same real date;
+  two exact dates within one calendar day are the same date (the stored date kept, the finding set aside by the
+  rule as `same_date_within_one_day`, TMDB and research alike, review included; Refresh doesn't send them, imports
+  record research ones set aside, an older pending one shows Keep your date); TMDB never changes a stored exact
+  date without an owner review (two or more days wait as `tmdb_date_differs`); qualified research still moves a
+  future exact date to another future date; only an exact new date is automatic. Preserved: TBA is filled as
+  before; a hand-typed window (no "TBA") is filled only while its date is still to come and a passed one isn't
+  re-checked (as CU1); "today counts as aired" (strictly after today is future) on both paths; aired dates,
+  protected values and holds need review; exact → window or TBA goes to review; TMDB without a date never blanks a
+  date. Before release: offline 1182/1182; the CU1 → CU1b → CU1c rehearsal on PGlite (189 checks, a failure
+  injected after each of CU1c's 14 statements, every rule through the real SQL, one-day findings non-actionable
+  across repeated TMDB sends, repeated imports and older-page calls, the test reverse and a reinstall); a local
+  browser check with synthetic data; a Fable review of the guarded date function (every CU1 check preserved in
+  order; a non-exact research value auto-applying, the widened hand-window rule and the helper's grants fixed and
+  confirmed in a follow-up). Release: a pre-release format-7 backup validated; the quiet window held; a read-only
+  preflight (phase `contracted-cu1`, format 7, CU1's run record, CU1c absent, the date function exactly CU1's
+  source, 22 holds, 21 findings, no pending date finding); the SQL Editor's contents checked against the file's
+  hash and run as written (its RLS prompt concerned the migration's own temp table); the run record confirmed by
+  a separate read (function replaced, members only; helper not executable by anon). Verified after deployment:
+  the post-migration backup validated and equals the pre-release one field by field; Pages built `697d123`; the
+  33 application files are byte-identical and carry `20261028-dates`; the reloaded page loads the new code without
+  console errors and its review opens unchanged (nothing waiting, six waiting for research). No production date,
+  hold or finding was changed (the two dates named in the release approval included); Refresh shows and research
+  imports were not run. Limits: a set-aside one-day finding stays set aside if the stored date is later
+  hand-edited; the page's "today" is UTC and the database's its session time zone, so near midnight a fill can
+  become a review item (never the reverse); an older page's import reopens a one-day research finding briefly
+  before the same import sets it aside again.
+
+- **Earlier release:** `21c3707`, the hold editor and setup-status fix (item 4; PR #25, the branch's seven commits rebased,
+  same tree as the reviewed head), released 2026-10-24 UTC with database migration `db/cu1b_hold_edit.sql` (one
+  function, `library_cu_update_hold`; no table, capability or backup-format change). Adds and edits holds in
+  Collections and rules (in place: same id and created_at; stored shape, value and collection kept unless changed;
+  an unchanged form sends nothing; a stale edit is refused); a confirmed setup import updates Settings' status at
+  once. Before release: offline 1176/1176; the CU1 rehearsal followed by CU1b on PGlite with a failure injected after
+  each of CU1b's 13 statements (and CU1's 89), editing, refusals (stale, invalid, another member, signed out), the
+  write guard and a backup round trip; local browser checks with synthetic data (add and edit through the real
+  controls, stale remove and edit refused with a visible message, the status right after a real import, 375 and 300
+  px); a Fable review of the contract and editor (findings fixed and confirmed closed, including show-wide protected
+  values, which five production holds use); a local check that every production hold opens in the editor and saves
+  unchanged. Release: a pre-release format-7 backup validated (identical to the post-setup one); the quiet window
+  held; a read-only preflight (phase `contracted-cu1`, format 7, CU1's run record, the function absent, 23 holds);
+  the SQL Editor's contents checked against the file's hash and run as written (its RLS prompt concerned the
+  migration's own temp table); the run record confirmed by a separate read (function present, members only, the
+  holds' fingerprint unchanged); merged and deployed. Verified after deployment: Pages built `21c3707`; the 34
+  application files are byte-identical and carry `20261023-holds`; the reloaded page runs in `contracted-cu1`; the
+  post-release backup validated and equals the pre-release one field by field; Collections and rules lists the 23
+  holds, each with Edit, and one opened in the editor showed its stored values and was closed without saving (no
+  write request sent). No production hold was added, edited or removed; Refresh shows and research findings were
+  not run.
+
+- **Earlier release:** `4e858c1`, collection updates (item 4, CU1; PR #23, the branch's ten commits rebased, same tree as
+  the reviewed head), released 2026-10-23 UTC with database migration `db/cu1_collection_updates.sql` (backup
+  format 7). Before release: offline 1167/1167; the CU1 rehearsal on PGlite with a failure injected after each of
+  its 89 statements, the admin runbook at format 7 and the release's backup checks; the EP1 rehearsal with the
+  runbook at format 6; local browser checks with synthetic data (research round trip through the real file picker,
+  re-import refused, review, Disney+ preview, delete dialog, lifecycle refresh decisions, light mode, 375 and 300
+  px); one bounded real research run against a synthetic library; Fable reviews of the implementation and of the
+  recovery and backup work (findings closed). Release: a pre-migration format-6 backup validated offline; the
+  migration applied once (a read-only preflight first; the SQL Editor's contents checked against the file's hash;
+  run as written, without the editor's RLS rewrite, since the migration enables and verifies RLS itself) and its
+  run record confirmed by a separate read (phase `contracted-cu1`, backup format 7, RLS on the ten new tables);
+  merged and deployed promptly. Verified after deployment: Pages built `4e858c1`; the application files are
+  byte-identical to the commit and carry `20261023-cu1`; the retired scripts are gone; the reloaded page runs
+  in `contracted-cu1`. The first format-7 backup validated, and the pre-migration backup converted to format 7
+  equalled it field by field (no library change; the migration's own preservation checks passed). The collection
+  setup file was then imported (3 definitions, 8 exclusions, 23 holds; one hold's show reference corrected in the
+  private file to the show's current title, owner-approved), read back from a new backup (every hold matches the
+  file, the protected Season 3 date included; the library's own tables unchanged), and that backup validated.
+  Refresh shows and research findings were not run in production. Limits: the TMDB completion signals and network
+  results are contributor data and can be missing, late or wrong, and cached episode lists can go stale; three of
+  the four trade outlets refuse automated reading, so research leans on official sources.
+
+- **Earlier app release:** `8baebb1`, the show rating directly after the title (PR #20, `4d850b5`, and its correction PR
+  #21, `8baebb1`, which keeps the score beside the title when its explanation opens), released 2026-10-22 UTC
+  (interface only; no database, backup or saved-data change; fetching, cache and Credits unchanged). Before release:
+  offline 1238/1238, and local browser checks with synthetic data and every explanation open (desktop rows and a
+  collection; 375 and 300 px Currently Watching and All TV with a long title: score beside the title or on the
+  next line when a long title fills it, explanation below inside the row or card, no overlap with the expand button
+  or season line, 44 × 44 targets, no overflow; a real tap doesn't expand). Verified after deployment (read-only):
+  Pages built `8baebb1` and serves `20261022-rnote` on all 28 versioned files, all 34 application files
+  byte-identical; after a hard reload (Pages caches `watchlist.html` for 10 minutes) both scored shows' scores sit 6
+  px after their titles on the same line, not with the categories; a click opened the explanation below without
+  expanding, the score stayed beside the title, keyboard focus showed it; in same-origin frames at 375 and 300 px
+  every score was beside its title, 44 × 44, explanations inside the cards, no overlap or overflow; no console errors.
+  Expanding one more TMDB-matched show (during #20's check) sent one TMDB show read and nothing else; no writes were
+  sent and Refresh shows wasn't run. #20 alone was live briefly: its open explanation moved the score to a new line
+  on desktop rows (fixed by #21). Limits: a very long desktop title puts the score on the next line; not observed
+  live: an asterisked, amber or red score.
+- **Earlier release:** `acc8262`, TMDB show ratings and Settings Credits (PR #18; commits `3a1026c` and `acc8262`, the
+  branch's two commits rebased, same tree), released 2026-10-22 UTC (interface and device storage only; no database,
+  backup or saved-data change). Before release: offline 1238/1238, and local browser checks with synthetic data at
+  desktop, 375 and 300 px (one read per expanded show, no writes, the tap and keyboard explanation, 44 px targets, no
+  overflow, collections, Credits). Verified after deployment (read-only): Pages built `acc8262` and serves
+  `20261022-rate` on all 28 versioned files; all 34 application files byte-identical to the commit; the signed-in
+  page loads in phase `contracted-ep1` with no console errors. Expanding one TMDB-matched show sent one TMDB show
+  read and nothing else, and showed its green score; a click and keyboard focus showed the explanation (the show
+  stayed expanded); Settings ended with Credits, its logo loaded. No writes were sent and Refresh shows wasn't run.
+  Not observed live: an asterisked, amber or red score, a failed read, and the phone layout. Limits: scores appear
+  only after a show is expanded (or after Refresh shows, Add season, a preview or Match) on each device; a tab already
+  open doesn't see scores another tab cached.
+- **Before that:** `2299166`, film-collection suggestions (PR #16; commits `dd585c4` and `2299166`, the branch's
+  two commits rebased, same tree), released 2026-10-22 UTC (interface only; no database, backup or saved-data
+  change). Before release: offline 1220/1220, and local browser checks with synthetic data only: every menu state
+  with real clicks (the menu stays open, focus kept), Refresh collections finding a film added later, the add-screen
+  notes, and at 375 and 300 px a long collection name, a failed check and its Retry (fits, no overflow; the add
+  screen's Retry was made 44 × 44 px on phones). Verified after deployment (read-only): Pages built `2299166` and
+  serves `20261022-coll` on all 27 versioned files, each (and `config.js` and `watchlist.html`) byte-identical to
+  the commit; the signed-in All Movies page loads in phase `contracted-ep1` with no console errors; every film's
+  menu offered Check collection and none offered Pull rest before a check; one film in a one-film TMDB collection
+  was checked live (a TMDB read) and then showed nothing, with the menu still open; no writes were sent. Not
+  observed live: Pull rest after a check, "All collection films are already in your library.", a failed check,
+  and the add-screen notes (no film was searched or added). Limits: "already in your library" uses the movie tools'
+  title-or-TMDB-id matching; the menu checks only when asked.
+- **Previous app releases:** `f01f0fa`, EP3 "Next unwatched" line (PR #14, 2026-10-22 UTC; interface and device
+  storage only): verified deployed read-only; the line itself wasn't seen live (no episode marks at the check).
+  `b7c698a`, EP2 episode-list controls (PR #12, 2026-10-21; interface and device storage
+  only): verified deployed, with the owner's phone checks and an owner-operated write smoke test. `45f12d9`, EP1
+  episode progress (PR #9, 2026-10-21): `db/ep1_episode_marks.sql` applied once, original tables preserved in the
+  first format-6 backup, signed-out access refused, a desktop mark / clear smoke test. Each PR holds the details.
+- **Database (as observed at the CU2 release, 2026-11-01):** phase `contracted-cu1` (B4/B5 with M1 owner-only
+  access, `access = members`, episode marks, collection updates and research access), backup format 7, recovery archive active, the
+  collection setup imported. G9 (archive retirement) is paused. The API exposes only `public` and `graphql_public`;
+  the format-5 and format-6 restores are kept as `private.restore_backup_v5` and `private.restore_backup_v6`,
+  reachable only through `restore_backup`. **Repairs are fix-forward:** the B4/B5 and D2 rollbacks are retired,
+  EP1, CU1, CU1b, CU1c, CU1d and CU2 have none (`db/test/cu1_reverse.sql`, `cu1b_reverse.sql`, `cu1c_reverse.sql`,
+  `cu1d_reverse.sql` and `cu2_reverse.sql` are for test environments only; CU2's run record confirmed 2026-11-01), and reopening anonymous access
+  is never a recovery step. Data recovery is a format-7 restore through the signed-in page, or
+  `docs/ADMIN_RESTORE.md` (its tool exports and checks the database's own format); accounts,
+  `docs/MEMBER_RECOVERY.md`.
+- **Admin enrichment extensions** (PR #11; database only, not an app release): `db/admin/tv_enrich_partial.sql`
+  installed in production on 2026-10-21, with its run record confirmed by a separate read. It adds
+  `private.tv_enrich_show_partial` and `private.tv_enrich_season`. Verified after the install: no application
+  role can execute either function, the strict `private.tv_enrich_show` is unchanged, and no library data
+  changed. One owner-approved batch then matched a few catalog shows and some of their seasons in a single
+  transaction, leaving the rest of each show's seasons unmatched on purpose. Verified by a separate commit read,
+  a post-batch read, a before/after backup comparison and the owner's in-app checks: only the intended TMDB
+  identity fields changed, and every other row, episode marks included, is identical. A season left unmatched
+  is matched later only as its own approved step, and only where the current model allows it: a plain
+  `Season N` of the same TMDB show, once confirmed. Split seasons, seasons that belong to a different TMDB
+  show, and non-plain labels stay unmatched.
+- **Done:** the B3 / B1 / B7 plan (S1–S6; D10 deferred), simplification Batches A and B.
+- **Reverting releases** (each needs its own approval, tested like any change):
+  - S4–S6: no database migration, but the app's actions change saved data (memberships, film state,
+    deletes, Match, Pull rest) and reverting code doesn't reverse them. The stage commits depend on each
+    other: revert the set together, newest first.
+  - Batch B: no saved-data effect; a code revert of its commits, newest first.
+  - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
+    writes refused, reads error); repairs are fix-forward.
+  - W1: removed by `db/w1_removal.sql`; fix-forward, with no script to put it back. Its migration stays as history.
+  - CU2: the page can be reverted by a code revert (an older page works against the CU2 database, and the database still
+    refuses research writes without access); the column, guard and restore wrapper stay (fix-forward).
+  - CU1d: the page can be reverted by a code revert of `0cac052` and `1ffd079`, newest first; the two functions stay
+    (fix-forward), unused by older pages; networks and marks set with it stay as saved.
+  - Date equivalence (CU1c): the page can be reverted by a code revert of its five commits, newest first; the
+    CU1c function stays (fix-forward) and keeps its rules for any page (an older page's TMDB differences on exact
+    dates then wait in review instead of applying).
+  - Hold editor (CU1b): the page can be reverted by a code revert of its seven commits, newest first (holds added or
+    edited with it stay as saved); `library_cu_update_hold` stays (fix-forward), unused by older pages.
+  - CU1: not revertible by a code revert. Pages from before CU1 stop against the CU1 database (phase mismatch);
+    repairs are fix-forward.
+  - Rating beside the title: no saved-data effect; a code revert of `8baebb1` and `4d850b5`, newest first.
+  - TMDB show ratings: no database or saved-data effect; a code revert of `acc8262` and `3a1026c`, newest first
+    (the device cache key is then ignored).
+  - Film-collection suggestions: no database or saved-data effect; a code revert of `2299166` and `dd585c4`,
+    newest first.
+  - EP3: no database or saved-data effect; a code revert of `f01f0fa` (the cache's numbers and titles are then
+    ignored).
+  - EP2: no database or saved-data effect beyond the marks an owner sets with it; a code revert of `b7c698a`
+    (the setting's device key is then ignored).
+  - EP1: not revertible by a code revert. The M1 page against the EP1 database keeps its ordinary writes, but
+    its backups and restores are refused and the database refuses its delete of a marked season; repairs are
+    fix-forward.
+- **Recovery reference before M1 (historical; those rollbacks are now retired):** the deployed page meets a rolled-back (`contracted`) database
+  with the mismatch notice, no usable list, no backup and every write refused. P3′'s verified target is
+  the application files of `aeb9f73` (documentation-only commits excluded); reaching it means removing
+  every application commit after `aeb9f73` (now including Batch A, S4–S6 and Batch B). The procedure is
+  the owner's (history §18).
+
+[#1]: https://github.com/jaredsclove/Watchlist/pull/1
+[#2]: https://github.com/jaredsclove/Watchlist/pull/2
+[#3]: https://github.com/jaredsclove/Watchlist/pull/3
+[#4]: https://github.com/jaredsclove/Watchlist/pull/4
+[#7]: https://github.com/jaredsclove/Watchlist/pull/7
+[#9]: https://github.com/jaredsclove/Watchlist/pull/9
+[#11]: https://github.com/jaredsclove/Watchlist/pull/11
+[#12]: https://github.com/jaredsclove/Watchlist/pull/12
+[#14]: https://github.com/jaredsclove/Watchlist/pull/14
+[#16]: https://github.com/jaredsclove/Watchlist/pull/16
+[#18]: https://github.com/jaredsclove/Watchlist/pull/18
+[#20]: https://github.com/jaredsclove/Watchlist/pull/20
+[#21]: https://github.com/jaredsclove/Watchlist/pull/21
+[#23]: https://github.com/jaredsclove/Watchlist/pull/23
+[#25]: https://github.com/jaredsclove/Watchlist/pull/25
+[#27]: https://github.com/jaredsclove/Watchlist/pull/27
+[#29]: https://github.com/jaredsclove/Watchlist/pull/29
+[#32]: https://github.com/jaredsclove/Watchlist/pull/32
+[#34]: https://github.com/jaredsclove/Watchlist/pull/34
+[#37]: https://github.com/jaredsclove/Watchlist/pull/37
+[#40]: https://github.com/jaredsclove/Watchlist/pull/40
+[#42]: https://github.com/jaredsclove/Watchlist/pull/42
+[#44]: https://github.com/jaredsclove/Watchlist/pull/44
