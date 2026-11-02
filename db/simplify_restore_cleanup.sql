@@ -10,7 +10,7 @@
 --   * an id in an eight-table row must be spelled as a uuid is exported, as the other eleven tables already required. The page refuses
 --     anything else itself.
 -- Section 3 drops functions nothing can reach any more (stubs for old pages, the retired catalog and rollback functions, the two dismissal
--- functions) and the archive and rollback tables. A tab open from before these pages fails on a dropped function without changing data.
+-- functions) and the archive and rollback tables. A tab open from before these pages keeps working until a removed dismissal call fails, then stops writing until reloaded.
 -- To keep the old chain, omit section 2 and the restore names from section 4; section 3's archive tables and rollback report then stay too.
 --
 -- Installing changes no library row, and section 4 checks that. Running restore later replaces a library: reinstalling an older function
