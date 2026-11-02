@@ -40,12 +40,12 @@ ended; never rerun to find out); explicit revokes from `anon`, verified before c
 
 ## Tests
 
-`test/` is for test projects and local runs only: `replica_schema.sql`, `supabase_shim.sql`, the self-checking `t_*.sql` scripts (prepend `_prelude.sql`; every check rolls back its own writes) and the test-only reverse scripts that `tools/db-rehearsal-cu1.mjs` runs.
-
-Test-project values (project ref, publishable key, test-user ids) are never committed. Supply them through the untracked files `db/test/local_test_users.sql` and `tools/auth-isolation-test.local.js` (both in `.gitignore`); copy the committed `*.example.*` templates.
+`test/` is for local runs only: `replica_schema.sql`, `supabase_shim.sql`, `m1_test_marker.sql` and the test-only reverse scripts that `tools/db-rehearsal-cu1.mjs` runs. Older rehearsals and self-checks are in git history (`docs/history/DB_SCRIPTS.md` describes them).
 
 Local tools:
+- `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/restore-test.mjs`: the restore suite. Without `PG_BIN` it skips the concurrency and timing checks on real PostgreSQL, with a notice.
 - `PGLITE_DIR=<dir> node tools/db-rehearsal-cu1.mjs --backup <format-6 file>`: CU1 through CU1e and CU2. It ends by reversing its migrations, so it tests those historical states, not the final one.
 - `PG_BIN=<postgres 17 bin> node tools/db-rehearsal-cu1e-pg.mjs`: real concurrency on a throwaway server.
 - `node tools/cu2-local-auth-test.mjs` and `tools/w1-removal-local-test.mjs`: real Auth and PostgREST on a local Supabase stack. The W1 test is historical.
-- `node tools/m1-synthetic-library.mjs --seed <n> --out <file> --format 5|6|7`: a synthetic library.
+- `PGLITE_DIR=<dir> node tools/db-rehearsal-enrich.mjs --backup <format-5 file> --title <an unmatched show with several seasons>`: the admin enrichment functions at EP1.
+- `node tools/m1-synthetic-library.mjs --seed <n> --out <file> --format 5|6|7`: a synthetic library built by the page's own code.
