@@ -844,7 +844,7 @@ const CATALOG_FIXTURES = [
 const NO_ORG = { enabled: false, newShow() {}, newItem() {}, dropShow() {}, dropItem() {}, isFilm: () => false,
   collectionsOfItem: () => [], collectionsOfShow: () => [], add() {}, collectionName: c => c };
 const LEGACY_SOURCES = [['disney', 'Disney+'], ['sheridan', 'Sheridan'], ['90day', '90 Day'], ['truecrime', 'True Crime / Docs']];
-const CONFIG_WATCH_WITH = ['Alone', 'Sam', 'Rina', 'Whole Family']; // the bootstrap choices of a harness library
+const CONFIG_WATCH_WITH = ['Alone', 'Sam', 'Robin', 'Whole Family']; // the bootstrap choices of a harness library
 const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.season === 'Film');
 
 // options:

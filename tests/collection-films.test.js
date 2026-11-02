@@ -145,7 +145,7 @@ test('film actions in a collection write as in All Movies: status, priority, Wat
   await app.ctx.setStatus(L.filmA.id, 'watched'); await settle();
   await app.ctx.setFilmPriority(L.filmA.id, 'high'); await settle();
   await app.ctx.toggleWatch(L.filmC.id); await settle();
-  await app.ctx.toggleWatchWith(L.filmC.id, 'Rina', true); await settle();
+  await app.ctx.toggleWatchWith(L.filmC.id, 'Robin', true); await settle();
   assert.deepStrictEqual(writes(app).map(path), ['rpc/library_set_film_state_b45', 'rpc/library_set_film_state_b45', 'rpc/library_set_film_state_b45', `watchlist_items?id=eq.${L.filmC.id}`]);
   const stored = app.store.watchlist_items.find(r => r.id === L.filmA.id);
   assert.deepStrictEqual([stored.watched, stored.priority], [true, 'high']);

@@ -50,17 +50,17 @@ function library() {
     show({ title: 'Skipped Show', status: 'skipped' }, [{ theme: 'Netflix' }, { theme: 'Netflix', w: true }]),
     show({ title: 'Done Skipped Show', status: 'skipped' }, [{ theme: 'Netflix', w: true }]),
     show({ title: 'Other Watch', status: 'watching' }, [{ theme: 'HBO' }]),
-    film({ id: 'f-alpha', title: 'Alpha', theme: 'Action', collections: ['Star Wars Collection'], watch_with: ['Rina'] }),
-    film({ id: 'f-beta', title: 'Beta', watched: true, watch_with: ['Rina'] }),
+    film({ id: 'f-alpha', title: 'Alpha', theme: 'Action', collections: ['Star Wars Collection'], watch_with: ['Robin'] }),
+    film({ id: 'f-beta', title: 'Beta', watched: true, watch_with: ['Robin'] }),
     film({ id: 'f-gamma', title: 'Gamma', collection: 'disney', media_type: null, tmdb_id: null, theme: 'Marvel' }),
     film({ id: 'f-delta', title: 'Delta', theme: 'Action', watched: true, collections: ['Star Wars Collection'] }),
     film({ id: 'f-eps', title: 'Epsilon', status: 'skipped' }),
     film({ id: 'f-zeta', title: 'Zeta', collection: 'disney', media_type: null, tmdb_id: null, theme: 'Star Wars',
-      collections: ['Star Wars Collection'], watch_with: ['Rina'] })
+      collections: ['Star Wars Collection'], watch_with: ['Robin'] })
   );
 }
-// Rina's choice was renamed: the stored token stays "Rina", the label is now "Rina R.".
-const CHOICES = [['Alone', 'Alone'], ['Rina', 'Rina R.'], ['Sam', 'Sam']].map(([token, label], i) => ({
+// Robin's choice was renamed: the stored token stays "Robin", the label is now "Robin R.".
+const CHOICES = [['Alone', 'Alone'], ['Robin', 'Robin R.'], ['Sam', 'Sam']].map(([token, label], i) => ({
   id: `0e000000-0000-4000-8000-00000000000${i + 1}`, token, label, sort_order: i + 1, archived_at: null, created_at: '2026-10-06T00:00:00+00:00' }));
 
 async function boot(data = library(), opts = {}) {
@@ -204,21 +204,21 @@ test('filter choices come from the whole view, not the shown rows, so a choice c
   assert.deepStrictEqual(options(app, 'fTheme').length, 5, 'unchanged after a redraw with nothing shown');
   assert.strictEqual(app.el('fTheme').value, 'Action');
   assert.deepStrictEqual(options(app, 'fCollection'), ['=All collection tags', 'Star Wars=Star Wars']);
-  assert.deepStrictEqual(options(app, 'fWatchWith'), ['=Watch with: anyone', 'Rina=Rina R.']);
+  assert.deepStrictEqual(options(app, 'fWatchWith'), ['=Watch with: anyone', 'Robin=Robin R.']);
 });
 
 test('collection-tag and watch-with pills in All Movies: by cleaned tag and by stored token, showing the renamed label; they combine', async () => {
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle();
   setFilter(app, 'fWatch', '');
-  assert.ok(/class="ww-tag ww-tag-clickable filter-pill" data-filter-kind="watchwith" data-filter-value="Rina"[^>]*>Rina R\.<\/button>/.test(html(app)),
+  assert.ok(/class="ww-tag ww-tag-clickable filter-pill" data-filter-kind="watchwith" data-filter-value="Robin"[^>]*>Robin R\.<\/button>/.test(html(app)),
     'token in the value, current label shown');
   assert.ok(/class="collection-tag collection-tag-clickable filter-pill" data-filter-kind="collection" data-filter-value="Star Wars"[^>]*>Star Wars</.test(html(app)));
   click(app, 'collection', 'Star Wars');
   assert.deepStrictEqual(titles(app), ['Alpha', 'Delta', 'Zeta']);
-  click(app, 'watchwith', 'Rina');
+  click(app, 'watchwith', 'Robin');
   assert.deepStrictEqual(titles(app), ['Alpha', 'Zeta'], 'both: AND');
-  assert.deepStrictEqual(pressed(app).sort(), ['collection:Star Wars', 'collection:Star Wars', 'watchwith:Rina', 'watchwith:Rina']);
+  assert.deepStrictEqual(pressed(app).sort(), ['collection:Star Wars', 'collection:Star Wars', 'watchwith:Robin', 'watchwith:Robin']);
   click(app, 'collection', 'Star Wars');
   assert.deepStrictEqual(titles(app), ['Alpha', 'Beta', 'Zeta']);
   assert.strictEqual(app.el('fCollection').value, '');
@@ -238,7 +238,7 @@ test('a collection’s films: tag and watch-with filters; no TV while one is set
   app.ctx.setBrowseMedia('all'); await settle();
   assert.strictEqual(app.el('fCollection').value, 'Star Wars', 'kept for the visit');
   assert.deepStrictEqual(titles(app), ['Zeta']);
-  click(app, 'watchwith', 'Rina');
+  click(app, 'watchwith', 'Robin');
   assert.deepStrictEqual(titles(app), ['Zeta']);
   assert.ok(readsOnly(app));
 });
@@ -357,8 +357,8 @@ test('All Movies: a collection-tag pill updates the person-collection refresh li
   click(app, 'collection', 'Star Wars');
   assert.strictEqual(app.el('fCollection').value, 'Star Wars');
   assert.strictEqual(linkCalls, 1, 'All Movies offers the refresh link');
-  click(app, 'watchwith', 'Rina');
-  assert.ok(/data-filter-value="Rina"[^>]*aria-pressed="true"[^>]*>Rina R\.</.test(html(app)), 'token filter, renamed label');
+  click(app, 'watchwith', 'Robin');
+  assert.ok(/data-filter-value="Robin"[^>]*aria-pressed="true"[^>]*>Robin R\.</.test(html(app)), 'token filter, renamed label');
   click(app, 'collection', 'Star Wars');
   assert.strictEqual(app.el('fCollection').value, '');
   app.ctx.updateCollectionRefreshLink = original;
