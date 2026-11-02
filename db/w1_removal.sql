@@ -5,7 +5,8 @@
 -- db/w1_write_scope.sql stays as history, and its run record stays. This puts the write authorization back as it was: lib_write_on
 -- sets the transaction-local watchlist.library_write, and the guards read it. It removes the xmloption clause from W1's 38 functions,
 -- restores the three functions W1 replaced, word for word, and drops private.lib_authorized. No function body changes otherwise, so
--- everything since W1 stays, and no row is written. The library functions never stopped setting the flag where they set it themselves.
+-- everything since W1 stays, and no library row is written. A library function already waiting on lib_write_on's lock when this commits
+-- fails once with library_write_required, and nothing of it is kept.
 --
 -- GraphQL stays disabled as a standing decision, so this refuses if pg_graphql is installed: the flag lasts for the transaction, and
 -- one GraphQL request could chain a library function with a direct write on the caller's own rows. Account isolation and CU2's research
@@ -77,10 +78,8 @@ begin
     raise exception 'w1 removal: expected phase contracted-cu1 with backup format 7; nothing was changed';
   end if;
   if exists (select 1 from pg_extension where extname = 'pg_graphql') then raise exception 'w1 removal: pg_graphql is installed, and GraphQL stays disabled; nothing was changed'; end if;
-  if to_regprocedure('public.library_delete_film_b45(uuid)') is not null or exists (select 1 from private.migration_runs where migration = 'dg1') then raise exception 'w1 removal: DG1 was abandoned and shouldn''t be here; nothing was changed'; end if;
-  if to_regclass('private.w1_recovery') is not null or to_regprocedure('public.w1_repair_gate()') is not null
-     or exists (select 1 from pg_db_role_setting s, unnest(s.setconfig) x where x like 'pgrst.db_pre_request=%' or lower(x) like 'xmloption=%' or lower(x) like 'watchlist.w1_reset_ok=%') then
-    raise exception 'w1 removal: a repair or a configured default is in place; nothing was changed';
+  if exists (select 1 from pg_db_role_setting s, unnest(s.setconfig) x where lower(x) like 'xmloption=%' or lower(x) like 'watchlist.w1_reset_ok=%') then
+    raise exception 'w1 removal: a configured default is in place; nothing was changed';
   end if;
   select string_agg(e.sig, ', ') into v_bad from w1r_expected e left join pg_proc p on p.oid = e.fn where p.oid is null or not coalesce(p.proconfig @> array['xmloption=document'], false);
   if v_bad is not null then raise exception 'w1 removal: expected the clause on: %; nothing was changed', v_bad; end if;
@@ -150,8 +149,8 @@ begin
     perform set_config('role', 'authenticated', true);
     begin
       begin
-        update public.tv_shows set priority = case when priority = 'high' then 'low' else 'high' end where id = (select id from public.tv_shows where user_id = v_owner limit 1);
-        if found then raise exception 'w1r-check: a direct write succeeded'; end if;
+        insert into public.tv_shows (title, show_key) values ('ZZ W1 Removal Direct', 'zz w1 removal direct');
+        raise exception 'w1r-check: a direct write succeeded';
       exception when raise_exception then
         if sqlerrm !~ '^library_write_required: ' then raise; end if;
       end;
