@@ -10,9 +10,9 @@ $$;
 create or replace function pg_temp.admin(p_sql text) returns void language plpgsql as $$
 begin
   perform set_config('role', 'postgres', true);
-  perform set_config('watchlist.library_write', 'on', true), set_config('xmloption', 'document', true);
+  perform set_config('watchlist.library_write', 'on', true);
   execute p_sql;
-  perform set_config('watchlist.library_write', '', true), set_config('xmloption', 'content', true);
+  perform set_config('watchlist.library_write', '', true);
   perform pg_temp.as_anon();
 end $$;
 -- Every column of every row of every table B45 can touch (owners included).
@@ -39,7 +39,7 @@ $$;
 -- The library-write flag lives for the rest of a transaction (each API request is one), so
 -- a check that tests a guard after calling a library function switches it off first.
 create or replace function pg_temp.flag_off() returns void language sql as $$
-  select set_config('watchlist.library_write', '', true), set_config('xmloption', 'content', true);
+  select set_config('watchlist.library_write', '', true);
 $$;
 -- Deferred checks now, then deferred again (so later checks start like a fresh request).
 create or replace function pg_temp.fk_now() returns void language plpgsql as $$
@@ -524,12 +524,12 @@ begin
   perform pg_temp.refused(format('select pg_temp.admin(%L)', format('update public.tv_shows set resume_start_season_id = %L, resume_end_season_id = %L where id = %L; select pg_temp.fk_now()',
     w.id, pg_temp.season(s.id, 3), s.id)), 'insert or update on table "tv_shows" violates foreign key constraint');
   perform set_config('role', 'postgres', true);
-  perform set_config('watchlist.library_write', 'on', true), set_config('xmloption', 'document', true);
+  perform set_config('watchlist.library_write', 'on', true);
   insert into public.tv_shows (id, user_id, title, show_key, status) values (gen_random_uuid(), other, 'ZZ RL5 Other', 'zz rl5 other', 'confirmed') returning id into os;
   insert into public.watchlist_items (user_id, item_key, title, season, theme, display_date, date_sort, show_id) values (other, 'zz rl5 other|season 1', 'ZZ RL5 Other', 'Season 1', '', '', '2020-01-01', os) returning id into oi;
   perform pg_temp.refused(format('update public.tv_shows set resume_start_season_id = %L, resume_end_season_id = %L where id = %L; select pg_temp.fk_now()',
     oi, pg_temp.season(s.id, 3), s.id), 'insert or update on table "tv_shows" violates foreign key constraint');
-  perform set_config('watchlist.library_write', '', true), set_config('xmloption', 'content', true);
+  perform set_config('watchlist.library_write', '', true);
   perform pg_temp.as_anon();
   perform public.set_season_watched(pg_temp.season(s.id, 1), true);
   perform public.library_set_resume_b45(s.id, jsonb_build_object('status', s.status, 'resume_start_season_id', null, 'resume_end_season_id', null),
