@@ -80,7 +80,7 @@ if (FINAL) {
   ok(!(await attempt(go('local-simplify'))), 'the exact migration commits on a database holding libraries');
   ok(same(data, await fp()), 'installing it changes no library row');
   ok(await catalog() !== cat && (await val(`select count(*)::int from private.migration_runs where migration = 'simplify'`)) === 1, 'it changes the catalog and records one run');
-  ok(!!(await attempt(go('local-again'))) && same(data, await fp()), 'a rerun is refused: the tables it locks are gone');
+  ok(/already installed/.test(await attempt(go('local-again'))) && same(data, await fp()), 'a rerun is refused');
   const gone = await val(`select count(*)::int from pg_class c where c.relnamespace = 'private'::regnamespace and c.relname ~ '^(stage5_recovery_|b45_)'`);
   ok(gone === 0, 'the archive and rollback tables are gone');
 }

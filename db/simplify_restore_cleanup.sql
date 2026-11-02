@@ -22,7 +22,12 @@
 begin;
 select set_config('application_name', 'watchlist-simplify-' || coalesce(nullif(current_setting('watchlist.simplify_run', true), ''), 'unset'), true);
 set local lock_timeout = '10s';
-lock table private.migration_runs, private.stage5_recovery_records, private.stage5_recovery_collections, private.stage5_recovery_othertv,
+lock table private.migration_runs in access exclusive mode;
+do $$
+begin
+  if exists (select 1 from private.migration_runs r where r.migration = 'simplify') then raise exception 'simplify: already installed; nothing was changed'; end if;
+end $$;
+lock table private.stage5_recovery_records, private.stage5_recovery_collections, private.stage5_recovery_othertv,
   private.stage5_recovery_meta, private.b45_meta, private.b45_saved in access exclusive mode;
 lock table public.tv_shows, public.watchlist_items, public.personal_collections, public.collection_memberships, public.watch_with_choices,
   public.custom_collections, public.catalog_show_links, public.catalog_film_links, public.episode_marks, public.update_setup,
@@ -53,7 +58,6 @@ begin
   select * into c from simplify_ctx;
   if c.run_id is null or c.run_id !~ '^[A-Za-z0-9_-]{6,64}$' then raise exception 'simplify: set watchlist.simplify_run (6–64 letters, digits, _ or -) first; nothing was changed'; end if;
   if exists (select 1 from private.migration_runs r where r.run_id = c.run_id) then raise exception 'simplify: run id % is already recorded; use a fresh one. Nothing was changed', c.run_id; end if;
-  if exists (select 1 from private.migration_runs r where r.migration = 'simplify') then raise exception 'simplify: already installed; nothing was changed'; end if;
   if public.stage5_capabilities() ->> 'phase' is distinct from 'contracted-cu1' or (public.stage5_capabilities() ->> 'backup_format') is distinct from '7' then
     raise exception 'simplify: expected phase contracted-cu1 with backup format 7; nothing was changed';
   end if;
