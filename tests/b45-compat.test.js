@@ -9,7 +9,7 @@
 //     nothing is written, backed up or restored until the page is reloaded, even though the
 //     capability still reads B4/B5.
 // (Batch B retired C1, the earlier releases' own behaviour on the B4/B5 database.)
-// The server side: db/test/t_b45.sql (RL1/RL2) and tools/db-rehearsal-b45.mjs.
+// The server side: the database functions, in git history's t_b45.sql.
 // Run from the repo root: node tests/b45-compat.test.js
 const fs = require('fs');
 const path = require('path');

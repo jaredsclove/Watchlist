@@ -64,7 +64,6 @@ const chipName = (app, key) => (chipsHtml(app).match(new RegExp(`id="chip-${key}
 const countLine = app => (app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || '';
 const titles = app => [...app.el('tbody').innerHTML.matchAll(/<span class="show-title">([^<]*)<\/span>/g)].map(m => m[1]);
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
-const check = (app, id, on) => { app.el(id).checked = on; app.ctx.renderTable(); };
 const badge = app => [app.el('filterMoreCount').textContent, app.el('filterMoreCount').hidden, app.el('filterMoreA11y').textContent];
 const panelHidden = app => /id="filterMore"[^>]* hidden>/.test(fb(app));
 const isOpen = app => app.get('filterPanelOpen');
@@ -103,22 +102,22 @@ test('§5: each view and mode has Search, its scope controls and More filters on
   const panelCats = ['fGenre', 'fForm', 'fFranchise', 'fNetwork', 'fCompany'];
   // Currently Watching (Alpha and Delta are Watching: both have a franchise / network / company only on Alpha)
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'filterMoreBtn'], 'Currently Watching');
-  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fNew', 'fReview', 'fTheme']);
+  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fTheme']);
   await allTv(app);
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'filterMoreBtn'], 'All TV Shows');
-  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fNew', 'fReview', 'fYear', 'fProgress', 'fTheme']);
+  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fYear', 'fProgress', 'fTheme']);
   app.ctx.setAllTvPresentation('seasons');
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'fSeasonVis', 'filterMoreBtn'], 'All TV Seasons');
-  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fNew', 'fReview', 'fYear', 'fTheme'], 'no Progress control in Seasons');
+  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fYear', 'fTheme'], 'no Progress control in Seasons');
   app.ctx.switchView('comingsoon'); await settle();
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'filterMoreBtn'], 'Coming Soon');
   assert.ok(panelIds(app).includes('fGenre') && panelIds(app).includes('fTheme') && !panelIds(app).includes('fStatus'));
   await movies(app);
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'fWatch', 'filterMoreBtn'], 'All Movies');
-  assert.deepStrictEqual(panelIds(app), ['fGenre', 'fForm', 'fPriority', 'fNew', 'fReview', 'fWatchWith', 'fYear', 'fCollection', 'fTheme'], 'no Network for films');
+  assert.deepStrictEqual(panelIds(app), ['fGenre', 'fForm', 'fPriority', 'fWatchWith', 'fYear', 'fCollection', 'fTheme'], 'no Network for films');
   await collection(app);
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'filterMoreBtn'], 'collection Shows');
-  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fNew', 'fReview', 'fWatchWith', 'fCollection', 'fTheme']);
+  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fWatchWith', 'fCollection', 'fTheme']);
   app.ctx.setBrowsePresentation('seasons');
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'fSeasonVis', 'filterMoreBtn'], 'collection Seasons');
   app.ctx.setBrowseMedia('tv');
@@ -129,7 +128,6 @@ test('§5: each view and mode has Search, its scope controls and More filters on
   for (const [id, label] of [['fGenre', 'Genre'], ['fNetwork', 'Original network / service'], ['fPriority', 'Priority'], ['fTheme', 'Original label']]) {
     assert.ok(f.includes(`<label class="filter-field-label" for="${id}">${label}</label>`), `${id} has a visible label`);
   }
-  assert.ok(/<label class="filter-check"><input type="checkbox" id="fNew"/.test(f), 'markers keep their own labels');
   assert.ok(readsOnly(app));
 });
 
@@ -174,14 +172,13 @@ test('§4.3: every non-default value has one chip ("Kind: value", full-text name
   setFilter(app, 'fSearch', 'a');
   assert.deepStrictEqual(chipKeys(app), [], 'no Search chip (D13)');
   assert.ok(chipsHtml(app).includes('id="filterClear"'), 'Clear for Search alone');
-  setFilter(app, 'fStatus', 'all'); setFilter(app, 'fPriority', 'high'); check(app, 'fNew', true); setFilter(app, 'fGenre', 'Drama');
-  assert.deepStrictEqual(groups(app), [['Active filters', ['fStatus', 'fGenre', 'fPriority', 'fNew']]]);
+  setFilter(app, 'fStatus', 'all'); setFilter(app, 'fPriority', 'high'); setFilter(app, 'fGenre', 'Drama');
+  assert.deepStrictEqual(groups(app), [['Active filters', ['fStatus', 'fGenre', 'fPriority']]]);
   assert.strictEqual(chipName(app, 'fStatus'), 'Remove filter: Status, All statuses');
   assert.strictEqual(chipName(app, 'fPriority'), 'Remove filter: Priority, ★ High');
-  assert.strictEqual(chipName(app, 'fNew'), 'Remove filter: New from catalog');
   assert.ok(chipsHtml(app).includes('<span class="chip-k">Genre:</span> <span class="chip-v">Drama</span>'));
   assert.ok(!chipsHtml(app).includes('Not applied'), 'no applied chip says Not applied');
-  assert.deepStrictEqual(badge(app), ['3', false, ', 3 active'], 'Genre, Priority, New (Status is on the line)');
+  assert.deepStrictEqual(badge(app), ['2', false, ', 2 active'], 'Genre, Priority (Status is on the line)');
   assert.ok(app.el('fGenre').classList.contains('filter-set') && app.el('fStatus').classList.contains('filter-set') && !app.el('fYear').classList.contains('filter-set'));
   assert.ok(readsOnly(app));
 });
@@ -274,7 +271,7 @@ test('§4.3 / AC5: a chip\'s removal sets that value to its starting value (Watc
   const app = await boot();
   await movies(app);
   const focused = spyDom(app);
-  setFilter(app, 'fWatch', 'watched'); setFilter(app, 'fGenre', 'Comedy'); setFilter(app, 'fPriority', 'normal');
+  setFilter(app, 'fWatch', 'watched'); setFilter(app, 'fGenre', 'Comedy'); setFilter(app, 'fPriority', 'highnormal');
   assert.deepStrictEqual(chipKeys(app), ['fWatch', 'fGenre', 'fPriority']);
   const before = app.requests.length;
   let draws = 0;
@@ -316,11 +313,10 @@ test('§4.4 / AC6: Clear filters returns every filter to its starting value (Unw
   const focused = spyDom(app);
   app.ctx.toggleFilterPanel(true);
   setFilter(app, 'fSearch', 'film'); setFilter(app, 'fStatus', 'all'); setFilter(app, 'fWatch', ''); setFilter(app, 'fGenre', 'Drama');
-  check(app, 'fReview', true); setFilter(app, 'fCollection', 'Saga Collection'); setFilter(app, 'fWatchWith', 'Rina'); setFilter(app, 'fTheme', 'Drama');
+  setFilter(app, 'fCollection', 'Saga Collection'); setFilter(app, 'fWatchWith', 'Rina'); setFilter(app, 'fTheme', 'Drama');
   const before = app.requests.length;
   app.ctx.clearViewFilters();
   assert.deepStrictEqual(['fSearch', 'fStatus', 'fWatch', 'fGenre', 'fCollection', 'fWatchWith', 'fTheme'].map(id => app.el(id).value), ['', '', 'unwatched', '', '', '', '']);
-  assert.strictEqual(app.el('fReview').checked, false);
   assert.strictEqual(chipsHtml(app), '', 'no chips and no Clear');
   assert.ok(isOpen(app), 'the panel stays open');
   assert.strictEqual(focused[focused.length - 1], 'fSearch');
@@ -495,7 +491,7 @@ test('§4.2.1: closed by TV ↔ Movies, another tab, re-entering a tab, entering
 test('with the panel closed, its values are kept through redraw, reload, Retry and Back, and still filter', async () => {
   const app = await boot();
   await allTv(app);
-  setFilter(app, 'fGenre', 'Comedy'); check(app, 'fNew', true);
+  setFilter(app, 'fGenre', 'Comedy'); setFilter(app, 'fPriority', 'highnormal');
   assert.ok(panelHidden(app));
   assert.deepStrictEqual(titles(app), ['Bravo']);
   app.ctx.renderFilters(); app.ctx.renderTable();
@@ -504,9 +500,9 @@ test('with the panel closed, its values are kept through redraw, reload, Retry a
   app.ctx.loadDerivedView(); await settle();
   app.ctx.loadDerivedView(); await settle();
   await collection(app); app.ctx.browseBack(); await settle();
-  assert.deepStrictEqual([app.el('fGenre').value, app.el('fNew').checked], ['Comedy', true]);
+  assert.deepStrictEqual([app.el('fGenre').value, app.el('fPriority').value], ['Comedy', 'highnormal']);
   assert.deepStrictEqual(titles(app), ['Bravo']);
-  assert.deepStrictEqual(chipKeys(app), ['fGenre', 'fNew']);
+  assert.deepStrictEqual(chipKeys(app), ['fGenre', 'fPriority']);
 });
 
 test('D5: a pill with the panel closed sets its filter and chip but never opens the panel', async () => {
@@ -540,13 +536,13 @@ test('assets: one new token on every versioned file; config.js, identity.js and 
   const html = fs.readFileSync(path.join(__dirname, '..', 'watchlist.html'), 'utf8');
   // Consistency only: that the token differs from the previous release's is a release check (docs/STATE.md).
   const versioned = [...html.matchAll(/\?v=([\w-]+)/g)].map(m => m[1]);
-  assert.strictEqual(versioned.length, 29, 'every versioned file carries a token');
+  assert.strictEqual(versioned.length, 28, 'every versioned file carries a token');
   assert.strictEqual(new Set(versioned).size, 1, `one token on every versioned file: ${[...new Set(versioned)].join(', ')}`);
   const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1].split('?')[0]);
   // The order at the baseline (fa69c9a), with write-lane.js after api.js (Batch A) and collection-members.js after organization-manage.js (S4) and history.js after browse-views.js (S6);
   // M1: the vendored supabase-js after config.js, and auth.js after identity.js. EP1: episodes.js after tv-shows.js. Item 2: show-ratings.js after episodes.js.
   // Item 4: refresh-shows.js and catalog-apply.js retired; collection-updates.js, collection-research.js and collection-settings.js where catalog-apply.js was.
-  assert.deepStrictEqual(scripts, ['config.js', 'vendor/supabase-js-2.117.2.umd.js', 'identity.js', 'auth.js', 'api.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'backup-restore.js', 'backup-format3.js', 'tabs.js',
+  assert.deepStrictEqual(scripts, ['config.js', 'vendor/supabase-js-2.117.2.umd.js', 'identity.js', 'auth.js', 'api.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'backup-restore.js', 'tabs.js',
     'render.js', 'row-actions.js', 'tmdb-search.js', 'collections-pull.js', 'universe-pull.js', 'person-pull.js', 'tmdb-match.js',
     'derived-views.js', 'tv-shows.js', 'episodes.js', 'show-ratings.js', 'organization.js', 'organization-manage.js', 'collection-members.js',
     'collection-updates.js', 'collection-research.js', 'collection-settings.js', 'browse-views.js', 'history.js', 'library.js']);

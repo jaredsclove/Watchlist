@@ -290,7 +290,7 @@ test('B6: the expanded show has the labelled Status select, a progress line and 
   const row = showRowOf(app, s.show.id), card = cardOf(app, s.show.id);
   for (const [where, h] of [['row', row], ['card', card]]) {
     assert.ok(h.includes('class="priority-high"'), `${where}: ★ High in the title`);
-    assert.ok(h.includes('ended-tag') && h.includes('new-tag') && h.includes('review-tag-b45'), `${where}: Ended, New, Review status tags`);
+    assert.ok(h.includes('ended-tag') && !h.includes('new-tag') && !h.includes('review-tag-b45'), `${where}: Ended; the retired tags are gone`);
     // ("N earlier seasons unwatched" is shown today only beside "Caught up · Ended", which Currently Watching never lists; unchanged.)
     assert.ok(!h.includes('earlier season unwatched'), `${where}: no gap note added`);
     assert.ok(h.includes('Marked ended, but an upcoming season is listed'), `${where}: the ended note`);
@@ -299,10 +299,9 @@ test('B6: the expanded show has the labelled Status select, a progress line and 
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   for (const [where, h] of [['table', tbody(app)], ['cards', cards(app)]]) {
     assert.ok(h.includes('<label class="state-field" data-action="status"><span class="state-field-label">Status</span> <select'), `${where}: Status`);
-    assert.ok(h.includes('<option value="" selected disabled>Choose a status…</option>'), `${where}: review starts on Choose a status…`);
     assert.ok(!h.includes('<label class="state-field" data-action="priority">'), `${where}: priority is in ⋯`);
     assert.ok(h.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && h.includes(`setShowStateById('${s.show.id}', { priority: this.value })`), `${where}: the same writes as All TV's selects`);
-    for (const a of ['details', 'ended', 'dismiss-new', 'keep-status', 'open-resume']) assert.ok(h.includes(`data-action="${a}"`), `${where}: ${a}`);
+    for (const a of ['details', 'ended', 'open-resume']) assert.ok(h.includes(`data-action="${a}"`), `${where}: ${a}`);
   }
   assert.ok(tbody(app).includes('<span class="show-progress-line">1 of 4 seasons watched · 1 skipped</span>'), 'desktop: progress line');
   assert.ok(tbody(app).includes(`data-show-of="${s.show.id}"`) && tbody(app).includes(`data-season-row="${s.rows[0].id}"`), 'focus hooks on the actions row and seasons');
@@ -750,7 +749,6 @@ test('correction 6: every full-width row of Currently Watching spans its five co
     .reduce((n, m) => n + Number((m[1].match(/colspan="(\d+)"/) || [0, 1])[1]), 0)).map(String);
   app.ctx.toggleDerivedShow(a.show.id); await settle();
   let html = app.el('tbody').innerHTML;
-  assert.ok(html.includes('Dismiss “New” on these 2'), 'the dismiss-all row is present');
   assert.ok(html.includes('data-section="inprogress"') && html.includes('data-section="uptodate"') && html.includes('show-actions-row'));
   assert.ok(spans().length >= 8 && spans().every(x => x === '5'), `every row spans 5: ${spans()}`);
   app.el('fSearch').value = 'zzz'; app.ctx.renderTable();

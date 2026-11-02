@@ -4,7 +4,7 @@
 // states (To Watch, Watched, Skipped, the preserved Skipped + Watched pair): what is sent (one
 // guarded call), which transitions ask first ("This also clears Watched" / "This clears
 // Watched"), what Cancel does (nothing), the O1-under-review rule, the controls that aren't
-// shown, refusals and unknown outcomes. The database rules: db/test/t_b45.sql (W2).
+// shown, refusals and unknown outcomes. The database rules: db/b45_expand.sql.
 // Run from the repo root: node tests/b45-film-contract.test.js
 const assert = require('assert');
 const { createApp, runner, settle } = require('./app-harness');
@@ -64,23 +64,6 @@ for (const [from, to, changes, ask, result] of SELECTOR) {
     else assert.deepStrictEqual([r.catalog_new, r.legacy_status], [true, 'pending'], 'a no-op changes nothing');
   });
 }
-
-test('O1 under review: the selector starts on a prompt; choosing the current state is sent and resolves the review (also from the pair, which stays a pair)', async () => {
-  const w = film('watched', { status_review: true, legacy_status: 'watching' });
-  const p = film('pair', { status_review: true, legacy_status: 'complete' });
-  const app = await allMovies([w, p]);
-  assert.ok(rowHtml(app, w.id).includes('<option value="" selected disabled>Choose a status…</option>'));
-  const asked = [];
-  app.ctx.confirm = q => { asked.push(q); return true; };
-  await app.ctx.setStatus(w.id, 'watched'); await settle();
-  await app.ctx.setStatus(p.id, 'skipped'); await settle();
-  assert.strictEqual(asked.length, 1);
-  assert.match(asked[0], /Skipped\? This clears Watched\./, 'choosing Skipped on the pair clears Watched: asked first');
-  assert.deepStrictEqual(sent(app), [{ state: 'watched' }, { state: 'skipped' }]);
-  assert.deepStrictEqual(storedState(app, w.id), STATES.watched);
-  assert.deepStrictEqual(storedState(app, p.id), STATES.skipped, 'Skipped chosen explicitly: Watched cleared (the server never keeps a pair on a status change)');
-  assert.ok(app.store.watchlist_items.filter(r => [w.id, p.id].includes(r.id)).every(r => !r.status_review && r.legacy_status === null));
-});
 
 test('the pair is shown as “✕ Skipped (marked watched)” (disabled option) and kept by a priority-only change', async () => {
   const p = film('pair', { legacy_status: 'maybe', priority: 'low' });

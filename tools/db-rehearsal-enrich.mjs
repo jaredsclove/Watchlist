@@ -48,7 +48,7 @@ const page = { console, Map, Set, JSON, Date, Math, Array, Object, String, Numbe
   crypto: crypto.webcrypto, TextEncoder };
 page.window = page;
 vm.createContext(page);
-for (const f of ['config.js', 'ui-helpers.js', 'metadata.js', 'api.js', 'backup-restore.js', 'backup-format3.js']) vm.runInContext(sql(f), page, { filename: f });
+for (const f of ['config.js', 'ui-helpers.js', 'metadata.js', 'api.js', 'backup-restore.js']) vm.runInContext(sql(f), page, { filename: f });
 const P = expr => vm.runInContext(expr, page);
 const validate = d => Array.from(P('validateBackupObject')(d));
 

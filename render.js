@@ -137,28 +137,16 @@ function categoryFilterSelectsHtml(records) {
       </select>`);
   }).join('');
 }
-// Priority and the markers (shows and films alike).
+// Priority (shows and films alike).
 function priorityFilterSelectHtml() {
   return `<select id="fPriority" onchange="renderTable()" aria-label="Priority">
         <option value="">Any priority</option><option value="high">★ High</option><option value="normal">Normal</option>
         <option value="low">Low</option><option value="highnormal">High + Normal</option></select>`;
 }
-// The markers: two checkboxes; a ticked one keeps only the records that have that marker.
-const MARKER_FILTER_IDS = ['fNew', 'fReview'];
-function markerFilterChecksHtml() {
-  return `<label class="filter-check"><input type="checkbox" id="fNew" onchange="renderTable()"> New from catalog</label>
-      <label class="filter-check"><input type="checkbox" id="fReview" onchange="renderTable()"> Needs status review</label>`;
-}
-function markerFilterValues() {
-  return { fNew: !!document.getElementById('fNew')?.checked, fReview: !!document.getElementById('fReview')?.checked };
-}
 function priorityMatches(p, fPriority) {
   if (!fPriority) return true;
   if (fPriority === 'highnormal') return p !== 'low';
   return p === fPriority;
-}
-function markerMatches(rec, m) {
-  return (!m || !m.fNew || !!rec.catalog_new) && (!m || !m.fReview || !!rec.status_review);
 }
 
 // ─── Filter bar (B10) ─────────────────────────────────────────────────────────
@@ -223,8 +211,7 @@ const FILTER_DEFS = [
   { id: 'fStatus', label: 'Status', scope: true }, { id: 'fWatch', label: 'Watched', scope: true }, { id: 'seasons', scope: true },
   { id: 'fGenre', label: 'Genre' }, { id: 'fForm', label: 'Form' }, { id: 'fFranchise', label: 'Franchise' },
   { id: 'fNetwork', label: 'Network' }, { id: 'fCompany', label: 'Company' },
-  { id: 'fPriority', label: 'Priority' }, { id: 'fNew', label: 'New from catalog', check: true },
-  { id: 'fReview', label: 'Needs status review', check: true }, { id: 'fWatchWith', label: 'Watch with' },
+  { id: 'fPriority', label: 'Priority' }, { id: 'fWatchWith', label: 'Watch with' },
   { id: 'fYear', label: 'Year' }, { id: 'fProgress', label: 'Progress' }, { id: 'fCollection', label: 'Collection tag' },
   { id: 'fTheme', label: 'Original label' }
 ];
@@ -287,9 +274,9 @@ function filterChipModel() {
       continue;
     }
     const el = document.getElementById(d.id), def = filterDefault(d.id);
-    const chip = v => ({ key: d.id, label: d.label, text: d.check ? '' : filterValueText(d.id, v), check: !!d.check, scope: !!d.scope });
+    const chip = v => ({ key: d.id, label: d.label, text: filterValueText(d.id, v), scope: !!d.scope });
     if (el) {
-      const v = d.check ? (el.checked ? 'on' : '') : (el.value || '');
+      const v = el.value || '';
       if (v !== def) applied.push(chip(v));
     } else if (kept[d.id] !== undefined && kept[d.id] !== def) {
       inactive.push({ ...chip(kept[d.id]), context: filterKeptContext(d.id) });
@@ -306,9 +293,9 @@ function viewFiltersNonDefault() {
 }
 
 function filterChipHtml(c, applied) {
-  const what = c.check ? c.label : `${c.label}, ${c.text}`;
+  const what = `${c.label}, ${c.text}`;
   const name = applied ? `Remove filter: ${what}` : `Not applied: ${what}. ${FILTER_CONTEXT_SENTENCES[c.context]} Remove.`;
-  const body = c.check ? `<span class="chip-v">${esc(c.label)}</span>` : `<span class="chip-k">${esc(c.label)}:</span> <span class="chip-v">${esc(c.text)}</span>`;
+  const body = `<span class="chip-k">${esc(c.label)}:</span> <span class="chip-v">${esc(c.text)}</span>`;
   const kept = applied ? '' : ` <span class="chip-na">Not applied (${esc(c.context)})</span>`;
   return `<button type="button" id="chip-${c.key}" class="filter-chip${applied ? '' : ' filter-chip-kept'}" aria-label="${esc(name)}" title="${esc(name)}" onclick="removeFilterChip('${c.key}')">${body}${kept}<span class="chip-x" aria-hidden="true">✕</span></button>`;
 }
@@ -358,7 +345,7 @@ function removeFilterChip(key) {
   if (key === 'seasons') setFilterSeasonsDefault();
   else {
     const def = filterDefault(key), el = document.getElementById(key);
-    if (el) { if (MARKER_FILTER_IDS.includes(key)) el.checked = false; else el.value = def; }
+    if (el) el.value = def;
     if (viewFilterMemory.tag === tag) viewFilterMemory.values[key] = def;
     if (key === 'fCollection' && activeViewId === ALL_MOVIES_VIEW.id) updateCollectionRefreshLink();
   }
@@ -379,7 +366,7 @@ function clearViewFilters() {
   FILTER_DEFS.forEach(d => {
     if (d.id === 'seasons') { setFilterSeasonsDefault(); return; }
     const el = document.getElementById(d.id);
-    if (el) { if (d.check) el.checked = false; else el.value = filterDefault(d.id); }
+    if (el) el.value = filterDefault(d.id);
   });
   if (viewFilterMemory.tag === tag) {
     const values = {};

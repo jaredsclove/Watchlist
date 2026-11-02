@@ -5,7 +5,7 @@
 // tv_shows/show_id/skipped, checked against the database's show rules).
 // Run from the repo root: node tests/backup-format.test.js
 const assert = require('assert');
-const { createApp, runner, legacyBackupFixture } = require('./app-harness');
+const { createApp, runner } = require('./app-harness');
 
 const T = runner('backup-format');
 const test = T.test;
@@ -42,39 +42,8 @@ test('a database without Stage 5 (format 1 or 2): no backup file, no format prob
   }
 });
 
-test('format 2 file (fixture): exact columns with tv_shows, show_id and skipped, no user_id; it validates', async () => {
-  const app = await createApp({ rows: v2Rows(), tvShows: v2Shows(), org: false });
-  const b = await legacyBackupFixture(app, 2);
-  assert.deepStrictEqual(Array.from(Object.keys(b.tables)).sort(), ['custom_collections', 'othertv_shows', 'tv_shows', 'watchlist_items']);
-  assert.strictEqual(b.rowCounts.tv_shows, 1);
-  assert.deepStrictEqual(Array.from(Object.keys(b.tables.watchlist_items[0])).slice(-2), ['show_id', 'skipped']);
-  assert.strictEqual(Object.keys(b.tables.tv_shows[0]).length, 7);
-  assert.ok(Object.values(b.tables).every(rows => rows.every(r => !('user_id' in r))));
-  assert.deepStrictEqual(Array.from(app.get('validateBackupObject')(b)), []);
-});
-
-test('format 2 validation refuses user_id, dangling or cross-collection links, linked films, unlinked skips, bad shows', async () => {
-  const app = await createApp({ rows: v2Rows(), tvShows: v2Shows(), org: false });
-  const good = await legacyBackupFixture(app, 2);
-  const validate = o => Array.from(app.get('validateBackupObject')(o)).join(' | ');
-  const variant = fn => { const b = JSON.parse(JSON.stringify(good)); fn(b); return validate(b); };
-  assert.match(variant(b => { b.tables.watchlist_items[0].user_id = OWNER; }), /unknown column\(s\) user_id/);
-  assert.match(variant(b => { b.tables.watchlist_items[0].show_id = uuid('dd'); }), /isn't in the backup/);
-  assert.match(variant(b => { b.tables.tv_shows[0].collection = 'disney'; }), /links to a show in collection "disney"/);
-  assert.match(variant(b => { const m = b.tables.watchlist_items.find(r => r.media_type === 'movie'); m.show_id = uuid('c1'); }), /is a film but links to a show/);
-  assert.match(variant(b => { const m = b.tables.watchlist_items.find(r => r.media_type === 'movie'); m.skipped = true; }), /is skipped but has no show/);
-  assert.match(variant(b => { b.tables.tv_shows[0].status = 'caughtup'; }), /tv_shows status/);
-  assert.match(variant(b => { b.tables.tv_shows.push({ ...b.tables.tv_shows[0], id: uuid('c2') }); b.rowCounts.tv_shows = 2; }), /duplicate identified show/);
-  assert.match(variant(b => { delete b.tables.tv_shows; }), /Missing or invalid data for table "tv_shows"/);
-  assert.match(variant(b => { b.formatVersion = 8; }), /Unsupported backup format version \(8\)/);
-  assert.match(variant(b => { b.formatVersion = 3; }), /Missing or invalid data for table "personal_collections"/);
-  assert.match(variant(b => { b.formatVersion = 1; }), /Unexpected table\(s\) for format 1: tv_shows/);
-});
-
 test('a database without Stage 5 (format 1 or 2): restore isn’t offered for a format 1 or 2 file; nothing is sent', async () => {
-  const src1 = await createApp({ rows: v1Rows(), format1: true });
-  const src2 = await createApp({ rows: v2Rows(), tvShows: v2Shows(), org: false });
-  const files = [await legacyBackupFixture(src1, 1), await legacyBackupFixture(src2, 2)];
+  const files = [1, 2].map(formatVersion => ({ format: 'watchlist-tracker-backup', formatVersion, exportedAt: '2026-01-01T00:00:00Z', rowCounts: {}, tables: {} }));
   for (const opts of [{ rows: v1Rows(), format1: true }, { rows: v2Rows(), tvShows: v2Shows(), org: false }]) {
     for (const f of files) {
       const app = await createApp({ ...opts, stage5: null });
@@ -96,7 +65,6 @@ test('restore: a format 7 restore sends the flag as false', async () => {
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
-  assert.strictEqual(app.get('pendingRestoreAllowV1Reset'), false);
   assert.match(app.el('restoreModalBox').innerHTML, /Restore database/);
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
   const call = app.requests.find(r => r.url.includes('/rpc/restore_backup'));

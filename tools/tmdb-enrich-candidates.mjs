@@ -1,5 +1,5 @@
 // Read-only TMDB identity review for the legacy (not TMDB-matched) shows of one
-// built-in collection, for the identity-enrichment project (docs/HANDOFF.md §18).
+// built-in collection, for the identity-enrichment project (docs/history/HANDOFF-2026-10-18.md §18).
 // GET requests only, to Supabase (anon key from config.js) and TMDB; nothing is written.
 //
 //   node tools/tmdb-enrich-candidates.mjs <collection> [--out=file.json]

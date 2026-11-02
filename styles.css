@@ -687,7 +687,7 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .card-labels > .meta-chip.meta-genres:first-child { margin-left: -4px; } /* the name, not its box, sits on the margin */
   .card-complete { display: inline-flex; margin-left: auto; }
   .card-actions { gap: 2px 8px; }
-  .card-actions .status-select:not(.status-needs-choice):is(.s-confirmed, .s-skipped, .s-film-to_watch, .s-film-skipped) { border-left-width: 0; padding-left: 0; } /* the borderless ones too */
+  .card-actions .status-select:is(.s-confirmed, .s-skipped, .s-film-to_watch, .s-film-skipped) { border-left-width: 0; padding-left: 0; } /* the borderless ones too */
   .card-actions .status-pill.s-caughtup { background: none; border: 0; padding: 0; color: var(--text2); } /* a state, not a control */
   .card-actions .status-select, .card-actions .watch-btn, .card-complete .watch-btn, .skip-btn, .show-actions-inner .ended-check { min-height: 44px; }
   .card-actions .status-select { border-radius: var(--radius); }
@@ -818,7 +818,6 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .status-select.s-film-to_watch, .status-select.s-film-skipped { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%235c6377' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 }
 /* A status waiting for the owner's choice ("Choose a status…") never goes quiet. */
-.status-select.status-needs-choice { background-color: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
 .status-select.s-film-pair { background-color: var(--red-bg); color: var(--red); border-color: var(--red); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
 .status-pill.s-film-to_watch { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
 .status-pill.s-film-watched { background: var(--teal-bg); color: var(--teal); border-color: var(--teal); }
@@ -828,8 +827,6 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .priority-select { font-size: 12px; padding: 3px 8px; }
 .state-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 5px; vertical-align: middle; border: 1px solid; white-space: nowrap; }
 .state-tag.ended-tag { background: var(--surface2); color: var(--text2); border-color: var(--border2); }
-.state-tag.new-tag { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
-.state-tag.review-tag-b45 { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
 .state-tag.resume-tag { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
 .meta-chip { font-size: 11px; }
 .meta-more { font-size: 11px; color: var(--text2); }
@@ -897,9 +894,7 @@ button.meta-chip.meta-genres:hover { filter: none; color: var(--text); text-deco
   .priority-select, .show-actions-inner .btn, .show-actions-inner .btn-link, .show-actions-inner .ended-check, .resume-picker .btn, .resume-picker select,
   .details-check, .details-field .search-input, #detailsModalBox .btn { min-height: 44px; }
 }
-.filter-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text2); white-space: nowrap; }
-@media (max-width: 700px) { .filter-check { min-height: 44px; } }
-.details-candidate { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 6px; }
+@media (max-width: 700px) { .details-candidate { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 6px; }
 @media (max-width: 700px) { .details-candidate select { min-height: 44px; } }
 /* B4/B5: the cards' action row wraps rather than overflow on a narrow phone. */
 .card-actions, .card-subseason-row .card-actions { flex-wrap: wrap; }

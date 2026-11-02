@@ -238,21 +238,9 @@ async function fetchAllRowsStrict(table, filter, pageSize = BACKUP_PAGE_SIZE) {
 // transaction (library.js, tmdb-match.js, catalog-apply.js). Where a record was
 // once stored is not part of any request since Stage 5.
 
-// A catalog entry's show key (private.tv_show_key in the database): the entry
-// key's prefix, unless a reviewed override for that catalog applies.
-function catalogShowKey(catalogId, itemKey) {
-  const prefix = String(itemKey || '').split('|')[0];
-  return SHOW_KEY_OVERRIDES[`${catalogId}|${prefix}`] || prefix;
-}
-
 function sbRpc(fn, args) {
   return sbFetch('POST', `rpc/${fn}`, args);
 }
-// A database function call that changes nothing (a preview).
-function sbRpcRead(fn, args) {
-  return sbFetch('POST', `rpc/${fn}`, args, { read: true });
-}
-
 async function tmdbFetch(path) {
   const res = await fetch(`${TMDB_BASE}${path}`, {
     headers: {

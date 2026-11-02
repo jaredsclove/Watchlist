@@ -116,8 +116,8 @@ const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"
 // allowed set grows by exactly those handlers. S4: films have All Movies' controls and entries the collection's
 // Remove (tests/collection-films.test.js); pressing nothing still writes and reads nothing.
 const TV_EDIT = ['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
-  'keepCurrentStatus', 'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
-  'setStatus', 'setFilmPriority', 'toggleMorePopover', 'closeRowMenu', 'toggleWatchWith', 'libraryPullRest', 'dismissCatalogNew', 'removeFromCollection'];
+  'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
+  'setStatus', 'setFilmPriority', 'toggleMorePopover', 'closeRowMenu', 'toggleWatchWith', 'libraryPullRest', 'removeFromCollection'];
 const READ_ONLY = new Set([...TV_EDIT, 'toggleFilterPill', 'toggleBrowseShow', 'setBrowseMedia', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
   'renderTable', 'browseBack', 'openBrowseCollection', 'loadBrowseView',
   'openManage', // Stage 3b-2: opens the Manage collections dialog (organization only, never tracking)

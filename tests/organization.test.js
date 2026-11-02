@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { createApp, runner, settle, legacyBackupFixture, userKeyOf } = require('./app-harness');
+const { createApp, runner, settle, userKeyOf } = require('./app-harness');
 
 const T = runner('organization');
 const test = T.test;
@@ -39,7 +39,7 @@ function library() {
     show({ title: 'Severance', collection: 'othertv', tmdb_id: 95396 }, ['Season 1']),
     film({ title: 'Sicario', collection: 'sheridan', media_type: null, tmdb_id: null }),
     film({ title: 'Wind River', watch_with: ['Rina', 'Kids'] }),
-    film({ title: 'Dune', watch_with: ['Suzanne'] })
+    film({ title: 'Dune', watch_with: ['Sam'] })
   );
 }
 const boot = (data = library(), opts = {}) => createApp({ rows: data.rows, tvShows: data.shows, ...opts });
@@ -51,20 +51,6 @@ const chooser = app => app.run('collectionsChooserHtml()');
 const options = app => [...chooser(app).matchAll(/<button type="button" role="tab"[^>]*id="ctab-([^"]+)"[^>]*>([^<]*)</g)].map(m => [`browse:${m[1]}`, m[2]]);
 const writes = app => app.requests.filter(r => r.method !== 'GET');
 const coll = (app, source) => app.store.personal_collections.find(c => c.legacy_source === source);
-
-// ── shared lists ──
-test('the configured watch-with choices, the harness bootstrap and the migration bootstrap list the same values', async () => {
-  const app = await boot();
-  const config = Array.from(app.get('WATCH_WITH_OPTIONS'));
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'db', 'phase3b_org.sql'), 'utf8');
-  const inSql = JSON.parse(sql.match(/v_config text\[\] := array\[([^\]]*)\]/)[1].replace(/'/g, '"').replace(/^/, '[').replace(/$/, ']'));
-  const inRollback = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'db', 'rollback', 'phase3b.sql'), 'utf8')
-    .match(/v_config text\[\] := array\[([^\]]*)\]/)[1].replace(/'/g, '"').replace(/^/, '[').replace(/$/, ']'));
-  assert.deepStrictEqual(inSql, config);
-  assert.deepStrictEqual(inRollback, config);
-  assert.deepStrictEqual(app.store.watch_with_choices.slice(0, 4).map(c => c.token), config);
-  assert.deepStrictEqual(app.store.watch_with_choices.slice(4).map(c => c.token), ['Kids'], 'a value used on a row but not configured is kept as a choice');
-});
 
 // ── selector ──
 test('startup: the TV landing view comes first; the selector then lists your collections in order, valued by collection id', async () => {
@@ -175,12 +161,12 @@ test('watch-with: labels from your choices, tokens in the data; an archived choi
   const picker = app.get(`watchWithPickerHtml('${wind.id}', ['Rina', 'Kids'])`);
   assert.ok(picker.includes('value="Kids" checked') && picker.includes('> Kids (archived)</label>'), 'still visible (marked, untickable) where it is used');
   assert.ok(!app.get(`watchWithPickerHtml('${wind.id}', ['Rina'])`).includes('value="Kids"'), 'not offered on a row that doesn’t have it');
-  await app.ctx.toggleWatchWith(wind.id, 'Suzanne', true); await settle();
+  await app.ctx.toggleWatchWith(wind.id, 'Sam', true); await settle();
   const patch = writes(app).at(-1);
-  assert.deepStrictEqual(patch.body, { watch_with: ['Rina', 'Kids', 'Suzanne'] }, 'tokens are written');
+  assert.deepStrictEqual(patch.body, { watch_with: ['Rina', 'Kids', 'Sam'] }, 'tokens are written');
   await app.ctx.toggleWatchWith(wind.id, 'Nobody', true); await settle();
   assert.match(app.el('errorBanner') ? app.el('errorBanner').innerHTML : app.get('document.getElementById("errorBanner").innerHTML'), /watch_with_invalid/);
-  assert.deepStrictEqual(Array.from(app.store.watchlist_items.find(r => r.id === wind.id).watch_with), ['Rina', 'Kids', 'Suzanne']);
+  assert.deepStrictEqual(Array.from(app.store.watchlist_items.find(r => r.id === wind.id).watch_with), ['Rina', 'Kids', 'Sam']);
 });
 
 // ── backup format 3 ──
@@ -201,42 +187,6 @@ test('backup (CU1) is format 7 with the nineteen tables and exact organization c
   assert.ok(app.requests.every(r => r.method === 'GET'));
 });
 
-test('format 3 validation mirrors the database: targets, kinds, duplicates, names and labels ignoring case, sources, watch-with values', async () => {
-  const data = library();
-  const app = await boot(data);
-  const good = await legacyBackupFixture(app, 3); // a format-3 file (the page no longer exports one)
-  const validate = o => Array.from(app.get('validateBackupObject')(o)).join(' | ');
-  const variant = fn => { const b = JSON.parse(JSON.stringify(good)); fn(b); return validate(b); };
-  const season = data.rows.find(r => r.show_id);
-  assert.match(variant(b => { b.tables.collection_memberships[0].show_id = uuid('99', 1); }), /isn't in the backup/);
-  assert.match(variant(b => { const m = b.tables.collection_memberships[0]; m.show_id = null; m.item_id = season.id; }), /which isn't a film/);
-  assert.match(variant(b => { const m = b.tables.collection_memberships[0]; m.item_id = season.id; }), /exactly one of show_id and item_id/);
-  assert.match(variant(b => { b.tables.collection_memberships.push({ ...b.tables.collection_memberships[0], id: uuid('99', 2) }); b.rowCounts.collection_memberships++; }), /collection_memberships duplicate/);
-  assert.match(variant(b => { b.tables.collection_memberships[0].collection_id = uuid('99', 3); }), /which isn't in the backup/);
-  assert.match(variant(b => { b.tables.personal_collections[1].name = 'disney+'; }), /duplicate name \(ignoring case\)/);
-  assert.match(variant(b => { b.tables.personal_collections[1].name = ' Spaced'; }), /personal_collections name/);
-  assert.match(variant(b => { b.tables.personal_collections[0].legacy_source = 'othertv'; }), /legacy source/);
-  assert.match(variant(b => { b.tables.watch_with_choices[1].label = 'ALONE'; }), /duplicate label \(ignoring case\)/);
-  assert.match(variant(b => { b.tables.watch_with_choices = b.tables.watch_with_choices.filter(c => c.token !== 'Rina'); b.rowCounts.watch_with_choices--; }), /uses "Rina", which isn't one of the backup's watch-with choices/);
-  assert.match(variant(b => { delete b.tables.collection_memberships; }), /Missing or invalid data for table "collection_memberships"/);
-});
-
-test('restore: a format 2 file into this database is refused with guidance before any safety backup, download or write', async () => {
-  const src = await boot(library(), { org: false });
-  const v2 = await legacyBackupFixture(src, 2);
-  const app = await boot(library());
-  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-  app.ctx.__b = v2;
-  const before = app.requests.length;
-  await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
-  assert.match(app.el('restoreModalBox').innerHTML, /format 2, from before personal collections/);
-  assert.match(app.el('restoreModalBox').innerHTML, /Restore a format 3 backup/);
-  assert.strictEqual(app.get('pendingRestoreData'), null);
-  assert.ok(app.requests.slice(before).every(r => r.method === 'GET'));
-});
-
-// (A format-3 file is restored only through the conversion since the 5c clean-up (G8): one restore_backup call
-// with the format-4 document, then all eight tables verified — tests/stage5-app.test.js.)
 
 // ── Match ──
 async function matchAsTv(app, rowId, tmdb) {
@@ -345,15 +295,15 @@ test('a restored-away collection that is still open (or chosen from a stale sele
 test('watch-with controls drawn before the choices load are redrawn when the loaded labels differ (slow startup)', async () => {
   const data = library();
   const app = await boot(data);
-  app.store.watch_with_choices.find(c => c.token === 'Suzanne').label = 'Suzanne B.';
+  app.store.watch_with_choices.find(c => c.token === 'Sam').label = 'Sam B.';
   app.run('watchWithChoices = null'); // as if the startup read hadn't finished yet
   const g = app.hold(r => r.url.includes('/watch_with_choices?'));
   const loading = app.ctx.loadOrganization();
   app.ctx.switchMediaType('movie'); await settle();
   app.ctx.switchView('allmovies'); await settle();
-  assert.ok(app.el('tbody').innerHTML.includes('>Suzanne</button>'), 'fallback before the choices arrive');
+  assert.ok(app.el('tbody').innerHTML.includes('>Sam</button>'), 'fallback before the choices arrive');
   g.release(); await loading; await settle();
-  assert.ok(app.el('tbody').innerHTML.includes('>Suzanne B.</button>'), 'redrawn with the loaded label');
+  assert.ok(app.el('tbody').innerHTML.includes('>Sam B.</button>'), 'redrawn with the loaded label');
 });
 
 test('an older organization read that finishes last never replaces newer data (Retry, a collection view, a restore)', async () => {
@@ -427,19 +377,19 @@ test('the database model refuses a NULL watch-with value and deleting a choice i
   const data = library();
   const app = await boot(data);
   const dune = data.rows.find(r => r.title === 'Dune');
-  const res = await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/watch_with_choices?token=eq.Suzanne`, { method: 'DELETE', headers: {} });
+  const res = await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/watch_with_choices?token=eq.Sam`, { method: 'DELETE', headers: {} });
   assert.strictEqual(res.status, 409);
-  assert.ok(app.store.watch_with_choices.some(c => c.token === 'Suzanne'));
+  assert.ok(app.store.watch_with_choices.some(c => c.token === 'Sam'));
   const res2 = await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/watchlist_items?id=eq.${dune.id}`, { method: 'PATCH', headers: {}, body: JSON.stringify({ watch_with: [null] }) });
   assert.strictEqual(res2.status, 400);
-  assert.deepStrictEqual(Array.from(app.store.watchlist_items.find(r => r.id === dune.id).watch_with), ['Suzanne']);
+  assert.deepStrictEqual(Array.from(app.store.watchlist_items.find(r => r.id === dune.id).watch_with), ['Sam']);
 });
 
 // ── failed post-restore choices read (second review, finding 2) ──
 async function restoreChangedChoices(app) {
   const b = JSON.parse(JSON.stringify(await app.run('buildBackupObject()')));
   b.tables.watch_with_choices = b.tables.watch_with_choices.filter(c => c.token !== 'Alone') // a removed choice
-    .map(c => c.token === 'Suzanne' ? { ...c, label: 'Suzanne (restored)' } : c);
+    .map(c => c.token === 'Sam' ? { ...c, label: 'Sam (restored)' } : c);
   b.rowCounts.watch_with_choices = b.tables.watch_with_choices.length;
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings (no navigation if already there)
   app.ctx.__b = b;
@@ -472,7 +422,7 @@ for (const withBrowse of [false, true]) {
     }
     const picker = pickerOf(app, dune.id);
     assert.ok(!/value="Alone"/.test(picker), 'the removed choice is not offered: ' + picker);
-    assert.ok(!/> Suzanne<\/label>/.test(picker), 'no stale label');
+    assert.ok(!/> Sam<\/label>/.test(picker), 'no stale label');
     assert.ok(!/<input type="checkbox"/.test(picker), 'no choices offered while unavailable');
     assert.match(picker, /Watch-with choices couldn’t be loaded/);
     assert.match(picker, /onclick="loadOrganization\(\)">Retry/);
@@ -485,7 +435,7 @@ for (const withBrowse of [false, true]) {
     await app.ctx.loadOrganization(); await settle();
     assert.strictEqual(app.get('watchWithState'), 'ready');
     const after = pickerOf(app, dune.id);
-    assert.ok(after.includes('> Suzanne (restored)</label>') && !after.includes('value="Alone"'), after);
+    assert.ok(after.includes('> Sam (restored)</label>') && !after.includes('value="Alone"'), after);
   });
 }
 
@@ -500,7 +450,7 @@ test('while the post-restore choices read is pending the controls say loading (n
   const picker = pickerOf(app, dune.id);
   assert.ok(!/<input type="checkbox"/.test(picker) && /Watch-with choices are loading/.test(picker), picker);
   g.release(); await settle();
-  assert.ok(pickerOf(app, dune.id).includes('> Suzanne (restored)</label>'));
+  assert.ok(pickerOf(app, dune.id).includes('> Sam (restored)</label>'));
 });
 
 // ── unfinished work during a watch-with refresh; Retry beside the filter (third review) ──

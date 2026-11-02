@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261101-seasons">
+<link rel="stylesheet" href="styles.css?v=20261102-simplify">
 </head>
 <body>
 
@@ -98,34 +98,33 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261101-seasons"></script>
-<script src="api.js?v=20261101-seasons"></script>
-<script src="write-lane.js?v=20261101-seasons"></script>
-<script src="ui-helpers.js?v=20261101-seasons"></script>
-<script src="metadata.js?v=20261101-seasons"></script>
-<script src="backup-restore.js?v=20261101-seasons"></script>
-<script src="backup-format3.js?v=20261101-seasons"></script>
-<script src="tabs.js?v=20261101-seasons"></script>
-<script src="render.js?v=20261101-seasons"></script>
-<script src="row-actions.js?v=20261101-seasons"></script>
-<script src="tmdb-search.js?v=20261101-seasons"></script>
-<script src="collections-pull.js?v=20261101-seasons"></script>
-<script src="universe-pull.js?v=20261101-seasons"></script>
-<script src="person-pull.js?v=20261101-seasons"></script>
-<script src="tmdb-match.js?v=20261101-seasons"></script>
-<script src="derived-views.js?v=20261101-seasons"></script>
-<script src="tv-shows.js?v=20261101-seasons"></script>
-<script src="episodes.js?v=20261101-seasons"></script>
-<script src="show-ratings.js?v=20261101-seasons"></script>
-<script src="organization.js?v=20261101-seasons"></script>
-<script src="organization-manage.js?v=20261101-seasons"></script>
-<script src="collection-members.js?v=20261101-seasons"></script>
-<script src="collection-updates.js?v=20261101-seasons"></script>
-<script src="collection-research.js?v=20261101-seasons"></script>
-<script src="collection-settings.js?v=20261101-seasons"></script>
-<script src="browse-views.js?v=20261101-seasons"></script>
-<script src="history.js?v=20261101-seasons"></script>
-<script src="library.js?v=20261101-seasons"></script>
+<script src="auth.js?v=20261102-simplify"></script>
+<script src="api.js?v=20261102-simplify"></script>
+<script src="write-lane.js?v=20261102-simplify"></script>
+<script src="ui-helpers.js?v=20261102-simplify"></script>
+<script src="metadata.js?v=20261102-simplify"></script>
+<script src="backup-restore.js?v=20261102-simplify"></script>
+<script src="tabs.js?v=20261102-simplify"></script>
+<script src="render.js?v=20261102-simplify"></script>
+<script src="row-actions.js?v=20261102-simplify"></script>
+<script src="tmdb-search.js?v=20261102-simplify"></script>
+<script src="collections-pull.js?v=20261102-simplify"></script>
+<script src="universe-pull.js?v=20261102-simplify"></script>
+<script src="person-pull.js?v=20261102-simplify"></script>
+<script src="tmdb-match.js?v=20261102-simplify"></script>
+<script src="derived-views.js?v=20261102-simplify"></script>
+<script src="tv-shows.js?v=20261102-simplify"></script>
+<script src="episodes.js?v=20261102-simplify"></script>
+<script src="show-ratings.js?v=20261102-simplify"></script>
+<script src="organization.js?v=20261102-simplify"></script>
+<script src="organization-manage.js?v=20261102-simplify"></script>
+<script src="collection-members.js?v=20261102-simplify"></script>
+<script src="collection-updates.js?v=20261102-simplify"></script>
+<script src="collection-research.js?v=20261102-simplify"></script>
+<script src="collection-settings.js?v=20261102-simplify"></script>
+<script src="browse-views.js?v=20261102-simplify"></script>
+<script src="history.js?v=20261102-simplify"></script>
+<script src="library.js?v=20261102-simplify"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -152,7 +151,7 @@ let activeArea = 'tv'; // S2: 'tv' | 'movie' | 'collections' | 'settings' — th
 let activeViewId = 'watching'; // the open view (derived or browse)
 let tabData = {}; // per-run caches by name: tabData.films = the movie tools' films (library.js); no storage
 let libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(), seq: 0 }; // the newest catalog-governance snapshot (library.js)
-let stage5Phase = null; // the database's phase from stage5_capabilities(); this page writes only in 'contracted-ep1' (null: not read yet, or any other phase)
+let stage5Phase = null; // the database's phase from stage5_capabilities(); this page writes only in PAGE_PHASE (null: not read yet, or any other phase)
 let derivedData = null; // { rows, loaded } — cross-TV rows for the derived views, kept apart from tabData
 let derivedLoadSeq = 0; // lets a late derived-view load see that it's been superseded
 let derivedSectionOpen = { uptodate: true, tba: false, alltvTba: false }; // collapsible sections in the derived views (Up to date starts open, TBA sections closed)
@@ -181,12 +180,12 @@ let filterPanelOpen = false; // B10: the More filters panel of the open view's v
 let viewFilterMemory = { tag: null, values: {} }; // the open derived or browse view's filter values for this visit, including controls its current mode hides (browse-views.js)
 let personalCollections = null; // personal_collections rows (organization.js); null until loaded
 let watchWithChoices = null; // watch_with_choices rows; null until loaded (the configured list is offered meanwhile)
-let orgState = 'loading'; // 'loading' | 'ready' | 'unavailable' (failed: Retry) | 'absent' (database without personal collections)
+let orgState = 'loading'; // 'loading' | 'ready' | 'unavailable' (failed: Retry)
 let orgLoadSeq = 0; // the latest organization load (its failure matters only if it is still the latest)
 let orgReadSeq = 0; // every read of the organization tables takes the next number when it starts (with a read stamp, write-lane.js)
 let orgCollectionsSeq = 0; // the start number of the read whose collections are shown (an older read never replaces them)
 let orgChoicesSeq = 0; // the same for the watch-with choices
-let watchWithState = 'loading'; // 'loading' | 'ready' | 'unavailable' (failed: Retry) | 'absent' (database without watch-with choices)
+let watchWithState = 'loading'; // 'loading' | 'ready' | 'unavailable' (failed: Retry)
 let orgCollectionsStale = 0; // the read number of a failed refresh newer than the collections shown (0: not stale); a newer published read clears it
 let orgChoicesStale = 0; // the same for the watch-with choices
 let orgOpSeq = 0; // every organization change the Manage dialog sends takes the next number
@@ -195,7 +194,6 @@ let manage = null; // the open Manage dialog's state (organization-manage.js); n
 let detailsDialog = null; // the open Details dialog (render.js): its session, snapshot, draft and whether a restore ran since; null while closed
 let detailsSessionSeq = 0; // bumped at each opening; an answer for an earlier opening never touches a newer one
 let resumePickerFor = null; // the show whose "Watch earlier seasons" picker is open (tv-shows.js); null while none is
-let shownNewRecords = []; // the New-from-catalog records the open view shows: [{ kind, id }] (Dismiss all, tv-shows.js)
 let cuModal = null; // item 4: the open collection-updates dialog (review, rules, brief, setup, results; collection-updates.js, collection-settings.js); null while closed
 let researchEnabled = false; // CU2: the database says this member has research access now (api.js noteResearchAccess); false until read, and whenever it can't be read
 let cuLastState = null; // item 4: the newest collection-updates state this page read (cuReadState), for Settings' status line without a read; null until read
@@ -277,7 +275,6 @@ let personCollectionNames = null; // custom_collections names: null = not loaded
 
 // ─── Restore flow ───────────────────────────────────────────────────────────
 let pendingRestoreData = null; // validated backup object, set once file passes checks
-let pendingRestoreAllowV1Reset = false; // true when a format-1 backup is restored into a format-2 database
 let pendingRestoreDbFormat = null; // the database's backup format the restore preview checked against (backup-restore.js)
 let restoreSessionSeq = 0; // the restore being prepared; navigation bumps it (backup-restore.js)
 let restoreInFlight = false; // restore_backup has been sent: navigation no longer abandons the restore

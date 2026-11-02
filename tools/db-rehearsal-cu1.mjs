@@ -198,15 +198,10 @@ if (inject) {
 }
 
 section('CU: the migration');
-// Release step: a fresh format-6 backup before the migration (here: the admin export as A), validated offline.
 const admDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu1rel-'));
 const adminTool = (...args) => { try { return { ok: true, out: execFileSync(process.execPath, [path.join(ROOT, 'tools/admin-restore.mjs'), ...args], { encoding: 'utf8' }) }; }
   catch (e) { return { ok: false, out: String(e.stdout || '') + String(e.stderr || '') }; } };
 const backupOfRun = r => r.ok ? r.out.map(q => q.rows && q.rows[0] && q.rows[0].backup).find(Boolean) : null;
-const preText = backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', A, '--format', '6').out));
-fs.writeFileSync(path.join(admDir, 'pre.json'), preText || '');
-const preCheck = adminTool('check', '--file', path.join(admDir, 'pre.json'), '--safety', path.join(admDir, 'pre.json'));
-ok(preText && JSON.parse(preText).formatVersion === 6 && preCheck.ok && /OK/.test(preCheck.out), 'release: the pre-migration format-6 backup validates offline', preCheck.out);
 const run = await tryExec(db, preamble('cu1-rehearsal-1') + CU1);
 if (!ok(run.ok, 'db/cu1_collection_updates.sql commits', run.message)) { console.log('\nFAILED: the migration did not commit; stopping'); process.exit(1); }
 const result = String(run.out.map(r => r.rows && r.rows[0] && r.rows[0].result).find(Boolean));
@@ -219,17 +214,12 @@ ok((await val(db, `select public.stage5_capabilities() ->> 'phase'`)) === 'contr
   'the capability: phase contracted-cu1, backup_format 7');
 ok((await val(db, `select string_agg(run_id || '/' || migration, ',' order by run_id) from private.migration_runs`)) === 'cu1-rehearsal-1/cu1,rehearsal-ep1/ep1,rehearsal-m1/m1',
   'the run record holds this run beside M1’s and EP1’s');
-// Release step: the first format-7 backup after the migration, validated offline, and the pre-migration backup
-// converted to format 7 equals it exactly (nothing changed; the ten new tables still empty before the setup import).
+// Release step: the first format-7 backup after the migration, validated offline.
 {
   const postText = backupOfRun(await tryExec(db, adminTool('export-sql', '--owner', A).out));
   fs.writeFileSync(path.join(admDir, 'post.json'), postText || '');
   const postCheck = adminTool('check', '--file', path.join(admDir, 'post.json'), '--safety', path.join(admDir, 'post.json'));
   ok(postText && JSON.parse(postText).formatVersion === 7 && postCheck.ok, 'release: the first post-migration format-7 backup validates offline', postCheck.out);
-  const conv = adminTool('check', '--file', path.join(admDir, 'pre.json'), '--safety', path.join(admDir, 'post.json'), '--out', path.join(admDir, 'pre7.json'));
-  const same7 = conv.ok && adminTool('verify', '--file', path.join(admDir, 'pre7.json'), '--after', path.join(admDir, 'post.json'));
-  ok(conv.ok && same7 && same7.ok && /VERIFIED/.test(same7.out), 'release: the pre-migration backup, converted to format 7, equals the post-migration backup field by field',
-    conv.out + (same7 ? same7.out : ''));
   fs.rmSync(admDir, { recursive: true, force: true });
 }
 {
@@ -683,7 +673,7 @@ section('adm: the admin restore runbook at format 7');
     fs.writeFileSync(path.join(dir, 'file6.json'), JSON.stringify(six));
     const conv = tool('check', '--file', path.join(dir, 'file6.json'), '--safety', path.join(dir, 'safety.json'), '--out', path.join(dir, 'conv7.json'));
     const conv7 = conv.ok && JSON.parse(fs.readFileSync(path.join(dir, 'conv7.json'), 'utf8'));
-    ok(conv.ok && /converted to format 7/.test(conv.out) && conv7.formatVersion === 7 && NEW_TABLES.every(t => Array.isArray(conv7.tables[t]) && !conv7.tables[t].length),
+    ok(conv.ok && /plain format 7/.test(conv.out) && conv7.formatVersion === 7 && NEW_TABLES.every(t => Array.isArray(conv7.tables[t]) && !conv7.tables[t].length),
       'check converts a format-6 file to format 7 (the ten tables empty)', conv.out);
     const r = await tryExec(db, tool('restore-sql', '--file', path.join(dir, 'file.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'cu1-adm-1').out);
     ok(r.ok, 'the restore SQL restores the format-7 file as A', r.message);
@@ -692,17 +682,8 @@ section('adm: the admin restore runbook at format 7');
     ok(ver.ok && /VERIFIED/.test(ver.out), 'verify: the export after the restore equals the file, every table', ver.out);
     const owner = JSON.parse(backupOf(await tryExec(db, tool('export-owner-sql', '--user', B).out)) || 'null');
     ok(owner && owner.formatVersion === 7 && owner.tables.tv_shows.length === doc6.tables.tv_shows.length, 'the owner export of B is format 7 with B’s library');
-    // The database names its format: a format-6 export or restore SQL is refused on the CU1 database.
-    const six6 = await tryExec(db, tool('export-sql', '--owner', A, '--format', '6').out);
-    ok(!six6.ok && /writes backup format 7, not 6/.test(six6.message), 'export-sql --format 6 is refused on a format-7 database', six6.message || 'exported');
-    const own6 = await tryExec(db, tool('export-owner-sql', '--user', B, '--format', '6').out);
-    ok(!own6.ok && /writes backup format 7, not 6/.test(own6.message), 'export-owner-sql --format 6 is refused too', own6.message || 'exported');
-    const before6 = await rows(db);
-    const r6 = await tryExec(db, tool('restore-sql', '--file', path.join(dir, 'file6.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'cu1-adm-6').out);
-    ok(!r6.ok && /writes backup format 7, not 6/.test(r6.message) && same(before6, await rows(db)), 'restore-sql of a format-6 file names the mismatch first; nothing changes', r6.message || 'restored');
-    // A format-6 safety backup means an EP1 database: a format-7 file is refused for it.
-    const wrong = tool('check', '--file', path.join(dir, 'file.json'), '--safety', path.join(dir, 'file6.json'));
-    ok(!wrong.ok && /format 7 can’t be restored on this database \(formats 3 to 6\)/.test(wrong.out), 'check refuses a format-7 file for an EP1 (format-6) database', wrong.out);
+    const r6 = tool('restore-sql', '--file', path.join(dir, 'file6.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'cu1-adm-6');
+    ok(!r6.ok && /plain format-7 document/.test(r6.out), 'restore-sql refuses a format-6 file', r6.out);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 

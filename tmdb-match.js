@@ -246,7 +246,7 @@ function renderTmdbMatchConfirm() {
 // that token goes ahead. A season that would become a Skipped + Watched film needs the
 // owner's explicit choice (an explicit status choice). Neither is ever sent automatically.
 const MATCH_FIELD_LABELS = { status: 'Status', priority: 'Priority', ended: 'Show ended', catalog_new: 'New from catalog', status_review: 'Needs status review',
-  legacy_status: 'The old status kept for a rollback', genres: 'Genres', forms: 'Form', franchises: 'Franchise / universe', companies: 'Production company',
+  legacy_status: 'The old status', genres: 'Genres', forms: 'Form', franchises: 'Franchise / universe', companies: 'Production company',
   genre_candidates: 'Unresolved source categories', network: 'Original network', network_candidates: 'Network candidates', metadata_owner_set: 'Categories saved by you' };
 const MATCH_LEGACY_LABELS = { pending: 'Pending', highpriority: 'High priority', maybe: 'Maybe', watching: 'Watching', complete: 'Complete' };
 function matchAckValue(field, v) {

@@ -219,11 +219,11 @@ function browseFilmStatusMatches(r, fStatus) {
   if (fStatus === 'skipped') return state === 'skipped' || state === 'pair';
   return state === fStatus;
 }
-// Priority, markers and categories (B4/B5), on the show or the film.
+// Priority and categories (B4/B5), on the show or the film.
 function browseStateMatches(rec, f) {
-  return priorityMatches(rec.priority, f.fPriority) && markerMatches(rec, f.markers) && categoryMatches(metadataOf(rec), f.cats);
+  return priorityMatches(rec.priority, f.fPriority) && categoryMatches(metadataOf(rec), f.cats);
 }
-// A film by every filter but Watched: Search, Status (its own row), priority, markers,
+// A film by every filter but Watched: Search, Status (its own row), priority,
 // categories, the original label, a legacy collection tag (cleaned name, as shown) and a
 // watch-with token.
 function browseFilmMatches(r, f) {
@@ -245,12 +245,12 @@ function browseWatchMatches(r, fWatch) {
 // hidden. A fresh entry starts from the view's defaults; Back puts back the
 // values the view had when a collection was opened from it.
 const VIEW_FILTER_IDS = ['fSearch', 'fStatus', 'fWatch', 'fTheme', 'fYear', 'fCollection', 'fWatchWith', 'fProgress',
-  'fPriority', 'fNew', 'fReview', 'fGenre', 'fForm', 'fFranchise', 'fNetwork', 'fCompany'];
+  'fPriority', 'fGenre', 'fForm', 'fFranchise', 'fNetwork', 'fCompany'];
 
 // (The marker checkboxes keep 'on' / ''.)
 function currentViewFilters(tag) {
   const values = viewFilterMemory.tag === tag ? { ...viewFilterMemory.values } : {};
-  VIEW_FILTER_IDS.forEach(id => { const el = document.getElementById(id); if (el) values[id] = MARKER_FILTER_IDS.includes(id) ? (el.checked ? 'on' : '') : el.value; });
+  VIEW_FILTER_IDS.forEach(id => { const el = document.getElementById(id); if (el) values[id] = el.value; });
   return values;
 }
 
@@ -277,7 +277,6 @@ function applyViewFilters(tag, values) {
   for (const [id, value] of Object.entries(values)) {
     const el = document.getElementById(id);
     if (!el) continue;
-    if (MARKER_FILTER_IDS.includes(id)) { el.checked = value === 'on'; continue; }
     if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === value)) continue;
     el.value = value;
   }
@@ -486,7 +485,6 @@ function collectionsChooserHtml() {
   const status = (text, button = '') => `<p class="collections-state" role="status">${esc(text)}</p>${button}`;
   const retry = handler => ` <button class="btn collections-retry" id="collectionsRetry" onclick="${handler}()">Retry</button>`;
   if (orgState === 'loading') return status('Loading collections…');
-  if (orgState === 'absent') return status('Collections aren’t available on this database.');
   if (orgState !== 'ready') return status('Collections unavailable', retry('loadOrganization'));
   const list = activeBrowseCollections();
   if (!list.length) {
@@ -927,7 +925,7 @@ function renderBrowseFilters() {
         ${statusValues.map(v => `<option value="${v}">${esc(BROWSE_STATUS_LABELS[v])}</option>`).join('')}
       </select>${watchSelect}${seasonVisSelect}`,
     cats: [categoryFields],
-    marks: [filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml()), markerFilterChecksHtml(), tagFilters.watchWith],
+    marks: [filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml()), tagFilters.watchWith],
     more: [filterFieldHtml('Year', 'fYear', yearSelect), tagFilters.tag, filterFieldHtml('Original label', 'fTheme', themeSelect)]
   });
   filtersRowEl.dataset.tab = tag;
@@ -957,7 +955,7 @@ function renderBrowseTable(chain = true) {
   const q = val('fSearch').trim().toLowerCase();
   const f = { textMatches: title => !q || (title || '').toLowerCase().includes(q), fStatus: val('fStatus'),
     fTheme: val('fTheme'), fCollection: val('fCollection'), fWatchWith: val('fWatchWith'),
-    fPriority: val('fPriority'), markers: markerFilterValues(), cats: categoryFilterValues() };
+    fPriority: val('fPriority'), cats: categoryFilterValues() };
   const dest = currentBrowseDest();
   let listing = null;
   if (collection) { if (dest) listing = renderBrowseCollection(dest, today, f); }
@@ -1094,7 +1092,6 @@ function renderAllMovies(today, f) {
   document.getElementById('statsRow').innerHTML = countLineHtml(countScoped(shown.length, films.length, 'film', 'films') + library);
   let html = '', cardHtml = '';
   const add = out => { html += out.row; cardHtml += out.card; };
-  add(dismissAllNewHtml(shown.filter(r => r.catalog_new).map(r => ({ kind: 'film', id: r.id }))));
   if (unclassified > 0) {
     add(browseNoteHtml(`⚠️ ${plural(unclassified, 'saved entry is', 'saved entries are')} neither a TV season nor a film, so ${unclassified === 1 ? 'it isn’t' : 'they aren’t'} listed.`));
   }
@@ -1183,7 +1180,7 @@ function browseFilmNoun() {
 }
 
 // A film in a collection (S4): All Movies' controls — status, Watched and the ⋯ menu (priority,
-// watch-with, Categories…, the markers, Pull rest, Match) — with the B6 focus hooks. In place of
+// watch-with, Categories…, Pull rest, Match) — with the B6 focus hooks. In place of
 // All Movies' ×, the menu ends with Remove from <collection>… and the library action named by its
 // effect: Delete from library…, or Skip film (built-in catalog)… (none for a Skipped catalog film).
 function browseFilmHtml(r, today, part) {
@@ -1233,14 +1230,12 @@ function browseFilmHtml(r, today, part) {
   return { row, card };
 }
 
-// A film's ⋯ menu (All Movies and, since S4, collections): priority, watch-with, Categories…, Dismiss “New”,
-// Keep current status, the rest of its franchise (a TMDB collection and a genre theme) and Match
+// A film's ⋯ menu (All Movies and, since S4, collections): priority, watch-with, Categories…,
+// the rest of its franchise (a TMDB collection and a genre theme) and Match
 // (an eligible row); extra: what the view adds at the end.
 function filmMenuHtml(r, policy, extra = '') {
   const idArg = esc(r.id).replace(/'/g, "\\'");
-  const stateActions = `<div class="popover-section-label" style="margin-top:8px">Details</div><button class="popover-action" onclick="openDetails('film', '${idArg}', this)">Categories…</button>`
-    + (r.catalog_new ? `<button class="popover-action" onclick="dismissCatalogNew([{ kind: 'film', id: '${idArg}' }])">Dismiss “New”</button>` : '')
-    + (r.status_review ? `<button class="popover-action" onclick="keepCurrentStatus('film', '${idArg}')">Keep current status</button>` : '');
+  const stateActions = `<div class="popover-section-label" style="margin-top:8px">Details</div><button class="popover-action" onclick="openDetails('film', '${idArg}', this)">Categories…</button>`;
   // Its TMDB collection: Check collection, then Pull rest only when other films can be added (collections-pull.js).
   const pullBtn = r.tmdb_collection_id && filmThemeKindOf(r) === 'genre'
     ? `<div class="film-franchise" data-film-franchise="${esc(r.id)}">${filmCollectionSectionHtml(r)}</div>` : '';

@@ -60,7 +60,7 @@ function library() {
   );
 }
 // Rina's choice was renamed: the stored token stays "Rina", the label is now "Rina R.".
-const CHOICES = [['Alone', 'Alone'], ['Rina', 'Rina R.'], ['Suzanne', 'Suzanne']].map(([token, label], i) => ({
+const CHOICES = [['Alone', 'Alone'], ['Rina', 'Rina R.'], ['Sam', 'Sam']].map(([token, label], i) => ({
   id: `0e000000-0000-4000-8000-00000000000${i + 1}`, token, label, sort_order: i + 1, archived_at: null, created_at: '2026-10-06T00:00:00+00:00' }));
 
 async function boot(data = library(), opts = {}) {
