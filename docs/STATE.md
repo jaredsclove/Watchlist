@@ -134,7 +134,11 @@ TMDB show ratings [#18], rating beside the title [#20] and [#21], collection upd
 (CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29], the compact interface [#32],
 density and search [#34], research access (CU2) [#37], a missing season comes back (CU1e) [#40], write scope (W1) [#42].
 
-- **Release:** `963b96e`, library writes are authorized by the function's own scope (W1, item 9; PR #42, a merge commit of the reviewed
+- **W1 removal (owner's decision, 2026-11-01):** W1 comes out of the active system, GraphQL stays disabled as a standing decision, and item 11
+  is abandoned unreleased. `db/w1_removal.sql` puts the earlier write authorization back: `lib_write_on` sets the transaction-local
+  `watchlist.library_write` and the guards read it. Database only, with no page change, so the token stays `20261101-seasons`. Run the migration
+  before this change merges; the release record then replaces this line with what ran. The bullets below on W1 and its drill are history.
+- **Historical: W1, removed since.** `963b96e`, library writes are authorized by the function's own scope (W1, item 9; PR #42, a merge commit of the reviewed
   head `b54f1fd`, whose migration and application files equal the reviewed implementation at `5d4fdac`), released 2026-11-01 UTC. Database only:
   `db/w1_write_scope.sql` puts `set xmloption = 'document'` on 35 public and 3 enrichment functions and makes the guards read it through
   `private.lib_authorized`. No table, policy, capability, phase, backup-format or application file changed; the token stays
@@ -143,13 +147,13 @@ density and search [#34], research access (CU2) [#37], a missing season comes ba
   (`db/test/w1_preflight.sql`, hosted capabilities included); a pre-release format-7 backup validated; the SQL Editor's contents checked
   against the run file's hash and run once (its RLS prompt concerned the migration's temp tables); one run record confirmed by a separate
   read, with the clause on exactly 35 + 3 functions, `lib_authorized` volatile, execute for `authenticated` only, no temp table left and
-  `pg_graphql` absent; `db/test/w1_catalog_check.sql` passed. Verified through the hosted API, signed in, on a synthetic `ZZ` show created
+  `pg_graphql` absent; `db/test/w1_catalog_check.sql` passed (both since removed). Verified through the hosted API, signed in, on a synthetic `ZZ` show created
   through `library_create_show_b45`: direct `PATCH`es of `tv_shows.priority` from normal to high, 16 of 16 refused with
   `library_write_required` and the value unchanged; the no-write check answered `target_missing`; a real write through
   `library_set_show_state_b45` went there and back; `delete_tv_season` removed the record. Merged only after that. Pages built `963b96e`; the
   35 application files are byte-identical and all 29 versioned files carry the token. The fresh page loaded all views as the owner, with
   member and research access true, and no console error.
-- **Recovery drill, H2 (owner-approved, 2026-11-01, `docs/W1_RELEASE_PROCEDURE.md`):** run on production right after the release, with
+- **Historical: recovery drill, H2 (owner-approved, 2026-11-01; its procedure and scripts are in git at `20c0433`):** run on production right after the release, with
   nothing poisoned, on PostgREST 14.5 and PostgreSQL 17 (the local stack is 16.4). The pre-request gate took effect within seconds of step 1's
   notification, and a signed-out request answered 503 `PT503`. With schema access revoked, the owner's direct writes and library functions
   stopped with permission errors. `postgres` ended PostgREST's connections, 8 and then 2, all that were found; the status read showed each
@@ -161,11 +165,10 @@ density and search [#34], research access (CU2) [#37], a missing season comes ba
   distinct export times, 19 tables and 1,393 rows each; each later one equals the baseline field by field, and no test record is left. No
   production GraphQL request was sent. **Not proved on hosted:** removing a real default, a server-level default (`postgres` can't set one,
   and only Supabase Support could remove one; unconfirmed), a project restart, and any second member, since no other account has a session.
-- **Write-scope limits (W1):** W1 doesn't fail closed in every state. A role default PostgREST still caches, and a session-level `SET` in a
-  function, let direct writes through; each needs database administrator access (`db/README.md`, write scope), and recovery is that
-  procedure. A later migration that replaces a listed function must set the clause again, then run the catalog check. Direct deletes and title
-  updates stay unguarded (item 11). A restore's largest local success under the 8 s timeout was 36,123 rows, up to 7.5 s, on a
-  synthetic library. That isn't a guaranteed capacity, and hosted timing wasn't measured.
+- **Accepted limitations (owner, 2026-11-01; `db/README.md`):** this is an app for trusted people. A member's crafted request can bypass product
+  rules on their own records: direct deletes and title changes (item 11, abandoned), and, if GraphQL were ever enabled, a chained write. It can't
+  reach another account. A restore's largest local success under the 8 s timeout was 36,123 rows, up to 7.5 s, on a synthetic library, and with W1
+  in place; that isn't a guaranteed capacity, and hosted timing wasn't measured.
 - **Earlier release:** `a3436a8`, a missing TMDB season comes back on every Refresh shows (CU1e, item 10; PR #40, the branch's three commits
   rebased, same tree as the reviewed head `2d0e6dc`), released 2026-11-01 UTC with database migration `db/cu1e_missing_season.sql`
   (replaces `private.cu1_finding_take` only; no table, grant, capability, phase or backup-format change, and no backfill). The page says
@@ -222,8 +225,8 @@ density and search [#34], research access (CU2) [#37], a missing season comes ba
   manual show, its season, a membership, a hold and two TMDB findings). It has no membership and no sessions, so it reaches no library,
   but its password still works: a new sign-in is possible and would read and write nothing. Re-adding its membership would restore access.
   It isn't banned. Removing it is deferred with other member libraries (`docs/MEMBER_RECOVERY.md`).
-- **GraphQL, observed 2026-11-01 (a dated observation, not a guarantee):** `pg_graphql` was not installed, by a catalog read; no
-  GraphQL request was sent. This can change. Item 9's chained-mutation path is closed by W1, on a local stack; enabling GraphQL still needs its own decision.
+- **GraphQL stays disabled, a standing decision (2026-11-01):** `pg_graphql` isn't installed, and the page uses REST only. Enabling it needs a new
+  explicit decision: the write flag lasts for a transaction, so one GraphQL request could chain a library function with a direct write on the caller's own rows.
 
 - **Earlier release:** `9768284`, density and search (item 8 follow-up; PR #34, the branch's two commits rebased, same tree as the
   reviewed head `7c125e7`), released 2026-10-31 UTC. Presentation and interaction only: no migration, and no backup-format
@@ -465,8 +468,7 @@ density and search [#34], research access (CU2) [#37], a missing season comes ba
   - Batch B: no saved-data effect; a code revert of its commits, newest first.
   - M1: not revertible by a code revert. Earlier pages can't use the locked database (they fail closed:
     writes refused, reads error); repairs are fix-forward.
-  - W1: no page to revert; fix-forward. `db/test/w1_reverse.sql` is for test environments only. A production reversal would be a new, separately
-    approved script.
+  - W1: removed by `db/w1_removal.sql`; fix-forward, with no script to put it back. Its migration stays as history.
   - CU2: the page can be reverted by a code revert (an older page works against the CU2 database, and the database still
     refuses research writes without access); the column, guard and restore wrapper stay (fix-forward).
   - CU1d: the page can be reverted by a code revert of `0cac052` and `1ffd079`, newest first; the two functions stay

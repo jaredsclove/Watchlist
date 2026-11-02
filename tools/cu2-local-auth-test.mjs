@@ -65,11 +65,10 @@ psql(`update private.migration_stage set stage = 'final'`);
 for (const f of ['db/phase3b_org.sql', 'db/phase3b2_org_write.sql', 'db/phase4a_catalog.sql', 'db/phase4b_add_to_show.sql', 'db/phase5a_expand.sql', 'db/phase5c_contract.sql']) psql(sql(f));
 psql(`select set_config('watchlist.b45_choices', '{"shows": {}, "films": {}}', false);\n` + sql('db/b45_expand.sql'));
 const A = await account('cu2-a@test.invalid'), B = await account('cu2-b@test.invalid'), C = await account('cu2-c@test.invalid');
-psql(`begin; select set_config('watchlist.library_write', 'on', true); set local xmloption = 'document';
+psql(`begin; select set_config('watchlist.library_write', 'on', true);
   insert into private.stage5_recovery_meta (user_id, origin, counts, hashes) select bootstrap_owner_id, 'contraction', '{}'::jsonb, '{}'::jsonb from private.app_owner; commit;`);
 psql(`select set_config('watchlist.m1_owner', '${A.id}', false), set_config('watchlist.m1_run', 'local-m1', false);\n` + sql('db/m1_access.sql'));
 psql(`select set_config('watchlist.ep1_run', 'local-ep1', false);\n` + sql('db/ep1_episode_marks.sql'));
-if (argv.includes('--w1')) psql(`select set_config('watchlist.enrich_run', 'local-enrich', false);\n` + sql('db/admin/tv_enrich_partial.sql'));
 psql(`insert into private.library_members (user_id, note) values ('${B.id}', 'local B')`);
 const asMember = (who, q) => psql(`begin; select set_config('request.jwt.claims', '{"sub": "${who.id}", "role": "authenticated"}', true); set local role authenticated; ${q}; commit;`);
 const idMap = new Map();
@@ -82,8 +81,6 @@ for (const [g, f] of [['cu1', 'db/cu1_collection_updates.sql'], ['cu1b', 'db/cu1
 }
 const inst = psql(`select set_config('watchlist.cu2_run', 'local-cu2', false), set_config('watchlist.cu2_owner', '${A.id}', false);\n` + sql('db/cu2_research_access.sql'), false);
 ok(/CU2\|/.test(inst), 'db/cu2_research_access.sql commits on real PostgreSQL 17');
-// --w1: the same checks under the write scope that replaced watchlist.library_write.
-if (argv.includes('--w1')) ok(/W1\|/.test(psql(`select set_config('watchlist.w1_run', 'local-w1', false);\n` + sql('db/w1_write_scope.sql'), false)), 'db/w1_write_scope.sql commits');
 await new Promise(r => setTimeout(r, 1500)); // the API reloads its schema cache
 const access = (who, v) => psql(`update private.library_members set research_enabled = ${v} where user_id = '${who.id}'`);
 const cap = async who => (await rpc(who.token, 'stage5_capabilities')).json;

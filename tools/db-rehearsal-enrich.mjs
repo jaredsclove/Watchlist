@@ -65,18 +65,7 @@ async function asRole(db, role, sub, s, p) {
 const asUser = (db, sub, s, p) => asRole(db, 'authenticated', sub, s, p);
 async function attempt(fn) { try { return { ok: true, rows: await fn() }; } catch (e) { return { ok: false, message: e.message }; } }
 const val = async (db, s, p) => Object.values((await db.query(s, p)).rows[0])[0];
-// REHEARSE_W1=1 runs every check under W1's guards: its core comes off before a script that replaces functions, since a
-// migration refuses settings it doesn't expect, and goes back on after it.
-const W1_CORE = process.env.REHEARSE_W1 ? sql('db/w1_write_scope.sql').match(/-- w1-core-begin\n([\s\S]*)-- w1-core-end/)[1] : null;
-const W1_OFF = W1_CORE && sql('db/test/w1_reverse.sql').replace(/do \$\$ begin[\s\S]*?end \$\$;\n/, '');
 async function tryExec(db, text) {
-  const hook = W1_CORE && /function/.test(text);
-  if (hook && Object.values((await db.query(`select to_regprocedure('private.lib_authorized()') is not null as on`)).rows[0])[0]) await db.exec(W1_OFF);
-  const r = await tryExec0(db, text);
-  if (hook) await db.exec(`begin;\n${W1_CORE}\ncommit;`);
-  return r;
-}
-async function tryExec0(db, text) {
   try { const out = await db.exec(text); return { ok: true, out }; }
   catch (e) { await db.exec('rollback').catch(() => {}); return { ok: false, message: e.message }; }
 }
@@ -92,7 +81,7 @@ async function replica({ ep1 = true } = {}) {
   await db.exec(sql('db/b45_expand.sql'));
   await db.exec(`insert into auth.users (id, email) values ('${A}', 'a@test.invalid'), ('${B}', 'b@test.invalid'), ('${C}', 'c@test.invalid')`);
   await asRole(db, 'anon', null, `select public.restore_backup($1::jsonb, false)`, [doc5]);
-  await db.exec(`begin; select set_config('watchlist.library_write', 'on', true); set local xmloption = 'document';
+  await db.exec(`begin; select set_config('watchlist.library_write', 'on', true);
     insert into private.stage5_recovery_records (user_id, kind, id, collection)
       select user_id, 'show', id, 'synthetic' from public.tv_shows union all select user_id, 'item', id, 'synthetic' from public.watchlist_items;
     insert into private.stage5_recovery_meta (user_id, origin, counts, hashes) select bootstrap_owner_id, 'contraction', '{}'::jsonb, '{}'::jsonb from private.app_owner;
