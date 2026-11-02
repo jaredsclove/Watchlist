@@ -3,8 +3,8 @@
 Migrations run as `postgres` in the Supabase SQL Editor, and every production step needs explicit approval and a validated backup first. The
 release tiers are in `docs/STATE.md`. What each script did when it ran, and the older rehearsals: `docs/history/DB_SCRIPTS.md`.
 
-**Current production state:** phase `contracted-cu1`, backup format 7, `access = members`, through CU1e and W1's removal. The recovery archive is
-present and unused. There is no schema rollback, and none of the old rollback scripts can run against this state: repairs are fix-forward, and
+**Current production state:** phase `contracted-cu1`, backup format 7, `access = members`, through CU1e, W1's removal and the simplification. The recovery
+archive is retired, exported privately first. There is no schema rollback, and none of the old rollback scripts can run against this state: repairs are fix-forward, and
 data recovery is a format-7 restore through the page or `docs/ADMIN_RESTORE.md`.
 
 ## Run order
@@ -21,7 +21,7 @@ To rebuild a local database, the order is the replay in `tools/db-rehearsal-cu1e
 | EP1 | `ep1_episode_marks.sql` (`watchlist.ep1_run`); `admin/tv_enrich_partial.sql` (`watchlist.enrich_run`) |
 | CU1 | `cu1_collection_updates.sql`, `cu1b_hold_edit.sql`, `cu1c_date_equivalence.sql`, `cu1d_network_and_marks.sql`, then `cu2_research_access.sql`, `cu1e_missing_season.sql` (each `watchlist.<name>_run`; CU2 also `watchlist.cu2_owner`) |
 | W1 (history) | `w1_write_scope.sql` then `w1_removal.sql`, applied in production and never to be run again there |
-| Prepared, **not run in production** | `simplify_restore_cleanup.sql` (`watchlist.simplify_run`): one flat `restore_backup`, the old chain, 36 dormant functions and the six archive and rollback tables removed. `simplify_preflight.sql` is its read-only check and the private archive export. Local builds include it through `tools/restore-fixture.mjs` |
+| Simplification | `simplify_restore_cleanup.sql` (`watchlist.simplify_run`), applied in production and refused on a rerun: one flat `restore_backup`, the old chain, 36 dormant functions and the six archive and rollback tables removed. `simplify_preflight.sql` is its read-only check and the private archive export. Local builds include it through `tools/restore-fixture.mjs` |
 
 The local replays leave out W1 and its removal: the removal's test showed the catalog afterwards equals the one before W1, so together they add nothing to the state a replay needs.
 

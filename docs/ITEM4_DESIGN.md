@@ -331,11 +331,9 @@ outcome writes a guarded row (`cu1_finish` updates the stored finding, so a rese
   `user_id`). The composite foreign keys make that true only inside the cascade, so while a parent exists no delete passes. A null
   reference is never a missing parent, and the guard is security definer so that a parent row security hides isn't one either. As for
   any member today, deleting a record takes the holds on it, and Refresh shows can add a deleted season back.
-- *Restore.* `public.restore_backup` is now a wrapper around the unchanged `private.restore_backup_v7`. It sets
-  `watchlist.research_restore` transaction-locally around that one call and clears it before returning; a failure discards it with the
-  transaction or the caller's savepoint, and there's deliberately no exception block. Members can't set it: nothing exposed calls
-  `set_config` with their values, and the API exposes neither `private` nor `pg_catalog`. Calling the inner function gains nothing,
-  because the flag is the wrapper's. The rule covers chained GraphQL mutations in one request.
+- *Restore.* `public.restore_backup` sets `watchlist.research_restore` itself, transaction-locally, and clears it before returning; a
+  failure discards it with the transaction or the caller's savepoint. Members can't set it: nothing exposed calls `set_config` with their
+  values, and the API exposes neither `private` nor `pg_catalog`. The rule covers chained GraphQL mutations in one request.
 
 **Restore and backup.** Format 7 is unchanged, and a backup taken without access is complete. A restore replaces saved data for any member,
 research rows included: they're stored, verified and inert until access is on; restored holds protect at once. The permission isn't
@@ -370,10 +368,9 @@ call still running. An unclear answer stops the rest. A finding that keeps being
 ## 5. Backup format 7
 
 - Tables: format 6's nine plus the ten above (nineteen), no `user_id`.
-- `restore_backup` for format 7: the format-6 function is kept unchanged as `private.restore_backup_v6` and
-  restores format 6's nine tables; the owner's rows in CU1's ten new tables are deleted first (or go by cascade), then
-  inserted from the file and verified row for row, in the same transaction.
-- Formats 3, 4, 5 and 6 are converted in the page (6 → 7 adds the ten tables empty). The preview states what
+- `restore_backup` for format 7: one function replaces the owner's rows in all nineteen tables, then verifies the final state against the
+  file field by field, in the same transaction.
+- Formats 5 and 6 are converted in the page (6 → 7 adds the ten tables empty). The preview states what
   a restore of such a file removes: the current definitions, exclusions, holds, aliases, removals, settings,
   findings and the setup row, by count, and that automatic updates for catalog shows pause until the setup file
   is imported again (section 3.2).
