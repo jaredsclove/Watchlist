@@ -1,6 +1,6 @@
 // Offline tests for the compact interface: the row's order (expand · title · ⋯), priority in the
 // menu with non-default marks in the row, status emphasis, explicit progress, the Mark watched
-// shortcut, subdued genres and the toolbar's order. The page runs in the whole-page harness
+// shortcut, genre filter buttons and the toolbar's order. The page runs in the whole-page harness
 // (tests/app-harness.js); measured layout at real widths is a browser check, not covered here.
 // Run from the repo root: node tests/compact-layout.test.js
 const assert = require('assert');
@@ -148,14 +148,13 @@ test('status stays a directly editable select; To Watch and Skipped are quiet, a
   assert.match(css, /\.status-select:focus-visible \{ outline: 2px solid var\(--accent\);/);
 });
 
-test('genres: a clickable one stays a filter button, subdued, with hover and focus treatments; without its filter it stays plain text', async () => {
+test('genres: a clickable one stays a filter button with the pills\' hover and focus treatments; without its filter it isn\'t a button', async () => {
   const a = mixed();
   const app = await boot(all(a));
   app.ctx.switchView('alltv'); await settle();
   const h = rowOf(app, a.show.id);
   assert.match(h, /<button type="button" class="badge meta-chip meta-genres badge-clickable filter-pill"[^>]*data-filter-kind="genres" data-filter-value="Crime"/);
   assert.strictEqual(app.get("filterPillHtml('watchwith', 'x', 'X', { cls: 'ww-tag' })").startsWith('<span'), app.el('fWatchWith') === null, 'no filter control, no button');
-  assert.match(css, /button\.meta-chip\.meta-genres:hover \{[^}]*text-decoration: underline;/);
   assert.match(css, /\.filter-pill:focus-visible \{ outline: 2px solid var\(--accent\);/);
   assert.match(phone, /\.filter-pill \{ min-height: 32px;/);
 });
@@ -173,7 +172,7 @@ test('the toolbar: toggles, Search, scope, More filters, + Add in page order; th
 });
 
 test('phone cards: labels are small pills in 32 px targets, Up to date is quiet text, and one margin holds the card', () => {
-  assert.match(phone, /\.item-card \.filter-pill:not\(\.meta-genres\) \{[^}]*border-color: transparent !important;[^}]*background-clip: padding-box !important;[^}]*min-height: 32px;/);
+  assert.match(phone, /\.item-card \.filter-pill \{[^}]*border-color: transparent !important;[^}]*background-clip: padding-box !important;[^}]*min-height: 32px;/);
   assert.match(phone, /\.card-actions \.status-pill\.s-caughtup \{ background: none; border: 0; padding: 0;/);
   assert.match(phone, /\.card-labels \{ display: flex; flex-wrap: wrap;/, 'the labels move together');
   assert.ok(!/\.card-progress \{[^}]*margin-left: auto/.test(css), 'progress that wraps starts on the card\'s margin');
