@@ -21,6 +21,7 @@ To rebuild a local database, the order is the replay in `tools/db-rehearsal-cu1e
 | EP1 | `ep1_episode_marks.sql` (`watchlist.ep1_run`); `admin/tv_enrich_partial.sql` (`watchlist.enrich_run`) |
 | CU1 | `cu1_collection_updates.sql`, `cu1b_hold_edit.sql`, `cu1c_date_equivalence.sql`, `cu1d_network_and_marks.sql`, then `cu2_research_access.sql`, `cu1e_missing_season.sql` (each `watchlist.<name>_run`; CU2 also `watchlist.cu2_owner`) |
 | W1 (history) | `w1_write_scope.sql` then `w1_removal.sql`, applied in production and never to be run again there |
+| Prepared, **not run in production** | `simplify_restore_cleanup.sql` (`watchlist.simplify_run`): one flat `restore_backup`, the old chain, 36 dormant functions and the six archive and rollback tables removed. `simplify_preflight.sql` is its read-only check and the private archive export. Local builds include it through `tools/restore-fixture.mjs` |
 
 The local replays leave out W1 and its removal: the removal's test showed the catalog afterwards equals the one before W1, so together they add nothing to the state a replay needs.
 

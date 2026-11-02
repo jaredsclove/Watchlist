@@ -108,6 +108,7 @@ migration, merge after the migration's run record is confirmed.
 - Not yet verified on production: research-access Continue; CU1e's restored season, until the owner runs Refresh shows.
 - Deleting a removed member's library is deferred (`docs/MEMBER_RECOVERY.md`). Every migration revokes from `anon` explicitly, because default
   privileges owned by `supabase_admin` can't be changed by `postgres`.
+- **Prepared locally, not released:** `db/simplify_restore_cleanup.sql` (`db/README.md`). Until it runs, production has the recovery archive and the old restore chain.
 - Optional: on an unknown database phase, a refused season toggle shows the raw refusal text.
 
 ## Tests

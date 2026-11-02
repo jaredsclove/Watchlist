@@ -81,6 +81,8 @@ for (const [g, f] of [['cu1', 'db/cu1_collection_updates.sql'], ['cu1b', 'db/cu1
 }
 const inst = psql(`select set_config('watchlist.cu2_run', 'local-cu2', false), set_config('watchlist.cu2_owner', '${A.id}', false);\n` + sql('db/cu2_research_access.sql'), false);
 ok(/CU2\|/.test(inst), 'db/cu2_research_access.sql commits on real PostgreSQL 17');
+psql(`select set_config('watchlist.cu1e_run', 'local-cu1e', false);\n` + sql('db/cu1e_missing_season.sql'));
+ok(/SIMPLIFY\|/.test(psql(`select set_config('watchlist.simplify_run', 'local-simplify', false);\n` + sql('db/simplify_restore_cleanup.sql'))), 'the final state: CU1e and the flat restore installed');
 await new Promise(r => setTimeout(r, 1500)); // the API reloads its schema cache
 const access = (who, v) => psql(`update private.library_members set research_enabled = ${v} where user_id = '${who.id}'`);
 const cap = async who => (await rpc(who.token, 'stage5_capabilities')).json;
@@ -105,8 +107,6 @@ ok(!s2.ok && (await cap(B)).research === false, 'Auth metadata the user can writ
 
 section('nothing private is reachable');
 for (const [label, r] of [
-  ['private.restore_backup_v7', await rest(B.token, 'POST', 'rpc/restore_backup_v7', { p_backup: {}, p_allow_v1_reset: false })],
-  ['private.restore_backup_v7, private profile', await rest(B.token, 'POST', 'rpc/restore_backup_v7', { p_backup: {}, p_allow_v1_reset: false }, { 'Content-Profile': 'private' })],
   ['private.research_enabled', await rest(B.token, 'POST', 'rpc/research_enabled', {}, { 'Content-Profile': 'private' })],
   ['private.lib_write_on', await rest(B.token, 'POST', 'rpc/lib_write_on', {}, { 'Content-Profile': 'private' })],
   ['set_config', await rest(B.token, 'POST', 'rpc/set_config', { setting_name: 'watchlist.research_restore', new_value: 'on', is_local: true })],
