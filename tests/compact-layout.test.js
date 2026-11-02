@@ -148,6 +148,11 @@ test('status stays a directly editable select; To Watch and Skipped are quiet, a
   assert.match(css, /\.status-select:focus-visible \{ outline: 2px solid var\(--accent\);/);
 });
 
+test('styles.css: every block closes, so no later rule is caught inside a media query', () => {
+  const plain = css.replace(/\/\*[^]*?\*\//g, '');
+  assert.strictEqual(plain.split('{').length, plain.split('}').length);
+});
+
 test('genres: a clickable one stays a filter button with the pills\' hover and focus treatments; without its filter it isn\'t a button', async () => {
   const a = mixed();
   const app = await boot(all(a));

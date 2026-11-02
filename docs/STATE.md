@@ -27,8 +27,9 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: neutral-gray genre pills (presentation only), released
-  2026-11-02 UTC. Cache token `20261102-genre-pills`. Last database release: the simplification (PRs #46 and #47), the flat restore and
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: the two-line expanded-season layout and a repaired
+  `styles.css` block that had limited its later rules to phone widths since PR #46 (presentation only), released 2026-11-02 UTC. Cache token
+  `20261102-season-lines`. Last database release: the simplification (PRs #46 and #47), the flat restore and
   retired-object cleanup, released 2026-11-02 UTC.
 - Database phase `contracted-cu1`, backup format 7 (nineteen tables, no `user_id`), `access = members`, research per member. One flat
   `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one

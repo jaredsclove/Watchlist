@@ -155,21 +155,21 @@ function marksAgainstList(seasonId, ids) {
   marks.forEach((v, id) => { if (listed.has(id)) inList++; });
   return { inList, unlisted: marks.size - inList, total: ids.length };
 }
-// A collapsed season: "N/T watched" against the cached list; from a count alone only while the marks
-// are fewer than it (a count can't tell a kept mark for an unlisted episode from a listed one, so it
-// never shows a complete-looking T/T); otherwise "N marked". Nothing for a season without marks, an
+// A collapsed season: "N/T episodes watched" against the cached list; from a count alone only while the
+// marks are fewer than it (a count can't tell a kept mark for an unlisted episode from a listed one, so it
+// never shows a complete-looking T/T); otherwise "N episodes marked". Nothing for a season without marks, an
 // untracked or a skipped one.
 function episodeProgressText(r) {
   if (!isEpisodeTrackable(r) || r.skipped) return '';
   const n = episodeMarkCount(r.id);
   if (!n) return '';
   const cached = cachedEpisodeList(r);
-  let text = `${n} marked`;
+  let text = `${n} episode${n === 1 ? '' : 's'} marked`;
   if (cached && cached.ids && cached.ids.length) {
     const p = marksAgainstList(r.id, cached.ids);
-    text = `${p.inList}/${p.total} watched${p.unlisted ? ` · ${p.unlisted} not listed` : ''}`;
-  } else if (cached && cached.count > 0 && n < cached.count) text = `${n}/${cached.count} watched`;
-  return r.watched ? text : `In progress · ${text}`;
+    text = `${p.inList}/${p.total} episodes watched${p.unlisted ? ` · ${p.unlisted} not listed` : ''}`;
+  } else if (cached && cached.count > 0 && n < cached.count) text = `${n}/${cached.count} episodes watched`;
+  return text;
 }
 // Next unwatched: the first episode of the known list without a mark (marks can have gaps), for a
 // season neither watched nor skipped; nothing when the list is unknown, empty or fully marked. It
@@ -182,12 +182,13 @@ function nextUnwatchedText(r) {
   const name = episodeTitlesShown() ? next.name.trim() : '';
   return `Next unwatched: E${next.number}${name ? ` — ${name}` : ''}`;
 }
-// Shown wherever a season's progress is: the progress text, then the next-unwatched line beside it.
-function episodeProgressHtml(r) {
+// Shown wherever a season's progress is: the progress text, the season's Episodes toggle where the
+// caller passes it (an expanded season's own row), then the next-unwatched text.
+function episodeProgressHtml(r, toggle = '') {
   const text = episodeProgressText(r);
-  if (!text) return '';
+  if (!text) return toggle ? ` ${toggle}` : '';
   const next = nextUnwatchedText(r);
-  return ` <span class="ep-progress">${esc(text)}</span>${next ? ` <span class="ep-next">${esc(next)}</span>` : ''}`;
+  return ` <span class="ep-progress">· ${esc(text)}</span>${toggle ? ` ${toggle}` : ''}${next ? ` <span class="ep-next">${esc(next)}</span>` : ''}`;
 }
 
 // ── The open list ──

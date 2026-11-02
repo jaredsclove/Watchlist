@@ -208,7 +208,7 @@ td.card-date { white-space: nowrap; }
 .show-group-row:hover .expand-chevron, .card-top:hover .expand-chevron { border-color: var(--accent); color: var(--accent); }
 .sub-row td { background: var(--bg); }
 .sub-row td:first-child { border-left: 2px solid var(--accent-dim); }
-.sub-row .season-lbl { color: var(--text2); font-size: 13px; }
+.sub-row .season-lbl { color: var(--text); font-size: 13px; }
 
 .card-subseasons { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
 .card-subseason-row { display: flex; flex-direction: column; gap: 6px; border-left: 2px solid var(--accent-dim); padding-left: 10px; }
@@ -896,7 +896,7 @@ td > :is(.meta-chip, .meta-more):not(:last-child) { margin-right: 4px; }
   .priority-select, .show-actions-inner .btn, .show-actions-inner .btn-link, .show-actions-inner .ended-check, .resume-picker .btn, .resume-picker select,
   .details-check, .details-field .search-input, #detailsModalBox .btn { min-height: 44px; }
 }
-@media (max-width: 700px) { .details-candidate { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 6px; }
+.details-candidate { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 6px; }
 @media (max-width: 700px) { .details-candidate select { min-height: 44px; } }
 /* B4/B5: the cards' action row wraps rather than overflow on a narrow phone. */
 .card-actions, .card-subseason-row .card-actions { flex-wrap: wrap; }
@@ -989,8 +989,12 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .account-password { max-width: 420px; }
 
 /* EP1: episode progress within seasons (episodes.js) */
-.ep-progress { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--text2); white-space: nowrap; }
+.ep-progress { display: inline-block; font-size: 11px; color: var(--text2); white-space: nowrap; }
 .ep-next { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
+/* An expanded season: the season, its progress and Episodes, then the next-unwatched line of its own. */
+.sub-row .ep-next, .card-subseason-row .ep-next { display: block; margin-left: 0; }
+.sub-row .ep-progress:has(+ .season-action)::after { content: ' ·'; white-space: pre; }
+.card-subseason-row .season-lbl { color: var(--text); }
 .ep-toggle { font-size: 12px; padding: 0 4px; }
 .ep-panel { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; font-size: 13px; }
 .ep-summary { color: var(--text2); }
@@ -1013,6 +1017,7 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
   /* Phone: each episode row and its controls are at least 44px tall. */
   .ep-check { min-height: 44px; flex: 1 1 auto; }
   .ep-check input { width: 22px; height: 22px; }
+  .card-subseason-row .ep-toggle { margin-block: -6px; } /* its 44 px target reaches past its line, not over the controls */
   .ep-title, .ep-toggle, .ep-through-select, .ep-through-apply, .ep-all, .ep-all-confirm, .ep-suggest .btn-link, .ep-suggest .watch-btn, .cu-list .btn-link, .settings-check { min-height: 44px; }
 }
 

@@ -307,7 +307,7 @@ test('B6: the expanded show has the labelled Status select, a progress line and 
   assert.ok(tbody(app).includes(`data-show-of="${s.show.id}"`) && tbody(app).includes(`data-season-row="${s.rows[0].id}"`), 'focus hooks on the actions row and seasons');
   // the expanded seasons keep Watched before Skip / Keep under the five headings
   const sub = rowsOf(tbody(app)).find(r => r.includes(`data-season-row="${s.rows[2].id}"`));
-  assert.strictEqual(cellCount(sub), 5);
+  assert.strictEqual(cellCount(sub), 4, 'the season label spans the empty Categories cell');
   assert.ok(sub.indexOf(`toggleWatch('${s.rows[2].id}')`) < sub.indexOf(`setSeasonSkipped('${s.rows[2].id}'`));
 });
 

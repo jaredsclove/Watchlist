@@ -605,7 +605,7 @@ test('section labels carry their counts; season entries include Specials and par
   assert.strictEqual(app.requests.length, reqs);
   assert.ok(html(app).includes(`aria-expanded="true" aria-label="Hide seasons of Yellowstone"`));
   // U4 (S3 inventory amendment): an expanded show's season rows are All TV's (whitespace inside the cell).
-  const seasonOrder = [...html(app).matchAll(/padding-left:28px">\s*<span class="season-lbl">([^<]*)<\/span>/g)].map(m => m[1]);
+  const seasonOrder = [...html(app).matchAll(/padding-left:28px"(?: colspan="2")?>\s*<span class="season-lbl">([^<]*)<\/span>/g)].map(m => m[1]);
   assert.deepStrictEqual(seasonOrder, ['Season 5 (Part 1)', 'Season 5 (Part 2)']);
   app.ctx.toggleBrowseShow(yid); await settle();
   assert.ok(!html(app).includes('sub-row'));
@@ -620,7 +620,7 @@ test('an expanded show lists every stored season in season order: numbered befor
     app.ctx.toggleBrowseShow(app.get(`[...tvShowsById.values()].find(s => s.title === ${JSON.stringify(t)} && showCatalogOf(s) === 'disney').id`));
   }
   await settle();
-  const labels = [...html(app).matchAll(/padding-left:28px">\s*<span class="season-lbl">([^<]*)<\/span>/g)].map(m => m[1]);
+  const labels = [...html(app).matchAll(/padding-left:28px"(?: colspan="2")?>\s*<span class="season-lbl">([^<]*)<\/span>/g)].map(m => m[1]);
   assert.deepStrictEqual(labels, ['Volume 1', 'Volume 2', 'Season 1', 'Season 2', 'Specials', 'Season 1', 'Season 2']);
   assert.ok(html(app).includes('<span class="confirmed-lbl">Show skipped</span>'), 'a Skipped show’s seasons say so (All TV’s Skip / Keep rule)');
   // All TV's rule: a watched season has its ✓ Watched toggle (The Bear S1, Visions Volume 1); a Skipped show's season (Wonder Man S1, watched) shows —.
