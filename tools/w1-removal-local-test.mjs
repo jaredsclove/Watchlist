@@ -1,7 +1,7 @@
 // The W1 removal on a local Supabase stack: real Auth, PostgREST and tokens, synthetic data. Builds production's order, with CU1e before W1,
 // snapshots the catalog before W1, installs W1, then proves db/w1_removal.sql gives that catalog back and that the app's work still runs.
 //   LOCAL_SERVICE_KEY=… node tools/w1-removal-local-test.mjs --api http://127.0.0.1:54321 --key <anon key> --container <db container> --backup <format6.json>
-// The stack must be fresh. Remove this file with the status read once production is done: nothing else depends on W1.
+// Historical release verification: it proved the removal applied to production on 2026-11-02. It isn't a recurring test or a release gate. The stack must be fresh.
 // Exit 0 only if every check passes.
 import crypto from 'crypto';
 import fs from 'fs';
