@@ -10,7 +10,7 @@
 // kept); collections after a creation (a separate step); Year; duplicates; All
 // Movies' and All TV's actions; Catalog updates from the Browse bar.
 // The database functions themselves are checked on PGlite (db/test/t_5a_expand.sql,
-// db/test/t_5c_contract.sql, tools/db-rehearsal-5.mjs); the harness's library_*
+// db/phase5c_contract.sql); the harness's library_*
 // functions are independent stand-ins.
 // Run from the repo root: node tests/library.test.js
 const assert = require('assert');
@@ -149,7 +149,7 @@ test('editing rules and add kinds follow catalog governance (Stage 5): catalog e
   const probe = await createApp();
   const defSeason = probe.get("COLLECTIONS.find(c => c.id === 'disney').defaults.find(d => d.s !== 'Film')");
   const defFilm = probe.get("COLLECTIONS.find(c => c.id === 'disney').defaults.find(d => d.s === 'Film')");
-  const listed = probe.get(`catalogShowKey('disney', ${JSON.stringify(defSeason.k)})`);
+  const listed = defSeason.k.split('|')[0];
   const app = await boot();
   // Governance as read from library_catalog_shows / library_catalog_films (here: the coexistence views over storage).
   assert.strictEqual(app.ctx.showAddKind(showOf(app, 'Severance')), 'tmdb', 'identified, no catalog');

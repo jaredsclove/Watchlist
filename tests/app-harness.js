@@ -844,7 +844,7 @@ const CATALOG_FIXTURES = [
 const NO_ORG = { enabled: false, newShow() {}, newItem() {}, dropShow() {}, dropItem() {}, isFilm: () => false,
   collectionsOfItem: () => [], collectionsOfShow: () => [], add() {}, collectionName: c => c };
 const LEGACY_SOURCES = [['disney', 'Disney+'], ['sheridan', 'Sheridan'], ['90day', '90 Day'], ['truecrime', 'True Crime / Docs']];
-const CONFIG_WATCH_WITH = ['Alone', 'Suzanne', 'Rina', 'Whole Family']; // WATCH_WITH_OPTIONS (tests/organization.test.js keeps them equal)
+const CONFIG_WATCH_WITH = ['Alone', 'Sam', 'Rina', 'Whole Family']; // the bootstrap choices of a harness library
 const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.season === 'Film');
 
 // options:
@@ -1492,29 +1492,6 @@ function runner(title) {
   };
 }
 
-// Test-only (Stage 5 G8): a format 1–3 backup *file*. The page's own format 1–3 export
-// is retired, so tests that need such a file (conversion, validation, refusals) read the
-// harness store through the page's fetchAllRows with that format's column lists
-// (legacyBackupSpec), in the retired exporter's table and row order and object shape.
-// The tables are read as a database without Stage 5 serves them (stage5: null, which still
-// has the storage columns). (Old statuses — Complete, Pending, … — exist only in an app
-// created with stage5: null: the default B4/B5 app's store has been migrated.)
-async function legacyBackupFixture(app, formatVersion) {
-  const spec = app.ctx.legacyBackupSpec(formatVersion);
-  const tables = {};
-  const rowCounts = {};
-  const phase = app.stage5;
-  app.stage5 = null;
-  try {
-    for (const table of spec.tables) {
-      const rows = await app.ctx.fetchAllRows(table, null, Object.keys(spec.columns[table]).join(','));
-      tables[table] = rows;
-      rowCounts[table] = rows.length;
-    }
-  } finally { app.stage5 = phase; }
-  return { format: app.get('BACKUP_FORMAT'), formatVersion, exportedAt: new Date().toISOString(), rowCounts, tables };
-}
-
 // A remembered setting's key as the page stores it for the harness's signed-in user (auth.js userKey).
 const userKeyOf = (key, user = HARNESS_USER) => `${key}::${user}`;
-module.exports = { createApp, runner, settle, clone, legacyBackupFixture, HARNESS_USER, userKeyOf };
+module.exports = { createApp, runner, settle, clone, HARNESS_USER, userKeyOf };

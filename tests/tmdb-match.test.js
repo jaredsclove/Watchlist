@@ -28,7 +28,7 @@ const copy = v => JSON.parse(JSON.stringify(v)); // into this realm, so deepStri
 // Rows as the app stores them
 const manual = extra => ({ id: 'row-1', collection: 'movies', item_key: 'dune|season 1', title: 'Dune', season: 'Season 1', theme: 'Sci-Fi',
   display_date: 'Oct 22, 2021', date_sort: '2021-10-22', watched: true, status: 'watching', created_at: '2026-09-01T10:00:00+00:00',
-  watch_with: ['Suzanne'], collections: ['Favorites'], tmdb_collection_id: null, tmdb_collection_name: null,
+  watch_with: ['Sam'], collections: ['Favorites'], tmdb_collection_id: null, tmdb_collection_name: null,
   media_type: null, tmdb_id: null, season_number: null, ...extra });
 // TMDB detail objects (trimmed)
 const DUNE_2021 = { id: 438631, title: 'Dune', release_date: '2021-09-15', genres: [{ name: 'Science Fiction' }], production_companies: [{ name: 'Legendary Pictures' }],
@@ -258,7 +258,7 @@ test('confirm movie: one library_match_film_b45 call with exactly the patch and 
   assert.strictEqual(w.body.p_patch.tmdb_id, 438631);
   assert.ok(!('collection' in w.body.p_patch) && !('theme_kind' in w.body.p_patch), 'no storage, no kind: the database keeps them');
   assert.deepStrictEqual([row.id, row.tmdb_id, row.media_type, row.watched, row.status, row.created_at], ['row-1', 438631, 'movie', true, 'watching', '2026-09-01T10:00:00+00:00']);
-  assert.deepStrictEqual(copy(row.watch_with), ['Suzanne']);
+  assert.deepStrictEqual(copy(row.watch_with), ['Sam']);
   assert.strictEqual(env.log.saved, 1);
 });
 async function matchSiloS1(db) {

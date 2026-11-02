@@ -139,14 +139,12 @@ test('the shortcut is drawn only beside the up-next line naming the same season,
   assert.ok(fs.readFileSync(path.join(__dirname, '..', 'episodes.js'), 'utf8').includes('Mark ${'), 'the offer is unchanged');
 });
 
-test('status stays a directly editable select; To Watch and Skipped are quiet, Choose a status… never is, and focus is visible', async () => {
-  const a = show({ title: 'Review', status_review: true }, [{ num: 1 }]), b = show({ title: 'Quiet' }, [{ num: 1 }]);
-  const app = await boot(all(a, b));
+test('status stays a directly editable select; To Watch and Skipped are quiet, and focus is visible', async () => {
+  const b = show({ title: 'Quiet' }, [{ num: 1 }]);
+  const app = await boot(all(b));
   app.ctx.switchView('alltv'); await settle();
-  assert.ok(rowOf(app, a.show.id).includes('status-needs-choice'));
-  assert.ok(!rowOf(app, b.show.id).includes('status-needs-choice') && rowOf(app, b.show.id).includes(`setShowStateById('${b.show.id}', { status: this.value })`));
+  assert.ok(rowOf(app, b.show.id).includes(`setShowStateById('${b.show.id}', { status: this.value })`));
   assert.match(css, /\.status-select\.s-confirmed \{ background-color: transparent; color: var\(--text2\); border-color: transparent;/);
-  assert.match(css, /\.status-select\.status-needs-choice \{ background-color: var\(--amber-bg\);/);
   assert.match(css, /\.status-select:focus-visible \{ outline: 2px solid var\(--accent\);/);
 });
 

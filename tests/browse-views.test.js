@@ -124,7 +124,7 @@ const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'rende
 // (S4) All Movies' film controls and the collection's Remove (tests/collection-films.test.js has their
 // positive checks).
 const TV_EDIT_HANDLERS = new Set(['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
-  'keepCurrentStatus', 'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
+  'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
   // EP1: a matched season's episode list and its marks (tests/episodes.test.js)
   'toggleEpisodes', 'retryEpisodes', 'toggleEpisodeTitle', 'setEpisodeMark',
   // EP2: the one Mark watched through control
@@ -256,7 +256,6 @@ test('missing defaults and a stale TBA date cause no write from any view or any 
     for (const m of ['tv', 'movie', 'all']) { app.ctx.setBrowseMedia(m); await settle(); }
     for (const st of ['', 'all', 'to_watch', 'watching', 'watched', 'skipped']) setFilter(app, 'fStatus', st);
     for (const [id, vals] of [['fPriority', ['high', 'normal', 'low', 'highnormal', '']], ]) for (const v of vals) setFilter(app, id, v);
-    for (const id of ['fNew', 'fReview']) for (const on of [true, false]) { app.el(id).checked = on; app.ctx.renderTable(); }
     setFilter(app, 'fStatus', 'all');
     for (const key of app.get('[...tvShowsById.keys()]')) { app.ctx.toggleBrowseShow(key); await settle(); }
     assertReadOnlyDom(app);
@@ -565,11 +564,8 @@ test('TV follows the show status, never the season status copies; Skipped shows 
     setFilter(app, 'fStatus', st);
     assert.deepStrictEqual(titles(app), expected, st);
   }
-  // New from catalog (the former Pending shows) and priority are their own filters (B4/B5).
+  // Priority is its own filter (B4/B5).
   setFilter(app, 'fStatus', '');
-  app.el('fNew').checked = true; app.ctx.renderTable();
-  assert.deepStrictEqual(titles(app), ['Lamp Life', 'Star Wars: Visions']);
-  app.el('fNew').checked = false; app.ctx.renderTable();
   await openCol(app, B['sheridan']);
   setFilter(app, 'fPriority', 'high');
   assert.deepStrictEqual(titles(app), ['Tulsa King'], 'the former High priority show');

@@ -10,25 +10,23 @@ Tools: `node tools/admin-restore.mjs` (offline; it never connects to anything). 
 page's own code.
 
 1. **Validate the file offline.** Keep the backup file you mean to restore. `check` (step 4) validates
-   it, and converts an older file to the database's format exactly as the page does: format 7 since CU1
-   (collection updates; a format-6 file has none of their data), format 6 on an EP1 database (a format-5
-   file has no episode marks, and `check` says how many the library would lose).
+   it and prepares what is sent exactly as the page does: formats 5 and 6 are converted to format 7 (a format-6
+   file has no collection updates, a format-5 file no episode marks either), and any `conversion` or `recovery`
+   section is left out. The file itself is never changed.
 2. **Confirm the destination account.** In the SQL Editor:
    `select id, email from auth.users where lower(email) = lower('<email>');`
    The owner confirms that this id is the account to restore into, and that it is a member
    (`select * from private.library_members where user_id = '<id>';`).
-3. **Take a fresh safety backup.** `node tools/admin-restore.mjs export-sql --owner <id>` (add `--format 6` on an
-   EP1 database; the SQL refuses to run if the database writes another format, and so does step 5's) prints a
-   read-only query that runs as that member, all in one snapshot. Run it, save the single value as `safety.json`.
+3. **Take a fresh safety backup.** `node tools/admin-restore.mjs export-sql --owner <id>` (the SQL refuses to run if
+   the database writes another format, and so does step 5's) prints a read-only query that runs as that member, all in one snapshot. Run it, save the single value as `safety.json`.
    It refuses (no value) if the account is not a member at that moment: a non-member reads no rows, and an
    empty file must never stand in for their library.
 4. **Check, refusing as the page refuses.**
-   `node tools/admin-restore.mjs check --file <backup.json> --safety safety.json [--out converted.json]`
-   validates the safety backup and the file, converts if needed, checks any conversion record or
-   recovery section, then compares the file with the safety backup for identity loss. **Any
-   finding stops the runbook. There is no override:** bypassing the identity-loss refusal would be
+   `node tools/admin-restore.mjs check --file <backup.json> --safety safety.json [--out prepared.json]`
+   validates the safety backup and the file, prepares the document to send, then compares it with the
+   safety backup for identity loss. **Any finding stops the runbook. There is no override:** bypassing the identity-loss refusal would be
    removing a safeguard, which needs its own proposal and the owner's explicit authorization.
-5. **Restore.** `node tools/admin-restore.mjs restore-sql --file <the checked format-7 file> --owner <id> --email <email> --run <fresh run id>`
+5. **Restore.** `node tools/admin-restore.mjs restore-sql --file <the checked or prepared format-7 file> --owner <id> --email <email> --run <fresh run id>`
    prints one transaction: a run label, the destination check (that id is that email and a
    member), then `restore_backup` as that member. Check the printed file hash, paste, run.
 6. **Verify.** Export again (step 3's query) as `after.json`, then
@@ -40,3 +38,17 @@ page's own code.
 seen and is then gone has it ended; a fresh export (step 3) then shows what the library holds. If
 the label was never seen, the outcome stays unknown: stop and report. What the library matches is
 an observation, not proof that the request did or didn't run.
+
+**A format 3 or 4 file.** Neither the page nor this tool reads them any more. To use one, convert it offline with the
+tools as they were at commit `7f650da`, the last that read them. In a separate checkout of that commit:
+
+```bash
+git worktree add /tmp/watchlist-formats 7f650da
+```
+
+```bash
+node /tmp/watchlist-formats/tools/admin-restore.mjs check --file <old.json> --safety <safety.json> --out <converted.json>
+```
+
+It needs only the two files and connects to nothing. Then run step 4 with the current tool on `<converted.json>`: it leaves out the
+`conversion` and `recovery` sections that conversion adds. Their contents aren't restored; the original file keeps them.

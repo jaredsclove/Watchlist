@@ -5,7 +5,7 @@
 // a changed list is shown again and never sent automatically; a season that would become a
 // Skipped + Watched film asks for the owner's Watched / Skipped choice before anything is sent
 // (M6b, an explicit status choice); Cancel and Back send nothing. The database rules (every
-// matrix cell, the FK invariant): db/test/t_b45.sql (W7, RL6, RL7).
+// matrix cell, the FK invariant): db/b45_expand.sql.
 // Run from the repo root: node tests/b45-match.test.js
 const assert = require('assert');
 const { createApp, runner, settle } = require('./app-harness');
@@ -116,12 +116,12 @@ test('M1 (the only season, promoted in place) and M4 (a film becomes a new show)
   assert.deepStrictEqual([row.priority, row.catalog_new, row.genres], [null, null, null], 'the row’s film-only values become NULL');
 });
 
-test('M4 with a film whose old status was Watching: “The old status kept for a rollback (Watching) isn’t kept.” — acknowledged before matching', async () => {
+test('M4 with a film whose old status was Watching: “The old status (Watching) isn’t kept.” — acknowledged before matching', async () => {
   const f = film({ status_review: true, legacy_status: 'watching' });
   const app = await boot([f], [], 'allmovies');
   pickTv(app, f.id, 7200, 'Was Watching');
   await app.ctx.confirmTmdbMatch(); await settle();
-  assert.match(panel(app), /The old status kept for a rollback \(Watching\) isn’t kept\./);
+  assert.match(panel(app), /The old status \(Watching\) isn’t kept\./);
   app.ctx.confirmTmdbMatchAck(); await settle();
   const s = app.store.tv_shows.find(x => x.tmdb_id === 7200);
   assert.deepStrictEqual([s.status_review, s.legacy_status], [true, null], 'review still carried; the provenance not');

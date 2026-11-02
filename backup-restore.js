@@ -202,6 +202,10 @@ function validateBackupObject(obj) {
   if (!obj || typeof obj !== 'object') { errors.push('File does not contain a JSON object.'); return errors; }
   if (obj.format !== BACKUP_FORMAT) errors.push(`Unrecognized backup format ("${obj.format}") — this doesn't look like a Watchlist Tracker backup file.`);
   const spec = backupSpec(obj.formatVersion);
+  if ([1, 2, 3, 4].includes(obj.formatVersion)) {
+    errors.push(`This is a format ${obj.formatVersion} backup, which this page no longer reads. It restores formats 5 to 7. Nothing was changed. The file is fine: docs/ADMIN_RESTORE.md in the project shows how to convert a format 3 or 4 file offline with the tools at commit ${LAST_FORMAT_3_4_COMMIT}.`);
+    return errors;
+  }
   if (!spec) { errors.push(`Unsupported backup format version (${obj.formatVersion}).`); return errors; }
   if (!obj.exportedAt || isNaN(Date.parse(obj.exportedAt))) errors.push('Missing or invalid export timestamp.');
   if (!obj.tables || typeof obj.tables !== 'object') { errors.push('Missing "tables" section.'); return errors; }
@@ -235,11 +239,11 @@ function validateBackupObject(obj) {
   return errors.concat(validateBackupRows(obj.tables, obj.formatVersion));
 }
 
-// Format 4 (Stage 5, once the contraction has run): no storage. watchlist_items
-// carries theme_kind (films: 'genre' / 'other'), personal_collections catalog_id,
-// and the catalog governance tables are included. Never user_id, never the
-// generated is_film / item_is_film. Formats 1–3: backup-format3.js. A trailing "?"
-// marks columns the database allows to be NULL. If the schema gains a column, add it here.
+// The columns of format 4, the base of format 5 (format 4 itself is no longer read): no storage.
+// watchlist_items carries theme_kind (films: 'genre' / 'other'), personal_collections catalog_id,
+// and the catalog governance tables are included. Never user_id, never the generated is_film /
+// item_is_film. A trailing "?" marks columns the database allows to be NULL. If the schema gains a
+// column, add it here.
 const RESTORE_COLUMNS_V4 = {
   watchlist_items: {
     id: 'uuid', item_key: 'text', title: 'text', season: 'text', theme: 'text', theme_kind: 'text?',
@@ -255,7 +259,6 @@ const RESTORE_COLUMNS_V4 = {
   catalog_show_links: { id: 'uuid', catalog: 'text', catalog_key: 'text', show_id: 'uuid', origin: 'text', created_at: 'timestamp' },
   catalog_film_links: { id: 'uuid', catalog: 'text', entry_key: 'text', item_id: 'uuid', origin: 'text', created_at: 'timestamp' }
 };
-const BACKUP_FORMAT_V4 = { tables: Object.keys(RESTORE_COLUMNS_V4), columns: RESTORE_COLUMNS_V4 };
 // Format 5 (B4/B5): format 4 plus the viewing state (status codes To Watch / Watching /
 // Skipped for shows, To Watch / Skipped plus watched for films; priority; Show ended;
 // New from catalog; Needs status review; the old status kept as provenance), the
@@ -305,19 +308,17 @@ const RESTORE_COLUMNS_V7 = {
     decided_at: 'timestamp?', applied_at: 'timestamp?', result: 'json?' }
 };
 const BACKUP_FORMAT_V7 = { tables: Object.keys(RESTORE_COLUMNS_V7), columns: RESTORE_COLUMNS_V7 };
-const FORMAT6_CONVERTER_VERSION = 'cu1.1';
-const FORMAT5_CONVERTER_VERSION = 'ep1.1';
 const CATALOG_GOVERNANCE_IDS = ['disney', '90day', 'sheridan'];
 const PRESENTATION_KEYS = ['disney', '90day', 'sheridan', 'truecrime'];
-const FORMAT4_CONVERTER_VERSION = 'b45.1';
+// The last commit whose page and admin tool read formats 3 and 4 (docs/ADMIN_RESTORE.md has the offline route).
+const LAST_FORMAT_3_4_COMMIT = '7f650da';
 
-// The tables and columns of a format (4–6 here; 1–3 in backup-format3.js).
+// The tables and columns of a format this page reads; null for any other.
 function backupSpec(formatVersion) {
-  return formatVersion === 7 ? BACKUP_FORMAT_V7 : formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : formatVersion === 4 ? BACKUP_FORMAT_V4 : legacyBackupSpec(formatVersion);
+  return formatVersion === 7 ? BACKUP_FORMAT_V7 : formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : null;
 }
 
-const TV_SHOW_STATUSES = ['confirmed', 'highpriority', 'watching', 'complete', 'pending', 'maybe', 'skipped'];
-const TV_SHOW_STATUSES_V5 = ['confirmed', 'watching', 'skipped'];
+const TV_SHOW_STATUSES = ['confirmed', 'watching', 'skipped'];
 
 // Returns why a value doesn't fit a RESTORE_COLUMNS type, or null if it does.
 function restoreValueProblem(type, v) {
@@ -340,7 +341,7 @@ function restoreValueProblem(type, v) {
 // Row-level checks that mirror the database: exact columns, value types, the
 // identity-shape CHECK, and every primary/unique key. Anything reported here would
 // otherwise fail only after the tables had already been cleared.
-function validateBackupRows(tables, formatVersion = 1) {
+function validateBackupRows(tables, formatVersion) {
   const spec = backupSpec(formatVersion);
   const errors = [];
   const report = (label, problems) => {
@@ -394,13 +395,10 @@ function validateBackupRows(tables, formatVersion = 1) {
   report('watchlist_items identity shape (must be movie, TV season, or legacy with all three empty)', shapeProblems);
   report('custom_collections duplicate name', findDuplicates(tables.custom_collections.filter(r => r && typeof r === 'object'),
     r => typeof r.name === 'string' ? r.name : null, r => `"${r.name}"`));
-  if (formatVersion >= 5) {
-    validateFormat4Rows(tables, items, report, rowLabel, findDuplicates, TV_SHOW_STATUSES_V5);
-    validateFormat5Rows(tables, items, report, rowLabel);
-    if (formatVersion >= 6) validateFormat6Rows(tables, items, report, rowLabel, findDuplicates);
-    if (formatVersion === 7) validateFormat7Rows(tables, items, report);
-  } else if (formatVersion === 4) validateFormat4Rows(tables, items, report, rowLabel, findDuplicates);
-  else validateLegacyBackupRows(tables, formatVersion, report, rowLabel, findDuplicates);
+  validateFormat4Rows(tables, items, report, rowLabel, findDuplicates);
+  validateFormat5Rows(tables, items, report, rowLabel);
+  if (formatVersion >= 6) validateFormat6Rows(tables, items, report, rowLabel, findDuplicates);
+  if (formatVersion === 7) validateFormat7Rows(tables, items, report);
   return errors;
 }
 
@@ -479,21 +477,29 @@ function validateFormat7Rows(tables, items, report) {
   report('collection updates (format 7) references', problems);
 }
 
-// ─── Converting a format-6 document to format 7 ───────────────────────────────
+// ─── Converting an older document to format 7 ─────────────────────────────────
 // Format 7 adds collection updates' ten tables, which a format-6 file can't have: the converted
 // document has them empty, and every other table is kept as it is. Restoring it therefore removes the
 // current definitions, exclusions, holds, aliases, removals, show settings, findings and the setup row;
-// automatic updates for catalog shows then wait until the setup file is imported again.
-function convertFormat6To7(doc6, { sourceSha256 } = {}) {
+// automatic updates for catalog shows then wait until the setup file is imported again. Format 6 adds
+// episode marks, which a format-5 file can't have: the converted document has none.
+function convertFormat6To7(doc6) {
   const tables = { ...doc6.tables };
   CU1_TABLES.forEach(t => { tables[t] = []; });
-  const doc = { format: doc6.format, formatVersion: 7, exportedAt: doc6.exportedAt,
+  return { format: doc6.format, formatVersion: 7, exportedAt: doc6.exportedAt,
     rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
-  doc.conversion = doc6.conversion
-    ? { ...doc6.conversion, converter_version: `${doc6.conversion.converter_version}+${FORMAT6_CONVERTER_VERSION}` }
-    : { source_format: 6, source_exported_at: doc6.exportedAt, source_sha256: sourceSha256, converter_version: FORMAT6_CONVERTER_VERSION };
-  if (doc6.recovery) doc.recovery = doc6.recovery;
-  return { doc };
+}
+function convertFormat5To6(doc5) {
+  const tables = { ...doc5.tables, episode_marks: [] };
+  return { format: doc5.format, formatVersion: 6, exportedAt: doc5.exportedAt,
+    rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
+}
+// What a restore sends for a validated file of format 5, 6 or 7: format 7, and only its library. A file
+// converted long ago can carry `conversion` and `recovery` sections from format 3; the archive they
+// belonged to is retired, so they are left out of what is sent (the file itself is never changed).
+function restoreDocument(doc) {
+  const doc7 = doc.formatVersion === 7 ? doc : convertFormat6To7(doc.formatVersion === 5 ? convertFormat5To6(doc) : doc);
+  return { format: doc7.format, formatVersion: 7, exportedAt: doc7.exportedAt, rowCounts: doc7.rowCounts, tables: doc7.tables };
 }
 function format6ConversionHtml(currentCounts) {
   const lost = CU1_TABLES.reduce((n, t) => n + (currentCounts[t] || 0), 0);
@@ -502,208 +508,21 @@ function format6ConversionHtml(currentCounts) {
     ${lost ? `<li>Restoring it removes the ${lost} collection-update record${lost === 1 ? '' : 's'} you have now (the safety backup keeps them).${researchEnabled ? ' Automatic updates for catalog shows then pause until you import the collection setup file again (Settings → Collection updates).' : ''}</li>` : ''}
     <li>The file itself isn’t changed.</li></ul></div>`;
 }
-
-// ─── Converting a format-5 document to format 6 ───────────────────────────────
-// Format 6 adds episode marks, which a format-5 file can't have: the converted document has
-// none, and every other table is kept as it is. A format-5 document converted from format 3 or 4
-// keeps its conversion record (and a format-3 recovery section) verbatim, with this converter
-// added to its version; a native format-5 file gets its own record (source format 5).
-function convertFormat5To6(doc5, { sourceSha256 } = {}) {
-  const tables = { ...doc5.tables, episode_marks: [] };
-  const doc = { format: doc5.format, formatVersion: 6, exportedAt: doc5.exportedAt,
-    rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
-  doc.conversion = doc5.conversion
-    ? { ...doc5.conversion, converter_version: `${doc5.conversion.converter_version}+${FORMAT5_CONVERTER_VERSION}` }
-    : { source_format: 5, source_exported_at: doc5.exportedAt, source_sha256: sourceSha256, converter_version: FORMAT5_CONVERTER_VERSION };
-  if (doc5.recovery) doc.recovery = doc5.recovery;
-  return { doc };
-}
 function format5ConversionHtml() {
-  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 6 before restoring</div><ul class="manage-list">
-    <li>Format 6 adds episode marks. This backup was made before them, so after restoring no season has episode marks; seasons keep their watched and skipped marks from the backup.</li>
-    <li>The file itself isn’t changed.</li></ul></div>`;
+  return `<div class="modal-section"><div class="modal-label">This backup also has no episode marks</div><ul class="manage-list">
+    <li>Format 6 added episode marks. This backup was made before them, so after restoring no season has episode marks; seasons keep their watched and skipped marks from the backup.</li></ul></div>`;
+}
+function retiredSectionsHtml() {
+  return `<div class="modal-section"><div class="modal-label">Old conversion data in this file isn’t restored</div><ul class="manage-list">
+    <li>This file carries a section from an older conversion. The archive it belonged to has been retired, so that section is left out; your library’s tables are restored and checked as usual. The file itself isn’t changed.</li></ul></div>`;
 }
 
-// ─── Converting a format-4 document to format 5 ───────────────────────────────
-// Deterministic, with the plan's converter rules (metadata.js b45MapShowStatus /
-// b45MapFilmStatus): Pending → To Watch with New from catalog; High Priority / Maybe
-// Later → To Watch with High / Low priority; Complete (a show) → To Watch, Show ended,
-// Needs status review; a film's watching / complete → To Watch (its watched flag kept)
-// with Needs status review; the old status is kept as provenance. Every film keeps its
-// watched flag (a Skipped + Watched pair stays one). No metadata, no resume range. A
-// format-4 document converted from format 3 keeps its conversion record (source format 3,
-// the original file's hash) and its recovery section verbatim; a native format-4 file gets
-// its own record (source format 4) and never a recovery section. sourceSha256: of the
-// file's text, as read. Refuses (never a document) an unknown status.
-function convertFormat4To5(doc4, { sourceSha256 } = {}) {
-  const t = doc4.tables;
-  const isFilm = r => r.media_type === 'movie' || (r.media_type == null && r.season === 'Film');
-  const refusals = [];
-  const badShows = t.tv_shows.filter(s => !OLD_STATUSES.includes(s.status)).map(s => s.id);
-  const badFilms = t.watchlist_items.filter(r => isFilm(r) && !OLD_STATUSES.includes(r.status)).map(r => r.id);
-  if (badShows.length) refusals.push(`a show with an unknown status: ${badShows.slice(0, 5).join(', ')}`);
-  if (badFilms.length) refusals.push(`a film with an unknown status: ${badFilms.slice(0, 5).join(', ')}`);
-  if (refusals.length) return { refusals };
-  const tally = {};
-  const count = k => { tally[k] = (tally[k] || 0) + 1; };
-  const shows = t.tv_shows.map(s => {
-    if (s.status !== b45MapShowStatus(s.status).status || s.status === 'complete') count(`show:${s.status}`);
-    return { ...s, ...b45MapShowStatus(s.status), genres: [], forms: [], franchises: [], companies: [], genre_candidates: [], network: null,
-      network_candidates: [], metadata_owner_set: false, resume_start_season_id: null, resume_end_season_id: null };
-  });
-  const items = t.watchlist_items.map(r => {
-    if (!isFilm(r)) return { ...r, priority: null, catalog_new: null, status_review: null, legacy_status: null, genres: null, forms: null,
-      franchises: null, companies: null, genre_candidates: null, metadata_owner_set: null };
-    const m = b45MapFilmStatus(r.status);
-    if (m.legacy_status) count(`film:${r.status}`);
-    if (r.status === 'skipped' && r.watched) count('film:pair');
-    return { ...r, ...m, genres: [], forms: [], franchises: [], companies: [], genre_candidates: [], metadata_owner_set: false };
-  });
-  const tables = { ...t, watchlist_items: items, tv_shows: shows };
-  const doc = { format: doc4.format, formatVersion: 5, exportedAt: doc4.exportedAt,
-    rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
-  doc.conversion = doc4.conversion
-    ? { ...doc4.conversion, converter_version: `${doc4.conversion.converter_version}+${FORMAT4_CONVERTER_VERSION}` }
-    : { source_format: 4, source_exported_at: doc4.exportedAt, source_sha256: sourceSha256, converter_version: FORMAT4_CONVERTER_VERSION };
-  if (doc4.recovery) doc.recovery = doc4.recovery;
-  const review = shows.filter(s => s.status_review).map(s => s.title).concat(items.filter(r => r.status_review).map(r => r.title));
-  return { refusals: [], doc, summary: { tally, review, pairs: tally['film:pair'] || 0, fromFormat: doc4.conversion ? 3 : 4 } };
-}
-
-// A format-4 file read from disk may carry a conversion record and a recovery section only
-// as the page's own format-3 conversion writes them (source format 3, the file's hash, a
-// converter version; a recovery section only with them and only while the archive is
-// active). Anything else is refused before anything is sent.
-function format4SectionProblems(doc4, archiveActive) {
-  return sectionProblems(doc4, archiveActive, ['3']);
-}
-// The optional sections of a document about to be restored (format 4 from disk: conversion
-// source 3 only; format 5: source 3 or 4; format 6: 3, 4 or 5), checked as restore_backup checks them: the
-// conversion record's fields; a recovery section only with a format-3 conversion and an
-// active archive, of exactly the expected shape, and corresponding to the document's own rows.
-function sectionProblems(doc, archiveActive, sources) {
-  const problems = [];
-  const c = doc.conversion, r = doc.recovery;
-  if (c !== undefined && (!c || typeof c !== 'object' || !sources.includes(String(c.source_format)) || !/^[0-9a-f]{64}$/.test(c.source_sha256 || '')
-      || !c.converter_version || !c.source_exported_at)) problems.push('Its conversion record isn’t one this page writes.');
-  if (r !== undefined) {
-    if (c === undefined) problems.push('It has a recovery section without a conversion record.');
-    else if (c && String(c.source_format) !== '3') problems.push('It has a recovery section, which belongs only to a converted format-3 backup.');
-    if (!archiveActive) problems.push('It has a recovery section, and the recovery archive has been retired.');
-    problems.push(...recoverySectionProblems(doc));
-  }
-  return problems;
-}
-// ── recovery section check: begin (reads a file's recovery section only; sends nothing) ──
-// A recovery section against the document's own rows: restore_backup's shape, exact-field and
-// correspondence rules (db/b45_expand.sql), so a section the database would refuse never gets
-// an actionable confirmation. The database still checks everything again, in one transaction.
-const RECOVERY_STORAGE = ['disney', '90day', 'sheridan', 'othertv', 'truecrime', 'movies'];
-const RECOVERY_OTHERTV_FIELDS = ['collection', 'created_at', 'id', 'network', 'title', 'tmdb_id'];
-// The other-TV rows go into private.stage5_recovery_othertv (like othertv_shows: id uuid primary key,
-// tmdb_id integer, title / network text, created_at timestamptz, collection text, all NOT NULL,
-// one row per collection and tmdb_id) after restore_backup's own row checks; these mirror both.
-// The id: restore_backup's pattern (36 lowercase hex digits and hyphens) and PostgreSQL's uuid input
-// (32 hex digits, a hyphen only after a group of four). Returns the uuid's digits, or null.
-function recoveryUuidDigits(v) {
-  return typeof v === 'string' && /^[0-9a-f-]{36}$/.test(v) && /^[0-9a-f]{4}(?:-?[0-9a-f]{4}){7}$/.test(v) ? v.replace(/-/g, '') : null;
-}
-// tmdb_id: its text matches ^[0-9]+$ and fits an integer. Returns the number, or null.
-function recoveryTmdbId(v) {
-  const t = typeof v === 'string' ? v : Number.isInteger(v) ? String(v) : null;
-  if (t === null || !/^[0-9]+$/.test(t)) return null;
-  const n = Number(t);
-  return n <= 2147483647 ? n : null;
-}
-// created_at: an ISO 8601 date and time PostgreSQL reads as timestamptz — a real calendar date
-// (year 1–9999), hour 0–23, minute and second 0–59, optional fraction, optional offset within ±15:59.
-// (Stricter than PostgreSQL, which also reads other spellings; the page and the database write this one.)
-function recoveryTimestampOk(v) {
-  const m = typeof v === 'string'
-    && /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-](\d{2})(?::?(\d{2}))?)?$/.exec(v);
-  if (!m) return false;
-  const [y, mo, d, h, mi, sec, oh, om] = m.slice(1).map(x => (x === undefined ? 0 : Number(x)));
-  const days = [31, (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return y >= 1 && mo >= 1 && mo <= 12 && d >= 1 && d <= days[mo - 1] && h <= 23 && mi <= 59 && sec <= 59 && oh <= 15 && om <= 59;
-}
-// title: restore_backup reads it as text and refuses it blank (PostgreSQL's btrim trims spaces only).
-const recoveryTextOf = v => (v === null || v === undefined ? null : typeof v === 'string' ? v : JSON.stringify(v));
-const recoveryNoNul = v => typeof v !== 'string' || !v.includes('\u0000'); // PostgreSQL text can't hold U+0000
-function recoverySectionProblems(doc) {
-  const r = doc.recovery, t = doc.tables || {};
-  const keys = o => Object.keys(o).sort().join(',');
-  const isObj = o => !!o && typeof o === 'object' && !Array.isArray(o);
-  if (!isObj(r) || keys(r) !== 'othertv_shows,storage_map' || !isObj(r.storage_map) || keys(r.storage_map) !== 'items,personal_collections,shows'
-      || !Array.isArray(r.othertv_shows) || !['items', 'shows', 'personal_collections'].every(k => Array.isArray(r.storage_map[k]))) {
-    return ['Its recovery section isn’t one this page writes (its structure is malformed).'];
-  }
-  const sm = r.storage_map, out = [];
-  const exact = (list, fields, what) => { const bad = list.filter(x => !isObj(x) || keys(x) !== fields).length; if (bad) out.push(`${bad} recovery ${what} entr${bad === 1 ? 'y doesn’t' : 'ies don’t'} have exactly the expected fields.`); };
-  exact(sm.items, 'collection,id', 'item'); exact(sm.shows, 'collection,id', 'show'); exact(sm.personal_collections, 'id,legacy_source', 'collection');
-  exact(r.othertv_shows, RECOVERY_OTHERTV_FIELDS.join(','), 'other-TV');
-  if (out.length) return out;
-  const say = (n, text) => { if (n) out.push(`${n} ${text}`); };
-  const count = (xs, f) => xs.filter(f).length;
-  const items = t.watchlist_items || [], shows = t.tv_shows || [], cols = t.personal_collections || [];
-  const itemMap = new Map(sm.items.map(x => [x.id, x.collection])), showMap = new Map(sm.shows.map(x => [x.id, x.collection]));
-  const repeats = list => list.length - new Set(list.map(x => x.id)).size;
-  say(repeats(sm.items) + repeats(sm.shows), 'recovery entries name the same record twice.');
-  say(count(items, w => !itemMap.has(w.id)), 'saved rows have no recovery entry.');
-  say(count(shows, s => !showMap.has(s.id)), 'shows have no recovery entry.');
-  const itemIds = new Set(items.map(w => w.id)), showIds = new Set(shows.map(s => s.id));
-  say(count(sm.items, x => !itemIds.has(x.id)) + count(sm.shows, x => !showIds.has(x.id)), 'recovery entries name records that aren’t in the backup.');
-  say(count(sm.items.concat(sm.shows), x => !RECOVERY_STORAGE.includes(x.collection)), 'recovery entries name an unknown storage.');
-  const showCat = new Map((t.catalog_show_links || []).map(l => [l.show_id, l.catalog])), filmCat = new Map((t.catalog_film_links || []).map(l => [l.item_id, l.catalog]));
-  const builtin = c => ['disney', '90day', 'sheridan'].includes(c);
-  say(count(sm.shows, x => showIds.has(x.id) && (builtin(x.collection) !== showCat.has(x.id) || (showCat.has(x.id) && showCat.get(x.id) !== x.collection)
-    || (!showCat.has(x.id) && !['othertv', 'truecrime'].includes(x.collection)))), 'show recovery entries disagree with what the backup’s catalogs govern.');
-  say(count(items, w => w.show_id && itemMap.has(w.id) && showMap.has(w.show_id) && itemMap.get(w.id) !== showMap.get(w.show_id)), 'season recovery entries disagree with their show’s.');
-  const isFilm = w => w.media_type === 'movie' || (w.media_type == null && w.season === 'Film');
-  say(count(items, w => isFilm(w) && itemMap.has(w.id) && (builtin(itemMap.get(w.id)) !== filmCat.has(w.id) || (filmCat.has(w.id) && filmCat.get(w.id) !== itemMap.get(w.id))
-    || ((w.theme_kind === 'genre') !== (itemMap.get(w.id) === 'movies')))), 'film recovery entries disagree with the backup’s catalogs or theme meanings.');
-  const colMap = new Map(sm.personal_collections.map(x => [x.id, x.legacy_source]));
-  say(count(cols, c => !colMap.has(c.id)), 'collections have no recovery entry.');
-  say(count(sm.personal_collections, x => { const c = cols.find(y => y.id === x.id);
-    return !c || (x.legacy_source != null && !['disney', '90day', 'sheridan', 'truecrime'].includes(x.legacy_source)) || (c.catalog_id != null && x.legacy_source !== c.catalog_id)
-      || (c.catalog_id == null && builtin(x.legacy_source)) || (c.presentation_key ?? null) !== (x.legacy_source ?? null); }), 'collection recovery entries disagree with the backup’s collections.');
-  say(repeats(sm.personal_collections), 'collection recovery entries repeat a collection.');
-  const otv = r.othertv_shows;
-  say(count(otv, x => recoveryUuidDigits(x.id) === null), 'other-TV recovery rows have an id that isn’t a valid lowercase uuid.');
-  say(count(otv, x => recoveryTmdbId(x.tmdb_id) === null), 'other-TV recovery rows have a TMDB id that isn’t a whole number from 0 to 2147483647.');
-  say(count(otv, x => !recoveryTimestampOk(x.created_at)), 'other-TV recovery rows have a created_at that isn’t a valid date and time.');
-  say(count(otv, x => !['othertv', 'truecrime'].includes(x.collection)), 'other-TV recovery rows have a storage other than othertv or truecrime.');
-  say(count(otv, x => { const t = recoveryTextOf(x.title); return t === null || t.replace(/^ +| +$/g, '') === '' || !recoveryNoNul(t); }), 'other-TV recovery rows have a title that is blank or can’t be stored.');
-  say(count(otv, x => typeof x.network !== 'string' || !recoveryNoNul(x.network)), 'other-TV recovery rows have a network that isn’t text that can be stored.');
-  const ids = otv.map(x => recoveryUuidDigits(x.id)).filter(Boolean);
-  say(ids.length - new Set(ids).size, 'other-TV recovery rows repeat an id.');
-  const otvShows = otv.filter(x => recoveryTmdbId(x.tmdb_id) !== null).map(x => `${x.collection}|${recoveryTmdbId(x.tmdb_id)}`);
-  say(otvShows.length - new Set(otvShows).size, 'other-TV recovery rows repeat a show.');
-  return out.length ? [`Its recovery section doesn’t correspond to the backup: ${out.join(' ')}`] : [];
-}
-// ── recovery section check: end ──
-
-// The preview's list of what the format-4 → 5 conversion derives.
-function format4ConversionHtml(summary) {
-  const li = text => `<li>${esc(text)}</li>`;
-  const n = k => summary.tally[k] || 0;
-  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 5 before restoring</div><ul class="manage-list">
-    ${n('show:pending') + n('film:pending') ? li(`${n('show:pending')} shows and ${n('film:pending')} films that were Pending: To Watch, marked New from catalog.`) : ''}
-    ${n('show:highpriority') + n('film:highpriority') ? li(`${n('show:highpriority')} shows and ${n('film:highpriority')} films that were High Priority: To Watch, High priority.`) : ''}
-    ${n('show:maybe') + n('film:maybe') ? li(`${n('show:maybe')} shows and ${n('film:maybe')} films that were Maybe Later: To Watch, Low priority.`) : ''}
-    ${n('show:complete') ? li(`${n('show:complete')} shows that were Complete: To Watch, Show ended, Needs status review.`) : ''}
-    ${n('film:watching') + n('film:complete') ? li(`${n('film:watching') + n('film:complete')} films that were Watching or Complete: To Watch or Watched (as marked), Needs status review.`) : ''}
-    ${summary.pairs ? li(`${summary.pairs} films that are both Skipped and marked watched are kept that way.`) : ''}
-    ${summary.review.length ? li(`Needs status review: ${summary.review.slice(0, 10).join(', ')}${summary.review.length > 10 ? ` and ${summary.review.length - 10} more` : ''}.`) : ''}
-    ${li('Each old status is kept with the record (for a rollback); no categories or earlier-seasons ranges are added. No field of the backup is lost.')}
-    ${li('The file itself isn’t changed.')}</ul></div>`;
-}
-
-// Format 4: identities unique across the whole library, one season label per show,
+// Identities unique across the whole library, one season label per show,
 // theme meanings only on films, the catalog governance (one catalog per record,
 // one record per catalog key), shows and links, collections and choices.
-function validateFormat4Rows(tables, items, report, rowLabel, findDuplicates, statuses = TV_SHOW_STATUSES) {
+function validateFormat4Rows(tables, items, report, rowLabel, findDuplicates) {
   const shows = tables.tv_shows.filter(r => r && typeof r === 'object');
-  checkTvShowRows(shows, items, report, rowLabel, statuses);
+  checkTvShowRows(shows, items, report, rowLabel);
   validateOrganizationRows(tables, items, report, rowLabel, findDuplicates);
   report('watchlist_items duplicate movie identity', findDuplicates(items, r => r.media_type === 'movie' && r.tmdb_id != null ? String(r.tmdb_id) : null, r => `(tmdb_id ${r.tmdb_id})`));
   report('watchlist_items duplicate TV identity', findDuplicates(items, r => r.media_type === 'tv' && r.tmdb_id != null && r.season_number != null ? `${r.tmdb_id}|${r.season_number}` : null,
@@ -744,11 +563,10 @@ function validateFormat4Rows(tables, items, report, rowLabel, findDuplicates, st
     ? `${rowLabel(c, i)} has catalog_id ${JSON.stringify(c.catalog_id)} but presentation_key ${JSON.stringify(c.presentation_key)}` : null).filter(Boolean));
 }
 
-// Format 3 only: collections, memberships and watch-with choices, mirroring the
-// database's rules (exactly one target that is in the backup and of the right
+// Collections, memberships and watch-with choices, mirroring the database's rules (exactly one target that is in the backup and of the right
 // kind, one membership per collection and target, names and labels unique
 // ignoring case, every watch-with value on a row is a choice).
-function validateOrganizationRows(tables, items, report, rowLabel) { // formats 3 and 4
+function validateOrganizationRows(tables, items, report, rowLabel) {
   const colls = tables.personal_collections.filter(r => r && typeof r === 'object');
   const members = tables.collection_memberships.filter(r => r && typeof r === 'object');
   const choices = tables.watch_with_choices.filter(r => r && typeof r === 'object');
@@ -781,21 +599,15 @@ function validateOrganizationRows(tables, items, report, rowLabel) { // formats 
   report('watch_with_choices duplicate token', dupBy(choices, c => typeof c.token === 'string' ? c.token : null, c => `"${c.token}"`));
   report('watch_with_choices duplicate label (ignoring case)', dupBy(choices, c => typeof c.label === 'string' ? c.label.toLowerCase() : null, c => `"${c.label}"`));
   const tokens = new Set(choices.map(c => c.token));
-  report('watchlist_items watch_with', items.flatMap((r, i) => (r.watch_with || []).filter(t => !tokens.has(t))
+  report('watchlist_items watch_with', items.flatMap((r, i) => (Array.isArray(r.watch_with) ? r.watch_with : []).filter(t => !tokens.has(t))
     .map(t => `${rowLabel(r, i)} uses "${t}", which isn't one of the backup's watch-with choices`)));
 }
 
-// Formats 2–4: the shows and the season → show links, mirroring the database's
-// rules (statuses, every link points at a show in the backup, films never link,
-// skipped only on linked seasons). The identity keys per format are checked by the caller.
-function validateTvShowRows(shows, items, report, rowLabel) {
-  checkTvShowRows(shows, items, report, rowLabel, TV_SHOW_STATUSES);
-}
-// The same rules with a given set of show statuses (format 5: To Watch / Watching / Skipped).
-// (backup-format3.js, unchanged since Stage 5, calls validateTvShowRows with the old set.)
-function checkTvShowRows(shows, items, report, rowLabel, statuses) {
+// The shows and the season → show links, mirroring the database's rules (statuses, every
+// link points at a show in the backup, films never link, skipped only on linked seasons).
+function checkTvShowRows(shows, items, report, rowLabel) {
   const byId = new Map(shows.map(s => [s.id, s]));
-  report('tv_shows status', shows.map((s, i) => statuses.includes(s.status) ? null : `${rowLabel(s, i)} has status ${JSON.stringify(s.status)}`).filter(Boolean));
+  report('tv_shows status', shows.map((s, i) => TV_SHOW_STATUSES.includes(s.status) ? null : `${rowLabel(s, i)} has status ${JSON.stringify(s.status)}`).filter(Boolean));
   report('tv_shows empty title or show_key', shows.map((s, i) => (typeof s.title === 'string' && s.title.trim() && typeof s.show_key === 'string' && s.show_key.trim()) ? null : rowLabel(s, i)).filter(Boolean));
   const linkProblems = [];
   items.forEach((r, i) => {
@@ -848,13 +660,11 @@ async function handleRestoreFileSelected(event) {
   if (!file || !restoreEligibleView()) return;
   const session = ++restoreSessionSeq;
 
-  let parsed, sourceSha256;
+  let parsed;
   try {
     const text = await file.text();
     if (!restoreSessionLive(session)) return;
     parsed = JSON.parse(text);
-    sourceSha256 = await cuSha256(text);
-    if (!restoreSessionLive(session)) return;
   } catch(e) {
     if (!restoreSessionLive(session)) return;
     showRestoreModal(`<div class="modal-title">Invalid backup file</div>
@@ -872,14 +682,13 @@ async function handleRestoreFileSelected(event) {
   }
 
   pendingRestoreData = parsed;
-  await renderRestorePreview(parsed, session, sourceSha256);
+  await renderRestorePreview(parsed, session);
 }
 
-// A format-3 file on a contracted database (format 4) is converted first
-// (backup-format3.js): the preview shows what the conversion derives and what it
-// can't keep, and only the converted document is ever sent. Nothing is converted or
-// sent again automatically if the database refuses it.
-async function renderRestorePreview(backup, session = restoreSessionSeq, sourceSha256 = null) {
+// A format-5 or -6 file is converted to format 7 first, and the preview says what that
+// means; only the prepared document is ever sent. Nothing is converted or sent again
+// automatically if the database refuses it.
+async function renderRestorePreview(backup, session = restoreSessionSeq) {
   if (!restoreSessionLive(session)) return;
   showRestoreModal(`<div class="modal-title">Checking current data…</div><div class="modal-progress">Fetching current row counts for comparison…</div>`);
 
@@ -887,8 +696,7 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
   let currentItems = [];
   let dbFormat;
   try {
-    // A restore needs a database in this page's phase (format 7); formats 3, 4, 5 and 6 are
-    // converted here first. Never a fallback to another format.
+    // A restore needs a database in this page's phase (format 7). Never a fallback to another format.
     const phaseCap = await stage5Capabilities();
     if (!restoreSessionLive(session)) return;
     if (!pageMayWrite(phaseCap)) {
@@ -916,95 +724,12 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
     return;
   }
 
-  // Formats 3, 4 and 5 into the EP1 database: an explicit, previewed conversion (3 → 4 with
-  // the retained converter, 4 → 5, then 5 → 6). Only the converted document is ever sent.
-  let conversion = null, conversion5 = null, conversion6 = false, conversion7 = false;
-  const refuseConversion = (lines) => {
-    showRestoreModal(`<div class="modal-title">This format ${backup.formatVersion} backup can't be converted</div>
-      <div class="modal-error">${lines.map(esc).join('\n')}</div>
-      <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
-    pendingRestoreData = null;
-  };
-  if (dbFormat === 7 && [3, 4, 5, 6].includes(backup.formatVersion)) {
-    let cap;
-    try { cap = await stage5Capabilities(); } catch (e) { cap = null; }
-    if (!restoreSessionLive(session)) return;
-    if (!cap) { refuseConversion(['Couldn’t read whether the recovery archive is active, so nothing was changed.']); return; }
-    // The conversion record names the file it came from (its SHA-256, computed when the file was read).
-    if (!/^[0-9a-f]{64}$/.test(sourceSha256 || '')) { refuseConversion(['The file’s fingerprint couldn’t be computed, so nothing was changed. Choose the file again.']); return; }
-    let doc5 = backup, doc6 = backup;
-    if (backup.formatVersion === 6) {
-      if (backup.conversion !== undefined || backup.recovery !== undefined) {
-        const problems = sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4', '5']);
-        if (problems.length) { refuseConversion(['Nothing was changed:'].concat(problems)); return; }
-      }
-    } else if (backup.formatVersion === 3 || backup.formatVersion === 4) {
-      let doc4 = backup;
-      if (backup.formatVersion === 3) {
-        const conv = convertFormat3To4(backup, { includeRecovery: cap.recovery_archive === 'active', sourceSha256 });
-        if (conv.refusals.length) { refuseConversion(['It breaks a rule your updated list enforces, so nothing was changed:'].concat(conv.refusals)); return; }
-        conversion = conv.summary;
-        doc4 = conv.doc;
-      } else {
-        const problems = format4SectionProblems(backup, cap.recovery_archive === 'active');
-        if (problems.length) { refuseConversion(['Nothing was changed:'].concat(problems)); return; }
-      }
-      const conv5 = convertFormat4To5(doc4, { sourceSha256 });
-      if (conv5.refusals.length) { refuseConversion(['It breaks a rule your list enforces, so nothing was changed:'].concat(conv5.refusals)); return; }
-      conversion5 = conv5.summary;
-      doc5 = conv5.doc;
-    } else if (backup.conversion !== undefined || backup.recovery !== undefined) {
-      // A format-5 file carrying a conversion record or a recovery section (possible only by hand
-      // or from a converted document saved elsewhere): checked as the database checks them first.
-      const problems = sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4']);
-      if (problems.length) { refuseConversion(['Nothing was changed:'].concat(problems)); return; }
-    }
-    if (backup.formatVersion !== 6) {
-      doc6 = convertFormat5To6(doc5, { sourceSha256 }).doc;
-      conversion6 = true;
-    }
-    const conv7 = convertFormat6To7(doc6, { sourceSha256 });
-    const docErrors = validateBackupObject(conv7.doc);
-    if (docErrors.length) { refuseConversion(['The converted backup doesn’t pass validation, so nothing was changed:'].concat(docErrors)); return; }
-    if (conv7.doc.recovery !== undefined) {
-      const rp = recoverySectionProblems(conv7.doc);
-      if (rp.length) { refuseConversion(['Nothing was changed:'].concat(rp)); return; }
-    }
-    conversion7 = true;
-    backup = conv7.doc;
-    pendingRestoreData = backup;
-  }
-  // A format-7 file carrying a conversion record or a recovery section (possible only by hand
-  // or from a converted document saved elsewhere): checked as the database checks them first.
-  if (dbFormat === 7 && backup.formatVersion === 7 && !conversion7 && (backup.conversion !== undefined || backup.recovery !== undefined)) {
-    let cap;
-    try { cap = await stage5Capabilities(); } catch (e) { cap = null; }
-    if (!restoreSessionLive(session)) return;
-    const problems = cap ? sectionProblems(backup, cap.recovery_archive === 'active', ['3', '4', '5', '6'])
-      : ['Couldn’t read whether the recovery archive is active, so nothing was changed.'];
-    if (problems.length) {
-      showRestoreModal(`<div class="modal-title">This file can't be used for restore</div>
-        <div class="modal-error">${problems.map(esc).join('\n')} Nothing was changed.</div>
-        <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
-      pendingRestoreData = null;
-      return;
-    }
-  }
-
-  // A format-2 backup needs the TV-show schema. Since the switch to show-level
-  // status, a TV show's status lives only in tv_shows, so a format-1 backup (which
-  // has none) can't be restored into a format-2 database; the database refuses it too.
-  // A format-3 database (personal collections) takes format 3 only: an older file
-  // has none of your collections or watch-with choices; the database refuses it too.
-  // A contracted database takes format 4 (or a converted format 3, above).
-  const formatErrors = backup.formatVersion > dbFormat
-    ? [`This backup is format ${backup.formatVersion}, which this database doesn't support yet (it is format ${dbFormat}).`]
-    : backup.formatVersion < dbFormat
-      ? [dbFormat >= 3 && backup.formatVersion === 2
-        ? 'This backup is format 2, from before personal collections: it has none of your collections or watch-with choices, so it can\'t be restored here. Restore a format 3 backup (made after the personal-collections update) instead. Nothing was changed.'
-        : `This backup predates TV shows (format ${backup.formatVersion}). TV show status is now stored per show, so only format ${dbFormat} backups can be restored.`]
-      : [];
-  const lossErrors = formatErrors.concat(identityLossErrors(currentItems, backup.tables.watchlist_items));
+  // Only the prepared document is sent from here on; the document read from the file stays as it is.
+  const fromFormat = backup.formatVersion, retiredSections = backup.conversion !== undefined || backup.recovery !== undefined;
+  backup = restoreDocument(backup);
+  pendingRestoreData = backup;
+  const docErrors = validateBackupObject(backup);
+  const lossErrors = docErrors.concat(identityLossErrors(currentItems, backup.tables.watchlist_items));
   if (lossErrors.length > 0) {
     showRestoreModal(`<div class="modal-title">This file can't be used for restore</div>
       <div class="modal-error">${lossErrors.map(esc).join('\n')}</div>
@@ -1012,7 +737,6 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
     pendingRestoreData = null;
     return;
   }
-  pendingRestoreAllowV1Reset = false;
   pendingRestoreDbFormat = dbFormat;
 
   const backupDate = new Date(backup.exportedAt).toLocaleString();
@@ -1021,7 +745,7 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
   const marksNote = marksNow > marksFile
     ? `<div class="modal-warning">Your library has ${marksNow} episode mark${marksNow === 1 ? '' : 's'} now; this backup has ${marksFile}. Restoring replaces them with the backup’s. The safety backup keeps the current ones.</div>`
     : '';
-  const tables = [...new Set([...backupSpec(dbFormat).tables, ...backupSpec(backup.formatVersion).tables])];
+  const tables = backupSpec(dbFormat).tables;
   const rows = tables.map(t => `
     <div class="modal-row"><span>${esc(t)}</span><span>${currentCounts[t] ?? 0} → ${backup.tables[t] ? (backup.rowCounts[t] ?? backup.tables[t].length) : 0}</span></div>
   `).join('');
@@ -1032,10 +756,9 @@ async function renderRestorePreview(backup, session = restoreSessionSeq, sourceS
       <div class="modal-label">Backup created</div>
       <div>${esc(backupDate)}</div>
     </div>
-    ${conversion ? format3ConversionHtml(conversion) : ''}
-    ${conversion5 ? format4ConversionHtml(conversion5) : ''}
-    ${conversion6 ? format5ConversionHtml() : ''}
-    ${conversion7 ? format6ConversionHtml(currentCounts) : ''}
+    ${fromFormat < 7 ? format6ConversionHtml(currentCounts) : ''}
+    ${fromFormat === 5 ? format5ConversionHtml() : ''}
+    ${retiredSections ? retiredSectionsHtml() : ''}
     <div class="modal-section">
       <div class="modal-label">Rows: current → backup</div>
       ${rows}
@@ -1057,7 +780,6 @@ function closeRestoreModal() {
   document.getElementById('restoreModalOverlay').style.display = 'none';
   document.getElementById('restoreModalBox').innerHTML = '';
   pendingRestoreData = null;
-  pendingRestoreAllowV1Reset = false;
   pendingRestoreDbFormat = null;
   restoreInFlight = false;
   if (typeof updateLeaveWarning === 'function') updateLeaveWarning(); // S6 (D18)
@@ -1168,11 +890,11 @@ async function sendRestore(preRestoreFilename) {
   };
 
   // ── Step 2: replace every table in one database transaction ──
-  // restore_backup (db/phase0_restore_v1.sql) deletes and re-inserts all tables
-  // atomically: if anything fails, the database rolls back to exactly what it was.
+  // restore_backup deletes and re-inserts all tables atomically: if anything fails, the
+  // database rolls back to exactly what it was.
   const restoredTables = backupSpec(backup.formatVersion).tables;
   // The phase is read again right before sending: it must still be this page's, and only
-  // a format-7 document is ever sent (formats 3, 4, 5 and 6 were converted in the preview).
+  // a format-7 document is ever sent (formats 5 and 6 were converted in the preview).
   // Nothing is sent otherwise.
   let sendCap = null;
   try { sendCap = await stage5Capabilities(); } catch (e) { sendCap = null; }
@@ -1187,11 +909,11 @@ async function sendRestore(preRestoreFilename) {
   restoreInFlight = true; // sent to the database: navigation no longer abandons it
   if (typeof updateLeaveWarning === 'function') updateLeaveWarning(); // S6 (D18): leaving now may leave its outcome unknown
   try {
-    await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup, p_allow_v1_reset: pendingRestoreAllowV1Reset === true },
+    await sbFetch('POST', 'rpc/restore_backup', { p_backup: backup, p_allow_v1_reset: false },
       { what: 'Restore from a backup file', note: { safetyBackup: preRestoreFilename } });
     // Collections and watch-with choices read before this point are stale now, and an open
     // Details dialog can no longer save its draft.
-    if (orgState !== 'absent') invalidateOrganization();
+    invalidateOrganization();
     if (typeof detailsDialog !== 'undefined' && detailsDialog) { detailsDialog.restored = true; renderDetails(); }
   } catch(e) {
     // M1: only a refusal (or a restore never sent) means nothing was changed. With no confirmed
@@ -1206,7 +928,7 @@ ${esc(preRestoreFilename)}</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
       return;
     }
-    if (orgState !== 'absent') invalidateOrganization();
+    invalidateOrganization();
     if (typeof detailsDialog !== 'undefined' && detailsDialog) { detailsDialog.restored = true; renderDetails(); }
     setProgress('No answer from the database. Checking what your library matches now…');
     const safety = pendingSafetyBackup && pendingSafetyBackup.filename === preRestoreFilename ? pendingSafetyBackup.doc : null;

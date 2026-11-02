@@ -35,9 +35,6 @@ function isOffList(r) {
   return !!r.skipped || displayStatus(r) === 'skipped';
 }
 
-function noteTvShows(shows) {
-  (shows || []).forEach(s => tvShowsById.set(s.id, s));
-}
 
 // The show list, read with every view (derived-views.js, browse-views.js). A read publishes
 // only if it is the newest one started and no change overlapped it (write-lane.js readFresh),
@@ -113,13 +110,6 @@ function resumeRange(show, seasons) {
   const sequence = main.slice(a, b).filter(r => !r.watched && !r.skipped);
   return { start: main[a], sequence, state: sequence.length ? 'active' : 'complete' };
 }
-// What the show's next season is: the range's first season while it is active,
-// otherwise the normal up next.
-function effectiveUpNext(show, seasons) {
-  const range = resumeRange(show, seasons);
-  if (range && range.state === 'active') return range.sequence[0];
-  return upNextSeason(seasons);
-}
 
 // ─── Controls ─────────────────────────────────────────────────────────────────
 function statusOptionLabel(status) {
@@ -129,9 +119,6 @@ function statusOptionLabel(status) {
 function plainStatusLabel(status) {
   return String(statusOptionLabel(status)).replace(/^[▶✕✓★] /, '');
 }
-function priorityLabel(p) {
-  return PRIORITY_LABELS[p] || 'Normal';
-}
 
 // High: a star before the title, with an accessible label; Normal: nothing; Low: a quiet
 // text label after the title (after: true).
@@ -140,22 +127,18 @@ function priorityMarkHtml(priority, after = false) {
   if (priority === 'low' && after) return ' <span class="priority-low" title="Low priority">Low</span>';
   return '';
 }
-// The markers: Ended (shows), New from catalog, Needs status review.
+// The marker: Ended (shows).
 function stateTagsHtml(rec, kind) {
   return (kind === 'show' && rec.ended ? ' <span class="state-tag ended-tag" title="You marked this show as ended">Ended</span>' : '')
     + (kind === 'show' && typeof cuEndedFlagHtml === 'function' ? cuEndedFlagHtml(rec) : '')
-    + (rec.catalog_new ? ' <span class="state-tag new-tag" title="Added by a catalog update">New</span>' : '')
-    + (rec.status_review ? ' <span class="state-tag review-tag-b45" title="Restored from an older backup whose status couldn’t be carried over: choose a status or keep this one">Review status</span>' : '');
 }
 
-// The show-level status control. While Needs status review is on, the control starts on
-// a prompt, so choosing any status — the current one included — is an explicit choice.
+// The show-level status control.
 function showStatusSelectHtml(show, opts = {}) {
   if (!show) return '<span class="confirmed-lbl">—</span>';
   const stop = opts.stopPropagation;
-  const prompt = show.status_review ? '<option value="" selected disabled>Choose a status…</option>' : '';
-  const options = TV_STATUS_ORDER.map(s => `<option value="${s}"${!show.status_review && s === show.status ? ' selected' : ''}>${statusOptionLabel(s)}</option>`).join('');
-  return `<select class="status-select show-status-select s-${show.status}${show.status_review ? ' status-needs-choice' : ''}" aria-label="Status of ${esc(show.title)}" title="Show status — applies to every season of ${esc(show.title)}"${stop ? ' onclick="event.stopPropagation()"' : ''} onchange="${stop ? 'event.stopPropagation(); ' : ''}setShowStateById('${show.id}', { status: this.value })">${prompt}<optgroup label="Applies to all seasons of ${esc(show.title)}">${options}</optgroup></select>`;
+  const options = TV_STATUS_ORDER.map(s => `<option value="${s}"${s === show.status ? ' selected' : ''}>${statusOptionLabel(s)}</option>`).join('');
+  return `<select class="status-select show-status-select s-${show.status}" aria-label="Status of ${esc(show.title)}" title="Show status — applies to every season of ${esc(show.title)}"${stop ? ' onclick="event.stopPropagation()"' : ''} onchange="${stop ? 'event.stopPropagation(); ' : ''}setShowStateById('${show.id}', { status: this.value })"><optgroup label="Applies to all seasons of ${esc(show.title)}">${options}</optgroup></select>`;
 }
 // Priority (shows and films; kind 'show' | 'film'), in the row's ⋯ menu. Choosing closes the menu.
 function prioritySelectHtml(rec, kind) {
@@ -186,16 +169,14 @@ function showStateOf(show) {
 
 // A guarded change of a show's state (library_set_show_state_b45): changes is any of
 // { status } (an explicit viewing-status choice), { priority }, { ended }. A choice equal
-// to what is stored sends nothing, except a status choice while Needs status review is on
-// (it resolves the review). Shown at once; put back if refused; an answer from before a
+// to what is stored sends nothing. Shown at once; put back if refused; an answer from before a
 // restore is set aside; an unknown outcome is never resent.
 async function setShowStateById(showId, changes) {
   if (activeViewId === ALL_MOVIES_VIEW.id) return; // All Movies lists no show (S3: collections edit shows)
   const show = tvShowsById.get(showId);
   if (!show || !changes) return;
-  const explicitReview = 'status' in changes && show.status_review;
   const differs = Object.keys(changes).some(k => (k === 'ended' ? !!show.ended !== !!changes.ended : show[k] !== changes[k]));
-  if (!differs && !explicitReview) { renderTable(); return; }
+  if (!differs) { renderTable(); return; }
   const what = `“${show.title}” · ${'status' in changes ? 'show status' : 'priority' in changes ? 'priority' : 'Show ended'}`;
   await runWrite(what, async () => {
     const expected = showStateOf(show);
@@ -254,59 +235,6 @@ async function reportStateFailure(e) {
   const ok = await reloadOpenView();
   showError(text + rereadText(ok));
   return ok ?? null;
-}
-
-// O6: keep the current status (Needs status review cleared, the old status no longer kept).
-async function keepCurrentStatus(kind, id) {
-  const rec = kind === 'show' ? tvShowsById.get(id) : actionRows().find(r => r.id === id);
-  if (!rec || !rec.status_review) return;
-  await runWrite(`“${rec.title}” · status review`, async () => {
-    const expected = kind === 'show' ? showStateOf(rec) : filmStateOf(rec);
-    try {
-      const res = await sbRpc('library_dismiss_review_b45', { p_kind: kind, p_id: id, p_expected: expected });
-      if (kind === 'show' && res && res.show) Object.assign(rec, res.show);
-      else if (res && res.row) mirrorRowUpdate(id, res.row);
-      showSaved();
-    } catch (e) {
-      await reportStateFailure(e);
-      return;
-    }
-    renderTable();
-  }, { list: true });
-}
-
-// O5: dismiss New from catalog for the records given ([{kind, id}]), all or nothing.
-async function dismissCatalogNew(list) {
-  if (!list || !list.length) return;
-  if (list.length > 1 && !confirm(`Dismiss “New from catalog” on the ${list.length} records shown? Their status and priority don’t change.`)) return;
-  await runWrite('New from catalog', async () => {
-    try {
-      await sbRpc('library_dismiss_catalog_new_b45', { p_expected: list.map(x => ({ kind: x.kind, id: x.id })) });
-      list.forEach(x => {
-        const rec = x.kind === 'show' ? tvShowsById.get(x.id) : null;
-        if (rec) { rec.catalog_new = false; if (rec.legacy_status === 'pending') rec.legacy_status = null; }
-        else mirrorRowUpdate(x.id, { catalog_new: false });
-      });
-      showSaved();
-    } catch (e) {
-      await reportStateFailure(e);
-      return;
-    }
-    renderTable();
-  }, { list: true });
-}
-function dismissShowNew(id) { dismissCatalogNew([{ kind: 'show', id }]); }
-// O5, all: the New-from-catalog records the open view shows — exactly that set, in one call
-// (the database refuses the whole call if it no longer matches). Offered from two records up.
-function dismissAllNewHtml(records) {
-  shownNewRecords = records;
-  if (records.length < 2) return { row: '', card: '' };
-  const text = `${records.length} of the records shown are New from catalog.`;
-  const btn = `<button class="btn btn-link" onclick="dismissShownNew()">Dismiss “New” on these ${records.length}</button>`;
-  return { row: `<tr class="empty-row"><td colspan="6">${esc(text)} ${btn}</td></tr>`, card: `<div class="empty-row" style="padding:0.5rem 0">${esc(text)} ${btn}</div>` };
-}
-function dismissShownNew() {
-  if (shownNewRecords.length >= 2) return dismissCatalogNew(shownNewRecords.slice());
 }
 
 // O9: watch earlier seasons. resumePicker names the show whose gap seasons are offered.

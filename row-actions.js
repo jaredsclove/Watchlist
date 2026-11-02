@@ -56,30 +56,24 @@ function filmStateOf(r) {
   return { status: r.status, watched: !!r.watched, priority: r.priority, catalog_new: !!r.catalog_new, status_review: !!r.status_review };
 }
 // The film status control: To Watch / Watched / Skipped over the stored status and
-// watched flag; a Skipped + Watched pair is shown as such. While Needs status review is
-// on, the control starts on a prompt, so any choice (the current one included) is explicit.
+// watched flag; a Skipped + Watched pair is shown as such.
 function filmStatusSelectHtml(r) {
   const state = filmViewState(r);
-  const prompt = r.status_review ? '<option value="" selected disabled>Choose a status…</option>' : '';
   const states = state === 'pair' ? ['pair', 'to_watch', 'watched', 'skipped'] : ['to_watch', 'watched', 'skipped'];
-  const options = states.map(v => `<option value="${v}"${!r.status_review && v === state ? ' selected' : ''}${v === 'pair' ? ' disabled' : ''}>${FILM_STATE_LABELS[v]}</option>`).join('');
-  return `<select class="status-select s-film-${state}${r.status_review ? ' status-needs-choice' : ''}" onchange="setStatus('${r.id}', this.value, this)" aria-label="Status of ${esc(r.title)}">${prompt}${options}</select>`;
+  const options = states.map(v => `<option value="${v}"${v === state ? ' selected' : ''}${v === 'pair' ? ' disabled' : ''}>${FILM_STATE_LABELS[v]}</option>`).join('');
+  return `<select class="status-select s-film-${state}" onchange="setStatus('${r.id}', this.value, this)" aria-label="Status of ${esc(r.title)}">${options}</select>`;
 }
 
 // Selector → To Watch / Watched / Skipped (O1, one guarded call). Choosing the state already
-// stored sends nothing, unless Needs status review is on (the choice resolves it). Leaving a
-// watched film for Skipped, or a Skipped + Watched pair for To Watch, asks first because it
+// stored sends nothing. Leaving a watched film for Skipped, or a Skipped + Watched pair for To Watch, asks first because it
 // clears Watched; Cancel sends nothing.
 async function setStatus(id, state, selectEl) {
   const row = actionRows().find(r => r.id === id);
   if (!row || isTvSeason(row) || !['to_watch', 'watched', 'skipped'].includes(state)) { renderTable(); return; }
   const current = filmViewState(row);
-  if (state === current && !row.status_review) { renderTable(); return; }
-  if (current === 'pair' && state === 'skipped' && !row.status_review) { renderTable(); return; }
-  // (Skipped chosen on a pair is reached only under review: an explicit choice, which clears Watched.)
+  if (state === current || (current === 'pair' && state === 'skipped')) { renderTable(); return; }
   const clearsWatched = (current === 'watched' && state === 'skipped') || (current === 'pair' && state !== 'watched');
-  if (clearsWatched && !confirm(current === 'watched' ? `Skip “${row.title}”? This also clears Watched.`
-    : state === 'skipped' ? `Keep “${row.title}” Skipped? This clears Watched.` : `Mark “${row.title}” To Watch? This clears Watched.`)) {
+  if (clearsWatched && !confirm(current === 'watched' ? `Skip “${row.title}”? This also clears Watched.` : `Mark “${row.title}” To Watch? This clears Watched.`)) {
     renderTable();
     return;
   }

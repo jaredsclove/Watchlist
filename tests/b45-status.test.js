@@ -4,7 +4,7 @@
 // (O5 one and all, O6), refusals, cancellations and unknown outcomes; Currently Watching
 // membership (the Ended exit, the all-skipped exclusion; plan §4.7.2–4.7.3, CW1); the
 // earlier-seasons range (O9; O1 + O9) and its progression (§4.7.4, CW2); and the labels (U1).
-// The database rules themselves are checked on PGlite (db/test/t_b45.sql W1–W10); the
+// The database rules themselves are in db/b45_expand.sql; the
 // harness's _b45 functions are independent stand-ins (tests/b45-harness.js).
 // Run from the repo root: node tests/b45-status.test.js
 const assert = require('assert');
@@ -66,7 +66,7 @@ test('controls: To Watch / ▶ Watching / ✕ Skipped, ★ High / Normal / Low b
   assert.ok(!/row-maybe/.test(body(app)), 'no dimming for Low');
 });
 
-test('the status filter is All (except Skipped) · All · To Watch · Watching · Skipped; priority Any · High · Normal · Low · High + Normal; markers are two checkboxes', async () => {
+test('the status filter is All (except Skipped) · All · To Watch · Watching · Skipped; priority Any · High · Normal · Low · High + Normal', async () => {
   const a = show({ title: 'A', priority: 'high' }, [{ num: 1 }]), b = show({ title: 'B', priority: 'low', catalog_new: true }, [{ num: 1 }]);
   const c = show({ title: 'C', status_review: true, legacy_status: 'complete', ended: true }, [{ num: 1 }]);
   const app = await open('alltv', all(a, b, c));
@@ -74,13 +74,11 @@ test('the status filter is All (except Skipped) · All · To Watch · Watching �
   const opts = id => [...(f.match(new RegExp(`id="${id}"[\\s\\S]*?</select>`)) || [''])[0].matchAll(/<option value="([^"]*)">([^<]*)</g)].map(m => `${m[1]}=${m[2]}`);
   assert.deepStrictEqual(opts('fStatus'), ['=All (except Skipped)', 'all=All statuses', 'confirmed=To Watch', 'watching=Watching', 'skipped=Skipped']);
   assert.deepStrictEqual(opts('fPriority'), ['=Any priority', 'high=★ High', 'normal=Normal', 'low=Low', 'highnormal=High + Normal']);
-  assert.ok(f.includes('id="fNew"') && f.includes('New from catalog') && f.includes('id="fReview"') && f.includes('Needs status review'));
+  assert.ok(!f.includes('New from catalog') && !f.includes('Needs status review'), 'the retired marker filters are gone');
   const titles = () => [...app.el('tbody').innerHTML.matchAll(/show-title">([^<]*)</g)].map(m => m[1]);
   app.el('fPriority').value = 'highnormal'; app.ctx.renderTable(); assert.deepStrictEqual(titles(), ['A', 'C']);
-  app.el('fPriority').value = ''; app.el('fNew').checked = true; app.ctx.renderTable(); assert.deepStrictEqual(titles(), ['B']);
-  app.el('fNew').checked = false; app.el('fReview').checked = true; app.ctx.renderTable(); assert.deepStrictEqual(titles(), ['C']);
-  app.ctx.renderFilters(); assert.strictEqual(app.el('fReview').checked, true, 'a ticked marker survives a redraw');
-  assert.ok(rowOf(app, 'C').includes('Ended') && rowOf(app, 'C').includes('Review status'));
+  assert.ok(rowOf(app, 'C').includes('Ended') && !rowOf(app, 'C').includes('Review status') && !rowOf(app, 'B').includes('>New<'), 'stored flags show no marker');
+  assert.ok(!rowOf(app, 'C').includes('Choose a status…'), 'and no prompt: the select shows the stored status');
   assert.deepStrictEqual(app.writes(), []);
 });
 
@@ -88,24 +86,10 @@ test('the status filter is All (except Skipped) · All · To Watch · Watching �
 test('O1 from the selector: one guarded call with the shown state; New, review and provenance cleared in the page as in the database', async () => {
   const s = show({ title: 'S', catalog_new: true, legacy_status: 'pending' }, [{ num: 1 }]);
   const app = await open('alltv', all(s));
-  assert.ok(rowOf(app, 'S').includes('>New<'));
   await app.ctx.setShowStateById(s.show.id, { status: 'watching' }); await settle();
   assert.deepStrictEqual(calls(app, 'library_set_show_state_b45'), [{ p_show_id: s.show.id, p_expected: { ...STATE, catalog_new: true }, p_changes: { status: 'watching' } }]);
   assert.deepStrictEqual(['status', 'catalog_new', 'status_review', 'legacy_status'].map(k => stored(app, s.show.id)[k]), ['watching', false, false, null]);
-  assert.ok(!rowOf(app, 'S').includes('>New<'), 'the tag is gone');
   assert.deepStrictEqual(app.writes().length, 1);
-});
-
-test('O1 under review: the selector starts on “Choose a status…”; choosing the current status is sent (it resolves the review); without review the same status sends nothing (O8)', async () => {
-  const r = show({ title: 'R', status_review: true, legacy_status: 'complete', ended: true }, [{ num: 1 }]);
-  const q = show({ title: 'Q' }, [{ num: 1 }]);
-  const app = await open('alltv', all(r, q));
-  assert.ok(rowOf(app, 'R').includes('<option value="" selected disabled>Choose a status…</option>'));
-  await app.ctx.setShowStateById(q.show.id, { status: 'confirmed' }); await settle();
-  assert.deepStrictEqual(app.writes(), [], 'O8: nothing sent');
-  await app.ctx.setShowStateById(r.show.id, { status: 'confirmed' }); await settle();
-  assert.deepStrictEqual(calls(app, 'library_set_show_state_b45').map(c => c.p_changes), [{ status: 'confirmed' }]);
-  assert.deepStrictEqual(['status_review', 'legacy_status', 'ended'].map(k => stored(app, r.show.id)[k]), [false, null, true], 'review and provenance cleared; Ended kept');
 });
 
 test('O2 priority and O3 Ended: markers kept; provenance cleared only for the field it encodes', async () => {
@@ -142,54 +126,6 @@ test('no clear answer: “wasn’t confirmed”, never resent, the view read aga
   await g.reached; g.fail(); await p; await settle(); await settle(50);
   assert.match(banner(app), /This change wasn’t confirmed[\s\S]*it won’t be sent again/);
   assert.strictEqual(calls(app, 'library_set_show_state_b45').length, 1);
-});
-
-// ─── O5 / O6 (W4–W6, page side) ───────────────────────────────────────────────
-test('O5 one: Dismiss “New” sends that one record; review untouched; pending provenance cleared, other provenance kept', async () => {
-  const s = show({ title: 'S', catalog_new: true, legacy_status: 'pending' }, [{ num: 1 }]);
-  const t = show({ title: 'T', catalog_new: true, status_review: true, legacy_status: 'complete', ended: true }, [{ num: 1 }]);
-  const app = await open('alltv', all(s, t));
-  app.ctx.toggleDerivedShow(s.show.id); await settle();
-  assert.ok(app.el('tbody').innerHTML.includes(`dismissShowNew('${s.show.id}')`));
-  await app.ctx.dismissShowNew(s.show.id); await settle();
-  await app.ctx.dismissShowNew(t.show.id); await settle();
-  assert.deepStrictEqual(calls(app, 'library_dismiss_catalog_new_b45'), [{ p_expected: [{ kind: 'show', id: s.show.id }] }, { p_expected: [{ kind: 'show', id: t.show.id }] }]);
-  assert.deepStrictEqual(['catalog_new', 'legacy_status'].map(k => stored(app, s.show.id)[k]), [false, null]);
-  assert.deepStrictEqual(['catalog_new', 'status_review', 'legacy_status'].map(k => stored(app, t.show.id)[k]), [false, true, 'complete']);
-});
-
-test('O5 all: offered for the New records the view shows (from two), one atomic call over exactly that set; the confirmation states the count; Cancel sends nothing; a changed set refuses the whole call', async () => {
-  const a = show({ title: 'A', catalog_new: true }, [{ num: 1 }]), b = show({ title: 'B', catalog_new: true }, [{ num: 1 }]);
-  const c = show({ title: 'C', catalog_new: true, status: 'skipped' }, [{ num: 1 }]), d = show({ title: 'D' }, [{ num: 1 }]);
-  const app = await open('alltv', all(a, b, c, d));
-  app.el('fStatus').value = ''; app.ctx.renderTable(); // the Skipped one isn't shown
-  assert.ok(app.el('tbody').innerHTML.includes('Dismiss “New” on these 2'));
-  const asked = [];
-  app.ctx.confirm = q => { asked.push(q); return false; };
-  await app.ctx.dismissShownNew(); await settle();
-  assert.deepStrictEqual(app.writes(), [], 'Cancel: nothing sent');
-  assert.match(asked[0], /on the 2 records shown\? Their status and priority don’t change\./);
-  app.ctx.confirm = () => true;
-  stored(app, b.show.id).catalog_new = false; // dismissed elsewhere meanwhile
-  await app.ctx.dismissShownNew(); await settle();
-  assert.deepStrictEqual(calls(app, 'library_dismiss_catalog_new_b45'), [{ p_expected: [{ kind: 'show', id: a.show.id }, { kind: 'show', id: b.show.id }] }]);
-  assert.match(banner(app), /1 of the 2 records shown are no longer new from the catalog, so nothing was changed/);
-  assert.strictEqual(stored(app, a.show.id).catalog_new, true, 'all or nothing');
-  assert.strictEqual(stored(app, c.show.id).catalog_new, true, 'a record not shown is never included');
-  app.ctx.renderTable();
-  assert.ok(!app.el('tbody').innerHTML.includes('Dismiss “New” on these'), 'the view was read again: only A is New, so Dismiss all isn’t offered');
-  await app.ctx.dismissShownNew(); await settle();
-  assert.strictEqual(calls(app, 'library_dismiss_catalog_new_b45').length, 1);
-});
-
-test('O6 Keep current status: clears review and provenance; New and status untouched', async () => {
-  const s = show({ title: 'S', status: 'watching', ended: true, status_review: true, legacy_status: 'complete', catalog_new: true }, [{ num: 1, w: true }]);
-  const app = await open('alltv', all(s));
-  app.ctx.toggleDerivedShow(s.show.id); await settle();
-  assert.ok(app.el('tbody').innerHTML.includes(`keepCurrentStatus('show', '${s.show.id}')`));
-  await app.ctx.keepCurrentStatus('show', s.show.id); await settle();
-  assert.deepStrictEqual(calls(app, 'library_dismiss_review_b45'), [{ p_kind: 'show', p_id: s.show.id, p_expected: { ...STATE, status: 'watching', ended: true, catalog_new: true, status_review: true } }]);
-  assert.deepStrictEqual(['status_review', 'legacy_status', 'catalog_new', 'status'].map(k => stored(app, s.show.id)[k]), [false, null, true, 'watching']);
 });
 
 // ─── Currently Watching membership (§4.7.2–4.7.3, CW1) ────────────────────────
@@ -297,7 +233,7 @@ test('CW2 resume progression, table-driven over §4.7.4 (the reviewed example fi
   assert.strictEqual(state(s.show, s.rows), 'active:Season 1,Season 2', 'resume from S1, boundary S3');
   // The reviewed example: S3 marked unwatched → the range is fixed; S3 never enters.
   assert.strictEqual(state(s.show, set(s.rows, 'a3', { watched: false })), 'active:Season 1,Season 2', 'the reviewed example');
-  assert.strictEqual(app.ctx.effectiveUpNext(s.show, set(s.rows, 'a3', { watched: false })).season, 'Season 1');
+  assert.strictEqual(range(s.show, set(s.rows, 'a3', { watched: false })).sequence[0].season, 'Season 1');
   assert.strictEqual(state(s.show, set(s.rows, 'a1', { watched: true })), 'active:Season 2', 'mark inside → leaves; up next advances');
   assert.strictEqual(state(s.show, set(set(s.rows, 'a1', { watched: true }), 'a2', { watched: true })), 'complete:', 'completion');
   assert.strictEqual(state(s.show, set(set(s.rows, 'a1', { watched: true }), 'a2', { watched: false })), 'active:Season 2', 'undo inside → re-enters');
@@ -316,7 +252,7 @@ test('CW2 resume progression, table-driven over §4.7.4 (the reviewed example fi
   assert.strictEqual(state(s.show, set(s.rows, 'a3', { id: 'gone' }).filter(r => r.id !== 'gone')), 'invalid:', 'a missing endpoint is inert (the database clears it on delete)');
   // After completion the normal rules apply again (the Ended exit included), and normal progression resumes.
   const done = set(set(s.rows, 'a1', { watched: true }), 'a2', { watched: true });
-  assert.strictEqual(app.ctx.effectiveUpNext(s.show, done).season, 'Season 4', 'normal up next after completion');
+  assert.strictEqual(app.ctx.upNextSeason(done).season, 'Season 4', 'normal up next after completion');
   const e = mk({ ended: true });
   const endedDone = set(set(set(e.rows, 'a1', { watched: true }), 'a2', { watched: true }), 'a4', { watched: true });
   const today = app.get('localTodayStr()');
@@ -343,31 +279,14 @@ test('labels in the expanded show: “Earlier seasons done” for a completed ra
   assert.deepStrictEqual(app.writes(), []);
 });
 
-test('phone width (375 px): the cards carry the status, priority and marker controls; the show actions are in the expanded card', async () => {
+test('phone width (375 px): the cards carry the status and priority controls; the show actions are in the expanded card', async () => {
   const s = show({ title: 'S', status: 'watching', catalog_new: true, ended: true }, [{ num: 1 }, { num: 2, w: true }]);
   const app = await open('alltv', all(s), { width: 375 });
   const cards = app.el('cardList').innerHTML;
   assert.ok(cards.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && cards.includes(`setShowStateById('${s.show.id}', { priority: this.value })`));
-  assert.ok(cards.includes('>New<') && cards.includes('>Ended<'));
+  assert.ok(cards.includes('>Ended<'));
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   assert.ok(app.el('cardList').innerHTML.includes('Watch earlier seasons…') && app.el('cardList').innerHTML.includes('Show ended'));
-});
-
-// ─── GA-1 review 3: stale and uncertain outcomes, the same everywhere ─────────
-test('Keep current status when the record changed elsewhere: refused, the list really is read again, and the message says so; a failed reread is said so', async () => {
-  const s = show({ title: 'S', status_review: true, legacy_status: 'complete', ended: true }, [{ num: 1 }]);
-  const app = await open('alltv', all(s));
-  stored(app, s.show.id).priority = 'high';
-  const before = app.requests.length;
-  await app.ctx.keepCurrentStatus('show', s.show.id); await settle();
-  assert.ok(app.requests.slice(before).some(r => r.method === 'GET' && r.url.includes('/tv_shows?')), 'reread');
-  assert.match(banner(app), /This changed since the page showed it, so nothing was changed\. The list has been read again; look at it again\./);
-  assert.strictEqual(app.get(`tvShowsById.get('${s.show.id}').priority`), 'high', 'the page shows what is stored now');
-  app.failNext(r => r.method === 'GET' && r.url.includes('/tv_shows?'));
-  stored(app, s.show.id).priority = 'low';
-  await app.ctx.keepCurrentStatus('show', s.show.id); await settle();
-  assert.match(banner(app), /This changed since the page showed it, so nothing was changed\. The list couldn’t be read again, so what is shown may be out of date; use Retry\./);
-  assert.strictEqual(calls(app, 'library_dismiss_review_b45').length, 2, 'one call each, never resent');
 });
 
 test('Start / Stop earlier seasons: a stale range or record is refused and the list is read again; no clear answer → not confirmed, never resent, read again', async () => {

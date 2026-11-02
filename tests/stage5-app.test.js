@@ -18,12 +18,12 @@
 //   * catalog conflicts shown with their candidates, never resolved by the page (U7);
 //     Match into a show a catalog governs is refused and changes nothing (U1).
 // The database side is checked on PGlite (db/test/t_5a_expand.sql, db/test/t_5c_contract.sql,
-// tools/db-rehearsal-5.mjs); the harness's library_* functions are independent stand-ins.
+// db/phase5c_contract.sql); the harness's library_* functions are independent stand-ins.
 // Run from the repo root: node tests/stage5-app.test.js
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { createApp, runner, settle, legacyBackupFixture, userKeyOf } = require('./app-harness');
+const { createApp, runner, settle, userKeyOf } = require('./app-harness');
 
 const T = runner('stage5-app');
 const test = T.test;
@@ -160,42 +160,27 @@ for (const phase of ['contracted-cu1']) { // (since CU1 the page writes only to 
 }
 
 // ─── Source scan (A13, source side) ───────────────────────────────────────────
-test('source scan: no app script but backup-format3.js names a storage value, a retired column or table, or a retired function (allowlisted lines listed); backup-format3.js sends no request', () => {
+test('source scan: no app script names a storage value, a retired column or table, or a retired function (allowlisted lines listed)', () => {
   const html = fs.readFileSync(path.join(ROOT, 'watchlist.html'), 'utf8');
   const scripts = [...html.matchAll(/<script src="([^"?]+\.js)[^"]*"/g)].map(m => m[1]).filter(s => !/^https?:/.test(s));
-  assert.ok(scripts.includes('library.js') && scripts.includes('backup-format3.js'));
+  assert.ok(scripts.includes('library.js') && !scripts.includes('backup-format3.js'));
   const RULE = /legacy_source|othertv_shows|collection=|\.collection\b|['"]collection['"]|\badd_tv_seasons\b|add_tv_seasons_to_show|create_tv_show|match_tv_row|(?<![_a-z])catalog_apply|seed_tv_defaults|tv_collections|isTvCollection|tv_backfill|org_bootstrap/;
   // Each allowlisted line is not a storage value: a tag-filter kind, a personal collection returned by
-  // the organization functions, a TMDB franchise label, or config.js's unused BACKUP_TABLES (config.js
-  // is synced from the catalog source and isn't edited here; the constant is read by nothing).
+  // the organization functions, or a TMDB franchise label.
   const ALLOW = [
-    ['config.js', /^const BACKUP_TABLES = /],
     ['render.js', /filterPillHtml\('collection', c, c, \{ cls: 'collection-tag'/],
     ['collections-pull.js', /tmdbLookupFailureNote\(collectionsMap\.size, failedCollections, 'collection'\)/],
     ['organization-manage.js', /res\.collection \|\| res\.choice|const noun = choice \? 'watch-with choice' : 'collection'|if \(res\.collection\) put\(d\.collections, res\.collection\)|manageCreate\('collection'\)/],
   ];
-  // B4/B5: the preview checks a file's recovery section as restore_backup does (its storage
-  // values against the file's own rows); that block reads the file only and sends nothing.
-  const BLOCKS = { 'backup-restore.js': [/recovery section check: begin/, /recovery section check: end/] };
   const hits = [];
   for (const f of scripts) {
-    if (f === 'backup-format3.js') continue;
-    let inBlock = false;
     fs.readFileSync(path.join(ROOT, f), 'utf8').split('\n').forEach((line, i) => {
-      if (BLOCKS[f] && BLOCKS[f][0].test(line)) inBlock = true;
-      if (BLOCKS[f] && BLOCKS[f][1].test(line)) inBlock = false;
-      if (inBlock) { if (/fetch\(|sbFetch\(|sbRpc\(|fetchAllRows/.test(line)) hits.push(`${f}:${i + 1}: request inside the file-only block`); return; }
       if (!RULE.test(line) || /^\s*\/\//.test(line)) return;
       if (ALLOW.some(([af, re]) => af === f && re.test(line.trim()))) return;
       hits.push(`${f}:${i + 1}: ${line.trim()}`);
     });
   }
   assert.deepStrictEqual(hits, []);
-  // The one module that knows format 1–3 shapes, and nothing else does. Since the 5c clean-up (G8)
-  // it only reads files: no request of any kind (no fetch, no Supabase call, no table read).
-  const f3 = fs.readFileSync(path.join(ROOT, 'backup-format3.js'), 'utf8');
-  assert.ok(/othertv_shows/.test(f3) && /legacy_source/.test(f3));
-  assert.deepStrictEqual(f3.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => /fetch\(|sbFetch\(|fetchAllRows\(|SUPABASE_/.test(l)).map(([i, l]) => `${i}: ${l.trim()}`), []);
 });
 
 // ─── Contracted flows ─────────────────────────────────────────────────────────
@@ -247,52 +232,11 @@ test('CU1: backup is format 7 (no storage, theme_kind, governance tables, no oth
 });
 
 for (const archive of ['active', 'retired']) {
-  test(`B4/B5: a format-3 file is converted in the page (3 → 4 → 5 → 6 → 7; previewed, loss-aware${archive === 'active' ? ', with its recovery section' : ', without a recovery section once the archive is retired'}); only the converted document is sent`, async () => {
-    const co = await boot('contracted');
-    const f3 = await legacyBackupFixture(co.app, 3); // a format-3 file (the page no longer exports one, G8)
-    assert.strictEqual(f3.formatVersion, 3);
-    const { app } = await boot('contracted-cu1', { recoveryArchive: archive });
-    app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-    await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle(); // the file is read (and fingerprinted) as when chosen
-    const preview = app.el('restoreModalBox').innerHTML.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    assert.match(preview, /format 3/i);
-    assert.match(preview, /Restore database/);
-    const sent = app.get('pendingRestoreData');
-    assert.strictEqual(sent.formatVersion, 7);
-    assert.strictEqual(!!sent.recovery, archive === 'active', 'the recovery section only while the archive is active');
-    assert.ok(sent.conversion && sent.conversion.source_format === 3);
-    await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
-    const calls = app.requests.filter(r => r.url.endsWith('/rpc/restore_backup'));
-    assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0].body.p_backup.formatVersion, 7, 'never the format-3 file itself');
-    assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
-  });
 }
 
 // PostgREST returns timestamptz as e.g. "…05.325+00:00", while the converter stamps the new link
 // rows with the file's exportedAt ("…05.325Z"): the same instant must verify; another must not.
 for (const [label, shift, verified] of [['the same instant in the database’s form', 0, true], ['a different instant (1 µs later)', 1, false]]) {
-  test(`contracted: converted format-3 restore whose link created_at comes back as ${label} ${verified ? 'verifies' : 'fails verification'}`, async () => {
-    const co = await boot('contracted');
-    const f3 = await legacyBackupFixture(co.app, 3);
-    const { app } = await boot('contracted-cu1', { recoveryArchive: 'active' });
-    const asDb = ts => ts.replace(/(\.\d{3})Z$/, (m, f) => `${shift ? (f + '00' + shift) : f.replace(/0+$/, '').replace(/\.$/, '')}+00:00`);
-    const restore = app.rpcHandlers.restore_backup;
-    app.rpcHandlers.restore_backup = body => {
-      const r = restore(body);
-      for (const l of [...app.store.__links.shows, ...app.store.__links.films]) l.created_at = asDb(l.created_at);
-      return r;
-    };
-    app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-    await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle(); // the file is read (and fingerprinted) as when chosen
-    const sent = app.get('pendingRestoreData');
-    assert.ok(sent.tables.catalog_show_links.length > 0 && sent.tables.catalog_show_links.every(l => /Z$/.test(l.created_at)));
-    await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
-    assert.ok(app.store.__links.shows.every(l => /\+00:00$/.test(l.created_at)));
-    const html = app.el('restoreModalBox').innerHTML;
-    if (verified) assert.match(html, /restored and verified/);
-    else { assert.match(html, /verification failed/); assert.match(html, /catalog_show_links[\s\S]*created_at/); }
-  });
 }
 
 test('B4/B5: a format-5 file into a database that is not B4/B5 is refused before anything happens', async () => {
@@ -427,28 +371,9 @@ for (const [label, stage5] of [['no Stage 5 (no capability)', null], ['an unknow
   });
 }
 
-test('G8 N3: a rolled-back (5c) database: a format-3 file is not restored (no direct restore): not offered, no safety backup, nothing sent or pending', async () => {
-  const { app } = await boot('contracted');
-  let downloads = 0;
-  app.ctx.downloadJSON = () => { downloads++; };
-  const f3 = await legacyBackupFixture(app, 3);
-  const before = app.requests.length;
-  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
-  assert.match(modalText(app), /Restore isn't available This page and the database don’t match/);
-  assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
-  assert.strictEqual(app.get('pendingRestoreData'), null);
-  assert.strictEqual(downloads, 0);
-  assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities'], 'no table read, no send');
-  app.ctx.closeRestoreModal();
-  assert.ok(!app.requests.some(r => r.url.includes('/rpc/restore_backup')));
-});
-
 test('G8 N4 (B4/B5): a document that is not format 7 is never sent at the send step', async () => {
-  const co = await boot('contracted');
-  const f3 = await legacyBackupFixture(co.app, 3);
   const { app } = await boot('contracted-cu1');
-  app.ctx.__b = f3;
+  app.ctx.__b = { ...JSON.parse(JSON.stringify(await app.ctx.buildBackupObject())), formatVersion: 6 };
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 6');
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
@@ -473,83 +398,19 @@ test('G8 N5 (B4/B5, finding 4): a page that found the database out of step stays
   assert.deepStrictEqual(app.writes(), []);
 });
 
-test('G8 N6: contracted: a format-3 file the converter refuses (a row that is neither a film nor a linked TV season): the refusal is shown; nothing sent, downloaded or pending', async () => {
-  const co = await boot('contracted');
-  const f3 = await legacyBackupFixture(co.app, 3);
-  const season = f3.tables.watchlist_items.find(r => r.show_id);
-  season.show_id = null; // still a valid format-3 row (format 3 allowed unlinked TV rows), but not representable at 5c
-  const { app } = await boot('contracted-cu1');
-  assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(f3)), [], 'the file itself passes format-3 validation');
-  let downloads = 0;
-  app.ctx.downloadJSON = () => { downloads++; };
-  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
-  assert.match(modalText(app), /This format 3 backup can't be converted It breaks a rule your updated list enforces, so nothing was changed: a row that is neither a film nor a linked TV season/);
-  assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
-  assert.strictEqual(app.get('pendingRestoreData'), null);
-  assert.strictEqual(downloads, 0);
-  assert.deepStrictEqual(app.writes(), []);
-});
-
-test('G8 N7: contracted: a converted document that fails format-4 validation is refused; nothing sent, downloaded or pending', async () => {
-  const co = await boot('contracted');
-  const f3 = await legacyBackupFixture(co.app, 3);
-  const { app } = await boot('contracted-cu1');
-  const real = app.ctx.convertFormat3To4(f3, { includeRecovery: true, sourceSha256: 'a'.repeat(64) });
-  const bad = JSON.parse(JSON.stringify(real.doc));
-  bad.tables.watchlist_items.find(r => r.theme_kind != null).theme_kind = 'bogus';
-  app.ctx.__conv = { refusals: [], doc: bad, summary: real.summary };
-  app.run('convertFormat3To4 = () => __conv'); // test-only stand-in; the real converter is unchanged (G8 L6)
-  let downloads = 0;
-  app.ctx.downloadJSON = () => { downloads++; };
-  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
-  assert.match(modalText(app), /This format 3 backup can't be converted The converted backup doesn’t pass validation, so nothing was changed:[\s\S]*theme_kind/);
-  assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
-  assert.strictEqual(app.get('pendingRestoreData'), null);
-  assert.strictEqual(downloads, 0);
-  assert.deepStrictEqual(app.writes(), []);
-});
-
-test('G8 N8: contracted: format 1 and format 2 files are refused at preview, before any safety backup, download or write', async () => {
-  const co = await boot('contracted');
-  const src2 = await createApp({ rows: library().rows, tvShows: library().tvShows, org: false });
-  const files = [[await legacyBackupFixture(co.app, 1), /predates TV shows \(format 1\)[\s\S]*only format 7 backups can be restored/],
-    [await legacyBackupFixture(src2, 2), /format 2, from before personal collections/]];
-  for (const [f, re] of files) {
+test('G8 N8: contracted: format 1 to 4 files are refused when chosen, before any safety backup, download or write', async () => {
+  for (const v of [1, 2, 3, 4]) {
     const { app } = await boot('contracted-cu1');
     let downloads = 0;
     app.ctx.downloadJSON = () => { downloads++; };
-    app.ctx.__b = f;
     app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-    await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
-    assert.match(app.el('restoreModalBox').innerHTML, re);
+    await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf({ format: 'watchlist-tracker-backup', formatVersion: v, exportedAt: '2026-01-01T00:00:00Z', rowCounts: {}, tables: {} })], value: 'x' } }); await settle();
+    assert.match(app.el('restoreModalBox').innerHTML, new RegExp(`format ${v} backup, which this page no longer reads`));
     assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
     assert.strictEqual(app.get('pendingRestoreData'), null);
     assert.strictEqual(downloads, 0);
     assert.deepStrictEqual(app.writes(), []);
   }
-});
-
-test('G8 N9 (finding 4): a format-3 file refused on a rolled-back database stays refused in that page after the database becomes B4/B5 (stop until reload); a reloaded page converts it', async () => {
-  const { app } = await boot('contracted');
-  const f3 = await legacyBackupFixture(app, 3);
-  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
-  assert.match(modalText(app), /Restore isn't available/);
-  app.ctx.closeRestoreModal();
-  app.migrateB45();
-  app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-  await app.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
-  assert.match(modalText(app), /Restore isn't available This page and the database don’t match/, 'still stopped until reload');
-  assert.strictEqual(app.get('pendingRestoreData'), null);
-  const r = (await boot('contracted-cu1')).app;
-  r.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
-  await r.ctx.handleRestoreFileSelected({ target: { files: [fileOf(f3)], value: 'x' } }); await settle();
-  assert.match(modalText(r), /This is a format 3 backup; it is converted before restoring/);
-  assert.ok(r.el('restoreModalBox').innerHTML.includes('executeRestore()'));
-  assert.strictEqual(r.get('pendingRestoreData.formatVersion'), 7);
-  assert.deepStrictEqual(app.writes().concat(r.writes()), []);
 });
 
 test('transition while an addition is prepared: B4/B5 rolled back between the preview and Add → the _b45 function is missing: refused, nothing added, no older function tried, no further writes', async () => {
@@ -598,21 +459,6 @@ for (const phase of ['contracted-cu1']) { // (since CU1 the page writes only to 
     noStorage(app);
   });
 }
-
-test('contracted: a converted format-3 restore keeps every collection’s presentation key (True Crime included); format 4 carries it', async () => {
-  const co = await boot('contracted');
-  const f3 = await legacyBackupFixture(co.app, 3);
-  const { app } = await boot('contracted-cu1');
-  const conv = app.ctx.convertFormat3To4(f3, { includeRecovery: true, sourceSha256: 'a'.repeat(64) });
-  const tc = f3.tables.personal_collections.find(c => c.legacy_source === 'truecrime');
-  assert.strictEqual(conv.doc.tables.personal_collections.find(c => c.id === tc.id).presentation_key, 'truecrime');
-  assert.strictEqual(conv.doc.tables.personal_collections.find(c => c.id === tc.id).catalog_id, null, 'True Crime governs nothing');
-  const f4 = await app.ctx.buildBackupObject();
-  assert.ok(f4.tables.personal_collections.every(c => 'presentation_key' in c));
-  const bad = JSON.parse(JSON.stringify(f4));
-  bad.tables.personal_collections[0].presentation_key = 'movies';
-  assert.ok(Array.from(app.ctx.validateBackupObject(bad)).some(e => /presentation_key "movies"/.test(e)));
-});
 
 // ─── Catalog twins (F2): acknowledged distinct works only ─────────────────────
 async function withCatalogShow(phase, title) {

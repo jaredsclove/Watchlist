@@ -234,7 +234,6 @@ function showListContainers() {
 }
 
 function settingsCollectionsText() {
-  if (orgState === 'absent') return 'Collections aren’t available on this database.';
   if (orgState !== 'ready') return orgState === 'loading' ? 'Loading…' : 'Couldn’t be read. Open Collections and use Retry.';
   const all = personalCollections || [];
   const archived = all.filter(c => c.archived_at).length;
@@ -242,7 +241,6 @@ function settingsCollectionsText() {
 }
 
 function settingsChoicesText() {
-  if (watchWithState === 'absent') return 'Watch-with choices aren’t available on this database.';
   if (watchWithState !== 'ready') return watchWithState === 'loading' ? 'Loading…' : 'Couldn’t be read.';
   return `${(watchWithChoices || []).filter(c => !c.archived_at).length} active`;
 }

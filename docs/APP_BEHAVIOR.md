@@ -26,7 +26,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   in its name) and it then opens on that section. Show rows read expand · title · ⋯. On a phone card the chevron starts on
   the card's one left margin, and the season line, progress, labels and actions flow below it from that margin, with progress
   beside the date when it fits; category labels are small pills inside 32 px targets, and Up to date is quiet text. Status is a quiet directly editable
-  select ("Choose a status…" is never quiet). Priority is edited in the row's ⋯ (shows and films; Seasons lists show it
+  select. Priority is edited in the row's ⋯ (shows and films; Seasons lists show it
   only); High shows ★ and Low the word, Normal nothing. The show-row shortcut reads "Mark watched" (its name and tooltip
   name the season; the episode list's offer keeps "Mark Season N watched"). Season progress reads "1/3 seasons watched".
   Clickable genres are subdued filter buttons ("Crime · Drama"), underlined on hover, 32 px tall on phones.
@@ -92,8 +92,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   Some take `p_expected` values and refuse a stale write; not every path does, so check each one before relying
   on it. `delete_tv_season` takes the mark count the page showed: a page from before EP1 can't delete a marked season.
 - **Backup** is format 7 (nineteen tables: format 6's nine plus collection updates' ten; no `user_id`). **Restore**
-  converts a format-3 to -6 file to format 7 first (a format-5 file has no marks, a format-6 file no collection
-  updates; the preview says what a restore removes), validates the file, checks for identity loss, makes and validates a safety backup,
+  converts a format-5 or -6 file to format 7 first (a format-5 file has no marks, a format-6 file no collection
+  updates; the preview says what a restore removes) and leaves out any `conversion` or `recovery` section an old file carries, saying so.
+  Formats 1 to 4 are refused (`docs/ADMIN_RESTORE.md` has the offline route). It validates the file, checks for identity loss, makes and validates a safety backup,
   then replaces the owner's rows in one database transaction and verifies field by field.
 
 ## Writes, reads and focus (since Batch A, `9487ce8`)

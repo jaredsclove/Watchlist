@@ -469,7 +469,7 @@ function renderDerivedFilters() {
         `<option value="${value}">${text}</option>`).join('')}</select>`
     : '';
   const themeSelect = themeFilterSelectHtml(derivedThemeChoices());
-  // B4: one select per category (shows' own metadata; seasons inherit), priority and markers.
+  // B4: one select per category (shows' own metadata; seasons inherit) and priority.
   const categoryFields = categoryFilterSelectsHtml(derivedFilterRecords());
   // Year (All TV only, Stage 4b): from every season the view lists before filtering.
   const yearSelect = activeViewId === 'alltv' && derivedData && derivedData.loaded
@@ -480,7 +480,7 @@ function renderDerivedFilters() {
     line: `${statusSelect}${seasonVisSelect}`,
     trail: tmdbQuickHtml('tv') + libraryAddButtonHtml('tv'),
     cats: [categoryFields],
-    marks: [filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml()), markerFilterChecksHtml()],
+    marks: [filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml())],
     more: [filterFieldHtml('Year', 'fYear', yearSelect), filterFieldHtml('Progress', 'fProgress', progressSelect), filterFieldHtml('Original label', 'fTheme', themeSelect)]
   });
   filtersRowEl.dataset.tab = tag;
@@ -503,9 +503,9 @@ function renderDerivedTable() {
   const val = id => document.getElementById(id)?.value || ''; // a control that isn't shown doesn't filter
   const fSearch = val('fSearch').trim().toLowerCase();
   const fTheme = val('fTheme');
-  const cats = categoryFilterValues(), fPriority = val('fPriority'), markers = markerFilterValues();
-  // Search, priority, markers and categories, on the show (a season by its show).
-  const showKeep = show => !!show && categoryMatches(metadataOf(show), cats) && priorityMatches(show.priority, fPriority) && markerMatches(show, markers);
+  const cats = categoryFilterValues(), fPriority = val('fPriority');
+  // Search, priority and categories, on the show (a season by its show).
+  const showKeep = show => !!show && categoryMatches(metadataOf(show), cats) && priorityMatches(show.priority, fPriority);
   const keep = x => (!fSearch || (x.title || '').toLowerCase().includes(fSearch)) && showKeep(x.show || showOfRow(x));
   updateDerivedTableHeader();
   let listing = null;
@@ -566,11 +566,6 @@ function countLineHtml(text) {
 function derivedColspan() {
   return activeViewId === 'watching' || activeViewId === 'comingsoon' ? 5 : 6;
 }
-// A full-width row from a shared helper written for six columns (tv-shows.js dismissAllNewHtml),
-// fitted to the open view.
-function fitColspan(out) {
-  return { ...out, row: (out.row || '').replace(/colspan="6"/g, `colspan="${derivedColspan()}"`) };
-}
 
 // A collapsible section's header: a real button (keyboard, aria-expanded), as in the
 // Browse views (B6).
@@ -609,9 +604,7 @@ function renderCurrentlyWatching(today, keep) {
   // B8: the counts are in the section headings (shows), not tiles.
   document.getElementById('statsRow').innerHTML = '';
 
-  const dismissAll = fitColspan(dismissAllNewHtml(shownActive.concat(derivedSectionOpen.uptodate ? shownUpToDate : [])
-    .filter(x => x.show.catalog_new).map(x => ({ kind: 'show', id: x.show.id }))));
-  let html = dismissAll.row, cardHtml = dismissAll.card;
+  let html = '', cardHtml = '';
   // B6: the upper section has its own heading (it doesn't collapse).
   const heading = derivedHeadingHtml('inprogress', 'In progress', headingCount(shownActive.length, active.length, 'show', 'shows'));
   html += heading.row;
@@ -678,8 +671,7 @@ function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '', fYear = 
   const breakdown = shown.length ? ` · ${shown.filter(x => x.show.status === 'watching').length} Watching · ${shown.filter(x => x.upToDate).length} up to date` : '';
   document.getElementById('statsRow').innerHTML = countLineHtml(countScoped(shown.length, items.length, 'show', 'shows') + breakdown);
 
-  const dismissAll = dismissAllNewHtml(shown.filter(x => x.show.catalog_new).map(x => ({ kind: 'show', id: x.show.id })));
-  let html = dismissAll.row, cardHtml = dismissAll.card;
+  let html = '', cardHtml = '';
   const notListed = unlinked + missingShow;
   if (notListed > 0) {
     const msg = `⚠️ ${notListed} TV season${notListed === 1 ? ' isn’t' : 's aren’t'} linked to a loaded show, so ${notListed === 1 ? 'it isn’t' : 'they aren’t'} listed here.`;
@@ -1009,7 +1001,7 @@ function derivedShowHtml(item, today, opts = {}) {
   return { row, card };
 }
 
-// An expanded show's own actions (B4/B5): Details, Show ended, the markers, and the
+// An expanded show's own actions (B4/B5): Details, Show ended, and the
 // earlier-seasons range (Watch earlier seasons; the chooser; Stop).
 // opts.state (B6, Currently Watching): the status select comes first, labelled (the row has
 // none; priority is in the row's ⋯); opts.progress: a line of season progress. data-action marks each
@@ -1025,8 +1017,6 @@ function showActionsHtml(item, keyArg, opts = {}) {
   if (opts.progress) parts.push(`<span class="show-progress-line">${showProgressText(seasons)}</span>`);
   parts.push(`<button class="btn btn-link" data-action="details" onclick="openDetails('show', '${keyArg}', this)">Details…</button>`,
     `<label class="ended-check" data-action="ended"><input type="checkbox"${show.ended ? ' checked' : ''} onchange="setShowStateById('${keyArg}', { ended: this.checked })"> Show ended</label>`);
-  if (show.catalog_new) parts.push(`<button class="btn btn-link" data-action="dismiss-new" onclick="dismissShowNew('${keyArg}')">Dismiss “New”</button>`);
-  if (show.status_review) parts.push(`<button class="btn btn-link" data-action="keep-status" onclick="keepCurrentStatus('show', '${keyArg}')">Keep current status</button>`);
   if (range) {
     const note = range.state === 'active' ? `Watching earlier seasons from ${esc(range.start ? range.start.season : '')}`
       : range.state === 'complete' ? 'Earlier seasons done' : 'Earlier-seasons range no longer applies; choose again or stop';

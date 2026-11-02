@@ -28,12 +28,6 @@ const ORG_COLLECTION_NOTES = {
 };
 const BROWSE_VIEW_PREFIX = 'browse:';
 
-// PostgREST's answer for a table that doesn't exist (the previous schema).
-function isMissingTableError(e) {
-  const msg = String(e && e.message || '');
-  return /: 404 /.test(msg) && msg.includes('PGRST205');
-}
-
 // Every read of these tables (startup, Retry, a collection view, after a change)
 // takes a number and a read stamp when it starts. Only a read that started after the
 // data now shown may replace it, and only if no change overlapped it (write-lane.js
@@ -93,24 +87,6 @@ function redrawForWatchWith() {
   if (isBrowseView(activeViewId) && browseData && browseData.loaded) renderTable();
 }
 
-// Redraws the rows and reopens the watch-with picker that was open (same row, same
-// table or card list), with focus back on the same choice.
-function redrawRowsKeepingPicker() {
-  const open = [...document.querySelectorAll('.more-popover')].find(p => p.style.display && p.style.display !== 'none');
-  const listId = open && typeof open.closest === 'function' && open.closest('#cardList') ? 'cardList' : 'tbody';
-  const active = document.activeElement;
-  const focusedValue = open && active && typeof active.closest === 'function' && active.closest('.more-popover') === open ? active.value : null;
-  renderTable();
-  if (!open) return;
-  const list = document.getElementById(listId);
-  const again = list && list.querySelector(`[id="${open.id}"]`);
-  if (!again) return;
-  again.style.display = open.style.display;
-  if (focusedValue != null) {
-    const box = [...again.querySelectorAll('input')].find(i => i.value === focusedValue);
-    if (box && typeof box.focus === 'function') box.focus();
-  }
-}
 
 // After a restore: everything read before it is stale (no read that overlapped the
 // restore publishes, write-lane.js). The selector says it is loading until the
@@ -141,17 +117,11 @@ async function loadOrganization() {
   // change overlapped it reads again once the lane is free.
   const current = () => read.seq === orgLoadSeq;
   const again = () => readAgainWhenFree(() => { if (orgLoadSeq === read.seq) loadOrganization(); });
-  const schemaAbsent = () => {
-    orgState = 'absent';
-    setWatchWith(() => { watchWithState = 'absent'; });
-    buildBrowseBar();
-  };
   const collections = readPersonalCollections().then(rows => {
     if (publishCollections(rows, read)) buildBrowseBar();
     else if (current() && !readFresh(read.stamp) && orgCollectionsSeq < read.seq) again();
   }, e => {
     if (!current()) return;
-    if (isMissingTableError(e)) { schemaAbsent(); return; }
     if (orgCollectionsSeq > read.seq) return;
     orgState = 'unavailable';
     console.error(e);
@@ -161,7 +131,6 @@ async function loadOrganization() {
     if (!publishChoices(rows, read) && current() && !readFresh(read.stamp) && orgChoicesSeq < read.seq) again();
   }, e => {
     if (!current()) return;
-    if (isMissingTableError(e)) { schemaAbsent(); return; }
     if (!watchWithChoices) {
       // Nothing read (since startup or a restore): say so, never fall back to the configured list.
       setWatchWith(() => { watchWithState = 'unavailable'; });
@@ -223,10 +192,8 @@ function membersOf(memberships, collectionId) {
 }
 
 // Watch-with: the choices to offer (not archived, in your order) and a token's
-// label. Only read choices are offered; the configured list only on a database
-// without the table; nothing while loading or after a failed read.
+// label. Only read choices are offered; nothing while loading or after a failed read.
 function watchWithChoiceList() {
-  if (watchWithState === 'absent') return WATCH_WITH_OPTIONS.map(w => ({ token: w, label: w }));
   if (watchWithState !== 'ready' || !watchWithChoices) return [];
   return watchWithChoices.filter(c => !c.archived_at)
     .sort((a, b) => (a.sort_order - b.sort_order) || cmpStr(a.token, b.token))
@@ -234,7 +201,7 @@ function watchWithChoiceList() {
 }
 
 function watchWithUsable() {
-  return watchWithState === 'ready' || watchWithState === 'absent';
+  return watchWithState === 'ready';
 }
 
 // What the watch-with controls show instead of choices while they can't be used.
@@ -255,11 +222,3 @@ function watchWithArchived(token) {
   return !!(c && c.archived_at);
 }
 
-// Archived choices still used on a row in the list, for filtering only (in your order).
-function archivedWatchWithInUse(rows) {
-  if (watchWithState !== 'ready' || !watchWithChoices) return [];
-  const used = new Set((rows || []).flatMap(r => r.watch_with || []));
-  return watchWithChoices.filter(c => c.archived_at && used.has(c.token))
-    .sort((a, b) => (a.sort_order - b.sort_order) || cmpStr(a.token, b.token))
-    .map(c => ({ token: c.token, label: c.label }));
-}

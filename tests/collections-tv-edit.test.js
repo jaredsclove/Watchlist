@@ -244,12 +244,9 @@ test('G3 F1 status: one library_set_show_state_b45 with the shown state; only th
   assert.deepStrictEqual(body(sent[0]), { p_show_id: L.bravo.show.id, p_expected: { status: 'confirmed', priority: 'normal', ended: false, catalog_new: true, status_review: false }, p_changes: { status: 'watching' } });
   assert.deepStrictEqual(d, { tv_shows: { added: [], removed: [], changed: { [L.bravo.show.id]: ['catalog_new', 'status'] } } });
 });
-test('G3 F1 the same status sends nothing; a review status is an explicit choice', async () => {
+test('G3 F1 the same status sends nothing', async () => {
   const { sent } = await flow(async (app, L) => app.ctx.setShowStateById(L.alpha.show.id, { status: 'watching' }));
   assert.deepStrictEqual(sent, []);
-  const r = await flow(async (app, L) => app.ctx.setShowStateById(L.charlie.show.id, { status: 'watching' }));
-  assert.deepStrictEqual(r.sent.map(path), ['rpc/library_set_show_state_b45']);
-  assert.deepStrictEqual(r.d.tv_shows.changed[r.L.charlie.show.id], ['status_review']);
 });
 test('G3 F2 priority and F3 Show ended: one call each; only those columns', async () => {
   const p = await flow(async (app, L) => app.ctx.setShowStateById(L.alpha.show.id, { priority: 'high' }));
@@ -285,17 +282,6 @@ test('G3 F5 Skip / Keep: set_season_skipped; only that row’s skipped; the seas
   assert.deepStrictEqual(sent.map(r => [path(r), body(r)]), [['rpc/set_season_skipped', { p_row_id: L.lone.rows[0].id, p_skipped: true }]]);
   assert.deepStrictEqual(d, { watchlist_items: { added: [], removed: [], changed: { [L.lone.rows[0].id]: ['skipped'] } } });
   assert.ok(!html(app).includes(`data-item="${L.lone.rows[0].id}"`), 'hidden under All (except Skipped)');
-});
-test('G3 F6 Dismiss “New” (one show): library_dismiss_catalog_new_b45 with exactly that show', async () => {
-  const { L, d, sent } = await flow(async (app, L) => { expandAll(app, [L.bravo.show.id]); assert.ok(html(app).includes(`dismissShowNew('${L.bravo.show.id}')`)); await app.ctx.dismissShowNew(L.bravo.show.id); await settle(); });
-  assert.deepStrictEqual(sent.map(r => [path(r), body(r)]), [['rpc/library_dismiss_catalog_new_b45', { p_expected: [{ kind: 'show', id: L.bravo.show.id }] }]]);
-  assert.deepStrictEqual(d, { tv_shows: { added: [], removed: [], changed: { [L.bravo.show.id]: ['catalog_new'] } } });
-});
-test('G3 F7 Keep current status: library_dismiss_review_b45 for the show; only status_review', async () => {
-  const { L, d, sent } = await flow(async (app, L) => app.ctx.keepCurrentStatus('show', L.charlie.show.id));
-  assert.deepStrictEqual(sent.map(path), ['rpc/library_dismiss_review_b45']);
-  assert.deepStrictEqual(body(sent[0]).p_kind, 'show');
-  assert.deepStrictEqual(d, { tv_shows: { added: [], removed: [], changed: { [L.charlie.show.id]: ['status_review'] } } });
 });
 test('G3 F8 earlier seasons: start (from the collection’s rows) and stop; only the range columns', async () => {
   const { app, L, d, sent } = await flow(async (app, L) => {
@@ -635,8 +621,6 @@ const SHOW_FLOWS = [
   ['F1', 'status', 'library_set_show_state_b45', L => L.bravo.show.id, 'status', (app, L) => app.ctx.setShowStateById(L.bravo.show.id, { status: 'watching' }), ['R', 'Ub', 'Ua', 'N']],
   ['F2', 'priority', 'library_set_show_state_b45', L => L.alpha.show.id, 'priority', (app, L) => app.ctx.setShowStateById(L.alpha.show.id, { priority: 'high' }), ['R', 'Ub', 'Ua']],
   ['F3', 'Show ended', 'library_set_show_state_b45', L => L.alpha.show.id, 'ended', (app, L) => app.ctx.setShowStateById(L.alpha.show.id, { ended: true }), ['R', 'Ub', 'Ua']],
-  ['F6', 'Dismiss “New”', 'library_dismiss_catalog_new_b45', L => L.bravo.show.id, 'catalog_new', (app, L) => app.ctx.dismissCatalogNew([{ kind: 'show', id: L.bravo.show.id }]), ['R', 'Ub', 'Ua']],
-  ['F7', 'Keep current status', 'library_dismiss_review_b45', L => L.charlie.show.id, 'status_review', (app, L) => app.ctx.keepCurrentStatus('show', L.charlie.show.id), ['R']],
   ['F8', 'earlier seasons', 'library_set_resume_b45', L => L.gap.show.id, 'resume_start_season_id', (app, L) => app.ctx.startResume(L.gap.show.id, L.gap.rows[0].id), ['R']]
 ];
 for (const [F, what, endpoint, idOf, field, act, outcomes] of SHOW_FLOWS) {
@@ -953,25 +937,6 @@ test('G8: no S3 flow sends org_*; Edit collection opens Manage at the members un
   assert.ok(app.requests.slice(mark).some(r => r.url.endsWith('/rpc/org_capabilities')));
   app.ctx.closeManage(); await settle();
   assert.ok(app.requests.slice(mark).every(r => r.method === 'GET'), 'closing unsubmitted sends nothing');
-});
-
-// S3-D4 (owner-approved omission): no list-level "Dismiss “New” on these N" in a collection; the
-// per-show Dismiss “New” (F6) stays. All TV, with the same New shows, still offers the line.
-test('G8 S3-D4: a collection offers no “Dismiss “New” on these N” (All TV does); each New show keeps its own Dismiss “New”', async () => {
-  const L = lib();
-  L.alpha.show.catalog_new = true;
-  const app = await boot(L);
-  await VIEWS.alltv(app);
-  assert.ok((html(app) + cards(app)).includes('dismissShownNew()'), 'All TV offers the line for two New shows');
-  for (const v of ['colShows', 'colSeasons']) {
-    await VIEWS[v](app);
-    const all = html(app) + cards(app);
-    assert.ok(!all.includes('dismissShownNew()') && !all.includes('on these'), `${v}: no list-level line`);
-    if (v !== 'colShows') continue;
-    expandAll(app, [L.alpha.show.id, L.bravo.show.id]);
-    for (const s of [L.alpha.show, L.bravo.show]) assert.ok(html(app).includes(`dismissShowNew('${s.id}')`), `${v}: ${s.title} keeps its own Dismiss “New”`);
-    assert.ok(!(html(app) + cards(app)).includes('dismissShownNew()'), `${v} expanded: still no list-level line`);
-  }
 });
 
 // ═══ G9: S1 / S2 preserved with a pending TV write ═══════════════════════════

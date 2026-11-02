@@ -121,24 +121,3 @@ function filmViewState(r) {
   return r.watched ? 'watched' : 'to_watch';
 }
 
-// ── Old statuses in a format 3 / 4 backup (plan §7.1, the converter column) ──
-// The stored values a record of the old model takes. Complete (shows) and watching /
-// complete (films) can't be decided without the owner, so they come back To Watch (a film
-// keeps its watched flag) with Needs status review; the old value is kept as provenance.
-function b45MapShowStatus(old) {
-  const v = { status: old, priority: 'normal', ended: false, catalog_new: false, status_review: false, legacy_status: null };
-  if (old === 'pending') Object.assign(v, { status: 'confirmed', catalog_new: true, legacy_status: 'pending' });
-  else if (old === 'highpriority') Object.assign(v, { status: 'confirmed', priority: 'high', legacy_status: 'highpriority' });
-  else if (old === 'maybe') Object.assign(v, { status: 'confirmed', priority: 'low', legacy_status: 'maybe' });
-  else if (old === 'complete') Object.assign(v, { status: 'confirmed', ended: true, status_review: true, legacy_status: 'complete' });
-  return v;
-}
-function b45MapFilmStatus(old) {
-  const v = { status: old, priority: 'normal', catalog_new: false, status_review: false, legacy_status: null };
-  if (old === 'pending') Object.assign(v, { status: 'confirmed', catalog_new: true, legacy_status: 'pending' });
-  else if (old === 'highpriority') Object.assign(v, { status: 'confirmed', priority: 'high', legacy_status: 'highpriority' });
-  else if (old === 'maybe') Object.assign(v, { status: 'confirmed', priority: 'low', legacy_status: 'maybe' });
-  else if (old === 'watching' || old === 'complete') Object.assign(v, { status: 'confirmed', status_review: true, legacy_status: old });
-  return v;
-}
-const OLD_STATUSES = ['confirmed', 'highpriority', 'watching', 'complete', 'pending', 'maybe', 'skipped'];

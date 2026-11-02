@@ -48,7 +48,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
 | Organization | `organization.js`, `organization-manage.js`, `collection-members.js` |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Collection updates | `collection-updates.js`, `collection-research.js`, `collection-settings.js` |
-| Backup / restore | `backup-restore.js`, `backup-format3.js` (the format-3 → 4 converter) |
+| Backup / restore | `backup-restore.js` (reads formats 5–7) |
 | Database | `db/` (migrations and tests; run order in `db/README.md`) |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (see `db/README.md`) |
 

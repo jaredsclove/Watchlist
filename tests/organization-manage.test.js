@@ -33,7 +33,7 @@ function library() {
     show({ title: 'Severance', collection: 'othertv', tmdb_id: 95396 }, ['Season 1', 'Season 2', 'Specials']),
     film({ title: 'Sicario', collection: 'sheridan', media_type: null, tmdb_id: null }),
     film({ title: 'Wind River', watch_with: ['Rina'] }),
-    film({ title: 'Dune', watch_with: ['Suzanne', 'Rina'] }),
+    film({ title: 'Dune', watch_with: ['Sam', 'Rina'] }),
     film({ title: 'Skipped Film', status: 'skipped' })
   ];
   const rows = parts.flatMap(x => x.rows || [x]);
@@ -111,7 +111,7 @@ test('counts: stored seasons from the rows (Specials included); watch-with usage
   assert.match(text(app), /Add show \(all 3 stored seasons, and any added later\)/);
   app.ctx.manageShow('choices'); await settle();
   assert.match(text(app), /Rina used on 3 saved items/, 'two films and a TV season');
-  assert.match(text(app), /Suzanne used on 1 saved item\b/);
+  assert.match(text(app), /Sam used on 1 saved item\b/);
 });
 
 test('inconsistent read: a membership whose show or collection wasn’t read is reported (no name needed), not shown, and Add/Remove are disabled', async () => {
@@ -378,12 +378,12 @@ test('per-kind stale flags: a choices-only failure marks only choices stale; the
 
 test('per-kind stale flags: a collections-only failure marks only collections stale; the choices read still publishes; a newer collections read clears it', async () => {
   const app = await boot();
-  app.store.watch_with_choices.find(c => c.token === 'Suzanne').label = 'Suzanne R.';
+  app.store.watch_with_choices.find(c => c.token === 'Sam').label = 'Sam R.';
   app.failNext(r => r.url.includes('/rest/v1/personal_collections?'));
   await app.ctx.startOrgRefresh({ barrier: false, reason: 'retry' }); await settle();
   assert.ok(app.get('orgCollectionsStale') > 0, 'collections stale');
   assert.strictEqual(app.get('orgChoicesStale'), 0, 'choices not stale');
-  assert.ok(app.get('watchWithChoices').some(c => c.label === 'Suzanne R.'), 'the successful choices read published');
+  assert.ok(app.get('watchWithChoices').some(c => c.label === 'Sam R.'), 'the successful choices read published');
   assert.match(app.run('collectionsChooserHtml()'), /Collections may be out of date/);
   app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
   assert.strictEqual(app.get('orgCollectionsStale'), 0, 'cleared by a newer successful collections read');
@@ -570,10 +570,10 @@ test('a stale page offering an archived choice: the database refuses the update,
   const app = await boot();
   app.ctx.switchMediaType('movie'); await settle(); // All Movies (Stage 5: no storage tabs)
   const wind = rowByTitle(app, 'Wind River');
-  app.store.watch_with_choices.find(c => c.token === 'Suzanne').archived_at = TS; // archived elsewhere; this page still offers it
+  app.store.watch_with_choices.find(c => c.token === 'Sam').archived_at = TS; // archived elsewhere; this page still offers it
   const i = app.requests.length;
-  await app.ctx.toggleWatchWith(wind.id, 'Suzanne', true); await settle();
-  assert.match(app.el('errorBanner').innerHTML, /“Suzanne” is archived, so it can’t be added\. Nothing was changed/);
+  await app.ctx.toggleWatchWith(wind.id, 'Sam', true); await settle();
+  assert.match(app.el('errorBanner').innerHTML, /“Sam” is archived, so it can’t be added\. Nothing was changed/);
   assert.deepStrictEqual(Array.from(rowByTitle(app, 'Wind River').watch_with), ['Rina']);
   assert.ok(app.requests.slice(i).some(r => r.method === 'GET' && r.url.includes('watch_with_choices')), 'choices read again');
 });

@@ -5,7 +5,7 @@
 // resolving a candidate, choosing a network candidate, refusals); the chips and their Original
 // label fallback; and the filters (the controlled lists, unresolved candidates as their own
 // group, confirmed networks only, seasons inheriting their show's values).
-// The database rules: db/test/t_b45.sql (W3, W9). Run from the repo root: node tests/b45-metadata.test.js
+// The database rules: db/b45_expand.sql. Run from the repo root: node tests/b45-metadata.test.js
 const assert = require('assert');
 const { createApp, runner, settle } = require('./app-harness');
 

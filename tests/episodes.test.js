@@ -436,7 +436,7 @@ test('backup: format 7 with every mark (id, season, TMDB episode, number; never 
   assert.deepStrictEqual(app.store.episode_marks.map(m => m.tmdb_episode_id), [9001]);
 });
 
-test('restore: a format-5 file is converted to format 6, then 7, with no marks (its own conversion record), previewed, and the marks it removes are named', async () => {
+test('restore: a format-5 file is converted to format 7 with no marks, previewed, and the marks it removes are named', async () => {
   const { app } = await boot({ marks: l => [mark(l.s2, 9001, 1)] });
   const b7 = JSON.parse(JSON.stringify(await app.ctx.buildBackupObject()));
   const b5 = { ...b7, formatVersion: 5, tables: { ...b7.tables }, rowCounts: { ...b7.rowCounts } };
@@ -447,11 +447,10 @@ test('restore: a format-5 file is converted to format 6, then 7, with no marks (
   const doc = JSON.parse(JSON.stringify(app.get('pendingRestoreData')));
   assert.strictEqual(doc.formatVersion, 7);
   assert.deepStrictEqual(doc.tables.episode_marks, []);
-  assert.deepStrictEqual(Object.keys(doc.conversion).sort(), ['converter_version', 'source_exported_at', 'source_format', 'source_sha256']);
-  assert.strictEqual(doc.conversion.source_format, 5);
-  assert.strictEqual(doc.conversion.converter_version, 'ep1.1+cu1.1');
+  assert.ok(!('conversion' in doc));
   const m = text(app.el('restoreModalBox').innerHTML);
-  assert.match(m, /This backup is converted to format 6 before restoring/);
+  assert.match(m, /This backup is converted to format 7 before restoring/);
+  assert.match(m, /This backup also has no episode marks/);
   assert.match(m, /Your library has 1 episode mark now; this backup has 0\./);
   await app.ctx.executeRestore(); await settle();
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
