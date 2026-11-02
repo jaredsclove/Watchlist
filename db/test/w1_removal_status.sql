@@ -1,4 +1,4 @@
--- W1 removal: one read-only SELECT, aggregates only, run as postgres before and after the migration.
+-- Historical release verification, not a recurring check. W1 removal: one read-only SELECT, aggregates only, run as postgres before and after the migration.
 -- Before: w1 recorded, clause_functions 38, helper true, repair and defaults none, pg_graphql false.
 -- After: w1 and w1_removal recorded once each, clause_functions 0, helper false, names_w1 0, guards_read_flag 3.
 select 'W1S|' || (jsonb_build_object(

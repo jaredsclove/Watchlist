@@ -132,12 +132,27 @@ test runner and token check [#4], M1 sign-in and owner-only access [#7], EP1 epi
 admin enrichment extensions [#11], EP2 episode-list controls [#12], EP3 next unwatched episode [#14], film-collection suggestions [#16],
 TMDB show ratings [#18], rating beside the title [#20] and [#21], collection updates (CU1) [#23], the hold editor
 (CU1b) [#25], date equivalence (CU1c) [#27], sole networks and Watched-season episode lists (CU1d) [#29], the compact interface [#32],
-density and search [#34], research access (CU2) [#37], a missing season comes back (CU1e) [#40], write scope (W1) [#42].
+density and search [#34], research access (CU2) [#37], a missing season comes back (CU1e) [#40], write scope (W1) [#42], its removal [#44].
 
-- **W1 removal (owner's decision, 2026-11-01):** W1 comes out of the active system, GraphQL stays disabled as a standing decision, and item 11
-  is abandoned unreleased. `db/w1_removal.sql` puts the earlier write authorization back: `lib_write_on` sets the transaction-local
-  `watchlist.library_write` and the guards read it. Database only, with no page change, so the token stays `20261101-seasons`. Run the migration
-  before this change merges; the release record then replaces this line with what ran. The bullets below on W1 and its drill are history.
+- **Release:** `224dfbb`, W1 is removed from the active architecture (owner's decision; PR #44, a merge commit of the reviewed head `2a8cf7d`),
+  released 2026-11-02 UTC. Database only: `db/w1_removal.sql` took the `xmloption` clause off W1's 38 functions, restored `lib_write_on`,
+  `library_write_guard` and `b45_show_guard` word for word, and dropped `private.lib_authorized`. Writes are authorized as before W1:
+  `lib_write_on` sets the transaction-local `watchlist.library_write`, and the guards read it. No page file changed, and the token stays
+  `20261101-seasons`. W1's recovery scripts, procedure, probes and test hooks are gone; its migration, run record and release notes stay as
+  history. Validation: offline 1259/1259; the transition on a local stack, 67/67, where the catalog after removal equalled one taken before
+  W1 across 366 entries; the CU2 local test and the rehearsals; the real page against a local database; one focused review with its findings
+  closed. Release: a read-only status query (W1 recorded once, the clause on 38 functions, no repair or configured default, `pg_graphql`
+  absent); a pre-release format-7 backup validated; the SQL Editor's contents checked against the run file's hash and run once (its prompts
+  concerned the migration's temp tables and the dropped function). A separate read showed the `w1` and `w1_removal` run records once each, no
+  clause and no helper, nothing naming W1, the three functions reading the flag, and counts unchanged. The post-migration backup validated
+  and equals the pre-release one field by field (19 tables, 1,393 rows, no differences). Verified through the hosted API, signed in, on one
+  synthetic `ZZ` show created through a library function: 16 of 16 direct `priority` writes refused with `library_write_required` and the value
+  unchanged, the no-write check answered `target_missing`, a real library write went there and back, signed-out requests were refused, and
+  `delete_tv_season` removed the record. Merged only after that. Pages built `224dfbb`; the 35 application files are byte-identical to the commit
+  and unchanged from before, and all 29 versioned files carry the token. The fresh page loaded all views as the owner, with member and
+  research access true and no console error. A final backup validated and equals the baseline field by field, with three distinct export
+  times, and no test record is left. Account isolation, CU2, item 10, backups and restore are intact. No production GraphQL request was sent.
+  Item 11 is intentionally abandoned and unreleased.
 - **Historical: W1, removed since.** `963b96e`, library writes are authorized by the function's own scope (W1, item 9; PR #42, a merge commit of the reviewed
   head `b54f1fd`, whose migration and application files equal the reviewed implementation at `5d4fdac`), released 2026-11-01 UTC. Database only:
   `db/w1_write_scope.sql` puts `set xmloption = 'document'` on 35 public and 3 enrichment functions and makes the guards read it through
@@ -520,6 +535,7 @@ density and search [#34], research access (CU2) [#37], a missing season comes ba
 [#37]: https://github.com/jaredsclove/Watchlist/pull/37
 [#40]: https://github.com/jaredsclove/Watchlist/pull/40
 [#42]: https://github.com/jaredsclove/Watchlist/pull/42
+[#44]: https://github.com/jaredsclove/Watchlist/pull/44
 
 ## How we work
 
