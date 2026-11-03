@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261103-show-row-episodes">
+<link rel="stylesheet" href="styles.css?v=20261103-ui-polish-1">
 </head>
 <body>
 
@@ -98,33 +98,33 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261103-show-row-episodes"></script>
-<script src="api.js?v=20261103-show-row-episodes"></script>
-<script src="write-lane.js?v=20261103-show-row-episodes"></script>
-<script src="ui-helpers.js?v=20261103-show-row-episodes"></script>
-<script src="metadata.js?v=20261103-show-row-episodes"></script>
-<script src="backup-restore.js?v=20261103-show-row-episodes"></script>
-<script src="tabs.js?v=20261103-show-row-episodes"></script>
-<script src="render.js?v=20261103-show-row-episodes"></script>
-<script src="row-actions.js?v=20261103-show-row-episodes"></script>
-<script src="tmdb-search.js?v=20261103-show-row-episodes"></script>
-<script src="collections-pull.js?v=20261103-show-row-episodes"></script>
-<script src="universe-pull.js?v=20261103-show-row-episodes"></script>
-<script src="person-pull.js?v=20261103-show-row-episodes"></script>
-<script src="tmdb-match.js?v=20261103-show-row-episodes"></script>
-<script src="derived-views.js?v=20261103-show-row-episodes"></script>
-<script src="tv-shows.js?v=20261103-show-row-episodes"></script>
-<script src="episodes.js?v=20261103-show-row-episodes"></script>
-<script src="show-ratings.js?v=20261103-show-row-episodes"></script>
-<script src="organization.js?v=20261103-show-row-episodes"></script>
-<script src="organization-manage.js?v=20261103-show-row-episodes"></script>
-<script src="collection-members.js?v=20261103-show-row-episodes"></script>
-<script src="collection-updates.js?v=20261103-show-row-episodes"></script>
-<script src="collection-research.js?v=20261103-show-row-episodes"></script>
-<script src="collection-settings.js?v=20261103-show-row-episodes"></script>
-<script src="browse-views.js?v=20261103-show-row-episodes"></script>
-<script src="history.js?v=20261103-show-row-episodes"></script>
-<script src="library.js?v=20261103-show-row-episodes"></script>
+<script src="auth.js?v=20261103-ui-polish-1"></script>
+<script src="api.js?v=20261103-ui-polish-1"></script>
+<script src="write-lane.js?v=20261103-ui-polish-1"></script>
+<script src="ui-helpers.js?v=20261103-ui-polish-1"></script>
+<script src="metadata.js?v=20261103-ui-polish-1"></script>
+<script src="backup-restore.js?v=20261103-ui-polish-1"></script>
+<script src="tabs.js?v=20261103-ui-polish-1"></script>
+<script src="render.js?v=20261103-ui-polish-1"></script>
+<script src="row-actions.js?v=20261103-ui-polish-1"></script>
+<script src="tmdb-search.js?v=20261103-ui-polish-1"></script>
+<script src="collections-pull.js?v=20261103-ui-polish-1"></script>
+<script src="universe-pull.js?v=20261103-ui-polish-1"></script>
+<script src="person-pull.js?v=20261103-ui-polish-1"></script>
+<script src="tmdb-match.js?v=20261103-ui-polish-1"></script>
+<script src="derived-views.js?v=20261103-ui-polish-1"></script>
+<script src="tv-shows.js?v=20261103-ui-polish-1"></script>
+<script src="episodes.js?v=20261103-ui-polish-1"></script>
+<script src="show-ratings.js?v=20261103-ui-polish-1"></script>
+<script src="organization.js?v=20261103-ui-polish-1"></script>
+<script src="organization-manage.js?v=20261103-ui-polish-1"></script>
+<script src="collection-members.js?v=20261103-ui-polish-1"></script>
+<script src="collection-updates.js?v=20261103-ui-polish-1"></script>
+<script src="collection-research.js?v=20261103-ui-polish-1"></script>
+<script src="collection-settings.js?v=20261103-ui-polish-1"></script>
+<script src="browse-views.js?v=20261103-ui-polish-1"></script>
+<script src="history.js?v=20261103-ui-polish-1"></script>
+<script src="library.js?v=20261103-ui-polish-1"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -220,6 +220,7 @@ let episodeMarks = new Map(); // EP1: the owner's episode marks, read with each 
 let episodePanel = null; // EP1: the one open episode list: { seasonId, seq, status: 'loading' | 'ready' | 'error', episodes, error, titles, throughId, throughNote, identity, finish, finishSeq, confirmAll }; page memory only
 let episodeTitlesChoice = null; // EP2: this page's "Show episode titles by default" choice once made here: { on, saved }; null: the stored choice (else off)
 let seasonFinishLater = new Map(); // CU1d: this page's "Not now" choices (season cache key → episode count); wins over the stored ones
+let expandedCategoryOwners = new Set(); // UI polish: rows whose +N categories are shown (show key or row id); page memory only
 let episodeNextMark = null; // EP4/EP5: the last row action (Mark E9 watched, a show row's Mark season watched): { seasonId, showId, until } (until: null while it is saved); that season's buttons, and its show row's action, ignore clicks until then; page memory only
 let episodePanelSeq = 0; // EP1: bumped each time an episode list is loaded; a late TMDB answer for an earlier one changes nothing
 let showRatingCache = null; // item 2: TMDB show scores from this device's cache for this account (show-ratings.js); read once signed in

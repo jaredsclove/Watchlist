@@ -134,7 +134,7 @@ test('first use is All media + Shows + Separate; Shows/Seasons hides with Movies
   assert.deepStrictEqual(J(app, '[browseMedia, browsePresentation, browseGrouping, browseSeasonVis]'), ['all', 'shows', 'separate', 'notskipped']);
   const inner = () => filters(app).indexOf('class="filter-line"'); // B10: the filter line follows the layout controls
   const at = s => filters(app).indexOf(s);
-  assert.ok(at('data-presentation="shows"') > -1 && at('data-presentation="shows"') < inner() && at('data-grouping="combined"') < inner(), 'outside the filters');
+  assert.ok(at('data-presentation="shows"') > -1 && at('data-presentation="shows"') < inner() && at('data-grouping="combined"') > filters(app).indexOf('id="filterMore"'), 'Shows/Seasons outside the filters; Separate/Combined in the Filters panel (UI polish)');
   assert.ok(/aria-label="TV presentation"/.test(filters(app)) && /aria-label="Grouping"/.test(filters(app)));
   assert.ok(!filters(app).includes('fSeasonVis'), 'TV seasons only in Seasons');
   app.ctx.setBrowseMedia('tv');

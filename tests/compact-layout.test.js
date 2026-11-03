@@ -133,7 +133,7 @@ test('the shortcut is drawn only beside the up-next line naming the same season,
     const app = await boot(all(a));
     app.ctx.switchView(view); await settle();
     const h = rowOf(app, a.show.id);
-    assert.ok(h.includes('aria-label="Mark season watched: Season 2 of Mixed"') && h.includes('>Mark season watched</button>'), view);
+    assert.ok(h.includes('aria-label="Mark S2 watched: Season 2 of Mixed"') && h.includes('>Mark S2 watched</button>'), view);
     assert.ok(/Season 2 · /.test(h), `${view}: the row names it`);
   }
   assert.ok(fs.readFileSync(path.join(__dirname, '..', 'episodes.js'), 'utf8').includes('Mark ${'), 'the offer is unchanged');
@@ -164,15 +164,16 @@ test('genres: a clickable one stays a filter button with the pills\' hover and f
   assert.match(phone, /\.filter-pill \{ min-height: 32px;/);
 });
 
-test('the toolbar: toggles, Search, scope, More filters, + Add in page order; the count beside them; nothing reordered on phones', async () => {
+test('the toolbar: toggles, Search, TMDB search, Filters, + Add in page order; Status in the panel; the count beside them; nothing reordered on phones', async () => {
   const app = await boot(all(mixed()));
   app.ctx.switchView('alltv'); await settle();
   const f = app.el('filtersRow').innerHTML;
   const at = s => f.indexOf(s);
-  assert.ok(at('view-toggle') < at('id="fSearch"') && at('id="fSearch"') < at('id="fStatus"') && at('id="fStatus"') < at('id="filterMoreBtn"') && at('id="filterMoreBtn"') < at('add-open-btn'));
+  assert.ok(at('view-toggle') < at('id="fSearch"') && at('id="fSearch"') < at('class="tmdb-quick"') && at('class="tmdb-quick"') < at('id="filterMoreBtn"') && at('id="filterMoreBtn"') < at('add-open-btn') && at('id="fStatus"') > at('id="filterMore"'));
   const page = fs.readFileSync(path.join(__dirname, '..', 'watchlist.html'), 'utf8');
   assert.match(page, /<div class="list-toolbar">\s*<div class="filters" id="filtersRow"><\/div>\s*<div class="stats-row" id="statsRow"><\/div>/);
   assert.match(css, /\.filter-line \.search-input \{ flex: 1 1 260px;/);
+  assert.match(css, /\.filter-line \.search-input \{ flex: 1 1 200px; max-width: 340px; \}\s*\.tmdb-quick \{ flex: 1 1 200px; max-width: 300px; \}/, 'desktop: the two searches share the width');
   assert.ok(!/\.search-input[^{]*\{[^}]*order:/.test(phone), 'Search keeps its place in the Tab order');
 });
 

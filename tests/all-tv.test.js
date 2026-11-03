@@ -349,7 +349,7 @@ test('phone width (375 px): Search and Status stay visible, the More filters pan
   const s = show({ title: 'Alpha', status: 'watching' }, [{ num: 1, date: day(-2) }]);
   const app = await openAllTv(all(s), { width: 375 });
   const f = app.el('filtersRow').innerHTML;
-  assert.ok(!app.el('filtersRow').classList.contains('collapsed') && f.indexOf('id="fSearch"') < f.indexOf('id="filterMore"') && f.indexOf('id="fStatus"') < f.indexOf('id="filterMore"'));
+  assert.ok(!app.el('filtersRow').classList.contains('collapsed') && f.indexOf('id="fSearch"') < f.indexOf('id="filterMore"') && f.indexOf('id="fStatus"') > f.indexOf('id="filterMore"'), 'Status is in the Filters panel (UI polish)');
   assert.ok(/id="filterMore"[^>]* hidden>/.test(f) && f.indexOf('id="fGenre"') > f.indexOf('id="filterMore"'), 'the other controls are in the closed panel');
   const card = app.el('cardList').innerHTML;
   assert.ok(card.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && card.includes(`markSeasonFromRow('${s.rows[0].id}')`));

@@ -154,7 +154,7 @@ test('hidden or shown, progress, up next and earlier seasons are the same', asyn
   const app = await boot(all(a), { view: 'watching' });
   app.ctx.toggleDerivedShow(a.show.id); await settle();
   app.ctx.openResumePicker(a.show.id); await settle();
-  const strip = s => s.replace(/<tr class="[^"]*sub-row"[^>]*data-season-row[\s\S]*?<\/tr>/g, '').replace(/<div class="card-subseason-row" data-season-row[\s\S]*?<\/div>\s*<\/div>/g, '')
+  const strip = s => s.replace(/<tr class="[^"]*sub-row"[^>]*data-season-row[\s\S]*?<\/tr>/g, '').replace(/<div class="card-subseason-row" data-season-row[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/g, '')
     .replace(/<button class="btn btn-link" data-action="skipped-seasons"[^>]*>[^<]*<\/button>/g, '');
   const hidden = { t: strip(tbody(app)), c: strip(cards(app)) };
   assert.ok(hidden.t.includes('<span class="show-progress-line">1/3 seasons watched</span>') && hidden.t.includes('Start from Season 1') && !hidden.t.includes('Start from Season 2'));

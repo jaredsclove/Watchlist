@@ -832,7 +832,7 @@ function browseHeadHtml() {
   // S3-D3, as amended by S4: shows and films are edited here; Remove changes only the collection.
   const notes = [dest.note, `Changes here apply everywhere in your library. Remove takes a title out of ${dest.label} only.`].filter(Boolean);
   return `<div class="browse-head">
-      <h2 class="browse-title">🗂 ${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
+      <h2 class="browse-title">${esc(dest.label)} — ${BROWSE_MEDIA_LABELS[browseMedia]}</h2>
       <p class="browse-note">${esc(notes.join(' '))}</p>
       <span class="browse-head-actions">${back}<button class="btn btn-link browse-edit-members" onclick="openManage('members', '${esc(dest.collectionId)}', this)">Edit collection</button></span>
     </div>`;
@@ -890,12 +890,15 @@ function renderBrowseFilters() {
     ? `<div class="view-toggle" role="group" aria-label="Media">${Object.entries(BROWSE_MEDIA_LABELS).map(([media, label]) =>
         `<button class="view-toggle-btn${browseMedia === media ? ' active' : ''}" data-media="${media}" aria-pressed="${browseMedia === media}" onclick="setBrowseMedia('${media}')">${label}</button>`).join('')}</div>`
     : '';
-  // Shows/Seasons (not for Movies only) and Separate/Combined (All media only), outside the filters.
+  // Shows/Seasons (not for Movies only) outside the filters; Separate/Combined (All media only) in the Filters panel.
   const toggleGroup = (label, attr, setter, options, current) =>
     `<div class="view-toggle" role="group" aria-label="${label}">${Object.entries(options).map(([value, text]) =>
       `<button class="view-toggle-btn${current === value ? ' active' : ''}" data-${attr}="${value}" aria-pressed="${current === value}" onclick="${setter}('${value}')">${text}</button>`).join('')}</div>`;
   const layoutToggles = dest && browseMedia !== 'movie'
-    ? `<div class="browse-toggles">${browseMedia !== 'movie' ? toggleGroup('TV presentation', 'presentation', 'setBrowsePresentation', BROWSE_PRESENTATIONS, browsePresentation) : ''}${browseMedia === 'all' ? toggleGroup('Grouping', 'grouping', 'setBrowseGrouping', BROWSE_GROUPINGS, browseGrouping) : ''}</div>`
+    ? `<div class="browse-toggles">${toggleGroup('TV presentation', 'presentation', 'setBrowsePresentation', BROWSE_PRESENTATIONS, browsePresentation)}</div>`
+    : '';
+  const groupingField = dest && browseMedia === 'all'
+    ? `<div class="filter-field"><span class="filter-field-label" id="groupingLabel">TV and films</span>${toggleGroup('Grouping', 'grouping', 'setBrowseGrouping', BROWSE_GROUPINGS, browseGrouping)}</div>`
     : '';
   const seasonVisSelect = dest && browseMedia !== 'movie' && browsePresentation === 'seasons'
     ? `<select id="fSeasonVis" class="season-vis-select" onchange="setBrowseSeasonVis(this.value)" aria-label="TV seasons">${Object.entries(BROWSE_SEASON_VIS_LABELS).map(([value, text]) =>
@@ -916,17 +919,17 @@ function renderBrowseFilters() {
   // .browse-controls scopes the larger phone touch targets to these views (All TV's toggle is unchanged).
   filtersRowEl.innerHTML = filterBarHtml({
     lead: dest ? `<div class="browse-controls">${mediaToggle}${layoutToggles}</div>` : '',
-    trail: dest ? `${tmdbQuickHtml(browseMedia === 'all' ? 'mixed' : browseMedia, currentBrowseDest())}<span id="collectionAddSlot" class="collection-add-slot">${collectionAddButtonHtml()}</span>`
-      : tmdbQuickHtml('movie') + libraryAddButtonHtml('movie'),
-    line: `
-      <select id="fStatus" onchange="renderTable()" aria-label="Status">
+    search2: tmdbQuickHtml(dest ? (browseMedia === 'all' ? 'mixed' : browseMedia) : 'movie', dest ? currentBrowseDest() : undefined),
+    trail: dest ? `<span id="collectionAddSlot" class="collection-add-slot">${collectionAddButtonHtml()}</span>` : libraryAddButtonHtml('movie'),
+    line: `${watchSelect}${seasonVisSelect}`,
+    cats: [categoryFields],
+    marks: [filterFieldHtml('Status', 'fStatus', `
+      <select id="fStatus" onchange="renderTable()">
         <option value="">All (except Skipped)</option>
         <option value="all">All statuses</option>
         ${statusValues.map(v => `<option value="${v}">${esc(BROWSE_STATUS_LABELS[v])}</option>`).join('')}
-      </select>${watchSelect}${seasonVisSelect}`,
-    cats: [categoryFields],
-    marks: [filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml()), tagFilters.watchWith],
-    more: [filterFieldHtml('Year', 'fYear', yearSelect), tagFilters.tag, filterFieldHtml('Original label', 'fTheme', themeSelect)]
+      </select>`), filterFieldHtml('Priority', 'fPriority', priorityFilterSelectHtml()), tagFilters.watchWith],
+    more: [groupingField, filterFieldHtml('Year', 'fYear', yearSelect), tagFilters.tag, filterFieldHtml('Original label', 'fTheme', themeSelect)]
   });
   filtersRowEl.dataset.tab = tag;
 
@@ -1082,13 +1085,14 @@ function browseSubsectionHtml(name, label, count) {
 }
 
 // B8: the count is the films the list holds of every saved film (all statuses, watched or
-// not), and the library's watched / unwatched by the stored flag.
+// not), and the library's watched by the stored flag (UI polish: "12 films · 0 watched"; filtered,
+// "8 of 12 films · 0 of 12 watched", so the watched count is never read as the shown ones').
 function renderAllMovies(today, f) {
   const { films, unclassified } = deriveAllMovies(browseData.rows);
   const matching = films.filter(r => (!f.fYear || rowYear(r) === f.fYear) && browseFilmMatches(r, f));
   const shown = matching.filter(r => browseWatchMatches(r, f.fWatch));
   const libWatched = films.filter(r => r.watched).length;
-  const library = films.length ? ` · library: ${libWatched} watched, ${films.length - libWatched} unwatched` : '';
+  const library = films.length ? ` · ${shown.length === films.length ? libWatched : `${libWatched} of ${films.length}`} watched` : '';
   document.getElementById('statsRow').innerHTML = countLineHtml(countScoped(shown.length, films.length, 'film', 'films') + library);
   let html = '', cardHtml = '';
   const add = out => { html += out.row; cardHtml += out.card; };
@@ -1136,12 +1140,13 @@ function browseSeasonEntryHtml(e, today, combined, part) {
   const item = seasonItemAttrs(r, part || 'tv');
   const dimClass = isOffList(r) ? 'row-skipped' : '';
   const badges = metadataChipsHtml(show, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
+  const badgesCell = categoryCellHtml(show, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)); // the desktop row's one line; the card lists every pill
   const kindTag = combined ? '<span class="ro-tag">TV</span>' : '';
   const statusHtml = `<span class="status-pill s-${esc(show.status)}" title="Show status — applies to every season of ${esc(show.title)}. Switch to Shows to change it.">${esc(statusOptionLabel(show.status))}</span>`;
   const releaseOpts = { requireReleased: true, today };
   const row = `<tr class="browse-season-row ${dimClass}"${item}>
       <td tabindex="-1" data-primary="1">${priorityMarkHtml(show.priority)}<span class="show-title">${esc(show.title)}</span>${priorityMarkHtml(show.priority, true)}<span class="season-lbl"> · ${esc(r.season)}</span>${episodeProgressHtml(r)}${kindTag}</td>
-      <td>${badges}</td>
+      <td>${badgesCell}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusHtml}</td>
       <td>${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, false))}</td>
@@ -1190,11 +1195,12 @@ function browseFilmHtml(r, today, part) {
   const dimClass = isSkipped ? 'row-skipped' : '';
   const item = ` data-item="${esc(r.id)}" data-row-section="${esc(part || 'film')}"`;
   const badges = metadataChipsHtml(r, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
+  const badgesCell = categoryCellHtml(r, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)); // the desktop row's one line; the card lists every pill
   const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
   const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
   const idArg = esc(r.id).replace(/'/g, "\\'");
   const statusCell = `<span class="state-action" data-action="status">${filmStatusSelectHtml(r)}</span>`;
-  const watchBtn = isSkipped ? '<span class="confirmed-lbl">—</span>'
+  const watchBtn = isSkipped ? ''
     : `<span class="state-action" data-action="watch"><button class="watch-btn${r.watched ? ' watched' : ''}" onclick="toggleWatch('${idArg}')">${r.watched ? '✓ Watched' : 'Mark watched'}</button></span>`;
   const libraryAction = policy.deleteEffect === 'delete'
     ? `<button class="popover-action" onclick="delRow('${idArg}')" aria-label="${esc(`Delete ${r.title} from your library`)}">Delete from library…</button>`
@@ -1207,7 +1213,7 @@ function browseFilmHtml(r, today, part) {
   const moreBtn = `<button class="more-btn" data-action="more" aria-expanded="false" onclick="toggleMorePopover('${idArg}', this)" title="Priority, watch with, details, collection, TMDB" aria-label="${esc(`More for ${r.title}`)}">⋯</button>`;
   const row = `<tr class="browse-film-row ${dimClass}"${item}>
       <td tabindex="-1" data-primary="1">${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl">${browseFilmNoun()}</span>${stateTagsHtml(r, 'film')}${labelsHtml}</td>
-      <td>${badges}</td>
+      <td>${badgesCell}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusCell}</td>
       <td>${watchBtn}</td>
@@ -1259,12 +1265,13 @@ function allMoviesFilmHtml(r, today, films) {
   const isSkipped = r.status === 'skipped';
   const dimClass = isSkipped ? 'row-skipped' : '';
   const badges = metadataChipsHtml(r, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
+  const badgesCell = categoryCellHtml(r, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)); // the desktop row's one line; the card lists every pill
   const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
   const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
   const item = ` data-item="${esc(r.id)}" data-row-section="film"`;
   const statusCell = `<span class="state-action" data-action="status">${filmStatusSelectHtml(r)}</span>`;
   const titleHtml = `${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl">${browseFilmNoun()}</span>${stateTagsHtml(r, 'film')}`;
-  const watchBtn = isSkipped ? '<span class="confirmed-lbl">—</span>'
+  const watchBtn = isSkipped ? ''
     : `<span class="state-action" data-action="watch"><button class="watch-btn${r.watched ? ' watched' : ''}" onclick="toggleWatch('${r.id}')">${r.watched ? '✓ Watched' : 'Mark watched'}</button></span>`;
   const popover = filmMenuHtml(r, policy);
   const moreBtn = `<button class="more-btn" data-action="more" aria-expanded="false" onclick="toggleMorePopover('${r.id}', this)" title="Priority, watch with, collection, TMDB" aria-label="${esc(`More for ${r.title}`)}">⋯</button>`;
@@ -1273,7 +1280,7 @@ function allMoviesFilmHtml(r, today, films) {
     : `<button class="${cls}" onclick="delRow('${r.id}')" title="${delTitle}" aria-label="${esc(`${delTitle}: ${r.title}`)}">×</button>`;
   const row = `<tr class="browse-film-row ${dimClass}"${item}>
       <td tabindex="-1" data-primary="1">${titleHtml}${labelsHtml}</td>
-      <td>${badges}</td>
+      <td>${badgesCell}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusCell}</td>
       <td>${watchBtn}</td>

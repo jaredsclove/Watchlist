@@ -93,15 +93,57 @@ function metadataEmpty(m) {
 // Chips (filter pills where the view has the filter): up to two genres, then forms,
 // franchises and the network. While every category is empty and the owner hasn't saved
 // Details, the original label is shown instead (fallback: its badge HTML).
-function metadataChipsHtml(m, owner, fallback = '') {
+// UI polish: in a stable priority (network, franchises, genres, forms; each group in its stored order). opts.budget (a
+// desktop row's Categories cell): the pills that fit a rough character budget, the first always whole (a long label may
+// wrap the +N), then a +N button that shows the rest inline (page memory per owner, expandedCategoryOwners) and reads
+// Fewer while they are shown. Without a budget (cards), every pill.
+function metadataChipsHtml(m, owner, fallback = '', opts = {}) {
   if (!m || (metadataEmpty(m) && !m.metadata_owner_set)) return fallback;
-  const chip = (kind, v) => filterPillHtml(kind, v, v, { cls: `badge meta-chip meta-${kind}`, attrs: kind === 'network' ? networkChipStyle(v) : '', title: `Filter by “${v}”`, owner });
-  const genres = m.genres || [];
-  return genres.slice(0, 2).map(v => chip('genres', v)).join('')
-    + (genres.length > 2 ? `<span class="meta-more" title="${esc(genres.slice(2).join(', '))}">+${genres.length - 2}</span>` : '')
-    + (m.forms || []).map(v => chip('forms', v)).join('')
-    + (m.franchises || []).map(v => chip('franchises', v)).join('')
-    + (m.network ? chip('network', m.network) : '');
+  const chip = ([kind, v]) => filterPillHtml(kind, v, v, { cls: `badge meta-chip meta-${kind}`, attrs: kind === 'network' ? networkChipStyle(v) : '', title: `Filter by “${v}”`, owner });
+  const all = (m.network ? [['network', m.network]] : [])
+    .concat((m.franchises || []).map(v => ['franchises', v]), (m.genres || []).map(v => ['genres', v]), (m.forms || []).map(v => ['forms', v]));
+  const open = expandedCategoryOwners.has(owner);
+  const fit = opts.budget ? categoryFitCount(all, opts.budget) : all.length;
+  const shown = open ? all.length : fit, hidden = all.length - fit;
+  const ownerArg = esc(owner).replace(/'/g, "\\'");
+  // The button only where the budget hides something; Fewer while the rest are shown.
+  const more = hidden
+    ? `<button type="button" class="meta-more" data-action="cats-more" aria-expanded="${open}" aria-label="${open ? 'Show fewer categories' : `Show ${hidden} more categor${hidden === 1 ? 'y' : 'ies'}`}" onclick="event.stopPropagation(); toggleCategoryOverflow('${ownerArg}')">${open ? 'Fewer' : `+${hidden}`}</button>`
+    : '';
+  return all.slice(0, shown).map(chip).join('') + more;
+}
+// How many pills fit a budget: each costs its label's length plus CATEGORY_PILL_COST; the first always fits; when some
+// are left out, the +N needs room too (CATEGORY_MORE_COST), so one fewer when only it wouldn't fit.
+const CATEGORY_PILL_COST = 4, CATEGORY_MORE_COST = 4;
+function categoryFitCount(all, budget) {
+  let used = 0, n = 0;
+  for (const [, v] of all) {
+    const cost = v.length + CATEGORY_PILL_COST;
+    if (n && used + cost > budget) break;
+    used += cost;
+    n++;
+  }
+  if (n < all.length && n > 1 && used + CATEGORY_MORE_COST > budget) n--;
+  return n;
+}
+// A desktop row's Categories cell: the pills that fit the view's budget (its column's width, in characters).
+function categoryCellHtml(m, owner, fallback = '') {
+  return metadataChipsHtml(m, owner, fallback, { budget: categoryBudget() });
+}
+// Below 1240 px the show views' Categories column is at its minimum width (styles.css), so the budget is smaller;
+// crossing that width redraws the list once.
+const CATEGORY_WIDE = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia('(min-width: 1240px)') : null;
+if (CATEGORY_WIDE && typeof CATEGORY_WIDE.addEventListener === 'function') CATEGORY_WIDE.addEventListener('change', () => renderTable());
+function categoryBudget() {
+  const wide = !CATEGORY_WIDE || CATEGORY_WIDE.matches;
+  if (activeViewId === 'watching') return wide ? 34 : 26;
+  if (activeViewId === 'alltv' && allTvPresentation === 'shows') return wide ? 32 : 20;
+  if (typeof isBrowseCollectionView === 'function' && isBrowseCollectionView(activeViewId)) return wide ? 30 : 20;
+  return wide ? 32 : 26; // flat Seasons lists, Coming Soon, All Movies
+}
+function toggleCategoryOverflow(owner) {
+  if (expandedCategoryOwners.has(owner)) expandedCategoryOwners.delete(owner); else expandedCategoryOwners.add(owner);
+  renderTable();
 }
 // The category filters' values (a control that isn't shown doesn't filter).
 function categoryFilterValues() {
@@ -151,8 +193,9 @@ function priorityMatches(p, fPriority) {
 
 // ─── Filter bar (B10) ─────────────────────────────────────────────────────────
 // Every derived and browse view draws one filter bar (filterBarHtml). On one line: Search, the
-// view's scope controls (those that hide something by default) and More filters. Then the More
-// filters panel: every other control, grouped; closed means hidden, never removed, so its
+// view's scope controls (those that hide something by default) and Filters. Then the Filters
+// panel: every other control, grouped (the status filter too, since the UI-polish batch: the chip
+// row says what its default leaves out); closed means hidden, never removed, so its
 // controls keep filtering and its pills keep working. Then the chip row: the applied values, the
 // values the visit keeps that don't filter in this mode ("Not applied"), and Clear filters. DOM
 // order is the keyboard order. The renderers filter exactly as before (they read the controls);
@@ -163,20 +206,20 @@ function filterFieldHtml(label, id, control) {
   return control ? `<div class="filter-field"><label class="filter-field-label" for="${id}">${esc(label)}</label>${control}</div>` : '';
 }
 
-// lead: what stays outside the filters before them (layout toggles); line: the scope controls;
-// trail: what follows More filters on the same line (+ Add); cats / marks / more: the panel's
-// fields, in that group order.
-function filterBarHtml({ lead = '', line = '', trail = '', cats = [], marks = [], more = [] }) {
+// lead: what stays outside the filters before them (layout toggles); search2: what sits right after library
+// search (UI polish: TMDB search, so the two read as a pair); line: the scope controls; trail: what follows
+// Filters on the same line (+ Add); cats / marks / more: the panel's fields, in that group order.
+function filterBarHtml({ lead = '', search2 = '', line = '', trail = '', cats = [], marks = [], more = [] }) {
   const groups = [['Categories', cats], ['Your marks', marks], ['More', more]].map(([title, fields]) => {
     const body = fields.filter(Boolean).join('');
     return body ? `<div class="filter-group" role="group" aria-label="${title}"><span class="filter-group-title" aria-hidden="true">${title}</span>${body}</div>` : '';
   }).join('');
   return `${lead}
     <div class="filter-line">
-      <input class="search-input" id="fSearch" type="text" placeholder="Search library…" aria-label="Search my library" oninput="renderTable()">${line}
-      <button type="button" class="btn filter-more-btn" id="filterMoreBtn" aria-expanded="${filterPanelOpen}" aria-controls="filterMore" onclick="toggleFilterPanel()"><span class="more-label-wide">More filters</span><span class="more-label-narrow">Filters</span><span class="filter-count" id="filterMoreCount" aria-hidden="true" hidden></span><span class="visually-hidden" id="filterMoreA11y"></span> <span id="filterMoreChevron" aria-hidden="true">${filterPanelOpen ? '▴' : '▾'}</span></button>${trail}
+      <input class="search-input" id="fSearch" type="text" placeholder="Search library…" aria-label="Search my library" oninput="renderTable()">${search2}${line}
+      <button type="button" class="btn filter-more-btn" id="filterMoreBtn" aria-expanded="${filterPanelOpen}" aria-controls="filterMore" onclick="toggleFilterPanel()">Filters<span class="filter-count" id="filterMoreCount" aria-hidden="true" hidden></span><span class="visually-hidden" id="filterMoreA11y"></span> <span id="filterMoreChevron" aria-hidden="true">${filterPanelOpen ? '▴' : '▾'}</span></button>${trail}
     </div>
-    <div class="filter-more" id="filterMore" role="group" aria-label="More filters" onkeydown="filterPanelKeydown(event)"${filterPanelOpen ? '' : ' hidden'}>${groups}</div>
+    <div class="filter-more" id="filterMore" role="group" aria-label="Filters" onkeydown="filterPanelKeydown(event)"${filterPanelOpen ? '' : ' hidden'}>${groups}</div>
     <div class="filter-chips" id="filterChips"></div>`;
 }
 
@@ -208,7 +251,7 @@ function filterPanelKeydown(e) {
 // Chip order: the scope controls, then the panel's groups (Categories, Your marks, More).
 // 'seasons' is the Seasons / TV seasons choice (page state, not the visit's memory).
 const FILTER_DEFS = [
-  { id: 'fStatus', label: 'Status', scope: true }, { id: 'fWatch', label: 'Watched', scope: true }, { id: 'seasons', scope: true },
+  { id: 'fStatus', label: 'Status' }, { id: 'fWatch', label: 'Watched', scope: true }, { id: 'seasons', scope: true },
   { id: 'fGenre', label: 'Genre' }, { id: 'fForm', label: 'Form' }, { id: 'fFranchise', label: 'Franchise' },
   { id: 'fNetwork', label: 'Network' }, { id: 'fCompany', label: 'Company' },
   { id: 'fPriority', label: 'Priority' }, { id: 'fWatchWith', label: 'Watch with' },
@@ -310,7 +353,10 @@ function renderFilterBarState() {
     ? `<div class="chip-group" role="group" aria-label="${label}"><span class="chips-label" aria-hidden="true">${visible}</span>${list.map(c => filterChipHtml(c, applied)).join('')}</div>` : '');
   const clear = m.search || m.applied.length || m.inactive.length
     ? '<button type="button" class="btn-link filter-clear" id="filterClear" onclick="clearViewFilters()">Clear filters</button>' : '';
-  box.innerHTML = group(m.applied, 'Active filters', 'Active:', true) + group(m.inactive, 'Kept, not applied', 'Kept, not applied:', false) + clear;
+  // The status filter's default leaves Skipped out: said here while it applies, since the control is in the panel.
+  const status = document.getElementById('fStatus');
+  const note = status && !status.value ? '<span class="filter-default" id="filterDefaultNote">Status: All except Skipped</span>' : '';
+  box.innerHTML = note + group(m.applied, 'Active filters', 'Active:', true) + group(m.inactive, 'Kept, not applied', 'Kept, not applied:', false) + clear;
   const count = document.getElementById('filterMoreCount');
   if (count) { count.textContent = m.badge ? String(m.badge) : ''; count.hidden = !m.badge; }
   const a11y = document.getElementById('filterMoreA11y');
@@ -703,8 +749,16 @@ document.addEventListener('focusin', function(e) {
 // opts.shortcutOf (B2): the show whose show-level shortcut this is. It is drawn only beside the
 // up-next line that names the season it marks, so the button reads "Mark watched"; its accessible
 // name and tooltip name the season (and the show). Same action as the season row's button.
+// UI polish: a season action's visible label, short and explicit like "Mark E4 watched": "Mark S4 watched" for "Season 4",
+// Specials or another short label by name ("Mark Volume 2 watched"), else "Mark season watched". Its accessible name
+// always names the season in full.
+function seasonMarkLabel(r) {
+  const label = String(r.season || '').trim(), m = /^Season (\d+)$/i.exec(label);
+  if (m) return `Mark S${Number(m[1])} watched`;
+  return label && label.length <= 14 ? `Mark ${label} watched` : 'Mark season watched';
+}
 function seasonWatchControlHtml(r, opts, compact) {
-  if (isOffList(r)) return compact ? '' : `<span class="confirmed-lbl">—</span>`;
+  if (isOffList(r)) return ''; // a skipped season has no watch control (its Keep says why)
   if (opts.requireReleased && !r.watched && !isReleasedRow(r, opts.today)) {
     return `<span class="not-aired-lbl">Not aired yet</span>`;
   }
@@ -712,11 +766,13 @@ function seasonWatchControlHtml(r, opts, compact) {
   const show = opts.shortcutOf;
   // EP5: the show row's season action, named for its scope, under the row's hold (episodes.js markSeasonFromRow).
   if (show && !r.watched) {
-    return `<button class="watch-btn show-shortcut" data-shortcut-show="${esc(show.id)}" aria-label="${esc(`Mark season watched: ${r.season} of ${show.title}`)}" title="${esc(`Mark ${r.season} watched`)}" ${REPEAT_KEY_GUARD} onclick="${stop}markSeasonFromRow('${r.id}')">Mark season watched</button>`;
+    const label = seasonMarkLabel(r);
+    return `<button class="watch-btn show-shortcut" data-shortcut-show="${esc(show.id)}" aria-label="${esc(`${label}: ${r.season} of ${show.title}`)}" title="${esc(`Mark ${r.season} watched`)}" ${REPEAT_KEY_GUARD} onclick="${stop}markSeasonFromRow('${r.id}')">${esc(label)}</button>`;
   }
-  // opts.seasonLabel (EP5): an expanded show's season row says it marks the season.
-  const label = r.watched ? (compact ? '✓' : '✓ Watched') : opts.seasonLabel ? 'Mark season watched' : 'Mark watched';
-  return `<button class="watch-btn${r.watched?' watched':''}" onclick="${stop}toggleWatch('${r.id}')">${label}</button>`;
+  // opts.seasonLabel (EP5): an expanded show's season row says it marks the season (seasonMarkLabel).
+  const label = r.watched ? (compact ? '✓' : '✓ Watched') : opts.seasonLabel ? seasonMarkLabel(r) : 'Mark watched';
+  const name = !r.watched && opts.seasonLabel ? ` aria-label="${esc(`${label}: ${r.season}`)}"` : r.watched && compact ? ` aria-label="${esc(`Watched: ${r.season}`)}"` : '';
+  return `<button class="watch-btn${r.watched?' watched':''}"${name} onclick="${stop}toggleWatch('${r.id}')">${esc(label)}</button>`;
 }
 
 // The per-row control in a season list: Skip / Keep for a TV season (its status
@@ -765,34 +821,28 @@ function seasonSubRowHtml(r, opts) {
         </td>`;
   const date = opts.represented ? '' : seasonDateHtml(r, opts);
   const panel = extra => episodePanelHtml(r, { showOf: opts.showOf, premiere: opts.represented ? seasonDateHtml(r, opts) : '', ...extra });
-  const watch = seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, false));
-  const control = seasonActionHtml('season-control', seasonRowControlHtml(r));
-  if (opts.cwOrder) {
-    return `<tr class="${rowClass} sub-row"${hooks}>
-        ${label(true)}
-        <td class="date-cell">${opts.represented ? '' : esc(r.display_date)}</td>
-        <td>${watch}</td>
-        <td>${control}</td>
-      </tr>` + panel({ colspan: 5 });
-  }
+  // UI polish: the season's own actions together in one cell across the parent's action columns (never under an
+  // unrelated heading): Mark S4 watched and Skip, then Match and Delete set apart.
+  const actions = seasonActionsGroupHtml(r, opts, false);
   return `<tr class="${rowClass} sub-row"${hooks}>
-        ${label(!opts.showMatch)}
-        ${opts.showMatch ? `<td>${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}</td>` : ''}
-        <td class="date-cell">${date}</td>
-        <td>${control}</td>
-        <td>${watch}</td>
-        <td>${opts.showDelete ? seasonActionHtml('season-delete', seasonDeleteHtml(r, opts, 'del-btn')) : ''}</td>
-      </tr>` + panel({ colspan: 6 });
+        ${label(true)}
+        <td class="date-cell">${opts.cwOrder ? (opts.represented ? '' : esc(r.display_date)) : date}</td>
+        <td colspan="${opts.cwOrder ? 2 : 3}">${actions}</td>
+      </tr>` + panel({ colspan: opts.cwOrder ? 5 : 6 });
+}
+function seasonActionsGroupHtml(r, opts, card) {
+  const watch = seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, card));
+  const control = seasonActionHtml('season-control', seasonRowControlHtml(r));
+  const match = opts.showMatch ? seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`) : '';
+  const del = opts.showDelete ? seasonActionHtml('season-delete', seasonDeleteHtml(r, opts, card ? 'card-del-btn' : 'del-btn')) : '';
+  const manage = match || del ? `<span class="season-manage">${match}${del}</span>` : '';
+  return `<div class="season-actions">${watch}${control}${manage}</div>`;
 }
 
 function seasonSubCardHtml(r, opts) {
   const progress = opts.represented ? ` ${episodeToggleHtml(r)}` : episodeProgressHtml(r, episodeToggleHtml(r)); // EP5, as the row
   return `<div class="card-subseason-row" data-season-row="${esc(r.id)}"${opts.showOf ? ` data-show-of="${esc(opts.showOf)}"` : ''}>
-          <span class="card-season"><span class="season-lbl">${esc(r.season)}</span>${opts.represented ? '' : ` · ${seasonDateHtml(r, opts)}`}${opts.showMatch ? ` ${seasonActionHtml('season-match', `<button class="universe-link" onclick="openTmdbMatch('${r.id}')">🎯 Match to TMDB</button>`)}` : ''}${progress}</span>
-          <div class="card-actions">
-            ${seasonActionHtml('season-control', seasonRowControlHtml(r))}
-            ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, opts, true))}
-            ${opts.showDelete ? seasonActionHtml('season-delete', seasonDeleteHtml(r, opts, 'card-del-btn')) : ''}
-          </div>
+          <span class="card-season"><span class="season-lbl">${esc(r.season)}</span>${opts.represented ? '' : ` · ${seasonDateHtml(r, opts)}`}${progress}</span>
+          <div class="card-actions">${seasonActionsGroupHtml(r, opts, true)}</div>
         </div>` + episodePanelHtml(r, { showOf: opts.showOf, premiere: opts.represented ? seasonDateHtml(r, opts) : '' }, true);
 }

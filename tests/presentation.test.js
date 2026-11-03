@@ -111,7 +111,7 @@ test('B9: from a collection opened in Movies, Back and the Movies button both re
 const shortcuts = html => [...html.matchAll(/<button class="watch-btn show-shortcut" data-shortcut-show="([^"]*)" aria-label="([^"]*)" title="([^"]*)" onkeydown="if \(event.repeat\) event.preventDefault\(\)" onclick="([^"]*)">([^<]*)<\/button>/g)]
   .map(m => ({ show: m[1], aria: m[2], title: m[3], onclick: m[4], text: m[5] }));
 
-test('B2: Currently Watching and All TV: the show-level shortcut reads Mark watched and names the up-next season to assistive tech, in table and cards', async () => {
+test('B2: Currently Watching and All TV: the show-level shortcut reads Mark S1 watched and names the up-next season to assistive tech, in table and cards', async () => {
   const a = show({ title: 'Synthetic Neighbor Show', status: 'watching' }, [{ num: 1, date: day(-3) }]);
   for (const view of ['watching', 'alltv']) {
     const app = await boot(all(a));
@@ -120,8 +120,8 @@ test('B2: Currently Watching and All TV: the show-level shortcut reads Mark watc
     assert.strictEqual(rows.length, 1, `${view}: one shortcut in the table`);
     assert.strictEqual(cards.length, 1, `${view}: one shortcut in the cards`);
     for (const s of [rows[0], cards[0]]) {
-      assert.strictEqual(s.text, 'Mark season watched');
-      assert.strictEqual(s.aria, 'Mark season watched: Season 1 of Synthetic Neighbor Show');
+      assert.strictEqual(s.text, 'Mark S1 watched');
+      assert.strictEqual(s.aria, 'Mark S1 watched: Season 1 of Synthetic Neighbor Show');
       assert.strictEqual(s.title, 'Mark Season 1 watched');
       assert.strictEqual(s.show, a.show.id);
       assert.ok(s.onclick.endsWith(`markSeasonFromRow('${a.rows[0].id}')`));
@@ -144,8 +144,10 @@ test('B2: the stored label is used verbatim (Volume, Specials, parts, a 60-chara
   for (const [s, label] of cases) {
     const b = got.find(x => x.show === s.show.id);
     assert.ok(b, `${s.show.title}: has a shortcut`);
-    assert.strictEqual(b.text, 'Mark season watched');
-    assert.strictEqual(b.aria, `Mark season watched: ${label} of ${s.show.title.replace(/"/g, '&quot;')}`);
+    // UI polish: a short label by name, else "Mark season watched"; the accessible name names it in full.
+    const visible = { 'Volume 2': 'Mark Volume 2 watched', Specials: 'Mark Specials watched' }[label] || 'Mark season watched';
+    assert.strictEqual(b.text, visible, label);
+    assert.strictEqual(b.aria, `${visible}: ${label} of ${s.show.title.replace(/"/g, '&quot;')}`);
     assert.ok(b.onclick.endsWith(`markSeasonFromRow('${s.rows[s.rows.length - 1].id}')`));
   }
   assert.ok(!app.el('tbody').innerHTML.includes('<b>S1</b>'), 'the label is escaped');
@@ -294,7 +296,8 @@ test('B6: the expanded show has the labelled Status select, a progress line and 
     // ("N earlier seasons unwatched" is shown today only beside "Caught up · Ended", which Currently Watching never lists; unchanged.)
     assert.ok(!h.includes('earlier season unwatched'), `${where}: no gap note added`);
     assert.ok(h.includes('Marked ended, but an upcoming season is listed'), `${where}: the ended note`);
-    assert.ok(h.includes('data-filter-kind') || h.includes('class="badge'), `${where}: categories / Original label`);
+    if (where === 'row') assert.ok(h.includes('data-filter-kind') || h.includes('class="badge'), `${where}: categories / Original label`);
+    else assert.ok(!h.includes('card-labels'), 'card: categories only once expanded (UI polish)');
   }
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   for (const [where, h] of [['table', tbody(app)], ['cards', cards(app)]]) {
@@ -305,9 +308,9 @@ test('B6: the expanded show has the labelled Status select, a progress line and 
   }
   assert.ok(tbody(app).includes('<span class="show-progress-line">1/4 seasons watched</span>') && !tbody(app).includes('· 1 skipped'), 'desktop: progress line; its skipped count is the control’s (EP5)');
   assert.ok(tbody(app).includes(`data-show-of="${s.show.id}"`) && tbody(app).includes(`data-season-row="${s.rows[0].id}"`), 'focus hooks on the actions row and seasons');
-  // the expanded seasons keep Watched before Skip / Keep under the five headings
+  // the expanded seasons keep Watched before Skip / Keep, together in one cell across Action and Progress (UI polish)
   const sub = rowsOf(tbody(app)).find(r => r.includes(`data-season-row="${s.rows[2].id}"`));
-  assert.strictEqual(cellCount(sub), 4, 'the season label spans the empty Categories cell');
+  assert.strictEqual(cellCount(sub), 3, 'the season label spans the empty Categories cell; the actions span Action and Progress');
   assert.ok(sub.indexOf(`toggleWatch('${s.rows[2].id}')`) < sub.indexOf(`setSeasonSkipped('${s.rows[2].id}'`));
 });
 
@@ -327,7 +330,7 @@ test('B6: phone cards: in progress = title, then one flow of season, progress, c
   const app = await boot(data);
   const c = cardOf(app, p.show.id);
   const at = s => c.indexOf(s);
-  assert.ok(at('card-title') < at('card-meta') && at('card-meta') < at('card-season') && at('card-season') < at('1/2 seasons watched') && at('1/2 seasons watched') < at('card-labels') && at('card-labels') < at('show-shortcut'), 'in-progress order');
+  assert.ok(at('card-title') < at('card-meta') && at('card-meta') < at('card-season') && at('card-season') < at('1/2 seasons watched') && at('1/2 seasons watched') < at('show-shortcut') && at('card-labels') < 0, 'in-progress order: no categories until expanded (UI polish)');
   assert.ok(c.includes('<span class="card-complete"'), 'the shortcut shares the flow, with no row of its own');
   const cu = cardOf(app, u.show.id);
   assert.ok(!cu.includes('card-labels') && !cu.includes('mini-progress') && !cu.includes('watched</span>'), 'caught up collapsed: no categories, no progress');
@@ -554,15 +557,15 @@ test('B8: Coming Soon: dated seasons (of every eligible dated season) · those i
   assert.strictEqual(line(none), '0 dated seasons');
 });
 
-test('B8 (decision 13): All Movies: "N of T films" (T: every saved film) · library: watched, unwatched; zero', async () => {
+test('B8 (decision 13): All Movies: "N of T films" (T: every saved film) · the library\'s watched (UI polish wording); zero', async () => {
   const data = all(film({ title: 'A' }), film({ title: 'B', watched: true }), film({ title: 'C', status: 'skipped' }), film({ title: 'D', status: 'skipped', watched: true }));
   const app = await boot(data);
   app.ctx.switchMediaType('movie'); await settle();
-  assert.strictEqual(line(app), '1 of 4 films · library: 2 watched, 2 unwatched', 'defaults: Unwatched only, Skipped hidden');
+  assert.strictEqual(line(app), '1 of 4 films · 2 of 4 watched', 'defaults: Unwatched only, Skipped hidden');
   setFilter(app, 'fWatch', ''); setFilter(app, 'fStatus', 'all');
-  assert.strictEqual(line(app), '4 films · library: 2 watched, 2 unwatched');
+  assert.strictEqual(line(app), '4 films · 2 watched');
   setFilter(app, 'fSearch', 'zzz');
-  assert.strictEqual(line(app), '0 of 4 films · library: 2 watched, 2 unwatched');
+  assert.strictEqual(line(app), '0 of 4 films · 2 of 4 watched');
   assert.ok(app.html().includes('No films match these filters.'));
   const none = await boot(all());
   none.ctx.switchMediaType('movie'); await settle();
@@ -670,7 +673,7 @@ test('correction 2: season actions are found by identity (season + action), neve
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   const row = dom.in('tbody', `[data-season-row="${s.rows[0].id}"]`);
   const actions = row.querySelectorAll('[data-action]').map(x => x.attrs['data-action']);
-  assert.deepStrictEqual(actions, ['season-match', 'season-control', 'season-watch', 'season-delete'], 'every control has a stable identity');
+  assert.deepStrictEqual(actions, ['season-watch', 'season-control', 'season-match', 'season-delete'], 'every control has a stable identity (UI polish: Mark and Skip, then Match and Delete)');
   // Skip the season: it is hidden as skipped, so focus goes to its show's skipped-seasons control.
   const toggle = () => dom.in('tbody', `[data-show-of="${s.show.id}"] [data-action="skipped-seasons"]`);
   dom.focus('tbody', `[data-season-row="${s.rows[0].id}"] [data-action="season-control"] button`);

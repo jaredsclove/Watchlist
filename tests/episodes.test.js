@@ -73,7 +73,7 @@ test('collapsed: no marks, no text; marks without a cached list → "N episodes 
   assert.ok(seasonRow(app, lib.s2).includes(`toggleEpisodes('${lib.s2.id}')`));
   app.ctx.toggleDerivedShow(lib.loc.id); await settle();
   assert.ok(!seasonRow(app, lib.l1).includes('toggleEpisodes'), 'an unmatched season has no episode list');
-  assert.match(seasonRow(app, lib.l1), /Mark season watched|Not aired/, 'its season-level controls are unchanged');
+  assert.match(seasonRow(app, lib.l1), /Mark S1 watched|Not aired/, 'its season-level controls are unchanged');
 });
 
 test('collapsed: against the cached list "N/T watched" counts only listed marks, unlisted ones apart; a count alone only while N < T; watched without "In progress"; skipped shows none', async () => {
@@ -569,7 +569,7 @@ test('EP5 show row: Up next, action and progress describe the up-next season’s
   // Expanded: Season 2 (represented) keeps only Episodes, Mark season watched and Skip; Season 3 keeps its own.
   app.ctx.toggleBrowseShow(lib.sev.id); await settle();
   const s2 = seasonRow(app, lib.s2), s3 = seasonRow(app, lib.s3);
-  assert.match(text(s2), /^\s*Season 2 ▸ Episodes\s+Skip Mark season watched Delete…\s*$/, 'the represented season: no progress, next episode or date');
+  assert.match(text(s2), /^\s*Season 2 ▸ Episodes\s+Mark S2 watched Skip Delete…\s*$/, 'the represented season: no progress, next episode or date');
   assert.ok(!s2.includes('ep-next') && !s2.includes('Jan 1, 2022'));
   assert.match(text(s3), /1\/2 episodes watched ▸ Episodes Next unwatched: E2 — B Mark E2 watched/, 'another partly watched season keeps its own');
   assert.match(text(html(app)), /1\/3 seasons watched/, 'the season progress moves to the expanded show');
@@ -590,19 +590,19 @@ test('EP5 show row: every other target keeps the season presentation; nothing is
     assert.deepStrictEqual([cells[2], cells[4], cells[5]], expect, o.why);
     return { app, lib };
   };
-  await run({ why: 'no marks: the season, Mark season watched, season progress' }, ['Season 2 · Jan 1, 2022', 'Mark season watched', '1/3 seasons watched']);
-  await run({ why: 'marks, the list unknown: N marked, no bar', marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2)] }, ['Season 2 · Jan 1, 2022', 'Mark season watched', '2 episodes marked']);
+  await run({ why: 'no marks: the season, Mark season watched, season progress' }, ['Season 2 · Jan 1, 2022', 'Mark S2 watched', '1/3 seasons watched']);
+  await run({ why: 'marks, the list unknown: N marked, no bar', marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2)] }, ['Season 2 · Jan 1, 2022', 'Mark S2 watched', '2 episodes marked']);
   const counted = await run({ why: 'a count only, equal to the marks: still N marked, never a complete-looking 2/2', storage: listCache(memoryStorage(), { '95396:2': { count: 2 } }), marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9005, 5)] },
-    ['Season 2 · Jan 1, 2022', 'Mark season watched', '2 episodes marked']);
+    ['Season 2 · Jan 1, 2022', 'Mark S2 watched', '2 episodes marked']);
   assert.ok(!showRowOf(counted.app, counted.lib.sev).includes('mini-progress-fill'), 'no bar without a known total');
   const partial = await run({ why: 'a count above the marks: N/T with its bar', storage: listCache(memoryStorage(), { '95396:2': { count: 4 } }), marks: l => [mark(l.s2, 9001, 1)] },
-    ['Season 2 · Jan 1, 2022', 'Mark season watched', '1/4 episodes watched']);
+    ['Season 2 · Jan 1, 2022', 'Mark S2 watched', '1/4 episodes watched']);
   assert.ok(showRowOf(partial.app, partial.lib.sev).includes('style="width:25%"'));
   const listed = await run({ why: 'every listed episode marked: said so, no row action; a mark TMDB no longer lists isn’t counted', storage: listCache(memoryStorage(), { '95396:2': { ids: [9001, 9002], numbers: [1, 2], names: ['', ''] } }),
-    marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2), mark(l.s2, 9009, 9)] }, ['Season 2 · All listed episodes watched', '—', '2/2 episodes watched · 1 not listed']);
+    marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2), mark(l.s2, 9009, 9)] }, ['Season 2 · All listed episodes watched', '', '2/2 episodes watched · 1 not listed']);
   assert.ok(!/markSeasonFromRow|markNextEpisode|toggleWatch/.test(showRowOf(listed.app, listed.lib.sev) + showCardOf(listed.app, listed.lib.sev)), 'no action in the row or card: the season is completed deliberately');
   listed.app.ctx.toggleDerivedShow(listed.lib.sev.id); await settle();
-  assert.ok(seasonRow(listed.app, listed.lib.s2).includes(`toggleWatch('${listed.lib.s2.id}')`) && text(seasonRow(listed.app, listed.lib.s2)).includes('Mark season watched'), 'the expanded season row keeps it');
+  assert.ok(seasonRow(listed.app, listed.lib.s2).includes(`toggleWatch('${listed.lib.s2.id}')`) && text(seasonRow(listed.app, listed.lib.s2)).includes('Mark S2 watched'), 'the expanded season row keeps it');
   await run({ why: 'not aired yet: the restriction stands', storage: listCache(memoryStorage(), S2_LIST), marks: l => [mark(l.s2, 9001, 1)],
     edit: l => { l.s2.date_sort = '2099-03-01'; l.s2.display_date = 'Mar 1, 2099'; } }, ['Season 2 · Mar 1, 2099 Upcoming', 'Not aired yet', '1/3 seasons watched']);
   const toWatch = await bootRow({ storage: listCache(memoryStorage(), S2_LIST), marks: l => [mark(l.s2, 9001, 1)], edit: l => { l.sev.status = 'confirmed'; } });
@@ -616,7 +616,7 @@ test('EP5 show row: an Earlier-seasons range keeps choosing the season; marks ne
   app.ctx.toggleDerivedShow(lib.sev.id); await settle();
   await app.ctx.startResume(lib.sev.id, lib.s1.id); await settle();
   const cells = cellsOf(showRowOf(app, lib.sev));
-  assert.deepStrictEqual([cells[2], cells[4]], ['Season 1 · Jan 1, 2022', 'Mark season watched'], 'the range’s next season, though Season 3 has marks');
+  assert.deepStrictEqual([cells[2], cells[4]], ['Season 1 · Jan 1, 2022', 'Mark S1 watched'], 'the range’s next season, though Season 3 has marks');
   assert.match(text(seasonRow(app, lib.s3)), /1\/2 episodes watched ▸ Episodes Next unwatched: E2 Mark E2 watched/, 'Season 3 keeps its own row');
 });
 
@@ -695,7 +695,7 @@ test('Mark E2 watched: beside the line on the expanded row and phone card, named
   assert.ok(quickIn(row).includes('onkeydown="if (event.repeat) event.preventDefault()"'), 'a held key’s repeats don’t press it again');
   assert.ok(quickIn(row).includes(`markNextEpisode('${lib.s2.id}', 9002)`), 'it carries the episode it names');
   assert.match(card(app), /<span class="ep-next-line"><span class="ep-next">Next unwatched: E2<\/span> <span class="season-action" data-action="ep-next-mark">/, 'the phone card too');
-  assert.match(text(row), /Mark season watched/, 'the season’s own Mark season watched stays, separate');
+  assert.match(text(row), /Mark S2 watched/, 'the season’s own Mark S2 watched stays, separate');
   assert.strictEqual(quickIn(seasonRow(app, lib.s1)), '', 'a watched season: no line, no button');
   assert.strictEqual(quickIn(seasonRow(app, lib.s3)), '', 'a season without marks: no line, no button');
   app.ctx.setAllTvPresentation('seasons'); await settle();
