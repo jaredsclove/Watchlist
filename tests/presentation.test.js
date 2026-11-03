@@ -671,11 +671,20 @@ test('correction 2: season actions are found by identity (season + action), neve
   const row = dom.in('tbody', `[data-season-row="${s.rows[0].id}"]`);
   const actions = row.querySelectorAll('[data-action]').map(x => x.attrs['data-action']);
   assert.deepStrictEqual(actions, ['season-match', 'season-control', 'season-watch', 'season-delete'], 'every control has a stable identity');
-  // Skip the season: its Watched control turns into "—" (a control disappears) and Skip becomes Keep.
+  // Skip the season: it is hidden as skipped, so focus goes to its show's skipped-seasons control.
+  const toggle = () => dom.in('tbody', `[data-show-of="${s.show.id}"] [data-action="skipped-seasons"]`);
   dom.focus('tbody', `[data-season-row="${s.rows[0].id}"] [data-action="season-control"] button`);
   await app.ctx.setSeasonSkipped(s.rows[0].id, true); await settle();
-  assert.strictEqual(dom.active(), dom.in('tbody', `[data-season-row="${s.rows[0].id}"] [data-action="season-control"] button`), 'the same season’s Skip / Keep');
+  assert.ok(!app.el('tbody').innerHTML.includes(`data-season-row="${s.rows[0].id}"`), 'hidden as skipped');
+  assert.ok(dom.active() === toggle(), 'focus: the show’s skipped-seasons control');
+  // Revealed (focus stays on the control): Skip became Keep; Keep keeps focus on the same season's Skip / Keep.
+  app.ctx.toggleSkippedSeasons(s.show.id); await settle();
+  assert.ok(dom.active() === toggle() && /Hide skipped seasons \(1\)/.test(app.el('tbody').innerHTML), 'the same control, relabelled');
   assert.ok(/Keep/.test(app.el('tbody').innerHTML.split(`data-season-row="${s.rows[0].id}"`)[1].split('</tr>')[0]));
+  dom.focus('tbody', `[data-season-row="${s.rows[0].id}"] [data-action="season-control"] button`);
+  await app.ctx.setSeasonSkipped(s.rows[0].id, false); await settle();
+  assert.ok(dom.active() === dom.in('tbody', `[data-season-row="${s.rows[0].id}"] [data-action="season-control"] button`), 'the same season’s Skip / Keep');
+  assert.ok(!app.el('tbody').innerHTML.includes('data-action="skipped-seasons"'), 'no skipped season left: no control');
   // The same identities on the phone cards and in Currently Watching's five-cell rows.
   assert.ok(app.el('cardList').innerHTML.includes(`data-season-row="${s.rows[1].id}" data-show-of="${s.show.id}"`));
   assert.ok(app.el('cardList').innerHTML.includes('data-action="season-control"') && app.el('cardList').innerHTML.includes('data-action="season-watch"'));

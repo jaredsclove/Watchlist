@@ -359,6 +359,7 @@ test('a watched season without marks: its list for reference, no checkboxes, no 
   assert.deepStrictEqual(marksIn(app, lib.s1), []);
   await open(app, lib.s1);
   await app.ctx.setSeasonSkipped(lib.s3.id, true); await settle();
+  app.ctx.toggleSkippedSeasons(lib.sev.id); await settle(); // skipped seasons are listed on request
   await open(app, lib.s3);
   assert.match(panel(app), /This season is skipped, so its episodes are locked; keep it to change them\. Its marks are kept\./);
   await app.ctx.markEpisodesThrough(lib.s3.id, 1); await settle();

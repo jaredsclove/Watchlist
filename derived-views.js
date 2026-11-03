@@ -848,10 +848,35 @@ function showProgressText(seasons) {
   return `${watched} of ${kept.length} season${kept.length === 1 ? '' : 's'} watched${skipped ? ` · ${skipped} skipped` : ''}`;
 }
 
+// Skipped seasons of an expanded show: a season's own flag, listed only on request. A Skipped show
+// lists every season as before and has no such choice. Display only: everything else that
+// reads a show's seasons (progress, up next, earlier seasons) keeps using item.seasons.
+function skippedSeasonsToggleable(show) {
+  return show.status !== 'skipped';
+}
+function listedSeasons(item) {
+  return !skippedSeasonsToggleable(item.show) || shownSkippedSeasons.has(item.key)
+    ? item.seasons : item.seasons.filter(r => !r.skipped);
+}
+function toggleSkippedSeasons(key) {
+  if (shownSkippedSeasons.has(key)) shownSkippedSeasons.delete(key);
+  else shownSkippedSeasons.add(key);
+  renderTable();
+}
+function skippedSeasonsControlHtml(item, keyArg) {
+  if (!skippedSeasonsToggleable(item.show)) return '';
+  const count = item.seasons.filter(r => r.skipped).length;
+  if (!count) return '';
+  const shown = shownSkippedSeasons.has(item.key);
+  const note = count === item.seasons.length
+    ? `<span class="show-progress-line">${count === 1 ? 'The only season is skipped' : `All ${count} seasons are skipped`}</span> ` : '';
+  return `${note}<button class="btn btn-link" data-action="skipped-seasons" aria-expanded="${shown}" onclick="toggleSkippedSeasons('${keyArg}')">${shown ? 'Hide' : 'Show'} skipped seasons (${count})</button>`;
+}
+
 // One show: a header row/card with its up-next season (or, when Up to date,
 // what is next on the list), the show-level status control and, for a Watching
-// show in progress, the up-next season's watch control; expanded, every season
-// of the show with Watched and Skip / Keep. Currently Watching passes only
+// show in progress, the up-next season's watch control; expanded, its listed seasons
+// (listedSeasons) with Watched and Skip / Keep. Currently Watching passes only
 // Watching shows; All TV passes shows of every status.
 // B6: in Currently Watching there is no status control on the row (it is in the expanded
 // show), and a caught-up show's row is compact (no progress, no "—").
@@ -924,6 +949,7 @@ function derivedShowHtml(item, today, opts = {}) {
   const menu = showMenuHtml(show, keyArg);
   const showAttrs = `data-item="${esc(key)}" data-show-row="${esc(key)}" data-row-section="${section}"`;
   const ofAttr = `data-show-of="${esc(key)}"`;
+  const listed = isExpanded ? listedSeasons(item) : [];
 
   if (cw) {
     const shortcut = inProgress ? seasonWatchControlHtml(upNext, { ...shortcutOpts, stopPropagation: true }, false) : '';
@@ -942,7 +968,7 @@ function derivedShowHtml(item, today, opts = {}) {
       ${cells}
     </tr>`;
     if (isExpanded) row += `<tr class="sub-row show-actions-row" ${ofAttr}><td style="padding-left:28px" colspan="${derivedColspan()}" onclick="event.stopPropagation()">${showActionsHtml(item, keyArg, { state: true, progress: true })}</td></tr>`
-      + seasons.map(r => seasonSubRowHtml(r, subOpts(r))).join('');
+      + listed.map(r => seasonSubRowHtml(r, subOpts(r))).join('');
 
     // Phone card, top to bottom: title (expand button), then one wrapping flow of the season line,
     // progress, categories and the shortcut; expanded: the actions, then the seasons. A caught-up
@@ -958,7 +984,7 @@ function derivedShowHtml(item, today, opts = {}) {
         ${menu}
       </div>
       ${meta}
-      ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${showActionsHtml(item, keyArg, { state: true })}</div>${seasons.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}</div>` : ''}
+      ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${showActionsHtml(item, keyArg, { state: true })}</div>${listed.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}</div>` : ''}
     </div>`;
     return { row, card };
   }
@@ -979,7 +1005,7 @@ function derivedShowHtml(item, today, opts = {}) {
       <td class="card-date">${progressLabel}${progressBarHtml}</td>
     </tr>`;
   if (isExpanded) row += `<tr class="sub-row show-actions-row" ${ofAttr}><td style="padding-left:28px" colspan="6" onclick="event.stopPropagation()">${actions}</td></tr>`
-    + seasons.map(r => seasonSubRowHtml(r, subOpts(r))).join('')
+    + listed.map(r => seasonSubRowHtml(r, subOpts(r))).join('')
     + (addSeasonBtn ? `<tr class="sub-row" ${ofAttr}><td style="padding-left:28px" colspan="6">${addSeasonBtn}</td></tr>` : '');
 
   const card = `<div class="item-card show-group-card${dimClass}" ${showAttrs}>
@@ -995,14 +1021,14 @@ function derivedShowHtml(item, today, opts = {}) {
         <span class="state-action" data-action="status">${showStatusSelectHtml(show)}</span>${upToDatePill}
         ${inProgress ? seasonWatchControlHtml(upNext, shortcutOpts, false) : ''}
       </div>
-      ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${actions}</div>${seasons.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}${addSeasonBtn ? `<div class="card-subseason-row" ${ofAttr}>${addSeasonBtn}</div>` : ''}</div>` : ''}
+      ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${actions}</div>${listed.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}${addSeasonBtn ? `<div class="card-subseason-row" ${ofAttr}>${addSeasonBtn}</div>` : ''}</div>` : ''}
     </div>`;
 
   return { row, card };
 }
 
-// An expanded show's own actions (B4/B5): Details, Show ended, and the
-// earlier-seasons range (Watch earlier seasons; the chooser; Stop).
+// An expanded show's own actions (B4/B5): Details, the skipped-seasons control, Show ended and
+// the earlier-seasons range (Watch earlier seasons; the chooser; Stop).
 // opts.state (B6, Currently Watching): the status select comes first, labelled (the row has
 // none; priority is in the row's ⋯); opts.progress: a line of season progress. data-action marks each
 // control for focus after a redraw.
@@ -1016,6 +1042,7 @@ function showActionsHtml(item, keyArg, opts = {}) {
   }
   if (opts.progress) parts.push(`<span class="show-progress-line">${showProgressText(seasons)}</span>`);
   parts.push(`<button class="btn btn-link" data-action="details" onclick="openDetails('show', '${keyArg}', this)">Details…</button>`,
+    skippedSeasonsControlHtml(item, keyArg),
     `<label class="ended-check" data-action="ended"><input type="checkbox"${show.ended ? ' checked' : ''} onchange="setShowStateById('${keyArg}', { ended: this.checked })"> Show ended</label>`);
   if (range) {
     const note = range.state === 'active' ? `Watching earlier seasons from ${esc(range.start ? range.start.season : '')}`
@@ -1158,7 +1185,8 @@ function toggleDerivedShow(key, ev) {
 // Focus anywhere else (a filter, the header, a dialog, another window) is never moved, a filter
 // pill keeps its own rule (render.js toggleFilterPill), and a filter-row redraw keeps the focused
 // filter control (render.js renderFilters). Every redraw records afresh: nothing is carried
-// from one redraw to the next.
+// from one redraw to the next. Before the chain, a season of an expanded show that has just been
+// hidden as skipped hands focus to its show's skipped-seasons control, the way back to it.
 //
 // Items (data-item): a show (Currently Watching, All TV Shows), whose main control is its
 // expand button, or a season (Coming Soon, All TV Seasons), whose title takes focus from the
@@ -1285,11 +1313,23 @@ function documentHasFocus() {
   return typeof document.hasFocus !== 'function' || document.hasFocus();
 }
 
+// The recorded control's season is now hidden as skipped, and its show still lists the control.
+function hiddenSkippedTarget(rec, present) {
+  const h = rec.hook;
+  if (!h || h.kind !== 'action' || !h.season || present(h)) return null;
+  const row = actionRows().find(r => r.id === h.season);
+  const show = row && tvShowsById.get(row.show_id);
+  if (!row || !row.skipped || !show || !skippedSeasonsToggleable(show) || shownSkippedSeasons.has(show.id)) return null;
+  const t = { kind: 'action', value: 'skipped-seasons', item: show.id };
+  return present(t) ? t : null;
+}
+
 function applyListFocus(rec, listing) {
   if (!rec || !documentHasFocus()) return; // never pull focus back from outside the app
   const box = visibleListBox(rec.container);
   if (!box) return;
-  const t = focusChainTarget(rec, listing, x => !!focusTargetElement(box, x));
+  const present = x => !!focusTargetElement(box, x);
+  const t = hiddenSkippedTarget(rec, present) || focusChainTarget(rec, listing, present);
   // Never back to the page: the first visible section control, item or message.
   // (Section toggles are buttons; headings, item titles and messages take focus from the page.)
   const el = focusTargetElement(box, t)

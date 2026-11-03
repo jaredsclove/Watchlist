@@ -1112,7 +1112,7 @@ function browseDateHtml(r, today) {
 }
 
 // A show (S3): All TV's show entry — the status select, the ⋯ with priority, the Mark watched shortcut,
-// Up to date, the expand button, and when expanded the show actions, every stored season with
+// Up to date, the expand button, and when expanded the show actions, its listed seasons with
 // Watched, Skip / Keep, Match (eligible rows) and Delete… (rows that aren't built-in catalog
 // entries), and + Add season… (derived-views.js derivedShowHtml, the same functions and guards).
 // The collection keeps its own date text and the Combined kind tag. part: its focus section.

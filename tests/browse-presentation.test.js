@@ -115,7 +115,7 @@ const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"
 // S3: a collection's TV entries have All TV's controls (their parity is tests/collections-tv-edit.test.js); the
 // allowed set grows by exactly those handlers. S4: films have All Movies' controls and entries the collection's
 // Remove (tests/collection-films.test.js); pressing nothing still writes and reads nothing.
-const TV_EDIT = ['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
+const TV_EDIT = ['toggleDerivedShow', 'toggleSkippedSeasons', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
   'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
   'setStatus', 'setFilmPriority', 'toggleMorePopover', 'closeRowMenu', 'toggleWatchWith', 'libraryPullRest', 'removeFromCollection'];
 const READ_ONLY = new Set([...TV_EDIT, 'toggleFilterPill', 'toggleBrowseShow', 'setBrowseMedia', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
@@ -350,7 +350,10 @@ test('TV seasons defaults to All (except Skipped): a season skipped on its own i
   setFilter(app, 'fStatus', 'all');
   assert.deepStrictEqual(stats(app), ['5 Shows', '9 Season entries', '7 Films'], 'All statuses brings back Wonder Man and Ewoks; skipped seasons stay out');
   app.ctx.setBrowsePresentation('shows');
-  app.ctx.toggleBrowseShow(app.get("[...tvShowsById.values()].find(s => s.title === 'Andor').id"));
+  const andor = app.get("[...tvShowsById.values()].find(s => s.title === 'Andor').id");
+  app.ctx.toggleBrowseShow(andor);
+  assert.ok(!listed(app).includes('  - Season 1'), 'Shows: a skipped season is listed only on request');
+  app.ctx.toggleSkippedSeasons(andor);
   assert.ok(listed(app).includes('  - Season 1'), 'Shows: an expanded show still lists every stored season');
   assert.strictEqual(mutating(app).length, 0);
 });
