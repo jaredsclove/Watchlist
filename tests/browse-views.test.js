@@ -826,7 +826,7 @@ test('a slow read never paints after leaving the view, or over a newer entry of 
   g.release(); await settle();
   assert.strictEqual(app.get('activeViewId'), 'alltv');
   assert.strictEqual(app.get('browseData'), null);
-  assert.ok(app.el('tableHead').innerHTML.includes('<th>Next</th>'), 'All TV header intact');
+  assert.ok(app.el('tableHead').innerHTML.includes('<th class="col-next">Next</th>'), 'All TV header intact');
 
   // Leave and come back while the first read is still out: only the newer read paints.
   const g1 = app.hold(r => r.method === 'GET' && isRead(r.url, 'watchlist_items') && !r.url.includes('collection='));

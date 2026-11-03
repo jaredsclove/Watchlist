@@ -196,6 +196,11 @@ table { width: 100%; border-collapse: collapse; }
 /* The title and the categories share the room: a short title leaves it to the categories, and long titles wrap. */
 #desktopTable th:first-child { width: 31%; }
 #desktopTable th:nth-child(2) { width: 27%; }
+/* EP5: show views give Up next the room, so an episode title wraps there; the categories step back. */
+#desktopTable th.col-cats { width: 17%; }
+#desktopTable th.col-next { width: 24%; }
+.derived-show-row > td:nth-child(2) :is(.meta-chip, .meta-more) { font-size: 10px; opacity: 0.85; }
+.next-ep-title { display: block; white-space: normal; overflow-wrap: anywhere; font-size: 11px; color: var(--text3); }
 thead th { text-align: left; padding: 3px 8px; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .year-group td { background: var(--surface); padding: 5px 12px; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); }
 
@@ -685,6 +690,9 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .card-meta .card-season, .card-meta .card-date { font-size: 12px; line-height: 18px; }
   .card-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; min-width: 0; }
   .card-complete { display: inline-flex; margin-left: auto; }
+  /* EP5: a show card reads Up next, its progress and action, then the categories, quieter, on their own line. */
+  .show-group-card .card-meta .card-labels { order: 1; flex-basis: 100%; opacity: 0.85; }
+  .show-group-card .card-meta .next-ep-title { line-height: 16px; }
   .card-actions { gap: 2px 8px; }
   .card-actions .status-select:is(.s-confirmed, .s-skipped, .s-film-to_watch, .s-film-skipped) { border-left-width: 0; padding-left: 0; } /* the borderless ones too */
   .card-actions .status-pill.s-caughtup { background: none; border: 0; padding: 0; color: var(--text2); } /* a state, not a control */

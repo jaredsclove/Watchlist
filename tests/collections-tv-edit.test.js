@@ -258,7 +258,7 @@ test('G3 F2 priority and F3 Show ended: one call each; only those columns', asyn
 });
 test('G3 F4 Watched (the season-named shortcut): set_season_watched {p_row_id, p_watched}; only that row’s watched', async () => {
   const { app, L, d, sent } = await flow(async (app, L) => {
-    assert.ok(html(app).includes(`data-shortcut-show="${L.alpha.show.id}"`) && html(app).includes('aria-label="Mark watched: Season 2 of Alpha') && html(app).includes('>Mark watched</button>'));
+    assert.ok(html(app).includes(`data-shortcut-show="${L.alpha.show.id}"`) && html(app).includes('aria-label="Mark season watched: Season 2 of Alpha') && html(app).includes('>Mark season watched</button>'));
     await app.ctx.toggleWatch(L.alpha.rows[1].id);
   });
   assert.deepStrictEqual(sent.map(r => [path(r), body(r)]), [['rpc/set_season_watched', { p_row_id: L.alpha.rows[1].id, p_watched: true }]]);

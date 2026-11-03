@@ -210,13 +210,13 @@ test('Up to date only for a Watching show (today’s rule; Ended plays no part):
   const rowOf = title => app.el('tbody').innerHTML.split('<tr').find(x => x.includes(`show-title">${title}<`));
   // B6: no "Next:" prefix in the Next column (the heading says it); wording only.
   assert.ok(rowOf('W').includes('s-caughtup">Up to date') && rowOf('W').includes(`<td class="date-cell">Season 2 · ${disp(day(20))}<span class="upcoming-tag">Upcoming`) && !rowOf('W').includes('Next:'));
-  assert.ok(rowOf('P').includes(`Season 2 · ${disp(day(-5))}`) && rowOf('P').includes('toggleWatch('), 'in progress: Mark watched on up next');
+  assert.ok(rowOf('P').includes(`Season 2 · ${disp(day(-5))}`) && rowOf('P').includes('markSeasonFromRow('), 'in progress: Mark season watched on up next');
   assert.ok(!rowOf('P').includes('Next: '), 'an in-progress Watching show keeps the Watching up-next label');
   assert.ok(rowOf('C').includes('Caught up · Ended'), rowOf('C'));
   assert.ok(rowOf('F').includes(`<td class="date-cell">Season 1 · ${disp(day(30))}<span class="upcoming-tag">Upcoming`) && !rowOf('F').includes('Up to date'));
   assert.ok(rowOf('T').includes('<td class="date-cell">Season 1 · Date TBA</td>'), 'a plain stored TBA reads "Date TBA" (B6)');
   for (const x of ['F', 'T']) {
-    assert.ok(!rowOf(x).includes('toggleWatch('), `${x}: no collapsed watch control`);
+    assert.ok(!/toggleWatch\(|markSeasonFromRow\(/.test(rowOf(x)), `${x}: no collapsed watch control`);
     assert.ok(!/In progress/.test(rowOf(x)), `${x}: never labelled in progress`);
   }
   assert.deepStrictEqual(statNums(app), [5, 3, 2], 'Shows, Watching (C is Watching), Up to date (W and C)');
@@ -334,10 +334,10 @@ test('Search and Status combine (no Source filter since Stage 4b); switching vie
 test('header and stats follow the open view (All TV has its own branch)', async () => {
   const s = show({ title: 'Alpha', status: 'watching' }, [{ num: 1 }]);
   const app = await openAllTv(all(s));
-  assert.ok(app.el('tableHead').innerHTML.includes('<th>Next</th>'));
+  assert.ok(app.el('tableHead').innerHTML.includes('<th class="col-next">Next</th>'));
   assert.ok(app.el('statsRow').innerHTML.includes('<p class="count-line">1 show · 1 Watching · 0 up to date</p>'), 'B8: one count line');
   app.ctx.switchView('watching'); await settle();
-  assert.ok(app.el('tableHead').innerHTML.includes('<th>Up next</th>'));
+  assert.ok(app.el('tableHead').innerHTML.includes('<th class="col-next">Up next</th>'));
   assert.strictEqual(app.el('statsRow').innerHTML, '', 'B8: Currently Watching counts in its headings');
   assert.ok(app.el('tbody').innerHTML.includes('In progress <span class="section-count">· 1 show</span>'));
   app.ctx.switchView('comingsoon'); await settle();
@@ -352,7 +352,7 @@ test('phone width (375 px): Search and Status stay visible, the More filters pan
   assert.ok(!app.el('filtersRow').classList.contains('collapsed') && f.indexOf('id="fSearch"') < f.indexOf('id="filterMore"') && f.indexOf('id="fStatus"') < f.indexOf('id="filterMore"'));
   assert.ok(/id="filterMore"[^>]* hidden>/.test(f) && f.indexOf('id="fGenre"') > f.indexOf('id="filterMore"'), 'the other controls are in the closed panel');
   const card = app.el('cardList').innerHTML;
-  assert.ok(card.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && card.includes(`toggleWatch('${s.rows[0].id}')`));
+  assert.ok(card.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && card.includes(`markSeasonFromRow('${s.rows[0].id}')`));
   assert.ok(card.includes(`setShowStateById('${s.show.id}', { priority: this.value })`), 'priority on the card too');
   app.ctx.toggleDerivedShow(s.show.id); await settle();
   assert.ok(app.el('cardList').innerHTML.includes(`setSeasonSkipped('${s.rows[0].id}', true)`));

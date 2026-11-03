@@ -948,7 +948,7 @@ function renderBrowseTable(chain = true) {
   const rec = chain ? captureListFocus() : null;
   const thead = document.getElementById('tableHead');
   if (thead) thead.innerHTML = collection
-    ? `<tr><th>Title</th><th>Categories</th><th>Next / Release</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`
+    ? `<tr><th>Title</th><th class="col-cats">Categories</th><th class="col-next">Next / Release</th><th>Status</th><th>Action</th><th>Progress</th></tr>`
     : `<tr><th>Title</th><th>Categories</th><th>Release</th><th>Status</th><th>Watched</th><th></th></tr>`;
   const today = localTodayStr();
   const val = id => document.getElementById(id)?.value || ''; // a control that isn't shown doesn't filter

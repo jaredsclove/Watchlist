@@ -107,8 +107,8 @@ test('B9: from a collection opened in Movies, Back and the Movies button both re
   assert.strictEqual(app.el('tabBar').hidden, true);
 });
 
-// ─── B2: the show-level shortcut reads Mark watched; its name and tooltip name the season ──
-const shortcuts = html => [...html.matchAll(/<button class="watch-btn show-shortcut" data-shortcut-show="([^"]*)" aria-label="([^"]*)" title="([^"]*)" onclick="([^"]*)">([^<]*)<\/button>/g)]
+// ─── B2: the show-level shortcut reads Mark season watched (EP5); its name and tooltip name the season ──
+const shortcuts = html => [...html.matchAll(/<button class="watch-btn show-shortcut" data-shortcut-show="([^"]*)" aria-label="([^"]*)" title="([^"]*)" onkeydown="if \(event.repeat\) event.preventDefault\(\)" onclick="([^"]*)">([^<]*)<\/button>/g)]
   .map(m => ({ show: m[1], aria: m[2], title: m[3], onclick: m[4], text: m[5] }));
 
 test('B2: Currently Watching and All TV: the show-level shortcut reads Mark watched and names the up-next season to assistive tech, in table and cards', async () => {
@@ -120,11 +120,11 @@ test('B2: Currently Watching and All TV: the show-level shortcut reads Mark watc
     assert.strictEqual(rows.length, 1, `${view}: one shortcut in the table`);
     assert.strictEqual(cards.length, 1, `${view}: one shortcut in the cards`);
     for (const s of [rows[0], cards[0]]) {
-      assert.strictEqual(s.text, 'Mark watched');
-      assert.strictEqual(s.aria, 'Mark watched: Season 1 of Synthetic Neighbor Show');
+      assert.strictEqual(s.text, 'Mark season watched');
+      assert.strictEqual(s.aria, 'Mark season watched: Season 1 of Synthetic Neighbor Show');
       assert.strictEqual(s.title, 'Mark Season 1 watched');
       assert.strictEqual(s.show, a.show.id);
-      assert.ok(s.onclick.endsWith(`toggleWatch('${a.rows[0].id}')`));
+      assert.ok(s.onclick.endsWith(`markSeasonFromRow('${a.rows[0].id}')`));
     }
   }
 });
@@ -144,12 +144,12 @@ test('B2: the stored label is used verbatim (Volume, Specials, parts, a 60-chara
   for (const [s, label] of cases) {
     const b = got.find(x => x.show === s.show.id);
     assert.ok(b, `${s.show.title}: has a shortcut`);
-    assert.strictEqual(b.text, 'Mark watched');
-    assert.strictEqual(b.aria, `Mark watched: ${label} of ${s.show.title.replace(/"/g, '&quot;')}`);
-    assert.ok(b.onclick.endsWith(`toggleWatch('${s.rows[s.rows.length - 1].id}')`));
+    assert.strictEqual(b.text, 'Mark season watched');
+    assert.strictEqual(b.aria, `Mark season watched: ${label} of ${s.show.title.replace(/"/g, '&quot;')}`);
+    assert.ok(b.onclick.endsWith(`markSeasonFromRow('${s.rows[s.rows.length - 1].id}')`));
   }
   assert.ok(!app.el('tbody').innerHTML.includes('<b>S1</b>'), 'the label is escaped');
-  assert.ok(app.html().includes('aria-label="Mark watched: &lt;b&gt;S1&lt;/b&gt; &amp; &quot;x&quot; of O\'Neil &quot;Q&quot;"'), 'the accessible name is escaped (esc: & < > ")');
+  assert.ok(app.html().includes('aria-label="Mark season watched: &lt;b&gt;S1&lt;/b&gt; &amp; &quot;x&quot; of O\'Neil &quot;Q&quot;"'), 'the accessible name is escaped (esc: & < > ")');
 });
 
 test('B2: an unaired up-next season shows "Not aired yet" and no shortcut', async () => {
@@ -169,7 +169,7 @@ test('B2: with an active earlier-seasons range the shortcut names the range’s 
   const got = shortcuts(app.el('tbody').innerHTML);
   assert.strictEqual(got.length, 1);
   assert.strictEqual(got[0].title, 'Mark Season 1 watched');
-  assert.ok(got[0].onclick.endsWith(`toggleWatch('${a.rows[0].id}')`));
+  assert.ok(got[0].onclick.endsWith(`markSeasonFromRow('${a.rows[0].id}')`));
 });
 
 test('B2: the shortcut sends the same single set_season_watched request as before; season rows keep "Mark watched"', async () => {
@@ -205,13 +205,13 @@ function cwLibrary() {
 test('B6: Currently Watching has no Status column; collapsed rows and cards have no status control and priority only in ⋯', async () => {
   const { p, u, data } = cwLibrary();
   const app = await boot(data);
-  assert.strictEqual(app.el('tableHead').innerHTML, '<tr><th>Show</th><th>Categories</th><th>Up next</th><th>Watched</th><th>Progress</th></tr>');
+  assert.strictEqual(app.el('tableHead').innerHTML, '<tr><th>Show</th><th class="col-cats">Categories</th><th class="col-next">Up next</th><th>Action</th><th>Progress</th></tr>');
   for (const html of [tbody(app), cards(app)]) {
     assert.ok(!/\{ status: this\.value \}/.test(html), 'no status select while collapsed');
     assert.ok(html.split('<select').slice(1).every(s => s.startsWith(' class="priority-select')), 'the only selects are priority, in the menus');
     assert.ok(!html.includes('s-caughtup'), 'no Up to date pill in Currently Watching');
   }
-  assert.strictEqual(cellCount(showRowOf(app, p.show.id)), 5, 'in progress: Show · Categories · Up next · Watched · Progress');
+  assert.strictEqual(cellCount(showRowOf(app, p.show.id)), 5, 'in progress: Show · Categories · Up next · Action · Progress');
   const cu = showRowOf(app, u.show.id);
   assert.strictEqual(cellCount(cu), 3, 'caught up: Show · Categories · Up next (spanning)');
   assert.ok(cu.includes('<td class="date-cell" colspan="3">'));
@@ -253,7 +253,7 @@ test('B6: next-season wording: no "Next:" prefix in Currently Watching, All TV o
   check('All TV');
   app.ctx.openBrowseCollection(app.browseId('disney')); await settle();
   check('collection');
-  assert.ok(app.el('tableHead').innerHTML.includes('<th>Next / Release</th>'), 'headings unchanged');
+  assert.ok(app.el('tableHead').innerHTML.includes('<th class="col-next">Next / Release</th>'), 'headings unchanged');
 });
 
 test('B6 (decision 6): the hidden "Next season: " is only on phone cards, only before an actual next-season value', async () => {
@@ -303,7 +303,7 @@ test('B6: the expanded show has the labelled Status select, a progress line and 
     assert.ok(h.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && h.includes(`setShowStateById('${s.show.id}', { priority: this.value })`), `${where}: the same writes as All TV's selects`);
     for (const a of ['details', 'ended', 'open-resume']) assert.ok(h.includes(`data-action="${a}"`), `${where}: ${a}`);
   }
-  assert.ok(tbody(app).includes('<span class="show-progress-line">1 of 4 seasons watched · 1 skipped</span>'), 'desktop: progress line');
+  assert.ok(tbody(app).includes('<span class="show-progress-line">1/4 seasons watched</span>') && !tbody(app).includes('· 1 skipped'), 'desktop: progress line; its skipped count is the control’s (EP5)');
   assert.ok(tbody(app).includes(`data-show-of="${s.show.id}"`) && tbody(app).includes(`data-season-row="${s.rows[0].id}"`), 'focus hooks on the actions row and seasons');
   // the expanded seasons keep Watched before Skip / Keep under the five headings
   const sub = rowsOf(tbody(app)).find(r => r.includes(`data-season-row="${s.rows[2].id}"`));
@@ -333,7 +333,7 @@ test('B6: phone cards: in progress = title, then one flow of season, progress, c
   assert.ok(!cu.includes('card-labels') && !cu.includes('mini-progress') && !cu.includes('watched</span>'), 'caught up collapsed: no categories, no progress');
   app.ctx.toggleDerivedShow(u.show.id); await settle();
   const ex = cardOf(app, u.show.id);
-  assert.ok(ex.includes('card-meta') && ex.includes('1 of 2 seasons watched'), 'expanded: categories and progress text');
+  assert.ok(ex.includes('card-meta') && ex.includes('1/2 seasons watched'), 'expanded: categories and progress text');
   assert.ok(ex.indexOf('card-meta') < ex.indexOf('show-actions-state') && ex.indexOf('show-actions-state') < ex.indexOf('data-season-row'), 'expanded order: categories, actions, seasons');
 });
 

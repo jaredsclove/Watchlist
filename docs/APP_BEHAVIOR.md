@@ -27,8 +27,23 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   the card's one left margin, and the season line, progress, labels and actions flow below it from that margin, with progress
   beside the date when it fits; category labels are small pills inside 32 px targets, and Up to date is quiet text. Status is a quiet directly editable
   select. Priority is edited in the row's ⋯ (shows and films; Seasons lists show it
-  only); High shows ★ and Low the word, Normal nothing. The show-row shortcut reads "Mark watched" (its name and tooltip
-  name the season; the episode list's offer keeps "Mark Season N watched"). Season progress reads "1/3 seasons watched".
+  only); High shows ★ and Low the word, Normal nothing. The show-row shortcut reads "Mark season watched" (its name and tooltip
+  name the season; the episode list's offer keeps "Mark Season N watched"), as do an expanded show's season rows; flat
+  Seasons lists keep "Mark watched". Season progress reads "1/3 seasons watched". In show views (Currently Watching,
+  All TV Shows, collections) the desktop column is "Action", Up next has more room and categories are quieter.
+- **Episode-aware show rows (EP5):** a show row's Up next, Action and Progress describe one target, its up-next season
+  as chosen before (Earlier seasons included; marks never choose it). When the row offers an action (Watching, not up to
+  date, the season aired) and that season has marks: with its next unwatched episode known, "Season 35 · Episode 9" (the
+  title below while titles are shown by default), "Mark E9 watched" (the same one-episode change, ignoring a held key's
+  repeats and, for a second after a row action settles, further presses on that show's row action) and "8/12 episodes
+  watched" with its bar; with every listed episode marked, "All listed episodes watched", no row action (the season is
+  completed from its expanded row or its list), focus going to the show's expand button; with no numbered list on this
+  device, the season and date, Mark season watched and the existing episode progress ("N episodes marked", or N/T from a
+  count only while the marks are fewer), a bar only with a known total. Anything else reads as before. While the row shows
+  a season's episodes, that season's expanded row has only Episodes, Mark season watched and Skip (its premiere is in its
+  open list's summary), and the expanded show carries the season progress line; that line leaves the skipped count to
+  "Show skipped seasons (N)" (a Skipped show keeps it; an all-skipped show keeps the control's note). Phone cards read Up
+  next, progress and action, then the categories on their own line.
   Genres are neutral-gray pills, the same shape and size as the form, franchise and network pills and filter buttons like them.
 - **Film collections (TMDB):** a film TMDB places in a collection keeps that identity. Its ⋯ menu offers Check
   collection while the collection's contents are unknown on this page, then Pull rest only when another film can be
@@ -42,7 +57,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   per show and page memory only (redraws, collapsing and other views keep it; a reload or account change resets it). It is
   the same in Currently Watching, All TV and collections. A show whose own status is Skipped lists every season as
   before. Display only: progress, up next, earlier seasons and the flat Seasons lists use every season.
-- **Episode progress (EP1–EP4):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
+- **Episode progress (EP1–EP5):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
   one open at a time) with a checkbox per episode and one "Mark watched through [Episode N ▾] [Apply]" control above
   it (marks only the unmarked episodes up to N; starts on the first unmarked, keeps the choice). Titles are hidden
   behind a Show title button per episode unless Settings' "Show episode titles by default" is on (per account,
@@ -132,7 +147,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 - **One focus rule:** a redraw moves focus only if it was in the list (B6 chain F-1…F-7); a filter-row
   redraw keeps the focused control, its value and caret. Two additions: when the focused season is hidden because it
   is now skipped, focus goes to its show's "Show skipped seasons" control; when a focused "Mark E6 watched" is gone,
-  focus goes to its season's Episodes toggle. Deletions and other redraws follow the chain.
+  focus goes to its season's Episodes toggle. Deletions and other redraws follow the chain (a show row's action that is
+  gone, as after its last listed episode, falls to the show's expand button).
 - **Accepted limitations (Batch A):** after a refused change is rolled back,
   focus doesn't return to the control it started from; focus doesn't follow a pending save across the
   phone/desktop switch; opening another view during a change (a long Refresh shows or movie-tool run

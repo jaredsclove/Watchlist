@@ -159,17 +159,22 @@ function marksAgainstList(seasonId, ids) {
 // marks are fewer than it (a count can't tell a kept mark for an unlisted episode from a listed one, so it
 // never shows a complete-looking T/T); otherwise "N episodes marked". Nothing for a season without marks, an
 // untracked or a skipped one.
-function episodeProgressText(r) {
-  if (!isEpisodeTrackable(r) || r.skipped) return '';
+// pct (EP5, the show row's bar): only with a known total, never from the marks alone.
+function episodeProgress(r) {
+  if (!isEpisodeTrackable(r) || r.skipped) return null;
   const n = episodeMarkCount(r.id);
-  if (!n) return '';
+  if (!n) return null;
   const cached = cachedEpisodeList(r);
-  let text = `${n} episode${n === 1 ? '' : 's'} marked`;
   if (cached && cached.ids && cached.ids.length) {
     const p = marksAgainstList(r.id, cached.ids);
-    text = `${p.inList}/${p.total} episodes watched${p.unlisted ? ` · ${p.unlisted} not listed` : ''}`;
-  } else if (cached && cached.count > 0 && n < cached.count) text = `${n}/${cached.count} episodes watched`;
-  return text;
+    return { text: `${p.inList}/${p.total} episodes watched${p.unlisted ? ` · ${p.unlisted} not listed` : ''}`, pct: Math.round(p.inList / p.total * 100) };
+  }
+  if (cached && cached.count > 0 && n < cached.count) return { text: `${n}/${cached.count} episodes watched`, pct: Math.round(n / cached.count * 100) };
+  return { text: `${n} episode${n === 1 ? '' : 's'} marked`, pct: null };
+}
+function episodeProgressText(r) {
+  const p = episodeProgress(r);
+  return p ? p.text : '';
 }
 // Next unwatched: the first episode of the known list without a mark (marks can have gaps), for a
 // season neither watched nor skipped; nothing when the list is unknown, empty or fully marked. It
@@ -203,23 +208,62 @@ function episodeProgressHtml(r, toggle = '') {
 // elsewhere, or the list changed) sends nothing. A held key's repeats don't press it again (a fresh press
 // is needed), and for a moment after a mark settles a further click on that season's button is ignored,
 // so a double click can't mark the episode named next. The Episodes list chooses others and undoes.
+// EP5: the show row's action takes the same hold for its whole show (episode or season), so a repeat can't
+// press the button that replaces it either.
 const NEXT_EPISODE_MARK_SETTLE_MS = 1000;
+const REPEAT_KEY_GUARD = 'onkeydown="if (event.repeat) event.preventDefault()"';
 function nextEpisodeMarkHtml(r) {
   const next = nextUnwatchedEpisode(r);
   if (!next) return '';
   const idArg = esc(r.id).replace(/'/g, "\\'");
   const label = `Mark E${next.number} watched`;
-  return seasonActionHtml('ep-next-mark', `<button type="button" class="btn btn-link ep-next-mark" aria-label="${esc(`${label}: episode ${next.number} of ${r.season} only`)}" onkeydown="if (event.repeat) event.preventDefault()" onclick="event.stopPropagation(); markNextEpisode('${idArg}', ${next.id})">${esc(label)}</button>`);
+  return seasonActionHtml('ep-next-mark', `<button type="button" class="btn btn-link ep-next-mark" aria-label="${esc(`${label}: episode ${next.number} of ${r.season} only`)}" ${REPEAT_KEY_GUARD} onclick="event.stopPropagation(); markNextEpisode('${idArg}', ${next.id})">${esc(label)}</button>`);
 }
-async function markNextEpisode(seasonId, episodeId) {
-  const held = episodeNextMark;
-  if (held && held.seasonId === seasonId && (held.until == null || Date.now() < held.until)) return;
+// A row action held: this season's, or (showId: from a show row) any of that show's.
+function rowActionHeld(seasonId, showId) {
+  const h = episodeNextMark;
+  return !!h && (h.seasonId === seasonId || (!!showId && h.showId === showId)) && (h.until == null || Date.now() < h.until);
+}
+async function holdRowAction(row, fn) {
+  const mine = episodeNextMark = { seasonId: row.id, showId: row.show_id, until: null };
+  try { return await fn(); }
+  finally { if (episodeNextMark === mine) mine.until = Date.now() + NEXT_EPISODE_MARK_SETTLE_MS; }
+}
+async function markNextEpisode(seasonId, episodeId, showId = null) {
+  if (rowActionHeld(seasonId, showId)) return;
   const row = actionRows().find(r => r.id === seasonId);
   const next = row ? nextUnwatchedEpisode(row) : null;
   if (!next || next.id !== episodeId) { renderTable(); return; }
-  const mine = episodeNextMark = { seasonId, until: null };
-  try { await setEpisodeMarks(seasonId, [{ tmdb_episode_id: next.id, episode_number: next.number }], true); }
-  finally { if (episodeNextMark === mine) mine.until = Date.now() + NEXT_EPISODE_MARK_SETTLE_MS; }
+  await holdRowAction(row, () => setEpisodeMarks(seasonId, [{ tmdb_episode_id: next.id, episode_number: next.number }], true));
+}
+// The show row's Mark season watched (EP5): the season's ordinary Watched change, under the row's hold.
+async function markSeasonFromRow(seasonId) {
+  const row = actionRows().find(r => r.id === seasonId);
+  if (!row || rowActionHeld(seasonId, row.show_id)) return;
+  await holdRowAction(row, () => toggleWatch(seasonId));
+}
+
+// ── The show row's target (EP5) ──
+// What a show row is about: its up-next season, as chosen before (Earlier seasons included; marks never
+// choose it). For a row that offers an action (Watching, not up to date, the season aired) on a season with
+// marks, its episodes too. kind: 'episode' (the next unwatched is known), 'listed' (every listed episode is
+// marked; no row action), 'marked' (marks, but no numbered list on this device: the season with honest
+// progress), else 'season' (the row as before). The row's Up next, action and progress, and the expanded row
+// of the season it represents, all read this.
+function showTarget(item) {
+  const { show, upNext } = item;
+  const actionable = !!upNext && !item.upToDate && show.status === 'watching' && !!item.upNextReleased && !upNext.watched && !upNext.skipped;
+  if (!actionable || !isEpisodeTrackable(upNext) || !episodeMarkCount(upNext.id)) return { season: upNext || null, kind: 'season', actionable };
+  const progress = episodeProgress(upNext), eps = knownEpisodeList(upNext);
+  if (!eps || !eps.length) return { season: upNext, kind: 'marked', actionable, progress };
+  const next = nextUnwatchedEpisode(upNext);
+  return { season: upNext, kind: next ? 'episode' : 'listed', actionable, progress, next };
+}
+// The row's action for an episode target: Mark E9 watched, with the show shortcut's focus hook, so focus stays
+// on the row's action as it moves on.
+function showRowEpisodeActionHtml(t, show, stop) {
+  const r = t.season, next = t.next, idArg = esc(r.id).replace(/'/g, "\\'"), label = `Mark E${next.number} watched`;
+  return `<button type="button" class="watch-btn show-shortcut ep-row-mark" data-shortcut-show="${esc(show.id)}" aria-label="${esc(`${label}: episode ${next.number} of ${r.season} of ${show.title} only`)}" ${REPEAT_KEY_GUARD} onclick="${stop ? 'event.stopPropagation(); ' : ''}markNextEpisode('${idArg}', ${next.id}, '${esc(show.id)}')">${esc(label)}</button>`;
 }
 
 // ── The open list ──
@@ -368,7 +412,7 @@ function episodePanelHtml(r, opts = {}, card = false) {
     const listed = new Set(eps.map(e => e.id));
     const done = eps.filter(e => marks.has(e.id)).length;
     const notAired = eps.filter(e => e.air_date && e.air_date > today).length, noDate = eps.filter(e => !e.air_date).length;
-    parts.push(`<div class="ep-summary">${eps.length ? (reference ? `${eps.length} episode${eps.length === 1 ? '' : 's'} listed` : `${done}/${eps.length} watched`) : 'TMDB lists no episodes for this season'}${notAired ? ` · ${notAired} not aired yet` : ''}${noDate ? ` · ${noDate} without an air date` : ''}</div>`);
+    parts.push(`<div class="ep-summary">${opts.premiere ? `Premiere: ${opts.premiere} · ` : ''}${eps.length ? (reference ? `${eps.length} episode${eps.length === 1 ? '' : 's'} listed` : `${done}/${eps.length} watched`) : 'TMDB lists no episodes for this season'}${notAired ? ` · ${notAired} not aired yet` : ''}${noDate ? ` · ${noDate} without an air date` : ''}</div>`);
     // The explicit completion suggestion: a loaded, non-empty list with every listed episode checked.
     if (!locked && eps.length && done === eps.length) {
       const why = notAired || noDate
