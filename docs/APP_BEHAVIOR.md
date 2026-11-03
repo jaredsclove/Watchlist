@@ -36,6 +36,12 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   failed check with Retry. The + Add screen checks the selected film's collection once and shows the same states as
   a note. The lookup is page memory only and every fetch replaces it (Check collection, Pull rest, Refresh
   collections), so a film TMDB adds later is found on the next check or page load.
+- **Skipped seasons in an expanded show:** seasons skipped on their own are hidden until "Show skipped seasons (N)",
+  beside Details, lists them in season order (with Keep); it then reads "Hide skipped seasons (N)". The control appears
+  only when the show has a skipped season; when every season is, a note says "All N seasons are skipped". The choice is
+  per show and page memory only (redraws, collapsing and other views keep it; a reload or account change resets it). It is
+  the same in Currently Watching, All TV and collections. A show whose own status is Skipped lists every season as
+  before. Display only: progress, up next, earlier seasons and the flat Seasons lists use every season.
 - **Episode progress (EP1, EP2, EP3):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
   one open at a time) with a checkbox per episode and one "Mark watched through [Episode N ▾] [Apply]" control above
   it (marks only the unmarked episodes up to N; starts on the first unmarked, keeps the choice). Titles are hidden
@@ -119,7 +125,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   stays registered through a change's reconciling reread (it over-warns, never under-warns); Back
   with an idle Manage that saved changes starts its collection reread before navigating (a wasted read).
 - **One focus rule:** a redraw moves focus only if it was in the list (B6 chain F-1…F-7); a filter-row
-  redraw keeps the focused control, its value and caret.
+  redraw keeps the focused control, its value and caret. One addition: when the focused season is hidden because it
+  is now skipped, focus goes to its show's "Show skipped seasons" control; deletions and other redraws follow the chain.
 - **Accepted limitations (Batch A):** after a refused change is rolled back,
   focus doesn't return to the control it started from; focus doesn't follow a pending save across the
   phone/desktop switch; opening another view during a change (a long Refresh shows or movie-tool run

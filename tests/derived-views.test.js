@@ -203,6 +203,7 @@ test('render: an expanded Watching show lists every season with Watched and Skip
   const p = show({ title: 'Expand', status: 'watching' }, [{ num: 1, w: true }, { num: 2, date: day(-3) }, { num: 3, s: true, date: day(-2) }]);
   const app = await viewApp(all(p));
   app.ctx.toggleDerivedShow(p.show.id); await settle();
+  app.ctx.toggleSkippedSeasons(p.show.id); await settle(); // its skipped season is listed on request
   const html = tbody(app);
   assert.ok(html.includes(`setSeasonSkipped('${p.rows[1].id}', true)`));
   assert.ok(html.includes(`setSeasonSkipped('${p.rows[2].id}', false)`), 'skipped season offers Keep');

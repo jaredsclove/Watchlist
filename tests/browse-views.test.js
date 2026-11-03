@@ -123,7 +123,7 @@ const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'rende
 // expose only navigation and filters as before; the list exposes nothing beyond All TV's TV controls and
 // (S4) All Movies' film controls and the collection's Remove (tests/collection-films.test.js has their
 // positive checks).
-const TV_EDIT_HANDLERS = new Set(['toggleDerivedShow', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
+const TV_EDIT_HANDLERS = new Set(['toggleDerivedShow', 'toggleSkippedSeasons', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
   'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
   // EP1: a matched season's episode list and its marks (tests/episodes.test.js)
   'toggleEpisodes', 'retryEpisodes', 'toggleEpisodeTitle', 'setEpisodeMark',

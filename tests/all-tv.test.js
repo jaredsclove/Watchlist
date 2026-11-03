@@ -235,6 +235,8 @@ test('expanded: the show actions, every stored season with Watched (Not aired ye
   const s = show({ title: 'S', status: 'confirmed' }, [{ num: 1, w: true }, { num: 2, s: true }, { num: 3, date: day(9) }, { num: 4, tba: true }]);
   const app = await openAllTv(all(s));
   app.ctx.toggleDerivedShow(s.show.id); await settle();
+  assert.strictEqual((app.el('tbody').innerHTML.match(/sub-row/g) || []).length, 5, 'the skipped season is listed only on request');
+  app.ctx.toggleSkippedSeasons(s.show.id); await settle();
   const html = app.html();
   assert.strictEqual((app.el('tbody').innerHTML.match(/sub-row/g) || []).length, 6, 'the show actions, four seasons and the Add season row');
   assert.strictEqual((app.el('cardList').innerHTML.match(/card-subseason-row/g) || []).length, 6);

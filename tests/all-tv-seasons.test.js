@@ -269,6 +269,7 @@ test('approved exception: with To watch in Seasons, expanding a show in Shows st
   assert.deepStrictEqual(seasonRows(app), ['Alpha · Season 3']);
   await shows(app);
   app.ctx.toggleDerivedShow(a.show.id); await settle();
+  app.ctx.toggleSkippedSeasons(a.show.id); await settle(); // its skipped season is listed on request
   assert.strictEqual((tbody(app).match(/sub-row/g) || []).length, 5, 'the show actions (B4/B5), three seasons and the Add season row (Stage 4b)');
   assert.strictEqual((cards(app).match(/card-subseason-row/g) || []).length, 5);
 });
