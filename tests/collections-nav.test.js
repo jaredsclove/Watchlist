@@ -98,13 +98,12 @@ const archive = (app, ...ks) => ks.forEach(k => { coll(app, k).archived_at = TS;
 test('C1 the primary row: TV · Movies · Collections, words for names, the phone rules in styles.css', async () => {
   const app = await boot();
   const m = app.el('mediaSwitch').innerHTML;
-  const btns = [...m.matchAll(/<button class="media-switch-btn[^"]*" id="areaBtn-([a-z]+)"[^>]*onclick="([^"]+)"><span class="media-switch-icon" aria-hidden="true">([^<]+)<\/span> ([^<]+)<\/button>/g)]
-    .map(x => [x[1], x[2], x[3], x[4]]);
-  assert.deepStrictEqual(btns, [['tv', "switchMediaType('tv')", '📺', 'TV'], ['movie', "switchMediaType('movie')", '🎬', 'Movies'], ['collections', 'openCollections(this)', '🗂', 'Collections']]);
+  const btns = [...m.matchAll(/<button class="media-switch-btn[^"]*" id="areaBtn-([a-z]+)"[^>]*onclick="([^"]+)">([^<]+)<\/button>/g)]
+    .map(x => [x[1], x[2], x[3]]);
+  assert.deepStrictEqual(btns, [['tv', "switchMediaType('tv')", 'TV'], ['movie', "switchMediaType('movie')", 'Movies'], ['collections', 'openCollections(this)', 'Collections']], 'text only (UI polish)');
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   const phone = css.slice(css.indexOf('@media (max-width: 700px)'));
   // One non-sticky row with Settings: words only, each label on one line, 44 px targets.
-  assert.match(phone, /\.media-switch-icon \{ display: none; \}/);
   assert.match(phone, /\.media-switch-btn \{ flex: 1 1 auto; min-width: 0; padding: 8px 4px; white-space: nowrap; text-align: center; min-height: 44px; \}/);
   assert.match(css, /\.collection-tab \{[^}]*min-width: 44px; min-height: 44px;/);
   assert.match(css, /\.collection-tabs \{[^}]*overflow-x: auto;/);

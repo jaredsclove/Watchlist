@@ -95,7 +95,7 @@ const collectionStats = app => {
   num(/(\d+)(?: of \d+)? shows?\b/, 'Show', 'Shows'); num(/(\d+) season entr/, 'Season entry', 'Season entries'); num(/(\d+)(?: of \d+)? films?\b/, 'Film', 'Films');
   return out;
 };
-// B8: All Movies' count line ("N of T films · library: W watched, U unwatched").
+// B8: All Movies' count line ("N of T films · W of T watched"; unfiltered "T films · W watched", UI polish).
 const countLine = app => (app.el('statsRow').innerHTML.match(/<p class="count-line">([^<]*)<\/p>/) || [])[1] || '';
 const stats = app => (app.get('activeViewId') === 'allmovies' ? [countLine(app)] : collectionStats(app));
 const setFilter = (app, id, value) => { app.el(id).value = value; app.ctx.renderTable(); };
@@ -533,7 +533,7 @@ test('All Movies has no Source filter (Stage 4b); Status is the film row’s own
   setFilter(app, 'fSearch', 'tell me'); setFilter(app, 'fStatus', '');
   assert.deepStrictEqual(titles(app), ['Tell Me Who I Am']);
   // B8 (decision 13): shown of every saved film (all statuses); the library's watched / unwatched.
-  assert.deepStrictEqual(stats(app), ['1 of 9 films · library: 2 watched, 7 unwatched']);
+  assert.deepStrictEqual(stats(app), ['1 of 9 films · 2 of 9 watched']);
 });
 
 test('no duplicate marker or storage name is shown (Stage 5: one record per identity); Disney+ shows only its own The Bear', async () => {
@@ -625,7 +625,7 @@ test('an expanded show lists every stored season in season order: numbered befor
   assert.ok(html(app).includes('<span class="confirmed-lbl">Show skipped</span>'), 'a Skipped show’s seasons say so (All TV’s Skip / Keep rule)');
   // All TV's rule: a watched season has its ✓ Watched toggle (The Bear S1, Visions Volume 1); a Skipped show's season (Wonder Man S1, watched) shows —.
   assert.strictEqual((html(app).match(/>✓ Watched<\/button>/g) || []).length, 2);
-  assert.ok(html(app).split('<tr').some(r => r.includes('data-show-of=') && r.includes('>Season 1<') && r.includes('<span class="confirmed-lbl">—</span>')), 'the Skipped show’s watched season shows —');
+  assert.ok(html(app).split('<tr').some(r => r.includes('data-show-of=') && r.includes('>Season 1<') && !r.includes('toggleWatch(') && !r.includes('—')), 'the Skipped show’s watched season has no watch control (no — placeholder)');
   assert.strictEqual((cards(app).match(/class="card-subseason-row" data-season-row=/g) || []).length, 7, 'the phone cards list the same seasons');
 });
 

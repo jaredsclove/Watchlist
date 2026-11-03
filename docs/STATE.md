@@ -27,9 +27,9 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: episode-aware show rows (EP5; page only): Up next, Action and
-  Progress follow the up-next season's next episode, and the represented season's expanded row is simpler, released
-  2026-11-03 UTC. Cache token `20261103-show-row-episodes`. Last database release: the simplification (PRs #46 and #47), the flat restore and
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: UI polish 1 of 2 (page only): one-line categories with +N,
+  status and Separate / Combined in Filters, "Mark S4 watched", grouped season actions, compact cards, readable type and
+  label-like statuses, released 2026-11-03 UTC. Cache token `20261103-ui-polish-1`. Last database release: the simplification (PRs #46 and #47), the flat restore and
   retired-object cleanup, released 2026-11-02 UTC.
 - Database phase `contracted-cu1`, backup format 7 (nineteen tables, no `user_id`), `access = members`, research per member. One flat
   `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one

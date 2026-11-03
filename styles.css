@@ -5,8 +5,8 @@
   --border: #2a2f3d;
   --border2: #353b4d;
   --text: #e8eaf0;
-  --text2: #8b91a8;
-  --text3: #555d77;
+  --text2: #9ba1b6;
+  --text3: #7880a0;
   --accent: #4f7ef8;
   --accent-dim: #1a2a5e;
   --green: #3ecf8e;
@@ -43,8 +43,8 @@
     --border: #dde1e8;
     --border2: #c7cdd8;
     --text: #1a1d26;
-    --text2: #5c6377;
-    --text3: #8a90a3;
+    --text2: #50576b;
+    --text3: #6b7186;
     --accent: #3763d8;
     --accent-dim: #e4eaff;
     --green: #1a9e6a;
@@ -141,7 +141,6 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.tab-icon { margin-right: 6px; }
 
 /* ── Main ── */
 .main { max-width: 1240px; margin: 0 auto; padding: 12px 24px 24px; }
@@ -154,7 +153,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .stats-row { order: 2; margin-left: auto; min-width: 0; }
 .stats-row:empty { display: none; }
 .add-open-btn { order: 1; }
-.count-line { margin: 0; font-size: 12px; color: var(--text2); overflow-wrap: anywhere; }
+.count-line { margin: 0; font-size: 13px; color: var(--text2); overflow-wrap: anywhere; }
 .progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 6px; width: 80px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.4s ease; }
 .mini-progress-track { height: 3px; background: var(--border); border-radius: 2px; margin-top: 2px; width: 70px; overflow: hidden; }
@@ -196,11 +195,8 @@ table { width: 100%; border-collapse: collapse; }
 /* The title and the categories share the room: a short title leaves it to the categories, and long titles wrap. */
 #desktopTable th:first-child { width: 31%; }
 #desktopTable th:nth-child(2) { width: 27%; }
-/* EP5: show views give Up next the room, so an episode title wraps there; the categories step back. */
-#desktopTable th.col-cats { width: 17%; }
-#desktopTable th.col-next { width: 24%; }
-.derived-show-row > td:nth-child(2) :is(.meta-chip, .meta-more) { font-size: 10px; opacity: 0.85; }
-.next-ep-title { display: block; white-space: normal; overflow-wrap: anywhere; font-size: 11px; color: var(--text3); }
+/* EP5, UI polish: show views give Up next the room, so an episode title wraps there; categories keep one line (+N). */
+.next-ep-title { display: block; white-space: normal; overflow-wrap: anywhere; font-size: 13px; color: var(--text2); }
 thead th { text-align: left; padding: 3px 8px; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .year-group td { background: var(--surface); padding: 5px 12px; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); }
 
@@ -222,7 +218,7 @@ td.card-date { white-space: nowrap; }
 tbody tr:not(.year-group):hover td { background: var(--surface); }
 tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .show-title { font-weight: 500; color: var(--text); }
-.season-lbl { color: var(--text2); font-size: 12px; }
+.season-lbl { color: var(--text2); font-size: 13px; }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; white-space: nowrap; border: 1px solid transparent; font-family: inherit; }
 .badge-clickable { cursor: pointer; transition: filter 0.15s, opacity 0.15s; }
@@ -370,7 +366,7 @@ tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-al
 
 .pending-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; background: var(--orange-bg); color: var(--orange); border: 1px solid #4d2a10; margin-left: 5px; vertical-align: middle; }
 .new-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); margin-left: 5px; vertical-align: middle; }
-.confirmed-lbl { font-size: 11px; color: var(--text3); }
+.confirmed-lbl { font-size: 12px; color: var(--text2); }
 
 /* ── Movie-specific: condensed single row, inline tags, "more" popover ── */
 .movie-row-condensed td { padding-top: 9px; padding-bottom: 9px; }
@@ -491,7 +487,7 @@ tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-al
 .card-title { font-weight: 500; color: var(--text); font-size: 15px; display: block; }
 .card-season { color: var(--text2); font-size: 12px; }
 .card-meta { display: flex; align-items: center; gap: 2px 6px; margin-bottom: 6px; flex-wrap: wrap; }
-.card-date { color: var(--text2); font-size: 12px; }
+.card-date { color: var(--text2); font-size: 13px; }
 .card-actions { display: flex; gap: 8px; align-items: center; }
 .card-actions .status-select { flex: 0 1 auto; font-size: 12px; padding: 7px 26px 7px 10px; }
 .card-actions .watch-btn { flex: 1; text-align: center; padding: 7px 10px; }
@@ -513,7 +509,7 @@ tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-al
 .upcoming-tag, .today-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; }
 .upcoming-tag { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
 .today-tag { background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); }
-.not-aired-lbl { font-size: 11px; color: var(--text3); white-space: nowrap; }
+.not-aired-lbl { font-size: 12px; color: var(--text2); white-space: nowrap; }
 .derived-section-row td, .derived-heading-row th { text-align: left; padding: 5px 8px 2px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); }
 .derived-section-card { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 0 1px; }
 .derived-section-row:hover .expand-chevron, .derived-section-card:hover .expand-chevron { border-color: var(--accent); color: var(--accent); }
@@ -527,17 +523,14 @@ tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-al
 .state-field { display: inline-flex; gap: 6px; align-items: center; }
 /* B6: identity wrappers for focus hooks; they add no box of their own */
 .season-action, .state-action { display: contents; }
-.state-field-label { font-size: 12px; color: var(--text2); }
-.show-progress-line { font-size: 12px; color: var(--text2); }
+.state-field-label { font-size: 13px; color: var(--text2); }
+.show-progress-line { font-size: 13px; color: var(--text2); }
 @media (max-width: 1099px) {
-  .show-actions-state { flex-direction: column; align-items: stretch; }
-  .show-actions-state > * { width: 100%; }
-  .show-actions-state .state-field { justify-content: space-between; }
-  .show-actions-state .state-field select { flex: 1; min-height: 44px; }
+  .show-actions-state .state-field select { min-height: 44px; }
 }
-.status-pill { display: inline-block; padding: 4px 10px; border-radius: var(--radius); font-size: 12px; font-weight: 500; border: 1px solid; white-space: nowrap; }
+.status-pill { display: inline-block; padding: 0; border: 0; background: none !important; font-size: 13px; font-weight: 500; white-space: nowrap; } /* a label, not a control */
 .status-pill.s-caughtup { background: var(--teal-bg); color: var(--teal); border-color: var(--teal); }
-.status-pill.s-confirmed { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
+.status-pill.s-confirmed { color: var(--text2); }
 .status-pill.s-highpriority { background: var(--gold-bg); color: var(--gold); border-color: var(--gold-border); }
 .status-pill.s-watching { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
 .status-pill.s-complete { background: var(--surface2); color: var(--text2); border-color: var(--border2); }
@@ -546,9 +539,9 @@ tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-al
 .status-pill.s-skipped { background: var(--red-bg); color: var(--red); border-color: var(--red); }
 /* Show-level status (applies to every season of the show) and season Skip / Keep */
 .show-status-select { font-weight: 600; }
-.skip-btn { background: none; border: 1px dashed var(--border2); border-radius: var(--radius); padding: 4px 10px; cursor: pointer; font-size: 12px; color: var(--text3); white-space: nowrap; }
+.skip-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 10px; cursor: pointer; font-size: 12px; color: var(--text2); white-space: nowrap; }
 .skip-btn:hover { border-color: var(--red); color: var(--red); }
-.skip-btn.kept { border-style: solid; color: var(--text2); }
+.skip-btn.kept { color: var(--text); }
 .skip-btn.kept:hover { border-color: var(--green-border); color: var(--green); }
 .card-actions .skip-btn { padding: 7px 10px; }
 
@@ -588,7 +581,6 @@ tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-al
 .filter-line { display: contents; }
 .filter-more-btn { display: inline-flex; align-items: center; gap: 6px; }
 .filter-more-btn[aria-expanded="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); } /* B10 corr1 (F3): text stays --text */
-.more-label-narrow { display: none; }
 .filter-count { background: var(--accent); color: var(--bg); border-radius: 10px; font-size: 11px; font-weight: 700; padding: 0 6px; line-height: 17px; }
 .filter-count[hidden] { display: none; }
 .filter-more { flex: 1 0 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; padding: 12px;
@@ -635,7 +627,7 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 
 /* Desktop: the toolbar's TMDB search, where there's room for two search fields. Below that, + Add reaches the
    same search. In a collection the toggles take more of the row, so it needs a wider page. */
-.tmdb-quick { display: none; position: relative; order: 1; }
+.tmdb-quick { display: none; position: relative; }
 @media (min-width: 1100px) {
   .tmdb-quick { display: flex; flex: 0 1 210px; min-width: 180px; }
   .tmdb-quick input { flex: 1; min-width: 0; height: 34px; padding: 6px 30px 6px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: inherit; font-size: 13px; outline: none; }
@@ -643,15 +635,11 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .tmdb-quick input:focus { border-color: var(--accent); }
   .tmdb-quick-go { position: absolute; inset: 2px 2px 2px auto; width: 28px; background: none; border: 0; border-radius: 4px; color: var(--text2); cursor: pointer; }
   .tmdb-quick-go:hover { color: var(--accent); }
-  .filter-line .search-input { flex-basis: 170px; }
+  .filter-line .search-input { flex: 1 1 200px; max-width: 340px; }
+  .tmdb-quick { flex: 1 1 200px; max-width: 300px; }
   .filters:has(.browse-controls) .view-toggle-btn { padding: 6px 10px; }
-  .filters:has(.browse-controls) .filter-more-btn .more-label-wide { display: none; }
-  .filters:has(.browse-controls) .filter-more-btn .more-label-narrow { display: inline; }
-  .filters:has(.browse-controls) .search-input { flex-basis: 150px; }
-  .filters:has(.browse-controls) .tmdb-quick { flex-basis: 200px; }
-}
-@media (min-width: 1100px) and (max-width: 1239px) {
-  .filters:has(.browse-controls) .tmdb-quick { display: none; }
+  .filters:has(.browse-controls) .search-input { flex-basis: 160px; }
+  .filters:has(.browse-controls) .tmdb-quick { flex-basis: 170px; }
 }
 .tmdb-result-item:focus-visible, #tmdbInlinePreview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -691,7 +679,7 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .card-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; min-width: 0; }
   .card-complete { display: inline-flex; margin-left: auto; }
   /* EP5: a show card reads Up next, its progress and action, then the categories, quieter, on their own line. */
-  .show-group-card .card-meta .card-labels { order: 1; flex-basis: 100%; opacity: 0.85; }
+  .show-group-card .card-meta .card-labels { order: 1; flex-basis: 100%; }
   .show-group-card .card-meta .next-ep-title { line-height: 16px; }
   .card-actions { gap: 2px 8px; }
   .card-actions .status-select:is(.s-confirmed, .s-skipped, .s-film-to_watch, .s-film-skipped) { border-left-width: 0; padding-left: 0; } /* the borderless ones too */
@@ -718,10 +706,8 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
      by their own widths, each label on one line; the view tabs share a row and wrap their labels. */
   .tabs { padding: 0 12px; }
   .tab { flex: 1 1 auto; min-height: 44px; padding: 4px 6px; white-space: normal; text-align: center; }
-  .tab-icon { display: none; }
   .media-switch { flex: 1 1 auto; }
   .media-switch-btn { flex: 1 1 auto; min-width: 0; padding: 8px 4px; white-space: nowrap; text-align: center; min-height: 44px; }
-  .media-switch-icon { display: none; }
   .collection-tab { min-height: 44px; }
   .collections-retry, .collections-create { min-height: 44px; }
 
@@ -751,8 +737,6 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .filter-more-btn { justify-content: center; }
   .add-open-btn { order: 0; }
   .stats-row { flex: 1 0 100%; margin: -2px 0 0; }
-  .more-label-wide { display: none; }
-  .more-label-narrow { display: inline; }
   .filter-more { grid-template-columns: 1fr; }
   .filter-field select { min-height: 44px; }
   .filter-chip { min-height: 32px; max-width: min(100%, calc(100vw - 24px)); } /* B10 corr1 (F2) */
@@ -826,8 +810,8 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 }
 /* A status waiting for the owner's choice ("Choose a status…") never goes quiet. */
 .status-select.s-film-pair { background-color: var(--red-bg); color: var(--red); border-color: var(--red); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23c0392b' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E"); }
-.status-pill.s-film-to_watch { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
-.status-pill.s-film-watched { background: var(--teal-bg); color: var(--teal); border-color: var(--teal); }
+.status-pill.s-film-to_watch { color: var(--text2); }
+.status-pill.s-film-watched { color: var(--green); }
 .status-pill.s-film-skipped, .status-pill.s-film-pair { background: var(--red-bg); color: var(--red); border-color: var(--red); }
 .priority-high { color: var(--gold); font-weight: 700; }
 .priority-low { display: inline-block; font-size: 11px; line-height: 1.3; color: var(--text2); border: 1px solid var(--border2); border-radius: 4px; padding: 0 4px; vertical-align: middle; }
@@ -835,8 +819,12 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .state-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 5px; vertical-align: middle; border: 1px solid; white-space: nowrap; }
 .state-tag.ended-tag { background: var(--surface2); color: var(--text2); border-color: var(--border2); }
 .state-tag.resume-tag { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
-.meta-chip { font-size: 11px; }
-.meta-more { font-size: 11px; color: var(--text2); }
+.meta-chip { font-size: 11.5px; }
+.meta-more { font-size: 11.5px; color: var(--text2); }
+/* UI polish: +N / Fewer, a real button beside the desktop row's one line of categories. */
+button.meta-more { background: none; border: 1px solid var(--border); border-radius: 20px; padding: 1px 7px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+button.meta-more:hover { border-color: var(--border2); color: var(--text); }
+button.meta-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* Item 2: a show's TMDB score directly after its title (show-ratings.js), a little smaller than the title. Plain
    text, not a filter pill: the number is always shown, and its colour (by the rounded score) is 4.5:1 or more on
    every surface. The slot adds no box of its own, so the score stays beside the title and its explanation, when open,
@@ -892,7 +880,7 @@ td > :is(.meta-chip, .meta-more):not(:last-child) { margin-right: 4px; }
   .item-card .filter-pill { border-width: 5px 0; border-color: transparent !important; background-clip: padding-box !important; padding: 0 8px; min-height: 32px; }
 }
 .caught-ended { font-size: 12px; color: var(--text2); }
-.gap-note { display: block; font-size: 11px; color: var(--text3); margin-top: 2px; }
+.gap-note { display: block; font-size: 12px; color: var(--text2); margin-top: 2px; }
 .show-actions-inner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
 .show-actions-inner .ended-check { display: inline-flex; gap: 6px; align-items: center; color: var(--text2); }
 .resume-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1 1 100%; padding: 6px 0; }
@@ -997,8 +985,8 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .account-password { max-width: 420px; }
 
 /* EP1: episode progress within seasons (episodes.js) */
-.ep-progress { display: inline-block; font-size: 11px; color: var(--text2); white-space: nowrap; }
-.ep-next { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
+.ep-progress { display: inline-block; font-size: 12px; color: var(--text2); white-space: nowrap; }
+.ep-next { display: inline-block; margin-left: 6px; font-size: 12px; color: var(--text2); overflow-wrap: anywhere; }
 /* An expanded season: the season, its progress and Episodes, then the next-unwatched line of its own. */
 .sub-row .ep-next, .card-subseason-row .ep-next { display: block; margin-left: 0; }
 /* EP4: that line with its Mark E9 watched button; the button wraps below a long title rather than overflowing. */
@@ -1066,4 +1054,27 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
   #cuModalBox .settings-actions .btn, #cuModalBox select, #cuModalBox input[type="text"] { min-height: 44px; }
   #cuModalBox input[type="text"], #cuModalBox select { width: 100%; }
   .cu-mode { display: flex; align-items: center; gap: 6px; }
+}
+
+/* ── UI polish (release 1): show views' columns, the default-status note, season actions, cards ── */
+#desktopTable th.col-cats { width: 21%; min-width: 170px; }
+#desktopTable th.col-next { width: 22%; }
+td > :is(.meta-chip, .meta-more) { margin-bottom: 2px; }
+td > .meta-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; } /* an unusually long label wraps inside its pill, never widening the table */
+.filter-default { font-size: 12px; color: var(--text2); }
+/* A season's own actions: Mark S4 watched and Skip together, Match and Delete set apart. */
+.season-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.season-manage { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
+@media (max-width: 1099px) {
+  /* Cards: the next target on its own line, then progress and the action together when they fit. */
+  .show-group-card .card-meta .card-season { flex: 1 0 100%; }
+  .show-group-card .card-meta .card-complete { margin-left: auto; }
+  .show-group-card .card-meta .card-actions { gap: 4px 8px; }
+  .card-meta .card-season, .card-meta .card-date { font-size: 13px; }
+  /* An expanded show's season: its label and actions on one line when they fit. */
+  .card-subseason-row[data-season-row]:not(.ep-panel-card) { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .card-subseason-row[data-season-row]:not(.ep-panel-card) > .card-season { flex: 1 1 12rem; min-width: 0; }
+  .card-subseason-row[data-season-row]:not(.ep-panel-card) > .card-actions { margin-left: auto; }
+  .card-subseason-row .season-actions { justify-content: flex-end; }
+  .card-subseason-row .card-actions .watch-btn { flex: 0 1 auto; }
 }

@@ -13,7 +13,7 @@ function buildTabs() {
   const hadFocus = !!active && typeof active.closest === 'function' && !!active.closest('#tabBar');
   bar.hidden = views.length <= 1;
   bar.innerHTML = views.length <= 1 ? '' : views.map(v =>
-    `<button type="button" class="tab${v.id===activeViewId?' active':''}"${v.id===activeViewId?' aria-current="page"':''} onclick="switchView('${v.id}')"><span class="tab-icon" aria-hidden="true">${v.icon}</span>${esc(v.label)}</button>`
+    `<button type="button" class="tab${v.id===activeViewId?' active':''}"${v.id===activeViewId?' aria-current="page"':''} onclick="switchView('${v.id}')">${esc(v.label)}</button>`
   ).join('');
   if (hadFocus && typeof bar.querySelector === 'function') {
     const open = bar.querySelector('.tab.active');
@@ -36,9 +36,9 @@ function buildMediaSwitch() {
   const cls = area => (activeArea === area ? ' active' : '');
   const cur = area => (activeArea === area ? ' aria-current="page"' : '');
   if (el) {
-    el.innerHTML = `<button class="media-switch-btn${cls('tv')}" id="areaBtn-tv"${cur('tv')} onclick="switchMediaType('tv')"><span class="media-switch-icon" aria-hidden="true">📺</span> TV</button>`
-      + `<button class="media-switch-btn${cls('movie')}" id="areaBtn-movie"${cur('movie')} onclick="switchMediaType('movie')"><span class="media-switch-icon" aria-hidden="true">🎬</span> Movies</button>`
-      + `<button class="media-switch-btn${cls('collections')}" id="areaBtn-collections"${cur('collections')} onclick="openCollections(this)"><span class="media-switch-icon" aria-hidden="true">🗂</span> Collections</button>`;
+    el.innerHTML = `<button class="media-switch-btn${cls('tv')}" id="areaBtn-tv"${cur('tv')} onclick="switchMediaType('tv')">TV</button>`
+      + `<button class="media-switch-btn${cls('movie')}" id="areaBtn-movie"${cur('movie')} onclick="switchMediaType('movie')">Movies</button>`
+      + `<button class="media-switch-btn${cls('collections')}" id="areaBtn-collections"${cur('collections')} onclick="openCollections(this)">Collections</button>`;
     const again = keepCollections ? document.getElementById('areaBtn-collections') : null;
     if (again && again !== active && typeof again.focus === 'function') again.focus();
   }
@@ -276,7 +276,7 @@ function renderSettings() {
   screen.style.display = '';
   screen.innerHTML = `<div class="settings-head">
       <button class="btn settings-back" onclick="settingsBack()">← Back to library</button>
-      <h2 class="settings-title" id="settingsTitle" tabindex="-1">⚙ Settings &amp; Management</h2>
+      <h2 class="settings-title" id="settingsTitle" tabindex="-1">Settings &amp; Management</h2>
     </div>
     <div class="settings-grid">
       ${accountSectionHtml()}

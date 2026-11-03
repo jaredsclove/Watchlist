@@ -70,6 +70,8 @@ const isOpen = app => app.get('filterPanelOpen');
 const readsOnly = app => app.requests.every(r => r.method === 'GET');
 // Ids in the visible line (between the line's start and the panel) and in the panel.
 const ids = s => [...s.matchAll(/ id="(f[A-Z]\w*|filterMoreBtn)"/g)].map(m => m[1]);
+// UI polish: while the status filter is on its default, the chip row says what it leaves out.
+const DEFAULT_NOTE = '<span class="filter-default" id="filterDefaultNote">Status: All except Skipped</span>';
 const lineIds = app => { const f = fb(app); return ids(f.slice(f.indexOf('class="filter-line"'), f.indexOf('id="filterMore"'))); };
 const panelIds = app => { const f = fb(app); return ids(f.slice(f.indexOf('id="filterMore"'), f.indexOf('id="filterChips"'))); };
 // Records focus() and setAttribute() on the page's elements (the harness's DOM has neither).
@@ -104,22 +106,22 @@ test('§5: each view and mode has Search, its scope controls and More filters on
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'filterMoreBtn'], 'Currently Watching');
   assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fTheme']);
   await allTv(app);
-  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'filterMoreBtn'], 'All TV Shows');
-  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fYear', 'fProgress', 'fTheme']);
+  assert.deepStrictEqual(lineIds(app), ['fSearch', 'filterMoreBtn'], 'All TV Shows (UI polish: Status is in the panel)');
+  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fStatus', 'fPriority', 'fYear', 'fProgress', 'fTheme']);
   app.ctx.setAllTvPresentation('seasons');
-  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'fSeasonVis', 'filterMoreBtn'], 'All TV Seasons');
-  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fYear', 'fTheme'], 'no Progress control in Seasons');
+  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fSeasonVis', 'filterMoreBtn'], 'All TV Seasons');
+  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fStatus', 'fPriority', 'fYear', 'fTheme'], 'no Progress control in Seasons');
   app.ctx.switchView('comingsoon'); await settle();
   assert.deepStrictEqual(lineIds(app), ['fSearch', 'filterMoreBtn'], 'Coming Soon');
   assert.ok(panelIds(app).includes('fGenre') && panelIds(app).includes('fTheme') && !panelIds(app).includes('fStatus'));
   await movies(app);
-  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'fWatch', 'filterMoreBtn'], 'All Movies');
-  assert.deepStrictEqual(panelIds(app), ['fGenre', 'fForm', 'fPriority', 'fWatchWith', 'fYear', 'fCollection', 'fTheme'], 'no Network for films');
+  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fWatch', 'filterMoreBtn'], 'All Movies');
+  assert.deepStrictEqual(panelIds(app), ['fGenre', 'fForm', 'fStatus', 'fPriority', 'fWatchWith', 'fYear', 'fCollection', 'fTheme'], 'no Network for films');
   await collection(app);
-  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'filterMoreBtn'], 'collection Shows');
-  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fPriority', 'fWatchWith', 'fCollection', 'fTheme']);
+  assert.deepStrictEqual(lineIds(app), ['fSearch', 'filterMoreBtn'], 'collection Shows');
+  assert.deepStrictEqual(panelIds(app), [...panelCats, 'fStatus', 'fPriority', 'fWatchWith', 'fCollection', 'fTheme']);
   app.ctx.setBrowsePresentation('seasons');
-  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'fSeasonVis', 'filterMoreBtn'], 'collection Seasons');
+  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fSeasonVis', 'filterMoreBtn'], 'collection Seasons');
   app.ctx.setBrowseMedia('tv');
   assert.ok(!panelIds(app).includes('fCollection') && !panelIds(app).includes('fWatchWith'), 'TV only: no film filters (unchanged rule)');
   // Grouping and visible labels
@@ -138,7 +140,8 @@ test('§5: layout controls come before the filter line and + Add after More filt
   assert.ok(f.indexOf('view-toggle') < f.indexOf('class="filter-line"') && f.indexOf('id="filterMoreBtn"') < f.indexOf('add-open-btn') && f.indexOf('add-open-btn') < f.indexOf('id="filterMore"'));
   await collection(app);
   f = fb(app);
-  for (const s of ['data-media="all"', 'data-presentation="shows"', 'data-grouping="separate"']) assert.ok(f.indexOf(s) < f.indexOf('class="filter-line"'), s);
+  for (const s of ['data-media="all"', 'data-presentation="shows"']) assert.ok(f.indexOf(s) < f.indexOf('class="filter-line"'), s);
+  assert.ok(f.indexOf('data-grouping="separate"') > f.indexOf('id="filterMore"') && f.indexOf('data-grouping="separate"') < f.indexOf('id="filterChips"'), 'Separate/Combined is in the Filters panel (UI polish)');
   assert.ok(!/filterToggleBtn|filters-inner|Search &amp; Filter|class="filter-label"/.test(f), 'no collapse toggle, no "Filter:" label');
   assert.ok(!app.el('filtersRow').classList.contains('collapsed'));
   assert.strictEqual(typeof app.ctx.toggleFilters, 'undefined', 'the collapse handler is retired');
@@ -153,8 +156,8 @@ test('§4.8.1: DOM order is Search → scope → More filters → panel → appl
   setFilter(app, 'fStatus', 'all'); setFilter(app, 'fGenre', 'Drama');
   const f = fb(app);
   const at = s => f.indexOf(s);
-  assert.ok(at('id="fSearch"') < at('id="fStatus"') && at('id="fStatus"') < at('id="fSeasonVis"') && at('id="fSeasonVis"') < at('id="filterMoreBtn"')
-    && at('id="filterMoreBtn"') < at('id="filterMore"') && at('id="filterMore"') < at('id="filterChips"'));
+  assert.ok(at('id="fSearch"') < at('id="fSeasonVis"') && at('id="fSeasonVis"') < at('id="filterMoreBtn"')
+    && at('id="filterMoreBtn"') < at('id="filterMore"') && at('id="filterMore"') < at('id="fStatus"') && at('id="fStatus"') < at('id="filterChips"'));
   const c = chipsHtml(app);
   assert.ok(c.indexOf('aria-label="Active filters"') < c.indexOf('aria-label="Kept, not applied"') && c.indexOf('aria-label="Kept, not applied"') < c.indexOf('id="filterClear"'));
   assert.deepStrictEqual(chipKeys(app), ['fStatus', 'fGenre', 'fProgress'], 'chip order: scope, panel order, then kept');
@@ -167,7 +170,7 @@ test('§4.8.1: DOM order is Search → scope → More filters → panel → appl
 test('§4.3: every non-default value has one chip ("Kind: value", full-text name); Search has none; the count is the panel\'s applied controls', async () => {
   const app = await boot();
   await allTv(app);
-  assert.strictEqual(chipsHtml(app), '', 'starting values: no chips, no Clear');
+  assert.strictEqual(chipsHtml(app), DEFAULT_NOTE, 'starting values: no chips, no Clear; the default status said (UI polish)');
   assert.deepStrictEqual(badge(app), ['', true, '']);
   setFilter(app, 'fSearch', 'a');
   assert.deepStrictEqual(chipKeys(app), [], 'no Search chip (D13)');
@@ -178,7 +181,7 @@ test('§4.3: every non-default value has one chip ("Kind: value", full-text name
   assert.strictEqual(chipName(app, 'fPriority'), 'Remove filter: Priority, ★ High');
   assert.ok(chipsHtml(app).includes('<span class="chip-k">Genre:</span> <span class="chip-v">Drama</span>'));
   assert.ok(!chipsHtml(app).includes('Not applied'), 'no applied chip says Not applied');
-  assert.deepStrictEqual(badge(app), ['2', false, ', 2 active'], 'Genre, Priority (Status is on the line)');
+  assert.deepStrictEqual(badge(app), ['3', false, ', 3 active'], 'Status, Genre, Priority (UI polish: Status is in the panel, so it counts)');
   assert.ok(app.el('fGenre').classList.contains('filter-set') && app.el('fStatus').classList.contains('filter-set') && !app.el('fYear').classList.contains('filter-set'));
   assert.ok(readsOnly(app));
 });
@@ -317,10 +320,10 @@ test('§4.4 / AC6: Clear filters returns every filter to its starting value (Unw
   const before = app.requests.length;
   app.ctx.clearViewFilters();
   assert.deepStrictEqual(['fSearch', 'fStatus', 'fWatch', 'fGenre', 'fCollection', 'fWatchWith', 'fTheme'].map(id => app.el(id).value), ['', '', 'unwatched', '', '', '', '']);
-  assert.strictEqual(chipsHtml(app), '', 'no chips and no Clear');
+  assert.strictEqual(chipsHtml(app), DEFAULT_NOTE, 'no chips and no Clear');
   assert.ok(isOpen(app), 'the panel stays open');
   assert.strictEqual(focused[focused.length - 1], 'fSearch');
-  assert.strictEqual(countLine(app), '1 of 3 films · library: 1 watched, 2 unwatched', 'the starting list');
+  assert.strictEqual(countLine(app), '1 of 3 films · 1 of 3 watched', 'the starting list');
   assert.strictEqual(app.requests.length, before);
 });
 
@@ -528,7 +531,7 @@ test('AC8: count lines keep their B8 wording with the bar, chips and panel', asy
   app.ctx.toggleFilterPanel(true);
   assert.strictEqual(countLine(app), '2 of 4 shows · 2 Watching · 1 up to date', 'opening the panel changes nothing');
   await movies(app);
-  assert.strictEqual(countLine(app), '1 of 3 films · library: 1 watched, 2 unwatched');
+  assert.strictEqual(countLine(app), '1 of 3 films · 1 of 3 watched');
 });
 
 // ─── assets and CSS ───────────────────────────────────────────────────────────
@@ -666,7 +669,7 @@ test('follow-up F6: only a collection\'s TV seasons select carries the marker cl
   assert.ok(sel.startsWith('<select id="fSeasonVis" class="season-vis-select" onchange="setBrowseSeasonVis(this.value)" aria-label="TV seasons">'), 'class added; handler and name unchanged');
   assert.deepStrictEqual([...sel.matchAll(/<option value="(\w+)"[^>]*>([^<]*)<\/option>/g)].map(m => [m[1], m[2]]),
     [['notskipped', 'Seasons: Not skipped'], ['all', 'Seasons: All'], ['towatch', 'Seasons: To watch'], ['watched', 'Seasons: Watched'], ['skipped', 'Seasons: Skipped']], 'options unchanged');
-  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fStatus', 'fSeasonVis', 'filterMoreBtn'], 'line order unchanged');
+  assert.deepStrictEqual(lineIds(app), ['fSearch', 'fSeasonVis', 'filterMoreBtn'], 'line order unchanged');
   await allTv(app, 'seasons');
   const tvSel = fb(app).match(/<select id="fSeasonVis"[^>]*>/)[0];
   assert.ok(!tvSel.includes('season-vis-select') && tvSel.includes('aria-label="Seasons"'), 'All TV unchanged (outside scope)');

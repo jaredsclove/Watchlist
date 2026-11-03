@@ -101,13 +101,19 @@ test('network chips: an inline style from the network colour (known or hashed) w
   assert.strictEqual(ctx.networkBadgeStyle('HBO'), 'style="background:#8b5cf622; color:#8b5cf6; border-color:#8b5cf655"');
 });
 
-test('rendering: labels, order and the "+N" marker unchanged; only the network chip carries a style; the original label stays a fallback', async () => {
+test('rendering: network, franchises, genres, forms (UI polish); the desktop row fits its budget with a +N button; only the network chip carries a style; the original label stays a fallback', async () => {
   const lib = library();
   const app = await createApp(lib);
   await settle();
-  const alpha = chipsOf(app.html(), lib.tvShows[0].id);
-  assert.deepStrictEqual(alpha.map(c => `${c.kind}:${c.text}`),
-    ['genres:Drama', 'genres:Comedy', 'more:+1', 'forms:Limited series', 'franchises:Some Universe', 'network:HBO']);
+  assert.deepStrictEqual(chipsOf(app.el('cardList').innerHTML, lib.tvShows[0].id), [], 'a collapsed Currently Watching card has no categories');
+  app.ctx.toggleDerivedShow(lib.tvShows[0].id); await settle();
+  const card = chipsOf(app.el('cardList').innerHTML, lib.tvShows[0].id);
+  assert.deepStrictEqual(card.map(c => `${c.kind}:${c.text}`),
+    ['network:HBO', 'franchises:Some Universe', 'genres:Drama', 'genres:Comedy', 'genres:Mystery', 'forms:Limited series'], 'the card: every pill, in priority order');
+  // Currently Watching below 1240 px (the harness is 1200 px wide): a budget of 26, so HBO and +5.
+  const row = chipsOf(app.el('tbody').innerHTML, lib.tvShows[0].id);
+  assert.deepStrictEqual(row.map(c => `${c.kind}:${c.text}`), ['network:HBO', 'more:+5'], 'the desktop row: one line');
+  const alpha = card;
   for (const c of alpha) {
     if (c.kind === 'network') assert.ok(/style="background:#8b5cf622; color:#[0-9a-f]{6}; border-color:#8b5cf655"/.test(c.attrs), 'HBO style');
     else assert.ok(!/style=/.test(c.attrs), `${c.kind} has no inline style`);

@@ -92,10 +92,10 @@ test('the library search keeps its scope and gets its name; the visible text is 
   assert.ok(app.el('filtersRow').innerHTML.includes('id="fSearch" type="text" placeholder="Search library…" aria-label="Search my library" oninput="renderTable()"'));
 });
 
-test('the field is desktop only and hidden, not squeezed, in narrower pages; phones have one search field', () => {
+test('the field is desktop only (beside library search everywhere there, collections included); phones have one search field', () => {
   assert.match(css, /\.tmdb-quick \{ display: none;/);
   assert.match(css, /@media \(min-width: 1100px\) \{\s*\.tmdb-quick \{ display: flex;/);
-  assert.match(css, /@media \(min-width: 1100px\) and \(max-width: 1239px\) \{\s*\.filters:has\(\.browse-controls\) \.tmdb-quick \{ display: none; \}/);
+  assert.ok(!/\.tmdb-quick \{ display: none; \}\s*\}/.test(css.slice(css.indexOf('@media (min-width: 1100px)'))), 'no width above 1100 px hides it');
 });
 
 test('a TV view: Enter fills the panel and reads TMDB; choosing previews; neither writes; adding is the panel\'s confirmed action', async () => {

@@ -60,7 +60,7 @@ test('N1 the labelled gear opens Settings: the gear is the current page, no area
   assert.strictEqual(app.el('desktopTable').style.display, 'none');
   assert.strictEqual(app.el('cardList').style.display, 'none');
   assert.strictEqual(app.el('settingsScreen').style.display, '');
-  assert.match(screen(app), /id="settingsTitle"[^>]*>⚙ Settings &amp; Management</);
+  assert.match(screen(app), /id="settingsTitle"[^>]*>Settings &amp; Management</);
   assert.match(screen(app), /settingsBack\(\)">← Back to library</);
   for (const t of ['Library management', 'Collection updates', 'Backup &amp; Restore']) assert.ok(screen(app).includes(`>${t}</h3>`), t);
   assert.ok(!screen(app).includes('>Catalog updates</h3>'), 'item 4: the retired Catalog updates card is gone');

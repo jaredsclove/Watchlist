@@ -15,9 +15,12 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   choices, Collection updates, Backup & Restore). Since S6 every view
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
 - **Layout (compact interface):** one app bar holds the title, TV · Movies · Collections and Settings (on phones, a
-  non-sticky row of the areas and a gear, no logo); view tabs below it; then one list toolbar (`.list-toolbar`: toggles,
-  Search that grows, scope selects, More filters, + Add, the count), wrapping in page order. At 1100 px and wider it also
-  holds "Search TMDB to add" (1240 px in a collection, whose toggles need the room), sent only by Enter or its button: it fills
+  non-sticky row of the areas and a gear, no logo); the areas and view tabs are words only (no icons). Then one list
+  toolbar (`.list-toolbar`: toggles, Search, scope selects, Filters, + Add, the count), wrapping in page order. The
+  status filter (default "All except Skipped") and a collection's Separate / Combined are in the Filters panel; while
+  the status filter is on its default, the chip row says "Status: All except Skipped", and another value is a chip and
+  counts on Filters. At 1100 px and wider, "Search TMDB to add" sits right after library search, the two sharing the
+  width (collections too), sent only by Enter or its button: it fills
   the + Add panel's own search, and adding stays that panel's, confirmed in its preview. Lists are tables from 1100 px, cards
   below it, in two columns between 701 and 1099 px. A collection's title, note, Back and Edit share a compact header; its tabs
   are one scrolling row at every width. In a collection, TMDB adds to the library first, then the existing "Add to collections"
@@ -25,12 +28,25 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   are only in Settings' Backup & Restore; no backup, or 14 days or more, puts ⚠ on the Settings control (with the status
   in its name) and it then opens on that section. Show rows read expand · title · ⋯. On a phone card the chevron starts on
   the card's one left margin, and the season line, progress, labels and actions flow below it from that margin, with progress
-  beside the date when it fits; category labels are small pills inside 32 px targets, and Up to date is quiet text. Status is a quiet directly editable
-  select. Priority is edited in the row's ⋯ (shows and films; Seasons lists show it
-  only); High shows ★ and Low the word, Normal nothing. The show-row shortcut reads "Mark season watched" (its name and tooltip
-  name the season; the episode list's offer keeps "Mark Season N watched"), as do an expanded show's season rows; flat
-  Seasons lists keep "Mark watched". Season progress reads "1/3 seasons watched". In show views (Currently Watching,
-  All TV Shows, collections) the desktop column is "Action", Up next has more room and categories are quieter.
+  beside the date when it fits; category labels are small pills inside 32 px targets, and Up to date is quiet text. Show
+  cards read the next target, then progress and the action on one line when they fit, then (All TV, collections) the
+  categories; Currently Watching cards show categories only when expanded. An expanded show's controls share rows, and
+  each season's label and actions share a line when they fit. Status is a quiet directly editable
+  select; read-only statuses (Seasons lists, Coming Soon) are plain coloured words, To Watch neutral and green kept for
+  watched. Skip is a plain outlined button. Desktop progress bars are hidden at 0%, and cells without an action are empty
+  (no "—"). Coming Soon shows "Nov 18" under its month headings; All Movies counts "12 films · 0 watched" ("8 of 12 films
+  · 0 of 12 watched" when filtered). Priority is edited in the row's ⋯ (shows and films; Seasons lists show it
+  only); High shows ★ and Low the word, Normal nothing. The show-row shortcut reads "Mark S4 watched" (Specials or another
+  short label by name, "Mark Volume 2 watched"; else "Mark season watched"; its name and tooltip name the season; the
+  episode list's offer keeps "Mark Season N watched"), as do an expanded show's season rows, where it sits with Skip in
+  one group across the action columns (Match and Delete set apart after them); flat Seasons lists keep "Mark watched".
+  Season progress reads "1/3 seasons watched". In show views (Currently Watching, All TV Shows, collections) the desktop
+  column is "Action" and Up next has more room.
+- **Categories (UI polish):** pills in a stable priority, network, franchises, genres, forms (each group in its stored
+  order). A desktop row shows one line: the pills that fit its view's character budget (smaller below 1240 px, where the
+  show views' column is at its minimum), the first always whole, then a "+N" button that shows the rest inline and reads
+  "Fewer" while they are shown (page memory per row, reset on reload; focus stays on it). An unusually long label may wrap.
+  Cards list every pill; every pill filters as before.
 - **Episode-aware show rows (EP5):** a show row's Up next, Action and Progress describe one target, its up-next season
   as chosen before (Earlier seasons included; marks never choose it). When the row offers an action (Watching, not up to
   date, the season aired) and that season has marks: with its next unwatched episode known, "Season 35 · Episode 9" (the
@@ -38,9 +54,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   repeats and, for a second after a row action settles, further presses on that show's row action) and "8/12 episodes
   watched" with its bar; with every listed episode marked, "All listed episodes watched", no row action (the season is
   completed from its expanded row or its list), focus going to the show's expand button; with no numbered list on this
-  device, the season and date, Mark season watched and the existing episode progress ("N episodes marked", or N/T from a
+  device, the season and date, Mark S4 watched and the existing episode progress ("N episodes marked", or N/T from a
   count only while the marks are fewer), a bar only with a known total. Anything else reads as before. While the row shows
-  a season's episodes, that season's expanded row has only Episodes, Mark season watched and Skip (its premiere is in its
+  a season's episodes, that season's expanded row has only Episodes, Mark S4 watched and Skip (its premiere is in its
   open list's summary), and the expanded show carries the season progress line; that line leaves the skipped count to
   "Show skipped seasons (N)" (a Skipped show keeps it; an all-skipped show keeps the control's note). Phone cards read Up
   next, progress and action, then the categories on their own line.
