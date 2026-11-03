@@ -548,7 +548,7 @@ test('All Movies: status, Watched and watch-with by the film’s id, for a film 
     [['POST', 'rpc/library_set_film_state_b45', '{"state":"watched"}'], ['POST', 'rpc/library_set_film_state_b45', '{"watched":false}'],
       ['PATCH', 'watchlist_items?id=eq.f-lamp', '{"watch_with":["Robin"]}']]);
   assert.deepStrictEqual(app.writes().slice(0, 2).map(r => r.body.p_item_id), ['f-lamp', 'f-lamp']);
-  assert.ok(app.html().includes('title="Skip (built-in catalog film)"'));
+  assert.ok(/Skip film \(built-in catalog\)…/.test(app.html()) && !app.html().includes('title="Skip (built-in catalog film)"'), 'UI polish: in the film\'s ⋯ menu, not a ×');
   await app.ctx.delRow('f-cat'); await settle();
   assert.deepStrictEqual(JSON.parse(JSON.stringify(app.writes().at(-1).body.p_changes)), { state: 'skipped' });
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === 'f-cat').status, 'skipped');

@@ -185,8 +185,7 @@ async function setShowStateById(showId, changes) {
     if ('status' in changes) Object.assign(show, { catalog_new: false, status_review: false, legacy_status: null });
     renderTable();
     try {
-      const res = await sbRpc('library_set_show_state_b45', { p_show_id: showId, p_expected: expected, p_changes: changes });
-      if (res && res.show) Object.assign(show, res.show);
+      await sendShowState(show, expected, changes);
       showSaved();
     } catch(e) {
       Object.keys(show).forEach(k => { if (!(k in before)) delete show[k]; });
@@ -196,6 +195,14 @@ async function setShowStateById(showId, changes) {
     }
     renderTable();
   }, { list: true });
+}
+
+// The guarded call itself (no lane, no redraw): the page's copy takes the stored state from the answer. Details'
+// Save (render.js) sends Show ended through it inside its own lane.
+async function sendShowState(show, expected, changes) {
+  const res = await sbRpc('library_set_show_state_b45', { p_show_id: show.id, p_expected: expected, p_changes: changes });
+  if (res && res.show) Object.assign(show, res.show);
+  return res;
 }
 
 // ─── A refused or unconfirmed state change (every B4/B5 action) ───────────────

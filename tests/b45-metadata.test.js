@@ -330,8 +330,8 @@ test('chips: categorized values as filter pills (UI polish: priority order, one 
   const app = await createApp({ tvShows: [many, none], rows: [seasonRec(many, { theme: 'Netflix' }), seasonRec(none, { theme: 'Netflix' })] });
   app.ctx.switchView('alltv'); await settle();
   const row = t => app.el('tbody').innerHTML.split('<tr').find(x => x.includes(`show-title">${t}<`));
-  // UI polish: franchise first; All TV below 1240 px (the harness is 1200 px wide) fits Saga, then +4; the card lists them all.
-  assert.ok(/data-filter-value="Saga"[\s\S]*>\+4<\/button>/.test(row('Many')) && !row('Many').includes('data-filter-value="Drama"'), 'one line: Saga, +4');
+  // UI polish: franchise first; All TV below 1240 px (the harness is 1200 px wide) fits Saga and Drama, then +3; the card lists them all.
+  assert.ok(/data-filter-value="Saga"[\s\S]*data-filter-value="Drama"[\s\S]*>\+3<\/button>/.test(row('Many')) && !row('Many').includes('data-filter-value="Crime"'), 'one line: Saga, Drama, +3');
   assert.ok(/data-filter-value="Saga"[\s\S]*data-filter-value="Drama"[\s\S]*data-filter-value="Crime"[\s\S]*data-filter-value="Mystery"[\s\S]*data-filter-value="Limited series"/.test(app.el('cardList').innerHTML), 'the card: every pill, in priority order');
   assert.ok(!row('Many').includes('data-filter-value="Netflix"'), 'no Original label once a category is set');
   assert.ok(row('None').includes('data-filter-value="Netflix"') && !row('None').includes('Sci-Fi'), 'Original label fallback; the candidate isn’t shown as a genre');

@@ -1202,10 +1202,7 @@ function browseFilmHtml(r, today, part) {
   const statusCell = `<span class="state-action" data-action="status">${filmStatusSelectHtml(r)}</span>`;
   const watchBtn = isSkipped ? ''
     : `<span class="state-action" data-action="watch"><button class="watch-btn${r.watched ? ' watched' : ''}" onclick="toggleWatch('${idArg}')">${r.watched ? '✓ Watched' : 'Mark watched'}</button></span>`;
-  const libraryAction = policy.deleteEffect === 'delete'
-    ? `<button class="popover-action" onclick="delRow('${idArg}')" aria-label="${esc(`Delete ${r.title} from your library`)}">Delete from library…</button>`
-    : policy.deleteEffect === 'skip-film' && !isSkipped
-      ? `<button class="popover-action" onclick="delRow('${idArg}')" aria-label="${esc(`Skip ${r.title} (built-in catalog film)`)}">Skip film (built-in catalog)…</button>` : '';
+  const libraryAction = filmLibraryActionHtml(r, policy);
   const extra = dest ? `<div class="popover-section-label" style="margin-top:8px">${esc(dest.label)}</div>
         <button class="popover-action" onclick="removeFromCollection('film', '${idArg}', null)" aria-label="${esc(`Remove ${r.title} from ${dest.label}`)}">Remove from ${esc(dest.label)}…</button>`
       + (libraryAction ? `<div class="popover-section-label" style="margin-top:8px">Library</div>${libraryAction}` : '') : '';
@@ -1255,11 +1252,20 @@ function filmMenuHtml(r, policy, extra = '') {
       </div>`;
 }
 
+// A film's library action in its ⋯ menu, named by what it does (editPolicyOf): Delete from library, or Skip for a
+// built-in catalog film (none once skipped). delRow asks first, as before.
+function filmLibraryActionHtml(r, policy) {
+  const idArg = esc(r.id).replace(/'/g, "\\'");
+  return policy.deleteEffect === 'delete'
+    ? `<button class="popover-action popover-danger" onclick="delRow('${idArg}')" aria-label="${esc(`Delete ${r.title} from your library`)}">Delete from library…</button>`
+    : policy.deleteEffect === 'skip-film' && r.status !== 'skipped'
+      ? `<button class="popover-action" onclick="delRow('${idArg}')" aria-label="${esc(`Skip ${r.title} (built-in catalog film)`)}">Skip film (built-in catalog)…</button>` : '';
+}
+
 // A film in All Movies (Stage 4b; the focus chain's item since the row menu holds priority): the film actions of the old Movies tab, for every
 // film wherever it is stored. Status, Watched and the ⋯ menu (watch-with, the rest
-// of its franchise for a film stored with the films, Match for an eligible row);
-// × is labelled by what it does (editPolicyOf): Skip for a built-in catalog film,
-// Delete otherwise. Pills filter the list.
+// of its franchise for a film stored with the films, Match for an eligible row, and,
+// since the UI-polish batch, its library action: no separate ×). Pills filter the list.
 function allMoviesFilmHtml(r, today, films) {
   const policy = editPolicyOf(r);
   const isSkipped = r.status === 'skipped';
@@ -1273,18 +1279,16 @@ function allMoviesFilmHtml(r, today, films) {
   const titleHtml = `${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl">${browseFilmNoun()}</span>${stateTagsHtml(r, 'film')}`;
   const watchBtn = isSkipped ? ''
     : `<span class="state-action" data-action="watch"><button class="watch-btn${r.watched ? ' watched' : ''}" onclick="toggleWatch('${r.id}')">${r.watched ? '✓ Watched' : 'Mark watched'}</button></span>`;
-  const popover = filmMenuHtml(r, policy);
-  const moreBtn = `<button class="more-btn" data-action="more" aria-expanded="false" onclick="toggleMorePopover('${r.id}', this)" title="Priority, watch with, collection, TMDB" aria-label="${esc(`More for ${r.title}`)}">⋯</button>`;
-  const delTitle = policy.deleteEffect === 'skip-film' ? 'Skip (built-in catalog film)' : 'Delete';
-  const delBtn = cls => policy.deleteEffect === 'skip-film' && isSkipped ? ''
-    : `<button class="${cls}" onclick="delRow('${r.id}')" title="${delTitle}" aria-label="${esc(`${delTitle}: ${r.title}`)}">×</button>`;
+  const libraryAction = filmLibraryActionHtml(r, policy);
+  const popover = filmMenuHtml(r, policy, libraryAction ? `<div class="popover-section-label" style="margin-top:8px">Library</div>${libraryAction}` : '');
+  const moreBtn = `<button class="more-btn" data-action="more" aria-expanded="false" onclick="toggleMorePopover('${r.id}', this)" title="Priority, watch with, collection, TMDB, delete" aria-label="${esc(`More for ${r.title}`)}">⋯</button>`;
   const row = `<tr class="browse-film-row ${dimClass}"${item}>
       <td tabindex="-1" data-primary="1">${titleHtml}${labelsHtml}</td>
       <td>${badgesCell}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusCell}</td>
       <td>${watchBtn}</td>
-      <td class="more-cell">${moreBtn}${popover} ${delBtn('del-btn')}</td>
+      <td class="more-cell">${moreBtn}${popover}</td>
     </tr>`;
   const card = `<div class="item-card ${dimClass}"${item}>
       <div class="card-top">
@@ -1293,7 +1297,6 @@ function allMoviesFilmHtml(r, today, films) {
         </div>
         <div class="card-row-actions">
           ${moreBtn}
-          ${delBtn('card-del-btn')}
         </div>
         ${popover}
       </div>

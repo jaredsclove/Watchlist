@@ -1052,8 +1052,8 @@ function derivedShowHtml(item, today, opts = {}) {
   return { row, card };
 }
 
-// An expanded show's own actions (B4/B5): Details, the skipped-seasons control, Show ended and
-// the earlier-seasons range (Watch earlier seasons; the chooser; Stop).
+// An expanded show's own actions (B4/B5): Details, the skipped-seasons control and the earlier-seasons
+// range (Watch earlier seasons; the chooser; Stop). UI polish: Show ended is in Details.
 // opts.state (B6, Currently Watching): the status select comes first, labelled (the row has
 // none; priority is in the row's ⋯); opts.progress: a line of season progress. data-action marks each
 // control for focus after a redraw.
@@ -1068,8 +1068,7 @@ function showActionsHtml(item, keyArg, opts = {}) {
   const progress = opts.progress ? showProgressText(seasons, show) : '';
   if (progress) parts.push(`<span class="show-progress-line">${progress}</span>`);
   parts.push(`<button class="btn btn-link" data-action="details" onclick="openDetails('show', '${keyArg}', this)">Details…</button>`,
-    skippedSeasonsControlHtml(item, keyArg),
-    `<label class="ended-check" data-action="ended"><input type="checkbox"${show.ended ? ' checked' : ''} onchange="setShowStateById('${keyArg}', { ended: this.checked })"> Show ended</label>`);
+    skippedSeasonsControlHtml(item, keyArg));
   if (range) {
     const note = range.state === 'active' ? `Watching earlier seasons from ${esc(range.start ? range.start.season : '')}`
       : range.state === 'complete' ? 'Earlier seasons done' : 'Earlier-seasons range no longer applies; choose again or stop';

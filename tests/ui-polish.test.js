@@ -46,7 +46,7 @@ test('categories: network, franchises, genres, forms; the desktop row fits its b
   const a = many();
   const app = await boot(all(a));
   app.ctx.switchView('alltv'); await settle();
-  // All TV below 1240 px: a budget of 20. Net (7) and Saga (8) fit; Drama (9) doesn't.
+  // All TV below 1240 px: a budget of 22. Net (7) and Saga (8) fit; Drama (9) doesn't fit.
   const row = rowOf(app, a.show.id);
   assert.deepStrictEqual(pills(row), ['Net', 'Saga'], 'priority order, as many as fit');
   assert.match(row, /<button type="button" class="meta-more" data-action="cats-more" aria-expanded="false" aria-label="Show 3 more categories" onclick="event.stopPropagation\(\); toggleCategoryOverflow\('[^']+'\)">\+3<\/button>/);

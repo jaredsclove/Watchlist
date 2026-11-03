@@ -12,7 +12,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 - **Views:** TV (Currently Watching, All TV, Coming Soon), Movies (All Movies), Collections
   (personal collections: shows, seasons and, since S4, films editable there; Remove from a
   collection with Undo; Add to <collection>…, S5), Settings (Manage collections and watch-with
-  choices, Collection updates, Backup & Restore). Since S6 every view
+  choices, Collection updates, Backup & Restore; Backup & Restore is the first card, and Account's password form opens
+  from "Change password…"). Since S6 every view
   has a hash route (`#/tv/watching` … `#/collections/<id>`, `#/settings`) and browser Back / Forward work.
 - **Layout (compact interface):** one app bar holds the title, TV · Movies · Collections and Settings (on phones, a
   non-sticky row of the areas and a gear, no logo); the areas and view tabs are words only (no icons). Then one list
@@ -42,6 +43,22 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   one group across the action columns (Match and Delete set apart after them); flat Seasons lists keep "Mark watched".
   Season progress reads "1/3 seasons watched". In show views (Currently Watching, All TV Shows, collections) the desktop
   column is "Action" and Up next has more room.
+- **Show ended (UI polish 2):** set in a show's Details, not the expanded show. It is part of Details' draft: Cancel
+  discards it, Save sends what changed, the categories (`library_set_metadata_b45`) and then Show ended
+  (`library_set_show_state_b45`), each with its own expected values, in one write lane; not one transaction. Save with
+  Show ended unchanged sends the categories as before. A refused or unconfirmed categories save sends nothing more. Once
+  the categories are saved they become the dialog's baseline, so Save again sends only Show ended. A refused Show ended is
+  said ("Categories saved. Show ended wasn't changed: …") and kept as the draft; an unconfirmed one is never called
+  unchanged: the list is read again and the dialog says what it shows (saved as chosen, or not yet, with the request
+  possibly still completing), or that it isn't known when that read fails.
+- **Films' delete (UI polish 2):** in the film's ⋯ menu ("Delete from library…", or "Skip film (built-in catalog)…"),
+  with the same question and call as before; no separate ×. Season deletes are unchanged. Film collection tags are
+  rounded pills like the categories, still teal.
+- **Open Episodes list and phone dialogs (UI polish 2):** checkboxes and episode labels in aligned columns, titles
+  wrapping, the air date at the right (under the title on phones), the bulk controls in a group of their own, watched
+  episodes quieter. On phones the + Add panel keeps its title and Close on one line and the ways to add on the next
+  (labels wrap inside them; item 12), with the search field and its button side by side; dialogs take nearly the whole
+  screen, sized to what is visible, with their action buttons kept in view while the body scrolls.
 - **Categories (UI polish):** pills in a stable priority, network, franchises, genres, forms (each group in its stored
   order). A desktop row shows one line: the pills that fit its view's character budget (smaller below 1240 px, where the
   show views' column is at its minimum), the first always whole, then a "+N" button that shows the rest inline and reads
