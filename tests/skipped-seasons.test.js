@@ -157,7 +157,7 @@ test('hidden or shown, progress, up next and earlier seasons are the same', asyn
   const strip = s => s.replace(/<tr class="[^"]*sub-row"[^>]*data-season-row[\s\S]*?<\/tr>/g, '').replace(/<div class="card-subseason-row" data-season-row[\s\S]*?<\/div>\s*<\/div>/g, '')
     .replace(/<button class="btn btn-link" data-action="skipped-seasons"[^>]*>[^<]*<\/button>/g, '');
   const hidden = { t: strip(tbody(app)), c: strip(cards(app)) };
-  assert.ok(hidden.t.includes('1 of 3 seasons watched · 1 skipped') && hidden.t.includes('Start from Season 1') && !hidden.t.includes('Start from Season 2'));
+  assert.ok(hidden.t.includes('<span class="show-progress-line">1/3 seasons watched</span>') && hidden.t.includes('Start from Season 1') && !hidden.t.includes('Start from Season 2'));
   assert.ok(hidden.t.includes('Season 4'), 'up next');
   app.ctx.toggleSkippedSeasons(a.show.id); await settle();
   assert.strictEqual(strip(tbody(app)), hidden.t, 'the show row and actions are unchanged (table)');

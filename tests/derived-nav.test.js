@@ -202,7 +202,7 @@ test('Watched from Currently Watching goes through set_season_watched by the rea
   assert.strictEqual(rowIn(app, 'derivedData.rows', 'w1').watched, true);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === 'w1').watched, true, 'saved');
   const html = app.el('tbody').innerHTML;
-  assert.ok(html.includes("toggleWatch('w2')") && !html.includes("toggleWatch('w1')"), 'up next advanced to S2');
+  assert.ok(html.includes("markSeasonFromRow('w2')") && !html.includes("markSeasonFromRow('w1')"), 'up next advanced to S2');
 });
 
 test('a failed Watched write rolls back the local change and mirrors nothing', async () => {
@@ -212,13 +212,13 @@ test('a failed Watched write rolls back the local change and mirrors nothing', a
   assert.strictEqual(rowIn(app, 'derivedData.rows', 'w1').watched, false);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === 'w1').watched, false);
   assert.ok(app.el('errorBanner').innerHTML.includes('Supabase error 400'));
-  assert.ok(app.el('tbody').innerHTML.includes("toggleWatch('w1')"), 'still up next');
+  assert.ok(app.el('tbody').innerHTML.includes("markSeasonFromRow('w1')"), 'still up next');
 });
 
 test('show status from a view: Watching → To Watch removes the show; Skip in Coming Soon is saved by row id', async () => {
   const app = await watchingApp();
   const showId = rowIn(app, 'derivedData.rows', 'w1').show_id;
-  assert.ok(app.el('tbody').innerHTML.includes("toggleWatch('w1')"));
+  assert.ok(app.el('tbody').innerHTML.includes("markSeasonFromRow('w1')"));
   await app.ctx.setShowStateById(showId, { status: 'confirmed' });
   assert.ok(!app.el('tbody').innerHTML.includes('derived-show-row'), 'the show is no longer Watching');
   assert.strictEqual(app.store.tv_shows.find(s => s.id === showId).status, 'confirmed');

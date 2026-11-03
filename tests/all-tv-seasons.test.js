@@ -84,7 +84,7 @@ test('first use opens All TV in Shows: the switch shows Shows active, no season-
   assert.ok(f.includes(`aria-pressed="true" onclick="setAllTvPresentation('shows')"`));
   assert.ok(f.includes(`aria-pressed="false" onclick="setAllTvPresentation('seasons')"`));
   assert.ok(!f.includes('fSeasonVis'));
-  assert.ok(tbody(app).includes('derived-show-row') && app.el('tableHead').innerHTML.includes('<th>Next</th>'));
+  assert.ok(tbody(app).includes('derived-show-row') && app.el('tableHead').innerHTML.includes('<th class="col-next">Next</th>'));
   assert.ok(f.indexOf('view-toggle') < f.indexOf('class="filter-line"'), 'the switch sits outside the filters (B10: before the filter line)');
 });
 

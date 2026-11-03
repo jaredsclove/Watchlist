@@ -111,11 +111,11 @@ function listed(app) {
   return out;
 }
 const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"]*)"/g)]
-  .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1])).filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
+  .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1])).filter(x => !['if', 'replace', 'stopPropagation', 'preventDefault'].includes(x));
 // S3: a collection's TV entries have All TV's controls (their parity is tests/collections-tv-edit.test.js); the
 // allowed set grows by exactly those handlers. S4: films have All Movies' controls and entries the collection's
 // Remove (tests/collection-films.test.js); pressing nothing still writes and reads nothing.
-const TV_EDIT = ['toggleDerivedShow', 'toggleSkippedSeasons', 'setShowStateById', 'toggleWatch', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
+const TV_EDIT = ['toggleDerivedShow', 'toggleSkippedSeasons', 'setShowStateById', 'toggleWatch', 'markSeasonFromRow', 'markNextEpisode', 'setSeasonSkipped', 'openDetails', 'dismissShowNew',
   'openResumePicker', 'startResume', 'stopResume', 'openAddSeason', 'openTmdbMatch', 'delRow',
   'setStatus', 'setFilmPriority', 'toggleMorePopover', 'closeRowMenu', 'toggleWatchWith', 'libraryPullRest', 'removeFromCollection'];
 const READ_ONLY = new Set([...TV_EDIT, 'toggleFilterPill', 'toggleBrowseShow', 'setBrowseMedia', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',

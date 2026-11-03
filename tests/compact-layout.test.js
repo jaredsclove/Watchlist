@@ -133,7 +133,7 @@ test('the shortcut is drawn only beside the up-next line naming the same season,
     const app = await boot(all(a));
     app.ctx.switchView(view); await settle();
     const h = rowOf(app, a.show.id);
-    assert.ok(h.includes('aria-label="Mark watched: Season 2 of Mixed"') && h.includes('>Mark watched</button>'), view);
+    assert.ok(h.includes('aria-label="Mark season watched: Season 2 of Mixed"') && h.includes('>Mark season watched</button>'), view);
     assert.ok(/Season 2 · /.test(h), `${view}: the row names it`);
   }
   assert.ok(fs.readFileSync(path.join(__dirname, '..', 'episodes.js'), 'utf8').includes('Mark ${'), 'the offer is unchanged');

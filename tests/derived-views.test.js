@@ -180,8 +180,8 @@ test('render (B6): Currently Watching rows and cards carry no status control (th
     assert.ok(html.includes(`Season 2 · ${disp(day(40))}`) && !html.includes('Next: '), 'no "Next:" prefix');
   }
   assert.ok(tbody(app).includes('In progress <span class="section-count">· 1 show</span>') && tbody(app).includes('Caught up <span class="section-count">· 1 show</span>'), 'B8: counts in the headings');
-  assert.ok(tbody(app).includes(`toggleWatch('${p.rows[1].id}')`), 'released up next: Mark watched');
-  assert.ok(!tbody(app).includes(`toggleWatch('${u.rows[1].id}')`), 'up to date: no watch control for the future season');
+  assert.ok(tbody(app).includes(`markSeasonFromRow('${p.rows[1].id}')`), 'released up next: Mark season watched');
+  assert.ok(!tbody(app).includes(`markSeasonFromRow('${u.rows[1].id}')`), 'up to date: no watch control for the future season');
   app.ctx.toggleDerivedShow(p.show.id); app.ctx.toggleDerivedShow(u.show.id); await settle();
   for (const html of [tbody(app), cards(app)]) {
     assert.strictEqual((html.match(/setShowStateById\('[^']*', \{ status: this\.value \}\)/g) || []).length, 2, 'one show status control per expanded show');

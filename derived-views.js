@@ -522,10 +522,10 @@ function updateDerivedTableHeader() {
   if (!thead) return;
   const heads = {
     comingsoon: `<tr><th>Show &amp; Season</th><th>Categories</th><th>Premiere</th><th>Status</th><th></th></tr>`,
-    alltv: `<tr><th>Show</th><th>Categories</th><th>Next</th><th>Status</th><th>Watched</th><th>Progress</th></tr>`,
+    alltv: `<tr><th>Show</th><th class="col-cats">Categories</th><th class="col-next">Next</th><th>Status</th><th>Action</th><th>Progress</th></tr>`,
     alltvSeasons: `<tr><th>Show &amp; Season</th><th>Categories</th><th>Premiere</th><th>Show status</th><th>Watched</th><th></th></tr>`,
     // B6: no Status column (every show here is Watching; status is changed in the expanded show).
-    watching: `<tr><th>Show</th><th>Categories</th><th>Up next</th><th>Watched</th><th>Progress</th></tr>`
+    watching: `<tr><th>Show</th><th class="col-cats">Categories</th><th class="col-next">Up next</th><th>Action</th><th>Progress</th></tr>`
   };
   const key = activeViewId === 'alltv' && allTvPresentation === 'seasons' ? 'alltvSeasons' : activeViewId;
   if (heads[key]) thead.innerHTML = heads[key];
@@ -827,6 +827,14 @@ function nextSeasonLabel(upNext, released, card = false, upcomingOnTba = false) 
 
 // A show that isn't in progress or Up to date (any status but a Watching one
 // being watched): what's next on its list, without calling it in progress.
+// EP5: an episode target's Up next: the season and episode, its title on a quieter line of its own while titles
+// are shown by default; or, every listed episode marked, saying so (never that the season has finished).
+function episodeNextLabel(t, card = false) {
+  const head = `${card ? SR_NEXT_SEASON : ''}${esc(t.season.season)}`;
+  if (t.kind === 'listed') return `${head} · All listed episodes watched`;
+  const name = episodeTitlesShown() ? t.next.name.trim() : '';
+  return `${head} · Episode ${t.next.number}${name ? `<span class="next-ep-title">${esc(name)}</span>` : ''}`;
+}
 function neutralNextLabel(upNext, released, card = false) {
   if (!upNext) return 'No remaining season on your list';
   return nextSeasonLabel(upNext, released, card);
@@ -839,13 +847,16 @@ function derivedExpandBtnHtml(key, keyArg, title, isExpanded) {
   return `<button type="button" class="expand-btn" data-show-key="${esc(key)}" data-primary="1" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Hide' : 'Show'} seasons and actions of ${esc(title)}" onclick="event.stopPropagation(); toggleDerivedShow('${keyArg}')"><span class="expand-chevron">${isExpanded ? '▾' : '▸'}</span></button>`;
 }
 
-// A show's season progress as text: watched of non-skipped seasons, and skipped ones.
-function showProgressText(seasons) {
+// A show's season progress as text: watched of non-skipped seasons, and skipped ones. EP5: where the expanded
+// show has its "Show skipped seasons (N)" control (show given, not a Skipped show) the count is left to it, and
+// an all-skipped show's explanation is the control's note.
+function showProgressText(seasons, show = null) {
   const kept = seasons.filter(s => !s.skipped);
   const skipped = seasons.length - kept.length;
-  if (!kept.length) return `${seasons.length} season${seasons.length === 1 ? '' : 's'} · all skipped`;
+  const counted = !!show && skippedSeasonsToggleable(show);
+  if (!kept.length) return counted ? '' : `${seasons.length} season${seasons.length === 1 ? '' : 's'} · all skipped`;
   const watched = kept.filter(s => s.watched).length;
-  return `${watched} of ${kept.length} season${kept.length === 1 ? '' : 's'} watched${skipped ? ` · ${skipped} skipped` : ''}`;
+  return `${watched}/${kept.length} season${kept.length === 1 ? '' : 's'} watched${skipped && !counted ? ` · ${skipped} skipped` : ''}`;
 }
 
 // Skipped seasons of an expanded show: a season's own flag, listed only on request. A Skipped show
@@ -898,13 +909,17 @@ function derivedShowHtml(item, today, opts = {}) {
   const rating = showRatingHtml(show);
   const titleHtml = `<span class="show-title-main">${priorityMarkHtml(show.priority)}<span class="show-title">${esc(item.title)}</span>${rating ? ` ${rating}` : ''}${priorityMarkHtml(show.priority, true)}</span>${stateTagsHtml(show, 'show')}${resumeTag}`;
 
+  // EP5: the row's target (episodes.js showTarget): one source for its Up next, action and progress, and for
+  // the expanded row of the season it represents (episodes: no longer repeated there).
+  const target = showTarget(item);
+  const episodic = target.kind !== 'season';
   const trackable = seasons.filter(s => !s.skipped);
   const watchedCount = trackable.filter(s => s.watched).length;
-  const progressPct = trackable.length > 0 ? Math.round(watchedCount / trackable.length * 100) : 0;
-  const progressLabel = trackable.length > 0 ? `${watchedCount}/${trackable.length} season${trackable.length === 1 ? '' : 's'} watched` : `${seasons.length} season${seasons.length === 1 ? '' : 's'}`;
-  const progressBarHtml = trackable.length > 0
-    ? `<div class="mini-progress-track"><div class="mini-progress-fill" style="width:${progressPct}%"></div></div>`
-    : '';
+  const bar = pct => `<div class="mini-progress-track"><div class="mini-progress-fill" style="width:${pct}%"></div></div>`;
+  const progressLabel = episodic ? esc(target.progress.text)
+    : trackable.length > 0 ? `${watchedCount}/${trackable.length} season${trackable.length === 1 ? '' : 's'} watched` : `${seasons.length} season${seasons.length === 1 ? '' : 's'}`;
+  const progressBarHtml = episodic ? (target.progress.pct != null ? bar(target.progress.pct) : '')
+    : trackable.length > 0 ? bar(Math.round(watchedCount / trackable.length * 100)) : '';
 
   const gap = gapSeasons(seasons);
   const gapNote = gap.length ? ` <span class="gap-note">${gap.length} earlier season${gap.length === 1 ? '' : 's'} unwatched</span>` : '';
@@ -922,7 +937,9 @@ function derivedShowHtml(item, today, opts = {}) {
       ? '<span class="confirmed-lbl">All seasons skipped</span>'
       : upToDate
         ? upToDateNextLabel(upNext, card)
-        : inProgress
+        : episodic && (target.kind === 'episode' || target.kind === 'listed')
+          ? episodeNextLabel(target, card)
+          : inProgress
           ? nextSeasonLabel(upNext, item.upNextReleased, card, true)
           : neutralNextLabel(upNext, item.upNextReleased, card)) + upcomingNote;
   const nextCell = nextFor(false), nextCard = nextFor(true);
@@ -936,12 +953,17 @@ function derivedShowHtml(item, today, opts = {}) {
   const cw = activeViewId === 'watching';
   const subOpts = r => ({ isNew: false, showMatch: allTv && isTmdbMatchEligible(r), showDelete: allTv && editPolicyOf(r).deleteEffect === 'delete',
     deleteName: `Delete ${r.season} of ${show.title} from your library`, deleteLabel: collection ? 'Delete…' : '',
-    dateHtml: opts.dateHtml, requireReleased: true, today, showOf: key, cwOrder: cw });
+    dateHtml: opts.dateHtml, requireReleased: true, today, showOf: key, cwOrder: cw,
+    seasonLabel: true, represented: episodic && r.id === target.season.id });
   const addSeasonBtn = allTv ? `<button class="btn btn-link" data-action="add-season" onclick="event.stopPropagation(); openAddSeason('${keyArg}')">+ Add season…</button>` : '';
   // B2: the show-level shortcut names the season it marks (the up-next season, or the
   // earlier-seasons range's next one).
   const shortcutOpts = { ...releaseOpts, shortcutOf: show };
-  const watchCell = inProgress ? seasonWatchControlHtml(upNext, { ...shortcutOpts, stopPropagation: true }, false) : '<span class="confirmed-lbl">—</span>';
+  // EP5: the row's action for its target: Mark E9 watched; nothing once every listed episode is marked (the season
+  // is completed deliberately, from its expanded row or its list); else Mark season watched as before.
+  const rowAction = stop => target.kind === 'episode' ? showRowEpisodeActionHtml(target, show, stop)
+    : target.kind === 'listed' ? '' : inProgress ? seasonWatchControlHtml(upNext, { ...shortcutOpts, stopPropagation: stop }, false) : '';
+  const watchCell = rowAction(true) || '<span class="confirmed-lbl">—</span>';
   const expandBtn = opts.expandBtn ? opts.expandBtn(isExpanded) : derivedExpandBtnHtml(key, keyArg, item.title, isExpanded);
   // The focus hooks (B6): the show's row or card, and the section it is listed in.
   const section = cw ? (upToDate ? 'uptodate' : 'inprogress') : opts.section || 'all';
@@ -952,7 +974,7 @@ function derivedShowHtml(item, today, opts = {}) {
   const listed = isExpanded ? listedSeasons(item) : [];
 
   if (cw) {
-    const shortcut = inProgress ? seasonWatchControlHtml(upNext, { ...shortcutOpts, stopPropagation: true }, false) : '';
+    const shortcut = rowAction(true);
     const cells = upToDate
       ? `<td class="date-cell" colspan="3">${nextCell}</td>`
       : `<td class="date-cell">${nextCell}</td><td>${shortcut}</td><td class="card-date">${progressLabel}${progressBarHtml}</td>`;
@@ -973,8 +995,8 @@ function derivedShowHtml(item, today, opts = {}) {
     // Phone card, top to bottom: title (expand button), then one wrapping flow of the season line,
     // progress, categories and the shortcut; expanded: the actions, then the seasons. A caught-up
     // card shows its categories and progress only when expanded.
-    const detail = !upToDate ? progressLabel : isExpanded ? showProgressText(seasons) : '';
-    const meta = `<div class="card-meta"><span class="card-season">${nextCard}</span>${detail ? `<span class="card-date card-progress">${detail}</span><span class="card-labels">${badges}</span>` : ''}${inProgress ? `<span class="card-complete" onclick="event.stopPropagation()">${shortcut}</span>` : ''}</div>`;
+    const detail = !upToDate ? progressLabel : isExpanded ? showProgressText(seasons, show) : '';
+    const meta = `<div class="card-meta"><span class="card-season">${nextCard}</span>${detail ? `<span class="card-date card-progress">${detail}</span><span class="card-labels">${badges}</span>` : ''}${shortcut ? `<span class="card-complete" onclick="event.stopPropagation()">${shortcut}</span>` : ''}</div>`;
     const card = `<div class="item-card show-group-card${dimClass}" ${showAttrs}>
       <div class="card-top" onclick="toggleDerivedShow('${keyArg}', event)" style="cursor:pointer">
         ${expandBtn}
@@ -984,12 +1006,13 @@ function derivedShowHtml(item, today, opts = {}) {
         ${menu}
       </div>
       ${meta}
-      ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${showActionsHtml(item, keyArg, { state: true })}</div>${listed.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}</div>` : ''}
+      ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${showActionsHtml(item, keyArg, { state: true, progress: episodic })}</div>${listed.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}</div>` : ''}
     </div>`;
     return { row, card };
   }
 
-  const actions = isExpanded ? showActionsHtml(item, keyArg, { remove: collection }) : ''; // S4: a collection adds Remove show
+  // S4: a collection adds Remove show. EP5: the season progress moves here while the row shows episodes.
+  const actions = isExpanded ? showActionsHtml(item, keyArg, { remove: collection, progress: episodic }) : '';
   let row = `<tr class="show-group-row derived-show-row${dimClass}" ${showAttrs} onclick="toggleDerivedShow('${keyArg}', event)">
       <td>
         <div class="show-title-row">
@@ -1019,7 +1042,7 @@ function derivedShowHtml(item, today, opts = {}) {
       <div class="card-meta"><span class="card-season">${nextCard}</span><span class="card-date card-progress">${progressLabel}</span><span class="card-labels">${badges}</span></div>
       <div class="card-actions" onclick="event.stopPropagation()">
         <span class="state-action" data-action="status">${showStatusSelectHtml(show)}</span>${upToDatePill}
-        ${inProgress ? seasonWatchControlHtml(upNext, shortcutOpts, false) : ''}
+        ${rowAction(false)}
       </div>
       ${isExpanded ? `<div class="card-subseasons"><div class="card-subseason-row show-actions" onclick="event.stopPropagation()">${actions}</div>${listed.map(r => seasonSubCardHtml(r, subOpts(r))).join('')}${addSeasonBtn ? `<div class="card-subseason-row" ${ofAttr}>${addSeasonBtn}</div>` : ''}</div>` : ''}
     </div>`;
@@ -1040,7 +1063,8 @@ function showActionsHtml(item, keyArg, opts = {}) {
   if (opts.state) {
     parts.push(`<label class="state-field" data-action="status"><span class="state-field-label">Status</span> ${showStatusSelectHtml(show)}</label>`);
   }
-  if (opts.progress) parts.push(`<span class="show-progress-line">${showProgressText(seasons)}</span>`);
+  const progress = opts.progress ? showProgressText(seasons, show) : '';
+  if (progress) parts.push(`<span class="show-progress-line">${progress}</span>`);
   parts.push(`<button class="btn btn-link" data-action="details" onclick="openDetails('show', '${keyArg}', this)">Details…</button>`,
     skippedSeasonsControlHtml(item, keyArg),
     `<label class="ended-check" data-action="ended"><input type="checkbox"${show.ended ? ' checked' : ''} onchange="setShowStateById('${keyArg}', { ended: this.checked })"> Show ended</label>`);
