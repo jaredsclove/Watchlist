@@ -823,7 +823,10 @@ function nextDateText(r) {
   if (isTbaRow(r) && (!text || /^TBA$/i.test(text))) return 'Date TBA';
   return esc(text);
 }
+// UI refine: a season already released reads by its label alone (its premiere is in the season's own row, its Episodes
+// summary and Coming Soon); an upcoming one keeps its date or TBA text and the Upcoming tag.
 function nextSeasonLabel(upNext, released, card = false, upcomingOnTba = false) {
+  if (released) return `${card ? SR_NEXT_SEASON : ''}${esc(upNext.season)}`;
   const upcoming = !released && (upcomingOnTba || !isTbaRow(upNext)) ? '<span class="upcoming-tag">Upcoming</span>' : '';
   return `${card ? SR_NEXT_SEASON : ''}${esc(upNext.season)} · ${nextDateText(upNext)}${upcoming}`;
 }
@@ -921,7 +924,10 @@ function derivedShowHtml(item, today, opts = {}) {
   const watchedCount = trackable.filter(s => s.watched).length;
   // UI polish: no empty track at 0%.
   const bar = pct => (pct > 0 ? `<div class="mini-progress-track"><div class="mini-progress-fill" style="width:${pct}%"></div></div>` : '');
-  const progressLabel = episodic ? esc(target.progress.text)
+  // UI refine: episode progress names its season ("S35 · 8/12 episodes watched"), never breaking after the short form;
+  // a long name keeps its words and may wrap.
+  const seasonName = episodic ? seasonShortLabel(target.season) : '';
+  const progressLabel = episodic ? `${/^S\d+$/.test(seasonName) ? esc(seasonName) : `<span class="progress-season">${esc(seasonName)}</span>`}\u00a0· ${esc(target.progress.text)}`
     : trackable.length > 0 ? `${watchedCount}/${trackable.length} season${trackable.length === 1 ? '' : 's'} watched` : `${seasons.length} season${seasons.length === 1 ? '' : 's'}`;
   const progressBarHtml = episodic ? (target.progress.pct != null ? bar(target.progress.pct) : '')
     : trackable.length > 0 ? bar(Math.round(watchedCount / trackable.length * 100)) : '';

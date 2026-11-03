@@ -320,9 +320,10 @@ function libraryPanelClose() {
 // It only fills in the panel's search: searching and previewing read TMDB and nothing else, and
 // adding is the panel's own, confirmed in its preview. media: 'tv', 'movie' or, in a mixed collection,
 // 'mixed' (both kinds, each tagged; the result chosen decides the type).
+// UI refine: styled as library search (the same field, icon and size), with an explicit Search button; Enter submits too.
 function tmdbQuickHtml(media, dest) {
   const name = dest ? `Search TMDB to add to your library, then choose collections for ${dest.label}` : 'Search TMDB to add';
-  return `<form class="tmdb-quick" role="search" onsubmit="event.preventDefault(); tmdbQuickSubmit('${media}')"><input id="tmdbQuickQuery" type="search" placeholder="Search TMDB to add…" aria-label="${esc(name)}" value="${esc(tmdbQuickText)}" oninput="tmdbQuickText = this.value"><button type="submit" class="tmdb-quick-go" aria-label="Search TMDB">⏎</button></form>`;
+  return `<form class="tmdb-quick" role="search" onsubmit="event.preventDefault(); tmdbQuickSubmit('${media}')"><input id="tmdbQuickQuery" class="search-input" type="search" placeholder="Search TMDB to add…" aria-label="${esc(name)}" value="${esc(tmdbQuickText)}" oninput="tmdbQuickText = this.value"><button type="submit" class="btn tmdb-quick-go" aria-label="Search TMDB">Search</button></form>`;
 }
 function tmdbQuickSubmit(media) {
   const field = document.getElementById('tmdbQuickQuery');

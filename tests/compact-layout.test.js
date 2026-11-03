@@ -134,7 +134,7 @@ test('the shortcut is drawn only beside the up-next line naming the same season,
     app.ctx.switchView(view); await settle();
     const h = rowOf(app, a.show.id);
     assert.ok(h.includes('aria-label="Mark S2 watched: Season 2 of Mixed"') && h.includes('>Mark S2 watched</button>'), view);
-    assert.ok(/Season 2 · /.test(h), `${view}: the row names it`);
+    assert.ok(/>Season 2</.test(h), `${view}: the row names it`);
   }
   assert.ok(fs.readFileSync(path.join(__dirname, '..', 'episodes.js'), 'utf8').includes('Mark ${'), 'the offer is unchanged');
 });
@@ -173,7 +173,7 @@ test('the toolbar: toggles, Search, TMDB search, Filters, + Add in page order; S
   const page = fs.readFileSync(path.join(__dirname, '..', 'watchlist.html'), 'utf8');
   assert.match(page, /<div class="list-toolbar">\s*<div class="filters" id="filtersRow"><\/div>\s*<div class="stats-row" id="statsRow"><\/div>/);
   assert.match(css, /\.filter-line \.search-input \{ flex: 1 1 260px;/);
-  assert.match(css, /\.filter-line \.search-input \{ flex: 1 1 200px; max-width: 340px; \}\s*\.tmdb-quick \{ flex: 1 1 200px; max-width: 300px; \}/, 'desktop: the two searches share the width');
+  assert.match(css, /\.tmdb-quick \{ display: flex; gap: 6px; flex: 0 1 300px; min-width: 230px; \}[\s\S]*?\.filter-line > \.search-input \{ flex: 0 1 220px; \}/, 'desktop: the two searches stay compact together (UI refine)');
   assert.ok(!/\.search-input[^{]*\{[^}]*order:/.test(phone), 'Search keeps its place in the Tab order');
 });
 
