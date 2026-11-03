@@ -174,21 +174,52 @@ function episodeProgressText(r) {
 // Next unwatched: the first episode of the known list without a mark (marks can have gaps), for a
 // season neither watched nor skipped; nothing when the list is unknown, empty or fully marked. It
 // names an unmarked episode, not one that has aired.
-function nextUnwatchedText(r) {
-  if (!isEpisodeTrackable(r) || r.watched || r.skipped) return '';
+function nextUnwatchedEpisode(r) {
+  if (!isEpisodeTrackable(r) || r.watched || r.skipped) return null;
   const eps = knownEpisodeList(r), marks = marksOf(r.id);
-  const next = eps && eps.find(e => !marks.has(e.id));
+  return (eps && eps.find(e => !marks.has(e.id))) || null;
+}
+function nextUnwatchedText(r) {
+  const next = nextUnwatchedEpisode(r);
   if (!next) return '';
   const name = episodeTitlesShown() ? next.name.trim() : '';
   return `Next unwatched: E${next.number}${name ? ` — ${name}` : ''}`;
 }
 // Shown wherever a season's progress is: the progress text, the season's Episodes toggle where the
-// caller passes it (an expanded season's own row), then the next-unwatched text.
+// caller passes it (an expanded season's own row), then the next-unwatched text; on that expanded row
+// (EP4) with its Mark E9 watched button beside it.
 function episodeProgressHtml(r, toggle = '') {
   const text = episodeProgressText(r);
   if (!text) return toggle ? ` ${toggle}` : '';
   const next = nextUnwatchedText(r);
-  return ` <span class="ep-progress">· ${esc(text)}</span>${toggle ? ` ${toggle}` : ''}${next ? ` <span class="ep-next">${esc(next)}</span>` : ''}`;
+  const line = next ? `<span class="ep-next">${esc(next)}</span>` : '';
+  const quick = line && toggle ? nextEpisodeMarkHtml(r) : '';
+  return ` <span class="ep-progress">· ${esc(text)}</span>${toggle ? ` ${toggle}` : ''}${quick ? ` <span class="ep-next-line">${line} ${quick}</span>` : line ? ` ${line}` : ''}`;
+}
+
+// ── Mark E9 watched (EP4) ──
+// Marks the one episode the next-unwatched line names, through the same change as its checkbox, without
+// opening the list. The button carries that episode's id: a click when another episode is next (marked
+// elsewhere, or the list changed) sends nothing. A held key's repeats don't press it again (a fresh press
+// is needed), and for a moment after a mark settles a further click on that season's button is ignored,
+// so a double click can't mark the episode named next. The Episodes list chooses others and undoes.
+const NEXT_EPISODE_MARK_SETTLE_MS = 1000;
+function nextEpisodeMarkHtml(r) {
+  const next = nextUnwatchedEpisode(r);
+  if (!next) return '';
+  const idArg = esc(r.id).replace(/'/g, "\\'");
+  const label = `Mark E${next.number} watched`;
+  return seasonActionHtml('ep-next-mark', `<button type="button" class="btn btn-link ep-next-mark" aria-label="${esc(`${label}: episode ${next.number} of ${r.season} only`)}" onkeydown="if (event.repeat) event.preventDefault()" onclick="event.stopPropagation(); markNextEpisode('${idArg}', ${next.id})">${esc(label)}</button>`);
+}
+async function markNextEpisode(seasonId, episodeId) {
+  const held = episodeNextMark;
+  if (held && held.seasonId === seasonId && (held.until == null || Date.now() < held.until)) return;
+  const row = actionRows().find(r => r.id === seasonId);
+  const next = row ? nextUnwatchedEpisode(row) : null;
+  if (!next || next.id !== episodeId) { renderTable(); return; }
+  const mine = episodeNextMark = { seasonId, until: null };
+  try { await setEpisodeMarks(seasonId, [{ tmdb_episode_id: next.id, episode_number: next.number }], true); }
+  finally { if (episodeNextMark === mine) mine.until = Date.now() + NEXT_EPISODE_MARK_SETTLE_MS; }
 }
 
 // ── The open list ──

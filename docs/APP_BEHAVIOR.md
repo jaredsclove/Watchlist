@@ -42,7 +42,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   per show and page memory only (redraws, collapsing and other views keep it; a reload or account change resets it). It is
   the same in Currently Watching, All TV and collections. A show whose own status is Skipped lists every season as
   before. Display only: progress, up next, earlier seasons and the flat Seasons lists use every season.
-- **Episode progress (EP1, EP2, EP3):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
+- **Episode progress (EP1–EP4):** an expanded show's TMDB-matched seasons have an inline Episodes list (from TMDB,
   one open at a time) with a checkbox per episode and one "Mark watched through [Episode N ▾] [Apply]" control above
   it (marks only the unmarked episodes up to N; starts on the first unmarked, keeps the choice). Titles are hidden
   behind a Show title button per episode unless Settings' "Show episode titles by default" is on (per account,
@@ -53,7 +53,12 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   while titles are shown by default; it comes from the open list or the per-device cache and is hidden when the list is
   unknown, empty or fully marked, or the season is watched or skipped. That cache (replaceable device storage, not
   library data or backups) holds each list's episode ids and, since EP3, numbers and titles; a list cached before EP3
-  has ids only, so its line appears after the list is opened once. Show-level Watching is unchanged; nothing completes a season automatically (a fully checked list offers
+  has ids only, so its line appears after the list is opened once. On an expanded season's row and phone card (not the
+  flat Seasons lists or Coming Soon), the line ends with a "Mark E6 watched" button (EP4): the same one-episode change as
+  that episode's checkbox, without opening the list; it marks only the episode it names (sends nothing if another is
+  next by then), ignores a held key's repeats and, for a second after a mark settles, further clicks on that season's
+  button. Focus stays on it; when it goes (the last listed episode marked), focus goes to that season's Episodes. The
+  list stays the way to mark another episode or undo one. Show-level Watching is unchanged; nothing completes a season automatically (a fully checked list offers
   Mark season watched); a watched or skipped season's episodes are locked and its marks kept. The same
   controls are in collections; the flat Seasons lists show progress only; Coming Soon has no episode list.
 - **TMDB show ratings (item 2, first part):** a TMDB-matched show's score sits directly after its title (since PR #20;
@@ -125,8 +130,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   stays registered through a change's reconciling reread (it over-warns, never under-warns); Back
   with an idle Manage that saved changes starts its collection reread before navigating (a wasted read).
 - **One focus rule:** a redraw moves focus only if it was in the list (B6 chain F-1…F-7); a filter-row
-  redraw keeps the focused control, its value and caret. One addition: when the focused season is hidden because it
-  is now skipped, focus goes to its show's "Show skipped seasons" control; deletions and other redraws follow the chain.
+  redraw keeps the focused control, its value and caret. Two additions: when the focused season is hidden because it
+  is now skipped, focus goes to its show's "Show skipped seasons" control; when a focused "Mark E6 watched" is gone,
+  focus goes to its season's Episodes toggle. Deletions and other redraws follow the chain.
 - **Accepted limitations (Batch A):** after a refused change is rolled back,
   focus doesn't return to the control it started from; focus doesn't follow a pending save across the
   phone/desktop switch; opening another view during a change (a long Refresh shows or movie-tool run

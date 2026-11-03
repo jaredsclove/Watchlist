@@ -993,6 +993,10 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .ep-next { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
 /* An expanded season: the season, its progress and Episodes, then the next-unwatched line of its own. */
 .sub-row .ep-next, .card-subseason-row .ep-next { display: block; margin-left: 0; }
+/* EP4: that line with its Mark E9 watched button; the button wraps below a long title rather than overflowing. */
+.ep-next-line { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+.sub-row .ep-next-line .ep-next, .card-subseason-row .ep-next-line .ep-next { display: inline; min-width: 0; }
+.ep-next-mark { font-size: 12px; padding: 0 4px; white-space: nowrap; }
 .sub-row .ep-progress:has(+ .season-action)::after { content: ' ·'; white-space: pre; }
 .card-subseason-row .season-lbl { color: var(--text); }
 .ep-toggle { font-size: 12px; padding: 0 4px; }
@@ -1018,7 +1022,7 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
   .ep-check { min-height: 44px; flex: 1 1 auto; }
   .ep-check input { width: 22px; height: 22px; }
   .card-subseason-row .ep-toggle { margin-block: -6px; } /* its 44 px target reaches past its line, not over the controls */
-  .ep-title, .ep-toggle, .ep-through-select, .ep-through-apply, .ep-all, .ep-all-confirm, .ep-suggest .btn-link, .ep-suggest .watch-btn, .cu-list .btn-link, .settings-check { min-height: 44px; }
+  .ep-title, .ep-toggle, .ep-next-mark, .ep-through-select, .ep-through-apply, .ep-all, .ep-all-confirm, .ep-suggest .btn-link, .ep-suggest .watch-btn, .cu-list .btn-link, .settings-check { min-height: 44px; }
 }
 
 /* Item 4: collection updates (results, review, rules and setup dialogs) */
