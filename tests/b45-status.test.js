@@ -101,7 +101,7 @@ test('O2 priority and O3 Ended: markers kept; provenance cleared only for the fi
   await app.ctx.setShowStateById(e.show.id, { priority: 'low' }); await settle();
   assert.deepStrictEqual(['priority', 'legacy_status', 'status_review'].map(k => stored(app, e.show.id)[k]), ['low', 'complete', true], 'complete provenance isn’t about priority');
   app.ctx.toggleDerivedShow(e.show.id); await settle();
-  assert.ok(app.el('tbody').innerHTML.includes(`setShowStateById('${e.show.id}', { ended: this.checked })`));
+  assert.ok(!app.el('tbody').innerHTML.includes('{ ended: this.checked }'), 'UI polish: Show ended is in Details, through the same call');
   await app.ctx.setShowStateById(e.show.id, { ended: false }); await settle();
   assert.deepStrictEqual(['ended', 'legacy_status', 'status_review'].map(k => stored(app, e.show.id)[k]), [false, null, true], 'O3 clears complete; review kept');
   assert.deepStrictEqual(calls(app, 'library_set_show_state_b45').map(c => c.p_changes), [{ priority: 'normal' }, { priority: 'low' }, { ended: false }]);
@@ -286,7 +286,7 @@ test('phone width (375 px): the cards carry the status and priority controls; th
   assert.ok(cards.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && cards.includes(`setShowStateById('${s.show.id}', { priority: this.value })`));
   assert.ok(cards.includes('>Ended<'));
   app.ctx.toggleDerivedShow(s.show.id); await settle();
-  assert.ok(app.el('cardList').innerHTML.includes('Watch earlier seasons…') && app.el('cardList').innerHTML.includes('Show ended'));
+  assert.ok(app.el('cardList').innerHTML.includes('Watch earlier seasons…') && app.el('cardList').innerHTML.includes('Details…'));
 });
 
 test('Start / Stop earlier seasons: a stale range or record is refused and the list is read again; no clear answer → not confirmed, never resent, read again', async () => {

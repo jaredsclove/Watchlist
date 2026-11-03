@@ -241,7 +241,7 @@ test('expanded: the show actions, every stored season with Watched (Not aired ye
   assert.strictEqual((app.el('tbody').innerHTML.match(/sub-row/g) || []).length, 6, 'the show actions, four seasons and the Add season row');
   assert.strictEqual((app.el('cardList').innerHTML.match(/card-subseason-row/g) || []).length, 6);
   assert.ok(html.includes(`openDetails('show', '${s.show.id}'`) || html.includes(`openDetails('show','${s.show.id}'`), 'Details (categories) for the show');
-  assert.ok(html.includes(`setShowStateById('${s.show.id}', { ended: this.checked })`), 'Show ended');
+  assert.ok(!html.includes('{ ended: this.checked }') && html.includes(`openDetails('show', '${s.show.id}', this)`), 'Show ended is in Details (UI polish)');
   s.rows.forEach(r => assert.ok(html.includes(`delRow('${r.id}')`), 'Delete on a season that is not a built-in catalog entry'));
   assert.ok(html.includes(`openAddSeason('${s.show.id}')`));
   assert.ok(!html.includes('openTmdbMatch('), 'identified seasons are not Match-eligible');

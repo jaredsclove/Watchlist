@@ -279,6 +279,16 @@ function renderSettings() {
       <h2 class="settings-title" id="settingsTitle" tabindex="-1">Settings &amp; Management</h2>
     </div>
     <div class="settings-grid">
+      <!-- UI polish: Backup & Restore first, where the header's backup warning points -->
+      <section class="settings-card" aria-labelledby="settingsBackupTitle">
+        <h3 id="settingsBackupTitle" tabindex="-1">Backup &amp; Restore</h3>
+        <p class="settings-status${status.cls ? ' ' + status.cls : ''}" id="settingsBackupStatus">${esc(status.text)}</p>
+        <div class="settings-actions">
+          <button class="btn" id="settingsBackupBtn" onclick="handleBackupClick(this)"${busy}>${backupBusy && backupPressedId === 'settingsBackupBtn' ? 'Backing up…' : BACKUP_LABELS.settingsBackupBtn}</button>
+          <button class="btn settings-restore-btn" onclick="handleRestoreClick()">⬆ Restore from a backup file…</button>
+        </div>
+        <p class="settings-text">Restore checks the file first, downloads a safety copy of your current data, asks you to confirm, then replaces everything in one transaction. Leaving this screen before you confirm cancels it.</p>
+      </section>
       ${accountSectionHtml()}
       ${episodeTitlesSettingHtml()}
       <section class="settings-card" aria-labelledby="settingsLibraryTitle">
@@ -292,15 +302,6 @@ function renderSettings() {
         <div class="settings-actions"><button class="btn settings-manage-choices" onclick="openManage('choices', null, this)">Manage watch-with choices…</button></div>
       </section>
       ${cuSettingsSectionHtml()}
-      <section class="settings-card" aria-labelledby="settingsBackupTitle">
-        <h3 id="settingsBackupTitle" tabindex="-1">Backup &amp; Restore</h3>
-        <p class="settings-status${status.cls ? ' ' + status.cls : ''}" id="settingsBackupStatus">${esc(status.text)}</p>
-        <div class="settings-actions">
-          <button class="btn" id="settingsBackupBtn" onclick="handleBackupClick(this)"${busy}>${backupBusy && backupPressedId === 'settingsBackupBtn' ? 'Backing up…' : BACKUP_LABELS.settingsBackupBtn}</button>
-          <button class="btn settings-restore-btn" onclick="handleRestoreClick()">⬆ Restore from a backup file…</button>
-        </div>
-        <p class="settings-text">Restore checks the file first, downloads a safety copy of your current data, asks you to confirm, then replaces everything in one transaction. Leaving this screen before you confirm cancels it.</p>
-      </section>
       ${creditsSectionHtml()}
     </div>`;
   updateCuSettingsStatus(); // item 4 (collection-settings.js): a read only

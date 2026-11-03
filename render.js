@@ -136,10 +136,11 @@ const CATEGORY_WIDE = typeof window !== 'undefined' && typeof window.matchMedia 
 if (CATEGORY_WIDE && typeof CATEGORY_WIDE.addEventListener === 'function') CATEGORY_WIDE.addEventListener('change', () => renderTable());
 function categoryBudget() {
   const wide = !CATEGORY_WIDE || CATEGORY_WIDE.matches;
+  // Measured at 1400 / 1100 px: about 6.3 px a character, plus each pill's padding (CATEGORY_PILL_COST).
   if (activeViewId === 'watching') return wide ? 34 : 26;
-  if (activeViewId === 'alltv' && allTvPresentation === 'shows') return wide ? 32 : 20;
-  if (typeof isBrowseCollectionView === 'function' && isBrowseCollectionView(activeViewId)) return wide ? 30 : 20;
-  return wide ? 32 : 26; // flat Seasons lists, Coming Soon, All Movies
+  if (activeViewId === 'alltv' && allTvPresentation === 'shows') return wide ? 28 : 22;
+  if (typeof isBrowseCollectionView === 'function' && isBrowseCollectionView(activeViewId)) return wide ? 28 : 22;
+  return wide ? 40 : 30; // flat Seasons lists, Coming Soon, All Movies (the wider second column)
 }
 function toggleCategoryOverflow(owner) {
   if (expandedCategoryOwners.has(owner)) expandedCategoryOwners.delete(owner); else expandedCategoryOwners.add(owner);
@@ -460,7 +461,9 @@ function openDetails(kind, id, opener) {
     : [rec.theme].filter(Boolean);
   detailsDialog = { session: ++detailsSessionSeq, kind, id, title: rec.title, restored: false, snapshot, labels, opener: opener || null,
     draft: { genres: snapshot.genres.slice(), forms: snapshot.forms.slice(), franchises: snapshot.franchises.slice(),
-      companies: snapshot.companies.slice(), resolve: {}, network: kind === 'show' ? (snapshot.network || '') : '' },
+      companies: snapshot.companies.slice(), resolve: {}, network: kind === 'show' ? (snapshot.network || '') : '',
+      ended: kind === 'show' ? !!rec.ended : false },
+    endedBase: kind === 'show' ? !!rec.ended : false, // UI polish: Show ended's saved value, the baseline its draft is compared with
     error: '', notice: '', saving: false, stale: null, picker: false };
   renderDetails();
   document.getElementById('detailsModalOverlay').style.display = 'flex';
@@ -497,6 +500,7 @@ function detailsAddValue(field) { if (!detailsDialog) return; detailsDialog.draf
 function detailsRemoveValue(field, index) { if (!detailsDialog) return; detailsDialog.draft[field].splice(index, 1); renderDetails(); }
 function detailsResolve(index, choice) { if (detailsDialog) detailsDialog.draft.resolve[index] = choice; }
 function detailsSetNetwork(value) { if (detailsDialog) detailsDialog.draft.network = String(value); }
+function detailsSetEnded(on) { if (detailsDialog) detailsDialog.draft.ended = !!on; }
 function detailsPickNetwork(index) {
   if (!detailsDialog) return;
   detailsDialog.draft.network = (detailsDialog.snapshot.network_candidates || [])[index] || '';
@@ -594,11 +598,14 @@ function renderDetails() {
       ${(m.network_candidates || []).length ? `<p class="browse-note">Network candidates (TMDB): ${m.network_candidates.map((n, i) =>
         `<button type="button" class="btn btn-link" onclick="detailsPickNetwork(${i})">${esc(n)}</button>`).join(', ')}</p>` : ''}</div>` : '';
   const progress = kind === 'show' && rec ? detailsProgressHtml(rec) : '';
+  // UI polish: Show ended moved here from the expanded show; part of the draft, saved by Save, discarded by Cancel.
+  const ended = kind === 'show' ? `<div class="details-field"><label class="details-check details-ended"><input type="checkbox" id="detailsEnded"${d.ended ? ' checked' : ''} onchange="detailsSetEnded(this.checked)"> Show ended</label></div>` : '';
   const lockText = restored ? 'A restore happened since this dialog opened, so it can’t save. Your entries are shown for reference; start again from the current values.'
     : dlg.stale === 'changed' ? 'This entry changed since this dialog opened, so nothing was saved. Your entries are shown for reference; start again from the current values to edit what is stored now.'
     : dlg.stale === 'unknown' ? 'The save wasn’t confirmed and won’t be sent again. Your entries are shown for reference; start again from the current values once you have checked what is stored.' : '';
   box.innerHTML = `<div class="modal-title" id="detailsTitle">Details · ${esc(dlg.title)}</div>
     ${progress}
+    ${ended}
     ${dlg.labels.length ? `<div class="details-field"><span class="modal-label">Original label${dlg.labels.length > 1 ? 's' : ''}</span><div>${dlg.labels.map(esc).join(', ')}</div></div>` : ''}
     <div class="details-field"><span class="modal-label">Genres</span>${checks('genres', 'detailsGenre', GENRES)}</div>
     ${cands}
@@ -614,6 +621,13 @@ function renderDetails() {
         : `<button class="btn btn-accent" onclick="saveDetails()"${dlg.saving ? ' disabled' : ''}>${dlg.saving ? 'Saving…' : 'Save'}</button>`}</div>`;
 }
 
+// Save sends what changed, each through its own guarded call inside one write lane: the categories
+// (library_set_metadata_b45), then Show ended (library_set_show_state_b45, shows). Not one transaction: a
+// refused or unconfirmed categories save sends nothing more. Once the categories are saved they become the
+// dialog's baseline, so Save again after a failed Show ended sends only Show ended. An unconfirmed Show
+// ended is checked against the list read again; what that read shows is reported, and a result it can't
+// settle is said to be unknown. Save with Show ended unchanged sends the categories as before (even unchanged:
+// saving marks them the owner's).
 async function saveDetails() {
   const dlg = detailsDialog;
   if (!dlg || dlg.saving || dlg.stale) return;
@@ -621,36 +635,98 @@ async function saveDetails() {
   const { metadata, problems } = detailsValidate(dlg);
   if (problems.length) { dlg.error = `Not saved: ${problems.join(' ')} Correct these and save again.`; renderDetails(); return; }
   const { session, kind, id, title } = dlg;
+  const endedChange = kind === 'show' && dlg.draft.ended !== dlg.endedBase;
+  const sendMetadata = !endedChange || !sameMetadata(metadata, dlg.snapshot);
   const lane = beginWrite(`“${title}” · details`);
   if (!lane) return;
   dlg.saving = true;
   dlg.error = '';
+  dlg.notice = '';
   renderDetails();
   const current = () => detailsDialog && detailsDialog.session === session ? detailsDialog : null; // this opening, still open
+  let metaSaved = false;
   try {
-    const res = await sbRpc('library_set_metadata_b45', { p_kind: kind, p_id: id, p_expected: dlg.snapshot, p_metadata: metadata });
-    if (kind === 'show' && res && res.show) { const rec = tvShowsById.get(id); if (rec) Object.assign(rec, res.show); }
-    else if (res && res.row) mirrorRowUpdate(id, res.row);
+    if (sendMetadata) {
+      try {
+        const res = await sbRpc('library_set_metadata_b45', { p_kind: kind, p_id: id, p_expected: dlg.snapshot, p_metadata: metadata });
+        if (kind === 'show' && res && res.show) { const rec = tvShowsById.get(id); if (rec) Object.assign(rec, res.show); }
+        else if (res && res.row) mirrorRowUpdate(id, res.row);
+        metaSaved = true;
+        const mine = current(), rec = detailsRecord();
+        if (mine && rec) mine.snapshot = metadataExpected(rec, kind); // the new baseline: never resent against the old one
+      } catch (e) {
+        const mine = current();
+        if (mine) {
+          mine.saving = false;
+          mine.error = stateErrorText(e);
+          if (stateNeedsReread(e)) mine.stale = stateUnconfirmed(e) ? 'unknown' : 'changed';
+          renderDetails();
+        }
+        // Stale or unknown: the open view is read again; the dialog keeps this draft and says
+        // whether that read succeeded. An earlier opening's answer touches no dialog.
+        const ok = await reportStateFailure(e);
+        const still = current();
+        if (still && still.stale) { still.notice = rereadText(ok).trim(); renderDetails(); }
+        return;
+      }
+    }
+    if (endedChange) {
+      const show = tvShowsById.get(id), want = dlg.draft.ended;
+      try {
+        if (!show) throw Object.assign(new Error('This show isn’t on the page any more. Nothing was changed.'), { notFound: true });
+        await sendShowState(show, showStateOf(show), { ended: want });
+      } catch (e) {
+        const mine = current();
+        const saved = metaSaved ? 'Categories saved. ' : '';
+        if (e && e.notFound) { if (mine) { mine.saving = false; mine.error = saved + e.message; renderDetails(); } renderTable(); return; }
+        if (!stateUnconfirmed(e)) {
+          // Refused: Show ended didn't change. The draft keeps the choice; Save tries it again.
+          if (mine) { mine.saving = false; mine.error = `${saved}Show ended wasn’t changed: ${stateErrorText(e)}`; renderDetails(); }
+          const ok = await reportStateFailure(e);
+          const still = current(), now = tvShowsById.get(id);
+          if (still) {
+            if (ok === true && now) still.endedBase = !!now.ended; // compared with what is stored now
+            still.notice = rereadText(ok).trim();
+            renderDetails();
+          }
+          renderFilters();
+          return;
+        }
+        // No clear answer: it may have been saved. The list read again says what it shows now.
+        if (mine) { mine.saving = false; mine.error = `${saved}Show ended wasn’t confirmed. Checking what is saved…`; renderDetails(); }
+        const ok = await reportStateFailure(e);
+        const still = current(), now = tvShowsById.get(id);
+        if (still) {
+          if (ok === true && now && !!now.ended === want) {
+            still.endedBase = want;
+            still.error = '';
+            still.notice = `${saved}The list was read again and shows Show ended ${want ? 'on' : 'off'}, as chosen.`;
+          } else if (ok === true && now) {
+            still.endedBase = !!now.ended;
+            still.error = `${saved}The list was read again and shows Show ended ${now.ended ? 'on' : 'off'}; the request may still complete later. Check it before saving again.`;
+          } else {
+            still.error = `${saved}Show ended wasn’t confirmed, and the list couldn’t be read again, so it isn’t known whether it was saved. Use Retry on the list, then check it before saving again.`;
+          }
+          renderDetails();
+        }
+        renderFilters();
+        return;
+      }
+    }
     showSaved();
     if (current()) closeDetails();
     renderFilters();
     renderTable();
-  } catch (e) {
-    const mine = current();
-    if (mine) {
-      mine.saving = false;
-      mine.error = stateErrorText(e);
-      if (stateNeedsReread(e)) mine.stale = stateUnconfirmed(e) ? 'unknown' : 'changed';
-      renderDetails();
-    }
-    // Stale or unknown: the open view is read again; the dialog keeps this draft and says
-    // whether that read succeeded. An earlier opening's answer touches no dialog.
-    const ok = await reportStateFailure(e);
-    const still = current();
-    if (still && still.stale) { still.notice = rereadText(ok).trim(); renderDetails(); }
   } finally {
+    const mine = current();
+    if (mine && mine.saving) { mine.saving = false; renderDetails(); }
     endWrite(lane);
   }
+}
+// The validated draft against the dialog's baseline (the fields the categories call stores).
+function sameMetadata(m, base) {
+  const keys = ['genres', 'forms', 'franchises', 'companies', 'genre_candidates'].concat('network' in m ? ['network'] : []);
+  return keys.every(k => JSON.stringify(m[k] ?? null) === JSON.stringify(base[k] ?? null));
 }
 
 // A film's legacy collection tags (cleaned names) and watch-with choices as filter pills.

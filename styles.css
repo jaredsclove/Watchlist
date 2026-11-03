@@ -378,8 +378,8 @@ tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-al
 .ww-tag::before { content: '👤 '; }
 .ww-tag-clickable { cursor: pointer; transition: background 0.15s, border-color 0.15s; }
 .ww-tag-clickable:hover { background: var(--purple); color: var(--bg); border-color: var(--purple); }
-.collection-tag { display: inline-block; padding: 1px 7px 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--teal-bg); color: var(--teal); border: 1px solid #0d3830; font-family: inherit; }
-.collection-tag::before { content: '🎬 '; }
+/* UI polish: a film's collection tags are pills like the categories (rounded, normal case), still teal. */
+.collection-tag { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11.5px; font-weight: 500; background: var(--teal-bg); color: var(--teal); border: 1px solid var(--teal); font-family: inherit; white-space: nowrap; }
 .collection-tag-clickable { cursor: pointer; transition: background 0.15s, border-color 0.15s; }
 .collection-tag-clickable:hover { background: var(--teal); color: var(--bg); border-color: var(--teal); }
 
@@ -398,7 +398,8 @@ tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-al
 .ww-option { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }
 .ww-option input { accent-color: var(--accent); }
 .popover-note { font-size: 11px; color: var(--text2); padding: 4px 2px; }
-.popover-action { display: block; width: 100%; text-align: left; background: none; border: 1px solid var(--teal); border-radius: var(--radius); padding: 5px 9px; font-size: 11px; color: var(--teal); cursor: pointer; }
+.popover-action { display: block; width: 100%; text-align: left; background: none; border: 1px solid var(--teal); border-radius: var(--radius); padding: 5px 9px; font-size: 13px; color: var(--teal); cursor: pointer; }
+.popover-action.popover-danger { border-color: var(--red); color: var(--red); } /* a film's Delete from library…, in its ⋯ menu */
 .popover-action:hover { background: var(--teal-bg); }
 
 .card-row-actions { display: flex; gap: 6px; align-items: center; }
@@ -504,6 +505,14 @@ tbody td { padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-al
 .library-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .library-head strong { margin-right: 4px; }
 .library-head .btn:last-child { margin-left: auto; }
+@media (max-width: 700px) {
+  /* UI polish (item 12): the title and Close share the first line; the ways to add take the next, their labels wrapping
+     inside the buttons rather than pushing the page sideways. */
+  .library-head > strong { flex: 1 1 auto; }
+  .library-head > .btn:last-child { order: 1; }
+  .library-head > .view-toggle { order: 2; flex: 1 0 100%; min-width: 0; }
+  .library-head .view-toggle-btn { flex: 1 1 0; min-width: 0; white-space: normal; padding: 6px 8px; line-height: 1.25; }
+}
 .library-members { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
 .catalog-btn { margin-left: 4px; }
 .upcoming-tag, .today-tag { display: inline-block; padding: 1px 6px; border-radius: 20px; font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle; }
@@ -746,8 +755,9 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .empty-clear { min-height: 44px; }
 
 
-  .tmdb-search-row { flex-direction: column; }
-  .tmdb-search-row input, .tmdb-search-row button { width: 100%; }
+  .tmdb-search-row { flex-wrap: nowrap; }
+  .tmdb-search-row input { min-width: 0; }
+  .tmdb-search-row button { flex: none; }
 }
 
 @media (max-width: 340px) {
@@ -905,8 +915,10 @@ td > :is(.meta-chip, .meta-more):not(:last-child) { margin-right: 4px; }
 .settings-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
 .settings-title { font-size: 20px; font-weight: 600; margin: 0; }
 .settings-title:focus, .settings-card h3:focus { outline: none; }
-.settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
-.settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* UI polish: cards at their natural heights in columns (no row gaps sized by the tallest card); DOM order is the
+   reading and Tab order, Backup & Restore first. */
+.settings-grid { columns: 3 300px; column-gap: 16px; }
+.settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; break-inside: avoid; margin-bottom: 16px; }
 .settings-card h3 { font-size: 14px; font-weight: 600; margin: 0; color: var(--text); }
 .settings-sub { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
 .settings-text { font-size: 13px; color: var(--text2); margin: 0; }
@@ -935,7 +947,8 @@ td > :is(.meta-chip, .meta-more):not(:last-child) { margin-right: 4px; }
   .settings-warn { margin-left: 2px; }
   /* The header scrolls away here, so "Saved ✓" is a small notice over the page. */
   .save-status { position: fixed; right: 12px; bottom: 12px; z-index: 150; padding: 4px 10px; font-size: 12px; background: var(--surface); border: 1px solid var(--green-border); border-radius: var(--radius); pointer-events: none; }
-  .settings-grid { grid-template-columns: 1fr; gap: 12px; }
+  .settings-grid { columns: 1; }
+  .settings-card { margin-bottom: 12px; }
   .tmdb-credit-logo { min-height: 44px; }
   .settings-title { font-size: 18px; flex-basis: 100%; }
   .settings-head .btn, .settings-actions .btn { min-height: 44px; }
@@ -1001,7 +1014,6 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 .ep-note { color: var(--text3); font-size: 12px; }
 .ep-suggest { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text2); }
 .ep-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.ep-item { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ep-check { display: inline-flex; gap: 8px; align-items: center; min-height: 32px; cursor: pointer; }
 .ep-check input { width: 18px; height: 18px; margin: 0; flex: none; } /* a long, wrapping title never shrinks the box */
 .ep-item.ep-checked .ep-check span { color: var(--text2); }
@@ -1077,4 +1089,27 @@ td > .meta-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere;
   .card-subseason-row[data-season-row]:not(.ep-panel-card) > .card-actions { margin-left: auto; }
   .card-subseason-row .season-actions { justify-content: flex-end; }
   .card-subseason-row .card-actions .watch-btn { flex: 0 1 auto; }
+}
+
+/* ── UI polish (release 2): the open Episodes list, dialogs on phones ── */
+/* Episodes: checkbox and label in aligned columns, titles wrapping in theirs; the air date at the right (under the
+   title on phones); the bulk controls a group of their own. */
+.ep-item { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; column-gap: 8px; align-items: center; }
+/* (The checkbox's label and the title button sit in display: contents focus wrappers, .season-action.) */
+.ep-item .ep-check:not(.ep-ref) { display: contents; }
+.ep-item .ep-check:not(.ep-ref) > input { grid-column: 1; justify-self: center; }
+.ep-item .ep-check:not(.ep-ref) > span { grid-column: 2; overflow-wrap: anywhere; cursor: pointer; }
+.ep-item .ep-check.ep-ref { grid-column: 1 / 3; }
+.ep-item .ep-date { grid-column: 3; white-space: nowrap; text-align: right; }
+.ep-item .ep-title { grid-column: 4; }
+.ep-bulk { background: var(--surface2); border-radius: var(--radius); padding: 6px 8px; }
+.ep-list { margin-top: 2px; }
+@media (max-width: 700px) {
+  .ep-item { grid-template-columns: 26px minmax(0, 1fr) auto; min-height: 44px; }
+  .ep-item .ep-date { grid-column: 2; grid-row: 2; text-align: left; }
+  .ep-item .ep-title { grid-column: 3; grid-row: 1; }
+  /* Dialogs: nearly the whole screen, sized to what is visible, with their actions kept in reach while the body scrolls. */
+  .modal-overlay { padding: 8px; align-items: flex-start; }
+  .modal-box { max-height: calc(100dvh - 16px); padding: 16px; }
+  .modal-box > .modal-actions:last-child { position: sticky; bottom: -16px; margin: 16px -16px -16px; padding: 10px 16px; background: var(--surface); border-top: 1px solid var(--border); }
 }

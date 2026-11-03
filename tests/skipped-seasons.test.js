@@ -55,7 +55,7 @@ test('some skipped: hidden by default; "Show skipped seasons (N)" beside Details
     assert.deepStrictEqual(seasonsIn(s), ['Season 3', 'Season 5']);
     assert.strictEqual(label(s), 'Show skipped seasons (3)');
     assert.ok(/aria-expanded="false"/.test(control(s)));
-    assert.ok(s.indexOf('Details…') < s.indexOf('data-action="skipped-seasons"') && s.indexOf('data-action="skipped-seasons"') < s.indexOf('Show ended'), 'directly after Details');
+    assert.ok(s.indexOf('Details…') < s.indexOf('data-action="skipped-seasons"') && s.indexOf('Details…') < s.indexOf('data-action="skipped-seasons"'), 'directly after Details');
     assert.ok(!/seasons are skipped|only season is skipped/.test(s), 'no all-skipped note');
   }
   app.ctx.toggleSkippedSeasons(a.show.id); await settle();

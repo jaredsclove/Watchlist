@@ -304,7 +304,8 @@ test('B6: the expanded show has the labelled Status select, a progress line and 
     assert.ok(h.includes('<label class="state-field" data-action="status"><span class="state-field-label">Status</span> <select'), `${where}: Status`);
     assert.ok(!h.includes('<label class="state-field" data-action="priority">'), `${where}: priority is in ⋯`);
     assert.ok(h.includes(`setShowStateById('${s.show.id}', { status: this.value })`) && h.includes(`setShowStateById('${s.show.id}', { priority: this.value })`), `${where}: the same writes as All TV's selects`);
-    for (const a of ['details', 'ended', 'open-resume']) assert.ok(h.includes(`data-action="${a}"`), `${where}: ${a}`);
+    for (const a of ['details', 'open-resume']) assert.ok(h.includes(`data-action="${a}"`), `${where}: ${a}`);
+    assert.ok(!h.includes('data-action="ended"'), `${where}: Show ended is in Details (UI polish)`);
   }
   assert.ok(tbody(app).includes('<span class="show-progress-line">1/4 seasons watched</span>') && !tbody(app).includes('· 1 skipped'), 'desktop: progress line; its skipped count is the control’s (EP5)');
   assert.ok(tbody(app).includes(`data-show-of="${s.show.id}"`) && tbody(app).includes(`data-season-row="${s.rows[0].id}"`), 'focus hooks on the actions row and seasons');

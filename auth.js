@@ -317,6 +317,18 @@ async function changePassword() {
   setAccountNote('Your password has been changed. Other devices stay signed in until you use “Sign out other devices”.');
 }
 const PASSWORD_MIN_LENGTH = 12;
+// UI polish: the form opens from "Change password…" (its state is the form's own hidden attribute; a redraw closes
+// it). Closing clears what was typed; opening puts focus in the first field, closing back on the button.
+function toggleAccountPassword(open) {
+  const form = document.getElementById('accountPasswordForm'), btn = document.getElementById('accountPasswordToggle');
+  if (!form || !btn) return;
+  const show = open === undefined ? form.hidden : !!open;
+  form.hidden = !show;
+  btn.setAttribute('aria-expanded', String(show));
+  if (!show) ['accountCurrentPassword', 'accountNewPassword', 'accountNewPassword2'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const target = show ? document.getElementById('accountCurrentPassword') : btn;
+  if (target && typeof target.focus === 'function') target.focus();
+}
 
 function accountSectionHtml() {
   return `<section class="settings-card" aria-labelledby="settingsAccountTitle">
@@ -324,15 +336,16 @@ function accountSectionHtml() {
     <p class="settings-text">Signed in as <strong>${esc(pageUser ? pageUser.email || pageUser.id : '')}</strong>. This browser stays signed in until you sign out.</p>
     <div class="settings-actions"><button class="btn settings-signout" onclick="signOutHere()">Sign out on this device</button>
       <button class="btn settings-signout-others" onclick="signOutOtherDevices()">Sign out other devices</button></div>
-    <div class="settings-sub">Change password</div>
-    <form class="account-password" onsubmit="event.preventDefault(); changePassword()">
+    <div class="settings-actions"><button type="button" class="btn" id="accountPasswordToggle" aria-expanded="false" aria-controls="accountPasswordForm" onclick="toggleAccountPassword()">Change password…</button></div>
+    <form class="account-password" id="accountPasswordForm" hidden onsubmit="event.preventDefault(); changePassword()">
       <label class="auth-label" for="accountCurrentPassword">Current password</label>
       <input id="accountCurrentPassword" class="auth-input" type="password" autocomplete="current-password">
       <label class="auth-label" for="accountNewPassword">New password (at least ${PASSWORD_MIN_LENGTH} characters)</label>
       <input id="accountNewPassword" class="auth-input" type="password" autocomplete="new-password">
       <label class="auth-label" for="accountNewPassword2">New password again</label>
       <input id="accountNewPassword2" class="auth-input" type="password" autocomplete="new-password">
-      <div class="settings-actions"><button class="btn" type="submit">Change password</button></div>
+      <div class="settings-actions"><button class="btn" type="submit">Change password</button>
+        <button type="button" class="btn btn-link" onclick="toggleAccountPassword(false)">Cancel</button></div>
     </form>
     <p class="settings-text" id="settingsAccountNote" role="status">${esc(accountNote)}</p>
   </section>`;
