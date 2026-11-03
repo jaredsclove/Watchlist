@@ -470,7 +470,7 @@ test('next unwatched: the first listed episode without a mark (gaps included), f
   app.ctx.toggleEpisodes(lib.s2.id); await settle();
   assert.match(text(seasonRow(app, lib.s2)), /· 2\/4 episodes watched ▸ Episodes Next unwatched: E2/, 'with Episodes on the progress line, then its own, from the cache once closed');
   assert.doesNotMatch(html(app) + card(app), /Title 2/, 'no title while titles are hidden by default');
-  assert.match(card(app), /· 2\/4 episodes watched<\/span> <span class="season-action" data-action="episodes">[^]*?<\/span> <span class="ep-next">Next unwatched: E2</, 'the phone card has the same order');
+  assert.match(card(app), /· 2\/4 episodes watched<\/span> <span class="season-action" data-action="episodes">[^]*?<\/span> <span class="ep-next-line"><span class="ep-next">Next unwatched: E2</, 'the phone card has the same order');
   await open(app, lib.s2); // a mark is set from the open list
   await app.ctx.setEpisodeMark(lib.s2.id, 9002, true); await settle();
   assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E4', 'marking E2 moves it past the marked E3');
@@ -540,6 +540,100 @@ test('next unwatched: in Currently Watching and in a collection (row and phone c
   assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E3 — Title 3', 'a collection’s show entry');
   assert.ok(card(app).includes('Next unwatched: E3 — Title 3'), 'and its phone card');
   assert.deepStrictEqual(app.writes(), [], 'reading only');
+});
+
+// ── Mark E9 watched (EP4) ──
+const quickIn = s => (s.match(/<span class="season-action" data-action="ep-next-mark">[\s\S]*?<\/span>/) || [''])[0];
+const quickLabel = s => text(quickIn(s)).trim();
+function cachedList(storage, n = 4) {
+  storage.setItem(userKeyOf('watchlist-episode-lists'), JSON.stringify({ '95396:2': { ids: [9001, 9002, 9003, 9004].slice(0, n), numbers: [1, 2, 3, 4].slice(0, n), names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'].slice(0, n) } }));
+  return storage;
+}
+const rpcEpisodes = app => rpcs(app, 'library_set_episode_marks').map(r => r.body.p_episodes);
+test('Mark E2 watched: beside the line on the expanded row and phone card, named for that one episode; not on the flat Seasons list; hidden with the line', async () => {
+  const { app, lib } = await boot({ storage: cachedList(memoryStorage()), marks: l => [mark(l.s2, 9001, 1), mark(l.s1, 8001, 1)] });
+  const row = seasonRow(app, lib.s2);
+  assert.strictEqual(quickLabel(row), 'Mark E2 watched');
+  assert.match(row, /<span class="ep-next-line"><span class="ep-next">Next unwatched: E2<\/span> <span class="season-action" data-action="ep-next-mark"><button type="button" class="btn btn-link ep-next-mark" aria-label="Mark E2 watched: episode 2 of Season 2 only"/);
+  assert.ok(quickIn(row).includes('onkeydown="if (event.repeat) event.preventDefault()"'), 'a held key’s repeats don’t press it again');
+  assert.ok(quickIn(row).includes(`markNextEpisode('${lib.s2.id}', 9002)`), 'it carries the episode it names');
+  assert.match(card(app), /<span class="ep-next-line"><span class="ep-next">Next unwatched: E2<\/span> <span class="season-action" data-action="ep-next-mark">/, 'the phone card too');
+  assert.match(text(row), /Mark watched/, 'the season’s own Mark watched stays, separate');
+  assert.strictEqual(quickIn(seasonRow(app, lib.s1)), '', 'a watched season: no line, no button');
+  assert.strictEqual(quickIn(seasonRow(app, lib.s3)), '', 'a season without marks: no line, no button');
+  app.ctx.setAllTvPresentation('seasons'); await settle();
+  assert.ok((html(app) + card(app)).includes('Next unwatched: E2'), 'the flat Seasons list keeps the line');
+  assert.ok(!(html(app) + card(app)).includes('ep-next-mark'), 'but not the button');
+  app.ctx.setAllTvPresentation('shows'); await settle();
+  assert.deepStrictEqual(app.writes(), [], 'showing it writes nothing');
+});
+
+test('Mark E2 watched: marks only that episode through the one change, the progress and line move on, the list stays closed and focus stays; the last one removes both and focus goes to Episodes', async () => {
+  for (const layout of ['tbody', 'cardList']) {
+    const { app, lib } = await boot({ storage: cachedList(memoryStorage()), marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9003, 3)] });
+    const dom = makeMiniDom(app);
+    dom.hide(layout === 'tbody' ? 'cardList' : 'tbody');
+    const sel = `[data-season-row="${lib.s2.id}"] [data-action="ep-next-mark"] button`;
+    dom.focus(layout, sel);
+    await app.ctx.markNextEpisode(lib.s2.id, 9002); await settle();
+    assert.deepStrictEqual(rpcEpisodes(app), [[{ tmdb_episode_id: 9002, episode_number: 2 }]], `${layout}: one episode, the one named`);
+    assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002, 9003]);
+    assert.match(text(seasonRow(app, lib.s2)), /· 3\/4 episodes watched ▸ Episodes Next unwatched: E4 Mark E4 watched/, `${layout}: past the marked E3`);
+    assert.strictEqual(app.get('episodePanel'), null, `${layout}: Episodes not opened`);
+    assert.strictEqual(dom.active(), dom.in(layout, sel), `${layout}: focus on the button, now for E4`);
+    app.run('episodeNextMark = null');
+    await app.ctx.markNextEpisode(lib.s2.id, 9004); await settle();
+    assert.match(text(seasonRow(app, lib.s2)), /· 4\/4 episodes watched ▸ Episodes/, `${layout}: the last one: 4/4`);
+    assert.ok(!(html(app) + card(app)).includes('ep-next'));
+    assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s2.id).watched, false, `${layout}: nothing completes the season`);
+    assert.strictEqual(dom.active(), dom.in(layout, `[data-season-row="${lib.s2.id}"] [data-action="episodes"] button`), `${layout}: focus on the season’s Episodes toggle, not the show’s Mark watched`);
+  }
+});
+
+test('Mark E2 watched: further clicks while it is saved and just after send nothing (no lane message); a click naming an episode no longer next sends nothing; a later click marks the next', async () => {
+  const { app, lib } = await boot({ storage: cachedList(memoryStorage()), marks: l => [mark(l.s2, 9001, 1)] });
+  const held = app.hold(r => r.url.endsWith('/rpc/library_set_episode_marks'));
+  const first = app.ctx.markNextEpisode(lib.s2.id, 9002);
+  await held.reached;
+  assert.strictEqual(quickLabel(seasonRow(app, lib.s2)), 'Mark E3 watched', 'shown at once');
+  await app.ctx.markNextEpisode(lib.s2.id, 9003); // the double click's second half, on the redrawn button
+  held.release(); await first; await settle();
+  await app.ctx.markNextEpisode(lib.s2.id, 9003); // just after it settled
+  assert.deepStrictEqual(rpcEpisodes(app), [[{ tmdb_episode_id: 9002, episode_number: 2 }]]);
+  assert.doesNotMatch(banners(app), /still being saved/, 'ignored, not refused');
+  app.run('episodeNextMark.until = 0');
+  await app.ctx.markNextEpisode(lib.s2.id, 9002); await settle();
+  assert.strictEqual(rpcEpisodes(app).length, 1, 'E2 is no longer next: nothing sent');
+  await app.ctx.markNextEpisode(lib.s2.id, 9003); await settle();
+  assert.deepStrictEqual(rpcEpisodes(app)[1], [{ tmdb_episode_id: 9003, episode_number: 3 }]);
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002, 9003]);
+});
+
+test('Mark E2 watched: marked on another device already, harmless and the line moves on; refusals and a season changed elsewhere put back what was shown; another change in progress refuses it', async () => {
+  const { app, lib } = await boot({ storage: cachedList(memoryStorage()), marks: l => [mark(l.s2, 9001, 1)] });
+  app.store.episode_marks.push(mark(lib.s2, 9002, 2), mark(lib.s2, 9003, 3)); // another device
+  await app.ctx.markNextEpisode(lib.s2.id, 9002); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002, 9003]);
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E4', 'the answer’s marks: E4 next');
+  app.run('episodeNextMark = null');
+  app.refuseNext(r => r.url.endsWith('/rpc/library_set_episode_marks'), 'P0001', 'season_locked: This season is marked watched or skipped, so its episodes can\'t be changed. Change that first. Nothing was changed.');
+  await app.ctx.markNextEpisode(lib.s2.id, 9004); await settle();
+  assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E4', 'refused: put back');
+  assert.match(banners(app), /marked watched or skipped/);
+  app.run('episodeNextMark = null');
+  app.store.watchlist_items.find(r => r.id === lib.s2.id).watched = true; // marked watched elsewhere
+  await app.ctx.markNextEpisode(lib.s2.id, 9004); await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002, 9003], 'the expected values refuse it');
+  app.store.watchlist_items.find(r => r.id === lib.s2.id).watched = false;
+  app.run('episodeNextMark = null');
+  const g = app.hold(r => r.url.includes('/rpc/') && !r.url.endsWith('/rpc/library_set_episode_marks'));
+  const other = app.ctx.toggleWatch(lib.s3.id); // another change in progress
+  await g.reached;
+  await app.ctx.markNextEpisode(lib.s2.id, 9004);
+  assert.match(banners(app), /still being saved/, 'the lane refuses it as any other change');
+  g.release(); await other; await settle();
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002, 9003], 'nothing marked');
+  assert.strictEqual(rpcEpisodes(app).length, 3, 'nothing sent');
 });
 
 // ── Collections and the phone ──

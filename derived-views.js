@@ -1324,12 +1324,21 @@ function hiddenSkippedTarget(rec, present) {
   return present(t) ? t : null;
 }
 
+// EP4: the recorded Mark E9 watched is gone (its season's last listed episode is marked, or the season changed):
+// that season's Episodes toggle, not the chain's next control (a show's Mark watched would take a held key's repeats).
+function goneNextMarkTarget(rec, present) {
+  const h = rec.hook;
+  if (!h || h.kind !== 'action' || h.value !== 'ep-next-mark' || !h.season || present(h)) return null;
+  const t = { ...h, value: 'episodes' };
+  return present(t) ? t : null;
+}
+
 function applyListFocus(rec, listing) {
   if (!rec || !documentHasFocus()) return; // never pull focus back from outside the app
   const box = visibleListBox(rec.container);
   if (!box) return;
   const present = x => !!focusTargetElement(box, x);
-  const t = hiddenSkippedTarget(rec, present) || focusChainTarget(rec, listing, present);
+  const t = hiddenSkippedTarget(rec, present) || goneNextMarkTarget(rec, present) || focusChainTarget(rec, listing, present);
   // Never back to the page: the first visible section control, item or message.
   // (Section toggles are buttons; headings, item titles and messages take focus from the page.)
   const el = focusTargetElement(box, t)
