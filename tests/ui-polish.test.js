@@ -6,7 +6,7 @@
 // views' Categories column widens, so its budgets are the narrow ones.
 // Run from the repo root: node tests/ui-polish.test.js
 const assert = require('assert');
-const { createApp, runner, settle } = require('./app-harness');
+const { createApp, runner, settle, userKeyOf } = require('./app-harness');
 const { makeMiniDom } = require('./mini-dom');
 
 const T = runner('ui-polish');
@@ -177,6 +177,58 @@ test('All Movies’ count: "3 films · 1 watched"; filtered, "1 of 3 films · 1 
   assert.strictEqual(text(app.el('statsRow').innerHTML), '3 films · 1 watched');
   app.el('fWatch').value = 'watched'; app.ctx.renderTable(); await settle();
   assert.strictEqual(text(app.el('statsRow').innerHTML), '1 of 3 films · 1 of 3 watched');
+});
+
+// ─── UI refine ────────────────────────────────────────────────────────────────
+test('UI refine: TMDB search looks like library search (same field and icon) with an explicit Search button; library search has none', async () => {
+  const app = await boot(all(many()));
+  app.ctx.switchView('alltv'); await settle();
+  const f = app.el('filtersRow').innerHTML;
+  assert.match(f, /<input class="search-input" id="fSearch" type="text" placeholder="Search library…"/, 'library search: the shared field');
+  assert.match(f, /<form class="tmdb-quick" role="search" onsubmit="event.preventDefault\(\); tmdbQuickSubmit\('tv'\)"><input id="tmdbQuickQuery" class="search-input" type="search"[^>]*><button type="submit" class="btn tmdb-quick-go" aria-label="Search TMDB">Search<\/button><\/form>/, 'TMDB: the same field, then Search; Enter submits the form');
+  assert.strictEqual((f.match(/type="submit"/g) || []).length, 1, 'only TMDB search has a submit button');
+  assert.ok(!f.includes('⏎'));
+});
+
+test('UI refine: show rows name a released up-next season without its past date; upcoming ones keep date or TBA; flat lists and Coming Soon keep dates', async () => {
+  const released = show({ title: 'Released', status: 'watching' }, [{ num: 1, w: true, date: day(-200) }, { num: 2, date: day(-20) }]);
+  const later = show({ title: 'Later', status: 'watching' }, [{ num: 1, w: true, date: day(-200) }, { num: 2, date: day(40) }]);
+  const tba = show({ title: 'Tba', status: 'watching' }, [{ num: 1, w: true, date: day(-200) }, { num: 2, date: '2099-01-01', display: 'TBA' }]);
+  const toWatch = show({ title: 'Untouched' }, [{ num: 1, date: day(-20) }]);
+  const app = await boot(all(released, later, tba, toWatch));
+  const nextCell = id => (rowOf(app, id).match(/<td class="date-cell"[^>]*>([\s\S]*?)<\/td>/) || [])[1]; // (a caught-up row's spans three columns)
+  for (const view of ['watching', 'alltv']) {
+    app.ctx.switchView(view); await settle();
+    assert.strictEqual(nextCell(released.show.id), 'Season 2', `${view}: released, no date`);
+    assert.ok(!cardOf(app, released.show.id).includes(disp(day(-20))), `${view}: nor in the card`);
+    assert.strictEqual(nextCell(later.show.id), `Season 2 · ${disp(day(40))}<span class="upcoming-tag">Upcoming</span>`, `${view}: upcoming keeps its date`);
+    assert.ok(nextCell(tba.show.id).startsWith('Season 2 · Date TBA'), `${view}: TBA kept`);
+  }
+  assert.strictEqual(nextCell(toWatch.show.id), 'Season 1', 'All TV: a To Watch show’s released season too');
+  app.ctx.setAllTvPresentation('seasons'); await settle();
+  assert.ok(app.el('tbody').innerHTML.includes(`<td class="date-cell">${disp(day(-20))}</td>`), 'the flat Seasons list keeps the date');
+  app.ctx.switchView('comingsoon'); await settle();
+  assert.ok(app.el('tbody').innerHTML.includes('Later') && app.el('tbody').innerHTML.includes(disp(day(40)).replace(/, \d{4}$/, '')), 'Coming Soon keeps its dates');
+});
+
+test('UI refine: episode progress names its season ("S2 · …"); a long name is kept whole and may wrap; season progress is unchanged', async () => {
+  const app = await boot(all());
+  const short = season => app.ctx.seasonShortLabel({ season });
+  assert.strictEqual(short('Season 35'), 'S35');
+  assert.strictEqual(short('Specials'), 'Specials');
+  assert.strictEqual(short('Season 5 (Part 1): The Long Way Round'), 'Season 5 (Part 1): The Long Way Round', 'never dropped');
+  assert.strictEqual(app.ctx.seasonMarkLabel({ season: 'Season 5 (Part 1): The Long Way Round' }), 'Mark season watched', 'the button may stay short');
+  const named = show({ title: 'Parts', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { season: 'Season 2 (Part 1): A Long Way', num: 2, date: day(-20) }]);
+  const plain = show({ title: 'Plain', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-20) }]);
+  const data = all(named, plain);
+  const mk = (r, ep, num) => ({ id: nid('m'), season_id: r.id, tmdb_episode_id: ep, episode_number: num });
+  const app2 = await createApp({ rows: data.rows, tvShows: data.shows, episodeMarks: [mk(named.rows[1], 11, 1), mk(plain.rows[1], 21, 1), mk(plain.rows[1], 22, 2)] });
+  const progress = id => text(rowOf(app2, id).split('<td class="card-date">')[1] || '');
+  assert.strictEqual(progress(plain.show.id), 'S2 · 2 episodes marked', 'S-number; the conservative fallback is kept');
+  assert.match(rowOf(app2, named.show.id), /<td class="card-date"><span class="progress-season">Season 2 \(Part 1\): A Long Way<\/span> · 1 episode marked/, 'a long name whole, in a wrapping span');
+  const seasonsOnly = show({ title: 'Seasons', status: 'watching' }, [{ num: 1, w: true, date: day(-90) }, { num: 2, date: day(-20) }]);
+  const app3 = await boot(all(seasonsOnly));
+  assert.strictEqual(text(rowOf(app3, seasonsOnly.show.id).split('<td class="card-date">')[1] || ''), '1/2 seasons watched', 'season progress unchanged');
 });
 
 T.run();

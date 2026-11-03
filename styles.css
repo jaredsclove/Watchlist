@@ -168,9 +168,10 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
   padding: 6px 10px 6px 28px;
   color: var(--text);
   font-size: 13px;
+  font-family: inherit;
   outline: none;
   width: 220px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23555d77' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237880a0' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: 8px center;
   transition: border-color 0.15s;
@@ -181,7 +182,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 .search-input::placeholder { color: var(--text3); }
 @media (prefers-color-scheme: light) {
   .search-input {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a90a3' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7186' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
   }
 }
 select { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; color: var(--text); font-size: 13px; cursor: pointer; outline: none; }
@@ -196,7 +197,8 @@ table { width: 100%; border-collapse: collapse; }
 #desktopTable th:first-child { width: 31%; }
 #desktopTable th:nth-child(2) { width: 27%; }
 /* EP5, UI polish: show views give Up next the room, so an episode title wraps there; categories keep one line (+N). */
-.next-ep-title { display: block; white-space: normal; overflow-wrap: anywhere; font-size: 13px; color: var(--text2); }
+.next-ep-title { display: block; white-space: normal; overflow-wrap: anywhere; font: inherit; color: inherit; } /* the same type as the season / episode line */
+.progress-season { white-space: normal; overflow-wrap: anywhere; } /* a long season name wraps in the nowrap progress cell */
 thead th { text-align: left; padding: 3px 8px; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .year-group td { background: var(--surface); padding: 5px 12px; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border); border-top: 1px solid var(--border); }
 
@@ -638,17 +640,15 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
    same search. In a collection the toggles take more of the row, so it needs a wider page. */
 .tmdb-quick { display: none; position: relative; }
 @media (min-width: 1100px) {
-  .tmdb-quick { display: flex; flex: 0 1 210px; min-width: 180px; }
-  .tmdb-quick input { flex: 1; min-width: 0; height: 34px; padding: 6px 30px 6px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: inherit; font-size: 13px; outline: none; }
-  .tmdb-quick input:hover { border-color: var(--border2); }
-  .tmdb-quick input:focus { border-color: var(--accent); }
-  .tmdb-quick-go { position: absolute; inset: 2px 2px 2px auto; width: 28px; background: none; border: 0; border-radius: 4px; color: var(--text2); cursor: pointer; }
-  .tmdb-quick-go:hover { color: var(--accent); }
-  .filter-line .search-input { flex: 1 1 200px; max-width: 340px; }
-  .tmdb-quick { flex: 1 1 200px; max-width: 300px; }
+  /* UI refine: the two searches look alike and stay compact together (library ~220 px, TMDB with its Search button
+     ~300 px), so the toolbar doesn't stretch them across the page. */
+  .tmdb-quick { display: flex; gap: 6px; flex: 0 1 300px; min-width: 230px; }
+  .tmdb-quick > .search-input { flex: 1 1 auto; width: auto; min-width: 0; height: 34px; }
+  .tmdb-quick-go { flex: none; height: 34px; padding: 0 12px; }
+  .filter-line > .search-input { flex: 0 1 220px; }
   .filters:has(.browse-controls) .view-toggle-btn { padding: 6px 10px; }
-  .filters:has(.browse-controls) .search-input { flex-basis: 160px; }
-  .filters:has(.browse-controls) .tmdb-quick { flex-basis: 170px; }
+  .filters:has(.browse-controls) .filter-line > .search-input { flex-basis: 180px; }
+  .filters:has(.browse-controls) .tmdb-quick { flex-basis: 270px; }
 }
 .tmdb-result-item:focus-visible, #tmdbInlinePreview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -1070,7 +1070,11 @@ body.signed-out #filtersRow, body.signed-out #statsRow, body.signed-out #desktop
 
 /* ── UI polish (release 1): show views' columns, the default-status note, season actions, cards ── */
 #desktopTable th.col-cats { width: 21%; min-width: 170px; }
-#desktopTable th.col-next { width: 22%; }
+/* UI refine: a narrower Up next / Next (it wraps now, and released seasons carry no date) brings the action to its target;
+   the title takes the width, so long titles wrap less. */
+#desktopTable th.col-next { width: 16%; min-width: 150px; }
+#desktopTable:has(th.col-next) th:first-child { width: 33%; }
+.derived-show-row > td.date-cell { white-space: normal; }
 td > :is(.meta-chip, .meta-more) { margin-bottom: 2px; }
 td > .meta-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; } /* an unusually long label wraps inside its pill, never widening the table */
 .filter-default { font-size: 12px; color: var(--text2); }

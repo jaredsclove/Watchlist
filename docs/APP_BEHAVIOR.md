@@ -20,8 +20,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   toolbar (`.list-toolbar`: toggles, Search, scope selects, Filters, + Add, the count), wrapping in page order. The
   status filter (default "All except Skipped") and a collection's Separate / Combined are in the Filters panel; while
   the status filter is on its default, the chip row says "Status: All except Skipped", and another value is a chip and
-  counts on Filters. At 1100 px and wider, "Search TMDB to add" sits right after library search, the two sharing the
-  width (collections too), sent only by Enter or its button: it fills
+  counts on Filters. At 1100 px and wider, "Search TMDB to add" sits right after library search (collections too),
+  styled the same (field, search icon, size) and kept compact together (about 220 px and 300 px), with an explicit Search
+  button; library search filters as you type and has none. TMDB search is sent only by Enter or Search: it fills
   the + Add panel's own search, and adding stays that panel's, confirmed in its preview. Lists are tables from 1100 px, cards
   below it, in two columns between 701 and 1099 px. A collection's title, note, Back and Edit share a compact header; its tabs
   are one scrolling row at every width. In a collection, TMDB adds to the library first, then the existing "Add to collections"
@@ -64,14 +65,18 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   show views' column is at its minimum), the first always whole, then a "+N" button that shows the rest inline and reads
   "Fewer" while they are shown (page memory per row, reset on reload; focus stays on it). An unusually long label may wrap.
   Cards list every pill; every pill filters as before.
+- **Show rows' Up next / Next (UI refine):** a released season reads by its label alone ("Season 2"); its premiere is
+  in its expanded row, its Episodes summary and Coming Soon. An upcoming season keeps its date or TBA text and Upcoming.
+  Flat Seasons lists and Coming Soon keep their dates. The column is narrower and wraps, so the action sits beside it.
 - **Episode-aware show rows (EP5):** a show row's Up next, Action and Progress describe one target, its up-next season
   as chosen before (Earlier seasons included; marks never choose it). When the row offers an action (Watching, not up to
   date, the season aired) and that season has marks: with its next unwatched episode known, "Season 35 · Episode 9" (the
-  title below while titles are shown by default), "Mark E9 watched" (the same one-episode change, ignoring a held key's
-  repeats and, for a second after a row action settles, further presses on that show's row action) and "8/12 episodes
-  watched" with its bar; with every listed episode marked, "All listed episodes watched", no row action (the season is
+  title below in the same type, while titles are shown by default), "Mark E9 watched" (the same one-episode change,
+  ignoring a held key's repeats and, for a second after a row action settles, further presses on that show's row action)
+  and "S35 · 8/12 episodes watched" with its bar (episode progress names its season: "S35", or a season's whole name,
+  which may wrap); with every listed episode marked, "All listed episodes watched", no row action (the season is
   completed from its expanded row or its list), focus going to the show's expand button; with no numbered list on this
-  device, the season and date, Mark S4 watched and the existing episode progress ("N episodes marked", or N/T from a
+  device, the season, Mark S4 watched and the existing episode progress ("N episodes marked", or N/T from a
   count only while the marks are fewer), a bar only with a known total. Anything else reads as before. While the row shows
   a season's episodes, that season's expanded row has only Episodes, Mark S4 watched and Skip (its premiere is in its
   open list's summary), and the expanded show carries the season progress line; that line leaves the skipped count to

@@ -638,7 +638,7 @@ test('Up to date only for a Watching show; other statuses get a neutral Next; da
   setFilter(app, 'fStatus', 'all');
   const rowOf = t => html(app).split('<tr').find(r => r.includes(`<span class="show-title">${t}</span>`));
   assert.ok(rowOf('Andor').includes('Up to date') && rowOf('Andor').includes('>Season 2 · TBA 2027') && !rowOf('Andor').includes('Next:'), 'B6: no prefix; stored TBA text (with its year) is kept');
-  assert.ok(!rowOf('The Bear').includes('Up to date') && rowOf('The Bear').includes('>Season 2 · ') && !rowOf('The Bear').includes('Next:'));
+  assert.ok(!rowOf('The Bear').includes('Up to date') && />Season 2</.test(rowOf('The Bear')) && !rowOf('The Bear').includes('Next:'), 'released: no past date (UI refine)');
   assert.ok(rowOf('Bad Date Film').includes('date needs review') && !rowOf('Bad Date Film').includes('Upcoming'));
   assert.strictEqual(rowOf('The Mandalorian &amp; Grogu').includes('Upcoming'), day(0) < '2026-05-22');
   await openCol(app, B['sheridan']);

@@ -73,7 +73,8 @@ test('the field: in the toolbar before + Add, named, Enter or its button only; t
   const f = app.el('filtersRow').innerHTML;
   assert.ok(f.includes('<form class="tmdb-quick" role="search" onsubmit="event.preventDefault(); tmdbQuickSubmit(\'tv\')">'));
   assert.ok(f.includes('placeholder="Search TMDB to add…" aria-label="Search TMDB to add"'));
-  assert.ok(f.includes('<button type="submit" class="tmdb-quick-go" aria-label="Search TMDB">'));
+  assert.ok(f.includes('<input id="tmdbQuickQuery" class="search-input" type="search"'), 'styled as library search (UI refine)');
+  assert.ok(f.includes('<button type="submit" class="btn tmdb-quick-go" aria-label="Search TMDB">Search</button>'), 'an explicit Search button');
   assert.ok(f.indexOf('tmdb-quick') < f.indexOf('add-open-btn'), 'page order');
   assert.ok(f.includes('oninput="tmdbQuickText = this.value"'), 'typing only keeps the text');
   assert.ok(!/oninput="[^"]*(searchTMDB|tmdbFetch|tmdbQuickSubmit)/.test(f));
@@ -94,7 +95,7 @@ test('the library search keeps its scope and gets its name; the visible text is 
 
 test('the field is desktop only (beside library search everywhere there, collections included); phones have one search field', () => {
   assert.match(css, /\.tmdb-quick \{ display: none;/);
-  assert.match(css, /@media \(min-width: 1100px\) \{\s*\.tmdb-quick \{ display: flex;/);
+  assert.match(css, /@media \(min-width: 1100px\) \{[\s\S]*?\.tmdb-quick \{ display: flex;/);
   assert.ok(!/\.tmdb-quick \{ display: none; \}\s*\}/.test(css.slice(css.indexOf('@media (min-width: 1100px)'))), 'no width above 1100 px hides it');
 });
 

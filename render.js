@@ -138,8 +138,8 @@ function categoryBudget() {
   const wide = !CATEGORY_WIDE || CATEGORY_WIDE.matches;
   // Measured at 1400 / 1100 px: about 6.3 px a character, plus each pill's padding (CATEGORY_PILL_COST).
   if (activeViewId === 'watching') return wide ? 34 : 26;
-  if (activeViewId === 'alltv' && allTvPresentation === 'shows') return wide ? 28 : 22;
-  if (typeof isBrowseCollectionView === 'function' && isBrowseCollectionView(activeViewId)) return wide ? 28 : 22;
+  if (activeViewId === 'alltv' && allTvPresentation === 'shows') return wide ? 28 : 26;
+  if (typeof isBrowseCollectionView === 'function' && isBrowseCollectionView(activeViewId)) return wide ? 28 : 26;
   return wide ? 40 : 30; // flat Seasons lists, Coming Soon, All Movies (the wider second column)
 }
 function toggleCategoryOverflow(owner) {
@@ -829,9 +829,15 @@ document.addEventListener('focusin', function(e) {
 // Specials or another short label by name ("Mark Volume 2 watched"), else "Mark season watched". Its accessible name
 // always names the season in full.
 function seasonMarkLabel(r) {
+  const label = String(r.season || '').trim(), short = seasonShortLabel(r);
+  if (short !== label || label.length <= 14) return label ? `Mark ${short} watched` : 'Mark season watched';
+  return 'Mark season watched';
+}
+// A season named briefly and never dropped (UI refine): "S35" for "Season 35"; any other label (Specials, "Volume 2",
+// "Season 5 (Part 1)") whole, so a part or a named season stays identifiable.
+function seasonShortLabel(r) {
   const label = String(r.season || '').trim(), m = /^Season (\d+)$/i.exec(label);
-  if (m) return `Mark S${Number(m[1])} watched`;
-  return label && label.length <= 14 ? `Mark ${label} watched` : 'Mark season watched';
+  return m ? `S${Number(m[1])}` : label || 'Season';
 }
 function seasonWatchControlHtml(r, opts, compact) {
   if (isOffList(r)) return ''; // a skipped season has no watch control (its Keep says why)

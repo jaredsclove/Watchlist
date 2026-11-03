@@ -210,7 +210,7 @@ test('Up to date only for a Watching show (today’s rule; Ended plays no part):
   const rowOf = title => app.el('tbody').innerHTML.split('<tr').find(x => x.includes(`show-title">${title}<`));
   // B6: no "Next:" prefix in the Next column (the heading says it); wording only.
   assert.ok(rowOf('W').includes('s-caughtup">Up to date') && rowOf('W').includes(`<td class="date-cell">Season 2 · ${disp(day(20))}<span class="upcoming-tag">Upcoming`) && !rowOf('W').includes('Next:'));
-  assert.ok(rowOf('P').includes(`Season 2 · ${disp(day(-5))}`) && rowOf('P').includes('markSeasonFromRow('), 'in progress: Mark season watched on up next');
+  assert.ok(rowOf('P').includes('<td class="date-cell">Season 2</td>') && !rowOf('P').includes(disp(day(-5))) && rowOf('P').includes('markSeasonFromRow('), 'in progress: the released season without its past date (UI refine); Mark S2 watched');
   assert.ok(!rowOf('P').includes('Next: '), 'an in-progress Watching show keeps the Watching up-next label');
   assert.ok(rowOf('C').includes('Caught up · Ended'), rowOf('C'));
   assert.ok(rowOf('F').includes(`<td class="date-cell">Season 1 · ${disp(day(30))}<span class="upcoming-tag">Upcoming`) && !rowOf('F').includes('Up to date'));
@@ -227,7 +227,7 @@ test('up next uses the whole show, not a filtered subset; Specials never move pr
   const app = await openAllTv(all(s));
   const item = app.ctx.deriveAllTv(app.get('derivedData').rows, app.get('tvShowsById'), TODAY).items[0];
   assert.strictEqual(item.upNext.season, 'Season 2');
-  assert.ok(app.el('tbody').innerHTML.includes(`<td class="date-cell">Season 2 · ${disp(day(-1))}</td>`), 'aired: no Upcoming tag');
+  assert.ok(app.el('tbody').innerHTML.includes('<td class="date-cell">Season 2</td>'), 'aired: no Upcoming tag, and no past date (UI refine)');
 });
 
 // ─── Expansion and edits ─────────────────────────────────────────────────────
@@ -296,7 +296,7 @@ test('Watched and Skip from All TV: one function call each by row id, mirrored i
   await app.ctx.toggleWatch(s.rows[0].id); await settle();
   assert.deepStrictEqual(app.writes().map(r => r.url.split('/rest/v1/')[1]), ['rpc/set_season_watched']);
   assert.strictEqual(app.get('derivedData.rows').find(r => r.id === s.rows[0].id).watched, true, 'mirrored into the view’s rows');
-  assert.ok(app.el('tbody').innerHTML.includes('Season 2 · '), 'up next advanced');
+  assert.ok(app.el('tbody').innerHTML.includes('<td class="date-cell">Season 2</td>'), 'up next advanced');
   await app.ctx.setSeasonSkipped(s.rows[1].id, true); await settle();
   assert.strictEqual(app.writes()[1].body.p_row_id, s.rows[1].id);
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === s.rows[1].id).skipped, true);

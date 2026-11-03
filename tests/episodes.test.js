@@ -554,7 +554,7 @@ test('EP5 show row: Up next, action and progress describe the up-next season’s
     assert.ok(row.includes('<span class="next-ep-title">Title 3</span>'), `${where}: the title on its own quieter line`);
     assert.strictEqual(cells[actionCol], 'Mark E3 watched', `${where}: the action`);
     assert.ok(row.includes(`markNextEpisode('${lib.s2.id}', 9003, '${lib.sev.id}')`) && row.includes(`data-shortcut-show="${lib.sev.id}"`) && row.includes('onkeydown="if (event.repeat) event.preventDefault()"'), `${where}: the existing episode change, the row's focus hook, no held-key repeats`);
-    assert.strictEqual(cells[actionCol + 1], '2/4 episodes watched', `${where}: episode progress`);
+    assert.strictEqual(cells[actionCol + 1], 'S2 · 2/4 episodes watched', `${where}: episode progress, naming its season (UI refine)`);
     assert.ok(row.includes('mini-progress-fill" style="width:50%"'), `${where}: a matching bar`);
     assert.ok(c.includes('Season 2 · Episode 3') && c.includes('Mark E3 watched') && c.includes('2/4 episodes watched'), `${where}: the card`);
   };
@@ -590,16 +590,16 @@ test('EP5 show row: every other target keeps the season presentation; nothing is
     assert.deepStrictEqual([cells[2], cells[4], cells[5]], expect, o.why);
     return { app, lib };
   };
-  await run({ why: 'no marks: the season, Mark season watched, season progress' }, ['Season 2 · Jan 1, 2022', 'Mark S2 watched', '1/3 seasons watched']);
-  await run({ why: 'marks, the list unknown: N marked, no bar', marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2)] }, ['Season 2 · Jan 1, 2022', 'Mark S2 watched', '2 episodes marked']);
+  await run({ why: 'no marks: the season, Mark season watched, season progress' }, ['Season 2', 'Mark S2 watched', '1/3 seasons watched']);
+  await run({ why: 'marks, the list unknown: N marked, no bar', marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2)] }, ['Season 2', 'Mark S2 watched', 'S2 · 2 episodes marked']);
   const counted = await run({ why: 'a count only, equal to the marks: still N marked, never a complete-looking 2/2', storage: listCache(memoryStorage(), { '95396:2': { count: 2 } }), marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9005, 5)] },
-    ['Season 2 · Jan 1, 2022', 'Mark S2 watched', '2 episodes marked']);
+    ['Season 2', 'Mark S2 watched', 'S2 · 2 episodes marked']);
   assert.ok(!showRowOf(counted.app, counted.lib.sev).includes('mini-progress-fill'), 'no bar without a known total');
   const partial = await run({ why: 'a count above the marks: N/T with its bar', storage: listCache(memoryStorage(), { '95396:2': { count: 4 } }), marks: l => [mark(l.s2, 9001, 1)] },
-    ['Season 2 · Jan 1, 2022', 'Mark S2 watched', '1/4 episodes watched']);
+    ['Season 2', 'Mark S2 watched', 'S2 · 1/4 episodes watched']);
   assert.ok(showRowOf(partial.app, partial.lib.sev).includes('style="width:25%"'));
   const listed = await run({ why: 'every listed episode marked: said so, no row action; a mark TMDB no longer lists isn’t counted', storage: listCache(memoryStorage(), { '95396:2': { ids: [9001, 9002], numbers: [1, 2], names: ['', ''] } }),
-    marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2), mark(l.s2, 9009, 9)] }, ['Season 2 · All listed episodes watched', '', '2/2 episodes watched · 1 not listed']);
+    marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2), mark(l.s2, 9009, 9)] }, ['Season 2 · All listed episodes watched', '', 'S2 · 2/2 episodes watched · 1 not listed']);
   assert.ok(!/markSeasonFromRow|markNextEpisode|toggleWatch/.test(showRowOf(listed.app, listed.lib.sev) + showCardOf(listed.app, listed.lib.sev)), 'no action in the row or card: the season is completed deliberately');
   listed.app.ctx.toggleDerivedShow(listed.lib.sev.id); await settle();
   assert.ok(seasonRow(listed.app, listed.lib.s2).includes(`toggleWatch('${listed.lib.s2.id}')`) && text(seasonRow(listed.app, listed.lib.s2)).includes('Mark S2 watched'), 'the expanded season row keeps it');
@@ -616,7 +616,7 @@ test('EP5 show row: an Earlier-seasons range keeps choosing the season; marks ne
   app.ctx.toggleDerivedShow(lib.sev.id); await settle();
   await app.ctx.startResume(lib.sev.id, lib.s1.id); await settle();
   const cells = cellsOf(showRowOf(app, lib.sev));
-  assert.deepStrictEqual([cells[2], cells[4]], ['Season 1 · Jan 1, 2022', 'Mark S1 watched'], 'the range’s next season, though Season 3 has marks');
+  assert.deepStrictEqual([cells[2], cells[4]], ['Season 1', 'Mark S1 watched'], 'the range’s next season, though Season 3 has marks');
   assert.match(text(seasonRow(app, lib.s3)), /1\/2 episodes watched ▸ Episodes Next unwatched: E2 Mark E2 watched/, 'Season 3 keeps its own row');
 });
 
@@ -656,7 +656,7 @@ test('EP5 row action: Mark season watched is the season’s Watched change; the 
   dom.focus('tbody', `[data-shortcut-show="${lib.sev.id}"]`);
   await app.ctx.markSeasonFromRow(lib.s2.id); await settle();
   assert.deepStrictEqual(writes(app), ['POST rpc/set_season_watched']);
-  assert.strictEqual(cellsOf(showRowOf(app, lib.sev))[2], 'Season 3 · Jan 1, 2022', 'up next moves on');
+  assert.strictEqual(cellsOf(showRowOf(app, lib.sev))[2], 'Season 3', 'up next moves on');
   assert.ok(showRowOf(app, lib.sev).includes(`markSeasonFromRow('${lib.s3.id}')`) && dom.active() === dom.in('tbody', `[data-shortcut-show="${lib.sev.id}"]`), 'focus on the next season’s action');
   await app.ctx.markSeasonFromRow(lib.s3.id); await settle();
   assert.strictEqual(writes(app).length, 1, 'a second press just after sends nothing');

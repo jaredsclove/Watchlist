@@ -244,7 +244,7 @@ test('B6: next-season wording: no "Next:" prefix in Currently Watching, All TV o
   const check = (label) => {
     const h = tbody(app) + cards(app);
     assert.ok(!/Next: |Up next: |premiere date TBA|No new season on your list yet/.test(h), `${label}: no old wording`);
-    assert.ok(h.includes(`Season 2 · ${disp(day(-3))}`), `${label}: in progress`);
+    assert.ok(/>(<span class="visually-hidden">Next season: <\/span>)?Season 2</.test(h) && !h.includes(disp(day(-3))), `${label}: in progress, released: no past date (UI refine)`);
     assert.ok(h.includes(`Season 2 · ${disp(day(40))}<span class="upcoming-tag">Upcoming`), `${label}: future`);
     assert.ok(h.includes('Season 2 · Date TBA'), `${label}: a plain TBA reads Date TBA`);
     assert.ok(h.includes('Season 2 · 2026 (TBA)'), `${label}: stored TBA text is kept`);
@@ -273,7 +273,7 @@ test('B6 (decision 6): the hidden "Next season: " is only on phone cards, only b
     const lines = [...cards(app).matchAll(/<span class="card-season">([^]*?)<\/span>\s*<\/div>/g)].map(m => m[1]);
     assert.ok(lines.length >= 5);
     for (const l of lines) {
-      const actual = /^(<span class="visually-hidden">Next season: <\/span>)?Season \d+ · /.test(l);
+      const actual = /^(<span class="visually-hidden">Next season: <\/span>)?Season \d+( · |$|<)/.test(l);
       assert.strictEqual(l.startsWith(SR), actual, `${view}: "${l.slice(0, 80)}"`);
     }
     for (const status of ['No upcoming season listed', 'No remaining season on your list', 'Caught up · Ended', 'All seasons skipped']) {
