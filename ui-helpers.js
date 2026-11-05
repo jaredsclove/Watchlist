@@ -84,6 +84,7 @@ function parseDate(d) {
   return y ? `${y[1]}-06-01` : '2025-01-01';
 }
 function showSaved() {
+  if (typeof noteQueueSaved === 'function') noteQueueSaved(); // Q1: a change made from the queue reads it again once done
   const el = document.getElementById('saveStatus');
   el.classList.add('visible');
   setTimeout(() => el.classList.remove('visible'), 2000);

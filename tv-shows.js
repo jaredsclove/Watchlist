@@ -150,7 +150,7 @@ function prioritySelectHtml(rec, kind) {
 // expand button before the title; a click in it never expands the row (toggleDerivedShow).
 function showMenuHtml(show, keyArg) {
   return `<span class="more-cell"><button type="button" class="more-btn" data-action="more" aria-expanded="false" onclick="toggleMorePopover('${keyArg}', this)" title="Priority" aria-label="${esc(`More for ${show.title}`)}">⋯</button>
-        <div class="more-popover" id="more-popover-${esc(show.id)}" style="display:none"><div class="popover-section-label">Priority</div><span class="state-action" data-action="priority">${prioritySelectHtml(show, 'show')}</span></div></span>`;
+        <div class="more-popover" id="more-popover-${esc(show.id)}" style="display:none"><div class="popover-section-label">Priority</div><span class="state-action" data-action="priority">${prioritySelectHtml(show, 'show')}</span>${addToQueueMenuHtml('show', show.id)}</div></span>`;
 }
 
 // Skip / Keep for one season (never deletes anything).

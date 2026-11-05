@@ -7,7 +7,7 @@ function buildTabs() {
   // content heading names the view (B9).
   // Settings (S1) has no view tabs, and nor has the Collections area (S2): its chooser is drawn
   // by buildBrowseBar.
-  const views = isSettingsView() || activeArea === 'collections' ? [] : tabViewsFor(activeMediaType);
+  const views = isSettingsView() || activeArea === 'collections' || activeArea === 'queues' ? [] : tabViewsFor(activeMediaType);
   // A redraw keeps keyboard focus on the view tabs (the open view's tab takes it).
   const active = document.activeElement;
   const hadFocus = !!active && typeof active.closest === 'function' && !!active.closest('#tabBar');
@@ -38,7 +38,8 @@ function buildMediaSwitch() {
   if (el) {
     el.innerHTML = `<button class="media-switch-btn${cls('tv')}" id="areaBtn-tv"${cur('tv')} onclick="switchMediaType('tv')">TV</button>`
       + `<button class="media-switch-btn${cls('movie')}" id="areaBtn-movie"${cur('movie')} onclick="switchMediaType('movie')">Movies</button>`
-      + `<button class="media-switch-btn${cls('collections')}" id="areaBtn-collections"${cur('collections')} onclick="openCollections(this)">Collections</button>`;
+      + `<button class="media-switch-btn${cls('collections')}" id="areaBtn-collections"${cur('collections')} onclick="openCollections(this)">Collections</button>`
+      + `<button class="media-switch-btn${cls('queues')}" id="areaBtn-queues"${cur('queues')} onclick="openQueues()">Queues</button>`;
     const again = keepCollections ? document.getElementById('areaBtn-collections') : null;
     if (again && again !== active && typeof again.focus === 'function') again.focus();
   }
@@ -85,6 +86,7 @@ function switchView(id) {
   collectionUndo = null; // S4: Undo belongs to the collection visit it was offered in
   removeNotice = null;
   if (typeof addPickerOnNavigate === 'function') addPickerOnNavigate(); // S5: an idle picker closes; a running batch stops after its current request
+  if (typeof queueOnNavigate === 'function') queueOnNavigate(); // Q1: an idle Add to queue dialog closes; a drag ends
   activeViewId = id;
   activeArea = areaOfView(id);
   // Back from a collection keeps its origin only while the Collections area is open,
@@ -121,6 +123,7 @@ function switchView(id) {
   if (activeViewId !== id) return;
   if (isSettingsView(id)) { renderSettings(); return; }
   if (isCollectionsStateView(id)) { renderCollectionsState(); return; }
+  if (isQueuesView(id)) { queuesData = null; loadQueuesView(); return; }
   showListContainers();
   if (isBrowseView(id)) loadBrowseView();
   else loadDerivedView();
@@ -154,6 +157,7 @@ function isCollectionsAreaView(id = activeViewId) {
 function areaOfView(id) {
   if (isSettingsView(id)) return 'settings';
   if (isCollectionsAreaView(id)) return 'collections';
+  if (isQueuesView(id)) return 'queues';
   return activeMediaType;
 }
 
@@ -230,6 +234,8 @@ function settingsBack() {
 function showListContainers() {
   const screen = document.getElementById('settingsScreen');
   if (screen) { screen.style.display = 'none'; screen.innerHTML = ''; }
+  const queues = document.getElementById('queuesScreen'); // Q1
+  if (queues) { queues.style.display = 'none'; queues.innerHTML = ''; }
   SETTINGS_LIST_CONTAINERS.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
 }
 

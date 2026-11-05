@@ -1117,3 +1117,73 @@ td > .meta-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere;
   .modal-box { max-height: calc(100dvh - 16px); padding: 16px; }
   .modal-box > .modal-actions:last-child { position: sticky; bottom: -16px; margin: 16px -16px -16px; padding: 10px 16px; background: var(--surface); border-top: 1px solid var(--border); }
 }
+
+/* Q1: planning queues. One ordered list at every width; the handle is the only drag target (touch-action: none on it
+   alone, so scrolling anywhere else is unchanged). */
+.queues-screen { max-width: 960px; }
+.queues-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.queues-title { font-size: 20px; font-weight: 600; margin: 0; }
+.queues-title:focus { outline: none; }
+.queues-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.queue-select-label { font-size: 13px; color: var(--text2); }
+.queue-select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; font: inherit; font-size: 14px; max-width: 280px; }
+.queue-count { font-size: 13px; color: var(--text2); }
+.queue-empty { background: var(--surface); border: 1px dashed var(--border2); border-radius: var(--radius-lg); padding: 16px; color: var(--text2); font-size: 14px; line-height: 1.5; }
+.queue-empty p { margin: 0 0 6px; }
+.queue-empty:focus { outline: none; }
+.queue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.queue-entry { display: grid; grid-template-columns: 28px 24px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 10px; }
+.queue-entry-done { opacity: 0.8; }
+.queue-handle { display: flex; align-items: center; justify-content: center; width: 28px; height: 36px; color: var(--text3); font-size: 18px; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; border-radius: var(--radius); }
+.queue-handle:hover { color: var(--text); background: var(--surface2); }
+body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+.queue-dragging { border-color: var(--accent); box-shadow: 0 6px 18px rgba(0,0,0,0.45); background: var(--surface2); position: relative; z-index: 5; }
+.queue-pos { font-size: 12px; color: var(--text3); text-align: right; font-variant-numeric: tabular-nums; }
+.queue-main { min-width: 0; }
+.queue-title-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.queue-title { padding: 0; font-size: 14px; font-weight: 600; color: var(--text); text-decoration: none; text-align: left; overflow-wrap: anywhere; }
+.queue-title:hover { color: var(--accent); text-decoration: underline; }
+.queue-title-text { font-size: 14px; color: var(--text2); }
+.queue-kind { font-size: 12px; color: var(--text2); margin-top: 2px; overflow-wrap: anywhere; }
+.queue-state { font-size: 12px; color: var(--text2); border: 1px solid var(--border2); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
+.queue-state.queue-done { color: var(--green); border-color: var(--green-border); }
+.queue-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.queue-moves { display: flex; align-items: center; gap: 4px; }
+.queue-move { padding: 4px 9px; min-width: 32px; }
+.queue-move:disabled { opacity: 0.35; cursor: default; }
+.queue-manage { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+.queue-manage-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.queue-manage-item { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.queue-manage-name { font-weight: 600; overflow-wrap: anywhere; }
+.queue-manage-count { font-size: 12px; color: var(--text2); }
+.queue-manage-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.queue-manage-confirm span { flex: 1 1 260px; font-size: 13px; }
+.queue-new { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.queue-new label { font-size: 13px; color: var(--text2); }
+.queue-name-input { flex: 1 1 200px; max-width: 320px; min-width: 0; }
+.queue-season-btn { white-space: nowrap; font-size: 12px; }
+.queue-add-box fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }
+.queue-add-box legend { font-size: 12px; color: var(--text2); padding: 0 4px; }
+.queue-add-title { margin: 0 0 10px; font-weight: 600; overflow-wrap: anywhere; }
+.queue-add-option { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 14px; cursor: pointer; }
+.queue-add-blocked { color: var(--text3); cursor: default; }
+.queue-add-note { font-size: 12px; color: var(--text2); }
+.queue-add-help { font-size: 12px; color: var(--text2); margin: 0 0 8px; }
+@media (max-width: 700px) {
+  .queues-title { font-size: 18px; flex-basis: 100%; }
+  .queue-select { min-height: 44px; flex: 1 1 160px; }
+  .queue-manage-btn { min-height: 44px; }
+  .queue-entry { grid-template-columns: 36px minmax(0, 1fr) auto; grid-template-areas: "handle main moves" "handle actions actions"; padding: 8px; gap: 6px 8px; }
+  .queue-handle { grid-area: handle; width: 36px; height: 44px; align-self: start; }
+  .queue-pos { display: none; }
+  .queue-main { grid-area: main; }
+  .queue-actions { grid-area: actions; justify-content: flex-start; }
+  .queue-actions:empty { display: none; }
+  .queue-moves { grid-area: moves; align-self: start; }
+  .queue-move, .queue-moves .more-btn { min-height: 44px; min-width: 40px; }
+  .queue-manage-actions { margin-left: 0; }
+  .queue-manage .btn, .queue-new .btn { min-height: 44px; }
+  .queue-name-input { max-width: none; }
+  .queue-add-option { min-height: 44px; }
+  .queue-season-btn { min-height: 44px; }
+}

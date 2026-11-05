@@ -174,7 +174,7 @@ test('C2 code scan: no app script calls an old name (set_show_status, the librar
   });
   assert.deepStrictEqual(hits, []);
   const calls = scripts.flatMap(f => [...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/sbRpc\('([a-z0-9_]+)'/g)].map(m => m[1]));
-  assert.ok(calls.filter(x => /^library_/.test(x)).every(x => /_b45$/.test(x) || x === 'library_set_episode_marks' || /^library_cu_[a-z_]+$/.test(x)), calls.join(', ')); // (EP1's own function; CU1's library_cu_*)
+  assert.ok(calls.filter(x => /^library_/.test(x)).every(x => /_b45$/.test(x) || x === 'library_set_episode_marks' || /^library_cu_[a-z_]+$/.test(x) || /^library_queue_[a-z]+$/.test(x)), calls.join(', ')); // (EP1's own function; CU1's library_cu_*; Q1's library_queue_*)
   assert.ok(!calls.includes('set_show_status'));
 });
 

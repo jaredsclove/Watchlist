@@ -5,6 +5,7 @@
 function renderFilters() {
   if (typeof isSettingsView === 'function' && isSettingsView()) return; // Settings (S1) has no list filters
   if (typeof isCollectionsStateView === 'function' && isCollectionsStateView()) return; // nor has the Collections state (S2)
+  if (typeof isQueuesView === 'function' && isQueuesView()) return; // nor has Queues (Q1)
   const focus = captureFilterFocus();
   if (isBrowseView(activeViewId)) renderBrowseFilters();
   else if (activeViewId) renderDerivedFilters();
@@ -741,6 +742,7 @@ function watchWithPillsHtml(tokens, owner) {
 function renderTable() {
   if (typeof isSettingsView === 'function' && isSettingsView()) return; // Settings (S1) has no list
   if (typeof isCollectionsStateView === 'function' && isCollectionsStateView()) return; // nor has the Collections state (S2)
+  if (typeof isQueuesView === 'function' && isQueuesView()) { renderQueuesView(); return; } // Q1: the queue is its own list
   if (isBrowseView(activeViewId)) { renderBrowseTable(); return; }
   if (activeViewId) renderDerivedTable();
 }
