@@ -128,7 +128,8 @@ ok(/queue_missing/.test((await call(B, `public.library_queue_delete($1, 0)`, [QA
 ok((await call(B, `public.library_queue_remove($1)`, [E[0]])).r.removed === false && (await entryIds(A, QA)).length === 3, 'or remove an entry');
 ok(/library_write_required/.test(await as(A, `insert into public.queue_entries (queue_id, item_id, position) values ('${QA}', '${film(2)}', 99)`).then(() => 'inserted', e => e.message)), 'a direct insert is refused');
 ok(/library_write_required|permission/.test(await as(A, `update public.queue_entries set position = 50 where queue_id = '${QA}'`).then(() => 'updated', e => e.message)), 'a direct update is refused');
-ok(/library_write_required|permission/.test(await as(A, `delete from public.queue_entries where queue_id = '${QA}'`).then(() => 'deleted', e => e.message)), 'a direct delete is refused');
+// Direct deletes of a member's own entries aren't guarded (a film's delete cascades to them); they reach only that member's rows.
+ok((await as(B, `with d as (delete from public.queue_entries returning 1) select count(*)::int n from d`))[0].n === 0 && (await entryIds(A, QA)).length === 3, 'another member’s direct delete reaches none of A’s entries');
 ok(/not_a_member/.test((await create(C, 'ZZ Nope')).message) && (await as(C, `select count(*)::int n from public.watch_queues`))[0].n === 0, 'a signed-in non-member can create nothing and reads nothing');
 const anon = sql => db.transaction(async tx => { await tx.query(`select set_config('role', 'anon', true)`); return (await tx.query(sql)).rows; }).then(() => 'ran', e => e.message);
 ok(/permission denied/.test(await anon(`select * from public.watch_queues`)) && /permission denied/.test(await anon(`select * from public.queue_entries`))
@@ -255,6 +256,9 @@ ok(libBefore === await val(`select md5(string_agg(to_jsonb(w)::text, '|' order b
 ok((await add(A, QA, null, film(4))).ok, '(a film queued)');
 const del = await call(A, `public.delete_tv_season($1, (select count(*)::int from public.episode_marks where season_id = $1))`, [season(2, 4)]);
 ok(del.ok && await inQueues(A, season(2, 4)) === 0, 'deleting a season removes its entries', del.message);
+// The page deletes a film directly (a PostgREST DELETE, no library function): its entries go with it.
+const filmDel = await as(A, `delete from public.watchlist_items where id = '${film(4)}'`).then(() => 'deleted', e => e.message);
+ok(filmDel === 'deleted' && await inQueues(A, film(4)) === 0, 'a queued film deleted directly (as the page does): allowed, its entries gone', filmDel);
 
 section('restore, format 8');
 const exportA = async () => {
@@ -384,6 +388,25 @@ else {
   const a9 = await s2.done(m9);
   ok2(/^t$/m.test(a9) && q(`select count(*) from public.queue_entries where item_id = '${film(2)}'`) === '0', 'a film marked watched during a move: removed once the move commits', a9);
   ok2(q(`select count(*) = count(distinct position) from public.queue_entries where queue_id = '${Q1}'`) === 't', 'places stay distinct');
+  // A restore and a queue change from two devices at once: one waits for the other, no deadlock, nothing half done.
+  const fA8 = path.join(WORK, 'a8.json');
+  const doc8 = to8(L1, [{ id: id1(70001), name: 'ZZ Restored', sort_order: 1, created_at: '2026-11-05T00:00:00+00:00' }],
+    [{ id: id1(70002), queue_id: id1(70001), show_id: null, item_id: film(1), position: 1, created_at: '2026-11-05T00:00:00+00:00' }]);
+  fs.writeFileSync(fA8, JSON.stringify(doc8));
+  const eNow = q(`select '{' || string_agg(id::text, ',' order by position) || '}' from public.queue_entries where queue_id = '${Q1}'`);
+  const eNowIds = eNow.slice(1, -1).split(',');
+  await before(s1, `select public.library_queue_move('${Q1}', '${eNow}', '${eNowIds[0]}', 2) is not null`);
+  const m10 = s2.send(`\\set doc \`cat ${fA8}\`\nselect public.restore_backup(:'doc'::jsonb, false) is not null;`);
+  ok2(await waiting(), 'a restore waits for a queue move in progress');
+  await s1.run('commit;');
+  const a10 = await s2.done(m10);
+  ok2(/^t$/m.test(a10) && !/deadlock/.test(a10) && q(`select string_agg(name, ',') from public.watch_queues`) === 'ZZ Restored', 'then restores the file’s queues; no deadlock', a10);
+  await before(s1, `select public.restore_backup((select '${JSON.stringify(doc8).replace(/'/g, "''")}'::jsonb), false) is not null`);
+  const m11 = s2.send(`select public.library_queue_remove('${id1(70002)}') ->> 'removed';`);
+  ok2(await waiting(), 'a queue change waits for a restore in progress');
+  await s1.run('commit;');
+  const a11 = await s2.done(m11);
+  ok2(/^true$/m.test(a11) && !/deadlock/.test(a11), 'then runs on the restored queue; no deadlock', a11);
   s1.end(); s2.end();
   passed += p2; failed += f2;
   console.log(`Real PostgreSQL: ${p2} passed, ${f2} failed`);

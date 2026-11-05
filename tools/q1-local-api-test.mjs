@@ -110,11 +110,12 @@ for (const [label, r] of [
   ['insert an entry', await rest(A.token, 'POST', 'queue_entries', { queue_id: QA, item_id: film(2), position: 9 })],
   ['move an entry', await rest(A.token, 'PATCH', `queue_entries?id=eq.${add1.json.id}`, { position: 7 })],
   ['rename a queue', await rest(A.token, 'PATCH', `watch_queues?id=eq.${QA}`, { name: 'ZZ Renamed' })],
-  ['delete an entry', await rest(A.token, 'DELETE', `queue_entries?id=eq.${add1.json.id}`)],
   ['delete a queue', await rest(A.token, 'DELETE', `watch_queues?id=eq.${QA}`)]]) {
   ok(!r.ok && /library_write_required|permission denied/.test(r.text), `A’s direct ${label}: refused (${r.status})`, r.text);
 }
 ok((await rest(A.token, 'GET', 'queue_entries?select=id')).json.length === 3, '(nothing changed)');
+const bDel = await rest(B.token, 'DELETE', `queue_entries?id=eq.${add1.json.id}`);
+ok((await rest(A.token, 'GET', 'queue_entries?select=id')).json.length === 3, `B’s direct delete of A’s entry reaches nothing (${bDel.status})`, bDel.text);
 for (const [label, r] of [['read queues', await rest('anon', 'GET', 'watch_queues?select=*')], ['read entries', await rest('anon', 'GET', 'queue_entries?select=*')],
   ['create', await rest('anon', 'POST', 'rpc/library_queue_create', { p_name: 'x' })]]) ok(!r.ok, `signed out: ${label} refused (${r.status})`, r.text);
 ok(/not_a_member/.test((await rpc(C.token, 'library_queue_create', { p_name: 'ZZ C' })).text) && (await rest(C.token, 'GET', 'watch_queues?select=id')).json.length === 0, 'a non-member: nothing');
@@ -123,7 +124,10 @@ for (const fn of ['q1_lock', 'q1_show_complete', 'q1_moved']) {
   ok(!r.ok && [404, 406].includes(r.status), `private.${fn}: not exposed (${r.status})`, r.text);
 }
 
-section('completion and restore through the API');
+section('completion, a film’s delete and restore through the API');
+const f2 = await rpc(A.token, 'library_queue_add', { p_queue_id: QA, p_show_id: null, p_item_id: film(4) }); // (film 4 has no collection-update records: those have delete guards of their own, before Q1)
+const fDel = await rest(A.token, 'DELETE', `watchlist_items?id=eq.${film(4)}`);
+ok(f2.ok && fDel.ok && Array.isArray(fDel.json) && fDel.json.length === 1 && !(await rest(A.token, 'GET', 'queue_entries?select=item_id')).json.some(r => r.item_id === film(4)), 'a queued film deleted as the page deletes it: allowed, its entry gone', fDel.text);
 ok((await rpc(A.token, 'set_season_watched', { p_row_id: season(3, 3), p_watched: true })).ok
   && !(await rest(A.token, 'GET', 'queue_entries?select=item_id')).json.some(r => r.item_id === season(3, 3)), 'a season marked watched leaves the queue');
 const tables = {};

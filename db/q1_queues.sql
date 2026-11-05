@@ -120,7 +120,9 @@ comment on table public.queue_entries is 'Q1: a film, a whole show or one season
 
 create trigger watch_queues_write_guard before insert or update or delete on public.watch_queues
   for each row execute function private.library_write_guard();
-create trigger queue_entries_write_guard before insert or update or delete on public.queue_entries
+-- Inserts and updates only: deleting a film, season or show cascades to its entries, and a film's delete is a direct one
+-- (a member's direct delete of their own rows is an accepted limitation, db/README.md).
+create trigger queue_entries_write_guard before insert or update on public.queue_entries
   for each row execute function private.library_write_guard();
 
 do $$
@@ -138,11 +140,14 @@ end $$;
 
 -- ── 3. Helpers ─────────────────────────────────────────────────────────────────
 -- One member's queue changes run one after another: every queue function, the triggers below and restore take this
--- transaction lock (it needs no row, so it also covers a member's first queue). Taken after any library row lock, never before.
+-- transaction lock (it needs no row, so it also covers a member's first queue). Lock order, everywhere: library rows or
+-- tables first, then the queue tables (row exclusive, which a restore's exclusive lock blocks), then this lock.
 create function private.q1_lock(p_owner uuid) returns void
-language sql set search_path = '' as $$
-  select pg_advisory_xact_lock(hashtextextended('watchlist.queues ' || p_owner::text, 0))
-$$;
+language plpgsql set search_path = '' as $$
+begin
+  lock table public.watch_queues, public.queue_entries in row exclusive mode;
+  perform pg_advisory_xact_lock(hashtextextended('watchlist.queues ' || p_owner::text, 0));
+end $$;
 -- The library flag for the queue writes a trigger makes; returns what it was, so the trigger can put it back.
 create function private.q1_write_begin() returns text
 language plpgsql set search_path = '' as $$
@@ -470,7 +475,7 @@ begin
   perform set_config('lock_timeout', '5s', true);
   lock table public.tv_shows, public.watchlist_items, public.personal_collections, public.collection_memberships,
     public.watch_with_choices, public.custom_collections, public.watch_queues, public.queue_entries in exclusive mode;
-  perform private.q1_lock(v_owner);
+  perform pg_advisory_xact_lock(hashtextextended('watchlist.queues ' || v_owner::text, 0)); -- (q1_lock's second step)
   perform private.lib_write_on();
   -- Restoring saved data isn't a research operation (private.research_write_guard). Cleared below; a failure discards it with the transaction.
   perform set_config('watchlist.research_restore', 'on', true);
@@ -556,6 +561,7 @@ grant insert (id, queue_id, show_id, item_id, position, created_at), update (sho
 revoke all on function private.q1_lock(uuid), private.q1_write_begin(), private.q1_write_end(text), private.q1_show_complete(uuid),
   private.q1_entry_json(public.queue_entries), private.q1_queue(uuid, uuid), private.q1_moved(uuid[], uuid, integer),
   private.q1_item_watched(), private.q1_show_ended(), private.q1_season_moved() from public, anon;
+revoke all on function private.q1_item_watched(), private.q1_show_ended(), private.q1_season_moved() from authenticated; -- (triggers need no grant)
 grant execute on function private.q1_lock(uuid), private.q1_write_begin(), private.q1_write_end(text), private.q1_show_complete(uuid),
   private.q1_entry_json(public.queue_entries), private.q1_queue(uuid, uuid), private.q1_moved(uuid[], uuid, integer) to authenticated;
 revoke all on function public.library_queue_create(text), public.library_queue_rename(uuid, text, text), public.library_queue_delete(uuid, integer),
