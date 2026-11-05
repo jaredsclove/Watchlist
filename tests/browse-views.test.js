@@ -104,7 +104,8 @@ const mutating = app => app.requests.filter(r => r.method !== 'GET' || (/\/rpc\/
 const handlersIn = s => [...s.matchAll(/\bon(?:click|change|input|keydown)="([^"]*)"/g)]
   .flatMap(m => [...m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\(/g)].map(x => x[1]))
   .filter(x => !['if', 'replace', 'stopPropagation'].includes(x));
-const READ_ONLY_HANDLERS = new Set(['toggleBrowseShow', 'setBrowseMedia', 'renderTable', 'browseBack', 'openBrowseCollection',
+const READ_ONLY_HANDLERS = new Set(['openAddToQueue', 'openAddToQueueFromMenu', // Q1: opens the Add to queue dialog (reads only; adds on its own button)
+  'toggleBrowseShow', 'setBrowseMedia', 'renderTable', 'browseBack', 'openBrowseCollection',
   'loadBrowseView', 'switchView', 'switchTab', 'switchMediaType', 'setBrowsePresentation', 'setBrowseGrouping', 'setBrowseSeasonVis', 'toggleBrowseSection',
   // S2: the Collections chooser's tabs and their arrow keys only navigate and move focus (tests/collections-nav.test.js)
   'selectCollectionTab', 'collectionTabsKeydown', 'scrollCollectionTabs',

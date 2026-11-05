@@ -2,6 +2,7 @@
 // The rows the visible controls came from: All Movies' films, a collection's rows (S3: its
 // read of the library) or the open derived view's TV rows. Row actions PATCH by the row's real id.
 function actionRows() {
+  if (typeof isQueuesView === 'function' && isQueuesView()) return queuesData?.rows || []; // Q1: the queue's read of the library
   if (activeViewId === ALL_MOVIES_VIEW.id || isBrowseCollectionView(activeViewId)) return browseData?.rows || [];
   if (isBrowseView(activeViewId)) return [];
   return activeViewId ? derivedData?.rows || [] : [];
@@ -13,6 +14,7 @@ function mirrorRowUpdate(id, fields) {
   const lists = [];
   if (derivedData?.rows) lists.push(derivedData.rows);
   if (browseData?.rows) lists.push(browseData.rows);
+  if (queuesData?.rows) lists.push(queuesData.rows); // Q1
   lists.forEach(rows => rows.forEach(r => { if (r.id === id) Object.assign(r, fields); }));
 }
 

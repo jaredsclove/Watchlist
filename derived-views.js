@@ -516,6 +516,7 @@ function renderDerivedTable() {
   else if (activeViewId === 'watching') listing = renderCurrentlyWatching(today, x => keep(x) && themeMatchesShow(x.seasons, fTheme));
   renderFilterBarState(); // B10: chips, More filters count (render.js)
   if (rec) applyListFocus(rec, listing || null);
+  if (typeof applyPendingReveal === 'function') applyPendingReveal(); // Q1: a queued item opened from Queues
   return listing;
 }
 
@@ -791,7 +792,7 @@ function allTvSeasonRowHtml(r, today, needsReview, section = 'dated') {
       <td class="date-cell">${esc(r.display_date)}${upcomingTag}${reviewTag}</td>
       <td>${statusPill}</td>
       <td>${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, false))}</td>
-      <td>${seasonActionHtml('season-control', seasonRowControlHtml(r))}</td>
+      <td>${seasonActionHtml('season-control', seasonRowControlHtml(r))} ${queueSeasonButtonHtml(r)}</td>
     </tr>`;
   const card = `<div class="item-card ${rowClass}"${item}>
       <div class="card-top">
@@ -805,7 +806,7 @@ function allTvSeasonRowHtml(r, today, needsReview, section = 'dated') {
         <span class="card-date">${esc(r.display_date)}</span>${upcomingTag}${reviewTag}
         <span class="card-labels">${badges}</span>
       </div>
-      <div class="card-actions">${statusPill} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))}</div>
+      <div class="card-actions">${statusPill} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))} ${queueSeasonButtonHtml(r)}</div>
     </div>`;
   return { row, card };
 }
@@ -900,6 +901,15 @@ function skippedSeasonsControlHtml(item, keyArg) {
 // S3: a collection's show entry is All TV's (browse-views.js browseShowHtml). opts: { section
 // (its focus section), kindTag (Combined), dateHtml (the collection's date text for a season),
 // expandBtn (the collection's own expand button, given isExpanded) }.
+// EP5: a show row's action for its target (episodes.js showTarget): Mark E9 watched; nothing once every listed episode is
+// marked (the season is completed deliberately, from its expanded row or its list); else the up-next season's Mark S4
+// watched while the show is in progress. Shared with a whole show in a queue (queues.js).
+function showRowActionHtml(item, today, stop, target = showTarget(item)) {
+  const { show, upNext, upToDate } = item;
+  const inProgress = !upToDate && show.status === 'watching' && !!upNext;
+  return target.kind === 'episode' ? showRowEpisodeActionHtml(target, show, stop)
+    : target.kind === 'listed' ? '' : inProgress ? seasonWatchControlHtml(upNext, { requireReleased: true, today, shortcutOf: show, stopPropagation: stop }, false) : '';
+}
 function derivedShowHtml(item, today, opts = {}) {
   const { key, show, seasons, upNext, upToDate } = item;
   const inProgress = !upToDate && show.status === 'watching' && !!upNext;
@@ -972,8 +982,7 @@ function derivedShowHtml(item, today, opts = {}) {
   const shortcutOpts = { ...releaseOpts, shortcutOf: show };
   // EP5: the row's action for its target: Mark E9 watched; nothing once every listed episode is marked (the season
   // is completed deliberately, from its expanded row or its list); else Mark season watched as before.
-  const rowAction = stop => target.kind === 'episode' ? showRowEpisodeActionHtml(target, show, stop)
-    : target.kind === 'listed' ? '' : inProgress ? seasonWatchControlHtml(upNext, { ...shortcutOpts, stopPropagation: stop }, false) : '';
+  const rowAction = stop => showRowActionHtml(item, today, stop, target);
   const watchCell = rowAction(true); // empty when there's no action (no — placeholder)
   const expandBtn = opts.expandBtn ? opts.expandBtn(isExpanded) : derivedExpandBtnHtml(key, keyArg, item.title, isExpanded);
   // The focus hooks (B6): the show's row or card, and the section it is listed in.
@@ -1170,7 +1179,7 @@ function comingSoonRowHtml(r, today, section = 'dated') {
   const chipsCell = categoryCellHtml(metadataOf(r), r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)); // the desktop row's one line; the card lists every pill
   const todayTag = r.date_sort === today ? '<span class="today-tag">Today</span>' : '';
   const statusPill = `<span class="status-pill s-${status}" title="Show status">${esc(statusOptionLabel(status))}</span>`;
-  const skip = seasonActionHtml('season-control', seasonSkipButtonHtml(r));
+  const skip = `${seasonActionHtml('season-control', seasonSkipButtonHtml(r))} ${queueSeasonButtonHtml(r)}`;
   const row = `<tr class="${rowClass}"${item}>
       <td tabindex="-1" data-primary="1">
         ${priorityMarkHtml(show.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(show.priority, true)}

@@ -36,7 +36,7 @@ async function choose(app, file) {
 async function send(app) { await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle(); }
 
 // ─── The format-5 export ──────────────────────────────────────────────────────
-test('format 7: the nineteen tables with exactly the format-7 columns, in order; the phase is read before and after the tables; it validates', async () => {
+test('format 8: the twenty-one tables with exactly the format-8 columns, in order; the phase is read before and after the tables; it validates', async () => {
   const sh = showOf({ priority: 'high', ended: true, genres: ['Drama'], network: 'HBO', network_candidates: ['HBO'] });
   const a = seasonOf(sh, 1), b = seasonOf(sh, 2, { watched: true });
   Object.assign(sh, { resume_start_season_id: a.id, resume_end_season_id: b.id });
@@ -46,9 +46,9 @@ test('format 7: the nineteen tables with exactly the format-7 columns, in order;
   const reads = app.requests.slice(before).map(r => r.url.split('/rest/v1/')[1].split('?')[0]);
   assert.strictEqual(reads[0], 'rpc/stage5_capabilities');
   assert.strictEqual(reads.at(-1), 'rpc/stage5_capabilities', 'read again after the tables');
-  const spec = app.get('BACKUP_FORMAT_V7');
-  assert.strictEqual(doc.formatVersion, 7);
-  assert.deepStrictEqual(Array.from(spec.tables), Array.from(app.get('BACKUP_FORMAT_V5').tables).concat(['episode_marks'], Array.from(app.get('CU1_TABLES'))));
+  const spec = app.get('BACKUP_FORMAT_V8');
+  assert.strictEqual(doc.formatVersion, 8);
+  assert.deepStrictEqual(Array.from(spec.tables), Array.from(app.get('BACKUP_FORMAT_V5').tables).concat(['episode_marks'], Array.from(app.get('CU1_TABLES')), Array.from(app.get('Q1_TABLES'))));
   assert.deepStrictEqual(Object.keys(doc.tables), Array.from(spec.tables));
   for (const t of spec.tables) for (const r of doc.tables[t]) assert.deepStrictEqual(Object.keys(r), Object.keys(spec.columns[t]), t);
   assert.ok(!('conversion' in doc) && !('recovery' in doc));
@@ -71,7 +71,7 @@ test('RL8 a native format-7 round trip restores every value exactly — an activ
   const file = fileOf(doc);
   await choose(target, file);
   assert.match(modal(target), /Restore database/);
-  assert.strictEqual(target.get('pendingRestoreData.formatVersion'), 7);
+  assert.strictEqual(target.get('pendingRestoreData.formatVersion'), 8);
   await send(target);
   assert.match(target.el('restoreModalBox').innerHTML, /restored and verified/);
   assert.deepStrictEqual(out(restoreCalls(target)[0].body.p_backup), doc, 'sent unchanged');
@@ -95,7 +95,7 @@ test('formats 1 to 4: refused when the file is chosen, naming the last commit th
     await choose(app, fileOf({ format: app.get('BACKUP_FORMAT'), formatVersion: v, exportedAt: '2026-01-01T00:00:00Z', rowCounts: {}, tables: {} }));
     const m = modal(app);
     assert.match(m, new RegExp(`format ${v} backup, which this page no longer reads`));
-    assert.match(m, /It restores formats 5 to 7/);
+    assert.match(m, /It restores formats 5 to 8/);
     assert.match(m, /docs\/ADMIN_RESTORE\.md/);
     assert.ok(m.includes(app.get('LAST_FORMAT_3_4_COMMIT')));
     assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
@@ -111,7 +111,7 @@ test('a file carrying conversion and recovery sections (formats 5, 6 and 7): the
   const base = await createApp(lib);
   const b7 = out(await base.ctx.buildBackupObject());
   const drop = (d, tables) => { const c = out(d); tables.forEach(t => { delete c.tables[t]; delete c.rowCounts[t]; }); return c; };
-  const six = { ...drop(b7, Array.from(base.get('CU1_TABLES'))), formatVersion: 6 }, five = { ...drop(six, ['episode_marks']), formatVersion: 5 };
+  const six = { ...drop(b7, Array.from(base.get('CU1_TABLES')).concat(Array.from(base.get('Q1_TABLES')))), formatVersion: 6 }, five = { ...drop(six, ['episode_marks']), formatVersion: 5 };
   const sections = { conversion: { source_format: 3, source_exported_at: '2026-01-01T00:00:00Z', source_sha256: 'b'.repeat(64), converter_version: '5.1' },
     recovery: { storage_map: { items: [], shows: [], personal_collections: [] }, othertv_shows: [{ not: 'checked any more' }] } };
   for (const doc of [b7, six, five]) {
@@ -121,7 +121,7 @@ test('a file carrying conversion and recovery sections (formats 5, 6 and 7): the
     await app.ctx.executeRestore(); await settle();
     await send(app);
     const sent = restoreCalls(app)[0].body.p_backup;
-    assert.strictEqual(sent.formatVersion, 7);
+    assert.strictEqual(sent.formatVersion, 8);
     assert.ok(!('conversion' in sent) && !('recovery' in sent), `format ${doc.formatVersion}`);
     assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
   }

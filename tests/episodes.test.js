@@ -420,7 +420,7 @@ test('delete: the dialog names the marks; the count shown goes with the request;
 test('backup: format 7 with every mark (id, season, TMDB episode, number; never user_id); a round trip restores them; the preview warns when the file has fewer', async () => {
   const { app, lib } = await boot({ marks: l => [mark(l.s2, 9001, 1), mark(l.s3, 5, 1)] });
   const b = JSON.parse(JSON.stringify(await app.ctx.buildBackupObject()));
-  assert.strictEqual(b.formatVersion, 7);
+  assert.strictEqual(b.formatVersion, 8);
   assert.deepStrictEqual(b.tables.episode_marks.map(r => Object.keys(r)), [['id', 'season_id', 'tmdb_episode_id', 'episode_number'], ['id', 'season_id', 'tmdb_episode_id', 'episode_number']]);
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(b)), []);
   const bad = JSON.parse(JSON.stringify(b)); bad.tables.episode_marks[0].season_id = lib.l1.id;
@@ -443,22 +443,22 @@ test('restore: a format-5 file is converted to format 7 with no marks, previewed
   const { app } = await boot({ marks: l => [mark(l.s2, 9001, 1)] });
   const b7 = JSON.parse(JSON.stringify(await app.ctx.buildBackupObject()));
   const b5 = { ...b7, formatVersion: 5, tables: { ...b7.tables }, rowCounts: { ...b7.rowCounts } };
-  for (const t of ['episode_marks', ...app.get('CU1_TABLES')]) { delete b5.tables[t]; delete b5.rowCounts[t]; }
+  for (const t of ['episode_marks', ...app.get('CU1_TABLES'), ...app.get('Q1_TABLES')]) { delete b5.tables[t]; delete b5.rowCounts[t]; }
   app.ctx.openSettings(null);
   const textOf = JSON.stringify(b5);
   await app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => textOf }], value: 'x' } }); await settle();
   const doc = JSON.parse(JSON.stringify(app.get('pendingRestoreData')));
-  assert.strictEqual(doc.formatVersion, 7);
+  assert.strictEqual(doc.formatVersion, 8);
   assert.deepStrictEqual(doc.tables.episode_marks, []);
   assert.ok(!('conversion' in doc));
   const m = text(app.el('restoreModalBox').innerHTML);
-  assert.match(m, /This backup is converted to format 7 before restoring/);
+  assert.match(m, /This backup is converted to format 8 before restoring/);
   assert.match(m, /This backup also has no episode marks/);
   assert.match(m, /Your library has 1 episode mark now; this backup has 0\./);
   await app.ctx.executeRestore(); await settle();
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
   assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
-  assert.strictEqual(rpcs(app, 'restore_backup')[0].body.p_backup.formatVersion, 7, 'only the converted document is sent');
+  assert.strictEqual(rpcs(app, 'restore_backup')[0].body.p_backup.formatVersion, 8, 'only the converted document is sent');
   assert.deepStrictEqual(app.store.episode_marks, []);
 });
 

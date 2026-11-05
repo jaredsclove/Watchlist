@@ -21,7 +21,8 @@ function parseSel(sel) {
     return s;
   }));
 }
-function makeMiniDom(app) {
+function makeMiniDom(app, extraIds = []) {
+  const IDS = ['tbody', 'cardList', ...extraIds]; // (Q1: a test may add #queuesScreen)
   const doc = app.ctx.document;
   // Document- and window-level listeners (the page's focus-placement tracking uses them), and
   // focusin on every focus, as a browser sends them.
@@ -54,7 +55,7 @@ function makeMiniDom(app) {
     n.querySelector = sel => n.querySelectorAll(sel)[0] || null;
     n.focus = () => { doc.activeElement = n; docEvent('focusin', n); };
     n.ownerDocument = doc;
-    Object.defineProperty(n, 'isConnected', { get: () => ['tbody', 'cardList'].some(id => cache[id] && cache[id].root === n.root) || n.root === n });
+    Object.defineProperty(n, 'isConnected', { get: () => IDS.some(id => cache[id] && cache[id].root === n.root) || n.root === n });
     n.getClientRects = () => (n.root.hidden ? [] : [{}]);
     n.addEventListener = (t, f) => { (n.listeners[t] = n.listeners[t] || []).push(f); };
     n.removeEventListener = (t, f) => { n.listeners[t] = (n.listeners[t] || []).filter(x => x !== f); };
@@ -79,7 +80,7 @@ function makeMiniDom(app) {
     cache[id] = { html, root };
     return root;
   }
-  for (const id of ['tbody', 'cardList']) {
+  for (const id of IDS) {
     const el = app.el(id);
     el.querySelector = sel => tree(id).querySelector(sel);
     el.querySelectorAll = sel => tree(id).querySelectorAll(sel);

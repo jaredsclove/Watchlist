@@ -965,6 +965,7 @@ function renderBrowseTable(chain = true) {
   else listing = renderAllMovies(today, { ...f, fYear: val('fYear'), fWatch: val('fWatch') });
   renderFilterBarState(); // B10: chips, More filters count (render.js)
   if (rec) applyListFocus(rec, listing);
+  if (typeof applyPendingReveal === 'function') applyPendingReveal(); // Q1: a queued item opened from Queues
   return listing;
 }
 
@@ -1150,7 +1151,7 @@ function browseSeasonEntryHtml(e, today, combined, part) {
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusHtml}</td>
       <td>${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, false))}</td>
-      <td>${seasonActionHtml('season-control', seasonRowControlHtml(r))} ${remove}</td>
+      <td>${seasonActionHtml('season-control', seasonRowControlHtml(r))} ${queueSeasonButtonHtml(r)} ${remove}</td>
     </tr>`;
   const card = `<div class="item-card ${dimClass}"${item}>
       <div class="card-top">
@@ -1163,7 +1164,7 @@ function browseSeasonEntryHtml(e, today, combined, part) {
         <span class="card-date">${browseDateHtml(r, today)}</span>
         <span class="card-labels">${badges}</span>
       </div>
-      <div class="card-actions">${statusHtml} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))} ${remove}</div>
+      <div class="card-actions">${statusHtml} ${seasonActionHtml('season-watch', seasonWatchControlHtml(r, releaseOpts, true))} ${seasonActionHtml('season-control', seasonRowControlHtml(r))} ${queueSeasonButtonHtml(r)} ${remove}</div>
     </div>`;
   return { row, card };
 }
@@ -1248,7 +1249,7 @@ function filmMenuHtml(r, policy, extra = '') {
         <div class="popover-section-label">Priority</div>
         <span class="state-action" data-action="priority">${prioritySelectHtml(r, 'film')}</span>
         <div class="popover-section-label" style="margin-top:8px">Watch with</div>
-        <div class="ww-options-grid">${watchWithPickerHtml(r.id, r.watch_with || [])}</div>${stateActions}${pullBtn}${matchBtn}${extra}
+        <div class="ww-options-grid">${watchWithPickerHtml(r.id, r.watch_with || [])}</div>${stateActions}${addToQueueMenuHtml('item', r.id)}${pullBtn}${matchBtn}${extra}
       </div>`;
 }
 

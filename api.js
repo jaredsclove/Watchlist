@@ -4,7 +4,7 @@
 // authorizes nothing; a phase not read yet is read again (GET) once before a write. The refusal is raised before anything is
 // sent and is formatted as a database refusal (code update_required), so every caller
 // reports that nothing was changed.
-const PAGE_PHASE = 'contracted-cu1';
+const PAGE_PHASE = 'contracted-q1';
 const STATE_MISMATCH_TEXT = 'This page and the database don’t match (the database may have been updated or rolled back), so nothing was changed. Reload the page.';
 // Once a B4/B5 function is missing or a read lacks the B4/B5 columns, this page stops writing
 // (and makes no backup or restore) until it is reloaded. A later capability read that still

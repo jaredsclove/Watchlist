@@ -9,7 +9,7 @@ import os from 'os';
 import path from 'path';
 import { execFileSync, spawn } from 'child_process';
 import { createRequire } from 'module';
-import { replay, library, pageCode, clone, recount, rekey, file, ROOT, A, B, C, SPEC_CU1 } from './restore-fixture.mjs';
+import { replay, library8, as7, pageCode, clone, recount, rekey, file, ROOT, A, B, C, SPEC_CU1, SPEC_Q1 } from './restore-fixture.mjs';
 
 if (!process.env.PGLITE_DIR) { console.error('usage: PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/restore-test.mjs'); process.exit(2); }
 const req = createRequire(path.join(process.env.PGLITE_DIR, 'package.json'));
@@ -22,8 +22,9 @@ let passed = 0, failed = 0;
 const ok = (c, l, d = '') => { c ? passed++ : failed++; if (!c) console.log(`  FAIL ${l}${d ? `\n       ${String(d).slice(0, 600)}` : ''}`); };
 const section = t => console.log(`[${t}]`);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const TABLES = Array.from(P('backupSpec')(7).tables);
-const COLUMNS = P('backupSpec')(7).columns;
+const TABLES = Array.from(P('backupSpec')(8).tables);
+const COLUMNS = P('backupSpec')(8).columns;
+const Q1_STEP = `select set_config('watchlist.q1_run', 'local-q1', false);\n` + file('db/q1_queues.sql');
 
 // ── PGlite ──
 const db = new PGlite();
@@ -38,7 +39,7 @@ const rpc = (who, fn, args) => as(who, `select public.${fn}(${args.map((_, i) =>
 const val = async s => Object.values((await db.query(s)).rows[0])[0];
 const fp = async () => {
   const out = {};
-  for (const t of TABLES) out[t] = await val(`select md5(coalesce(string_agg(x, '|' order by x), '')) from (select to_jsonb(r)::text x from public.${t} r) q`);
+  for (const t of TABLES) if (await val(`select to_regclass('public.${t}') is not null`)) out[t] = await val(`select md5(coalesce(string_agg(x, '|' order by x), '')) from (select to_jsonb(r)::text x from public.${t} r) q`); // (the queue tables exist from Q1)
   out.members = await val(`select md5(coalesce(string_agg(to_jsonb(m)::text, '|' order by user_id), '')) from private.library_members m`);
   return out;
 };
@@ -60,11 +61,11 @@ const differences = async (who, doc) => {
   return out;
 };
 
-const L1 = library(1), L2 = library(2), L3 = library(3, 3);
+const L1 = library8(1), L2 = library8(2), L3 = library8(3, 3);
 
 if (FINAL) {
   section('the migration');
-  await restore(A, L1); await restore(B, L2);
+  await restore(A, as7(L1)); await restore(B, as7(L2));
   const catalog = () => val(`select md5(coalesce(string_agg(x, '|' order by x), '')) from (
     select pg_get_functiondef(p.oid) x from pg_proc p where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace) and p.prokind = 'f'
     union all select c.oid::regclass::text from pg_class c where c.relnamespace in ('public'::regnamespace, 'private'::regnamespace)
@@ -84,20 +85,22 @@ if (FINAL) {
   const gone = await val(`select count(*)::int from pg_class c where c.relnamespace = 'private'::regnamespace and c.relname ~ '^(stage5_recovery_|b45_)'`);
   ok(gone === 0, 'the archive and rollback tables are gone');
 }
+// Q1 on top (its own suite is tools/q1-test.mjs): the rest of this suite is format 8.
+await db.exec(Q1_STEP);
 section('the fixture');
 ok(!Array.from(P('validateBackupObject')(L1)).length && !Array.from(P('validateBackupObject')(L2)).length, 'the library passes the page’s validation', Array.from(P('validateBackupObject')(L1)).join('; '));
-ok(TABLES.length === 19 && TABLES.every(t => L1.tables[t].length > 0), 'it has rows in all nineteen tables', TABLES.filter(t => !L1.tables[t].length).join());
+ok(TABLES.length === 21 && TABLES.every(t => L1.tables[t].length > 0), 'it has rows in all twenty-one tables', TABLES.filter(t => !L1.tables[t].length).join());
 
-section('a valid format-7 file');
+section('a valid format-8 file');
 {
   const r = await restore(A, L1);
   ok(r.ok, 'A’s restore is accepted', r.message);
-  ok(r.ok && r.r.formatVersion === 7 && TABLES.every(t => r.r.restored[t] === L1.tables[t].length), 'its answer counts every table', JSON.stringify(r.r));
-  ok(same(await differences(A, L1), []), 'all nineteen tables equal the file, field by field', (await differences(A, L1)).slice(0, 5).join('; '));
+  ok(r.ok && r.r.formatVersion === 8 && TABLES.every(t => r.r.restored[t] === L1.tables[t].length), 'its answer counts every table', JSON.stringify(r.r));
+  ok(same(await differences(A, L1), []), 'all twenty-one tables equal the file, field by field', (await differences(A, L1)).slice(0, 5).join('; '));
   const before = await fp();
   ok((await restore(A, L1)).ok && same(before, await fp()), 'restoring it again changes no row');
   const r2 = await restore(B, L2);
-  ok(r2.ok && same(await differences(B, L2), []), 'a member without research access restores all nineteen too', r2.message);
+  ok(r2.ok && same(await differences(B, L2), []), 'a member without research access restores all twenty-one too', r2.message);
   ok(same(await differences(A, L1), []), 'A’s library is untouched by B’s restore');
   const small = await restore(A, L3);
   ok(small.ok && same(await differences(A, L3), []), 'a smaller file replaces the whole library: nothing of the old one stays', small.message || (await differences(A, L3)).slice(0, 5).join('; '));
@@ -130,12 +133,18 @@ section('Earlier seasons and retired flags');
 section('older formats, through the page');
 {
   const drop = (doc, tables) => { const d = clone(doc); tables.forEach(t => { delete d.tables[t]; delete d.rowCounts[t]; }); return d; };
-  const six = { ...drop(L1, SPEC_CU1), formatVersion: 6 };
-  const five = { ...drop(L1, [...SPEC_CU1, 'episode_marks']), formatVersion: 5 };
+  const seven = { ...drop(L1, SPEC_Q1), formatVersion: 7 };
+  const six = { ...drop(L1, [...SPEC_CU1, ...SPEC_Q1]), formatVersion: 6 };
+  const five = { ...drop(L1, [...SPEC_CU1, ...SPEC_Q1, 'episode_marks']), formatVersion: 5 };
+  ok(!Array.from(P('validateBackupObject')(seven)).length, 'a format-7 file validates', Array.from(P('validateBackupObject')(seven)).join('; '));
+  const p7 = clone(P('restoreDocument')(seven));
+  ok(p7.formatVersion === 8 && same(p7.tables.watch_queues, []) && same(p7.tables.queue_entries, []) && !Array.from(P('validateBackupObject')(p7)).length, 'format 7 becomes format 8 with no queues');
+  const r7 = await restore(A, p7);
+  ok(r7.ok && same(await differences(A, p7), []), 'restored: every other table equals the file; the queues are empty', r7.message);
   ok(!Array.from(P('validateBackupObject')(six)).length && !Array.from(P('validateBackupObject')(five)).length, 'format-5 and format-6 files validate', Array.from(P('validateBackupObject')(five)).join('; '));
   const prepared = doc => clone(P('restoreDocument')(doc));
   const p6 = prepared(six), p5 = prepared(five);
-  ok(p6.formatVersion === 7 && !('conversion' in p6) && !('recovery' in p6) && !Array.from(P('validateBackupObject')(p6)).length, 'format 6 becomes a plain format-7 document');
+  ok(p6.formatVersion === 8 && !('conversion' in p6) && !('recovery' in p6) && !Array.from(P('validateBackupObject')(p6)).length, 'format 6 becomes a plain format-8 document');
   const r6 = await restore(A, p6);
   ok(r6.ok && same(await differences(A, p6), []), 'restored: its nine tables equal the file; collection updates are empty', r6.message);
   const r5 = await restore(A, p5);
@@ -144,13 +153,13 @@ section('older formats, through the page');
   const legacy = clone(L1); legacy.conversion = { source_format: 3, source_exported_at: '2026-01-01T00:00:00Z', source_sha256: 'b'.repeat(64), converter_version: '5.1' };
   legacy.recovery = { storage_map: { items: [], shows: [], personal_collections: [] }, othertv_shows: [{ id: 'not-even-valid' }] };
   const pl = prepared(legacy);
-  ok(!('conversion' in pl) && !('recovery' in pl) && same(pl.tables, L1.tables), 'a format-7 file’s conversion and recovery sections are left out of what is sent, its tables kept');
+  ok(!('conversion' in pl) && !('recovery' in pl) && same(pl.tables, L1.tables), 'a format-8 file’s conversion and recovery sections are left out of what is sent, its tables kept');
   ok('recovery' in legacy, 'the document read from the file keeps them');
   const rl = await restore(A, pl);
   ok(rl.ok && same(await differences(A, L1), []), 'restored, the library tables fully checked', rl.message);
   const sixLegacy = clone(six); sixLegacy.conversion = { source_format: 3, source_exported_at: '2026-01-01T00:00:00Z', source_sha256: 'b'.repeat(64), converter_version: '5.1+ep1.1' }; sixLegacy.recovery = legacy.recovery;
   const ps = prepared(sixLegacy);
-  ok(ps.formatVersion === 7 && !('conversion' in ps) && !('recovery' in ps) && (await restore(A, ps)).ok, 'the same on a format-6 file: converted, sections left out, restored');
+  ok(ps.formatVersion === 8 && !('conversion' in ps) && !('recovery' in ps) && (await restore(A, ps)).ok, 'the same on a format-6 file: converted, sections left out, restored');
   await restore(A, L1);
   if (FINAL) {
     const direct = await restore(A, legacy);
@@ -176,7 +185,7 @@ section('refusals leave everything as it was');
     'not a backup': d => { d.format = 'other'; },
     'no format': d => { delete d.formatVersion; },
     'format 1': d => { d.formatVersion = 1; }, 'format 2': d => { d.formatVersion = 2; }, 'format 5 unconverted': d => { d.formatVersion = 5; }, 'format 6 unconverted': d => { d.formatVersion = 6; },
-    'a future format': d => { d.formatVersion = 8; },
+    'a future format': d => { d.formatVersion = 9; }, 'format 7 unconverted': d => { d.formatVersion = 7; },
     'an unknown top-level field': d => { d.extra = 1; },
     'a missing table': d => { delete d.tables.update_holds; delete d.rowCounts.update_holds; },
     'an extra table': d => { d.tables.zz = []; d.rowCounts.zz = 0; },
@@ -340,7 +349,7 @@ section('ordinary functions afterwards');
   const del = await rpc(A, 'delete_tv_season', [rows[1].id, 0]);
   ok(del.ok && (await as(A, `select resume_start_season_id s from public.tv_shows where id = $1`, [show]))[0].s === null, 'deleting a season clears its range', del.message);
   const cap = (await as(A, `select public.stage5_capabilities() c`))[0].c;
-  ok(cap.phase === 'contracted-cu1' && cap.backup_format === 7 && cap.member === true && cap.research === true && cap.access === 'members', 'the capability answers as before', JSON.stringify(cap));
+  ok(cap.phase === 'contracted-q1' && cap.backup_format === 8 && cap.member === true && cap.research === true && cap.access === 'members', 'the capability answers as before', JSON.stringify(cap));
   ok(cap.recovery_archive === (FINAL ? 'retired' : 'active'), 'and reports the archive', cap.recovery_archive);
   if (FINAL) {
     const stale = await rpc(A, 'library_dismiss_catalog_new_b45', [[]]);
@@ -366,11 +375,11 @@ section('the admin tool');
     ok(c.ok && /OK/.test(c.out), 'check accepts a format-7 file with inherited sections', c.out);
     const out = JSON.parse(fs.readFileSync(path.join(dir, 'out.json'), 'utf8'));
     ok(!('conversion' in out) && !('recovery' in out) && fs.readFileSync(path.join(dir, 'legacy.json')).equals(legacyBefore), 'its output has neither; the original file is unchanged');
-    const six = JSON.parse(safety); SPEC_CU1.forEach(t => { delete six.tables[t]; delete six.rowCounts[t]; }); six.formatVersion = 6;
+    const six = JSON.parse(safety); [...SPEC_CU1, ...SPEC_Q1].forEach(t => { delete six.tables[t]; delete six.rowCounts[t]; }); six.formatVersion = 6;
     fs.writeFileSync(path.join(dir, 'six.json'), JSON.stringify(six));
     const c6 = tool('check', '--file', path.join(dir, 'six.json'), '--safety', path.join(dir, 'safety.json'), '--out', path.join(dir, 'six7.json'));
     const six7 = JSON.parse(fs.readFileSync(path.join(dir, 'six7.json'), 'utf8'));
-    ok(c6.ok && six7.formatVersion === 7 && !('conversion' in six7), 'check converts a format-6 file to plain format 7', c6.out);
+    ok(c6.ok && six7.formatVersion === 8 && !('conversion' in six7), 'check converts a format-6 file to plain format 8', c6.out);
     const r = await db.exec(tool('restore-sql', '--file', path.join(dir, 'out.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'restore-suite-1').out).then(() => ({ ok: true }), e => ({ ok: false, message: e.message }));
     ok(r.ok, 'the restore SQL restores it as the member', r.message);
     fs.writeFileSync(path.join(dir, 'after.json'), await exportDoc());
@@ -418,6 +427,7 @@ else {
   execFileSync(bin('pg_ctl'), ['-D', DATA, '-o', `-c listen_addresses='' -c unix_socket_directories='${SOCK}' -c timezone=UTC -c deadlock_timeout=200ms`, '-l', path.join(WORK, 'log'), '-w', 'start'], { stdio: 'ignore' });
   await replay(async t => { psql(t); });
   if (FINAL) psql(`select set_config('watchlist.simplify_run', 'local-simplify', false);\n` + file(finalStep));
+  psql(Q1_STEP);
   const fA = docFile('a.json', L1), fB = docFile('b.json', L2), fA2 = docFile('a2.json', rekey(L1, '71', '74'));
   const season = L1.tables.watchlist_items.find(w => w.show_id && !w.watched).id;
   ok(/^t$/m.test(psql(setAs(A) + '\n' + rest(fA))) && /^t$/m.test(psql(setAs(B) + '\n' + rest(fB))), 'both libraries restore on a real server');
@@ -486,7 +496,7 @@ else {
   s1.end(); s2.end();
 
   section('real PostgreSQL 17: local timing');
-  const big = library(1, 2500), fBig = docFile('big.json', big);
+  const big = library8(1, 2500), fBig = docFile('big.json', big);
   psql('analyze');
   const rows = Object.values(big.rowCounts).reduce((a, b) => a + b, 0);
   const times = [];

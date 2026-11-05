@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261103-ui-refine">
+<link rel="stylesheet" href="styles.css?v=20261105-queues">
 </head>
 <body>
 
@@ -43,6 +43,9 @@
 <div id="addPickerOverlay" class="modal-overlay" style="display:none">
   <div class="modal-box manage-box" id="addPickerBox" role="dialog" aria-modal="true" aria-labelledby="addPickerTitle" tabindex="-1" onkeydown="addPickerKeydown(event)"></div>
 </div>
+<div id="queueAddOverlay" class="modal-overlay" style="display:none">
+  <div class="modal-box manage-box queue-add-box" id="queueAddBox" role="dialog" aria-modal="true" aria-labelledby="queueAddTitle" tabindex="-1" onkeydown="queueAddKeydown(event)"></div>
+</div>
 <div id="effectModalOverlay" class="modal-overlay" style="display:none">
   <div class="modal-box" id="effectModalBox" role="alertdialog" aria-modal="true" aria-labelledby="effectModalText" tabindex="-1" onkeydown="effectDialogKeydown(event)"></div>
 </div>
@@ -59,6 +62,7 @@
   <div id="errorBanner"></div>
   <div id="viewHead"></div>
   <div id="settingsScreen" class="settings-screen" style="display:none"></div>
+  <div id="queuesScreen" class="queues-screen" style="display:none"></div>
   <div class="list-toolbar">
     <div class="filters" id="filtersRow"></div>
     <div class="stats-row" id="statsRow"></div>
@@ -98,33 +102,34 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261103-ui-refine"></script>
-<script src="api.js?v=20261103-ui-refine"></script>
-<script src="write-lane.js?v=20261103-ui-refine"></script>
-<script src="ui-helpers.js?v=20261103-ui-refine"></script>
-<script src="metadata.js?v=20261103-ui-refine"></script>
-<script src="backup-restore.js?v=20261103-ui-refine"></script>
-<script src="tabs.js?v=20261103-ui-refine"></script>
-<script src="render.js?v=20261103-ui-refine"></script>
-<script src="row-actions.js?v=20261103-ui-refine"></script>
-<script src="tmdb-search.js?v=20261103-ui-refine"></script>
-<script src="collections-pull.js?v=20261103-ui-refine"></script>
-<script src="universe-pull.js?v=20261103-ui-refine"></script>
-<script src="person-pull.js?v=20261103-ui-refine"></script>
-<script src="tmdb-match.js?v=20261103-ui-refine"></script>
-<script src="derived-views.js?v=20261103-ui-refine"></script>
-<script src="tv-shows.js?v=20261103-ui-refine"></script>
-<script src="episodes.js?v=20261103-ui-refine"></script>
-<script src="show-ratings.js?v=20261103-ui-refine"></script>
-<script src="organization.js?v=20261103-ui-refine"></script>
-<script src="organization-manage.js?v=20261103-ui-refine"></script>
-<script src="collection-members.js?v=20261103-ui-refine"></script>
-<script src="collection-updates.js?v=20261103-ui-refine"></script>
-<script src="collection-research.js?v=20261103-ui-refine"></script>
-<script src="collection-settings.js?v=20261103-ui-refine"></script>
-<script src="browse-views.js?v=20261103-ui-refine"></script>
-<script src="history.js?v=20261103-ui-refine"></script>
-<script src="library.js?v=20261103-ui-refine"></script>
+<script src="auth.js?v=20261105-queues"></script>
+<script src="api.js?v=20261105-queues"></script>
+<script src="write-lane.js?v=20261105-queues"></script>
+<script src="ui-helpers.js?v=20261105-queues"></script>
+<script src="metadata.js?v=20261105-queues"></script>
+<script src="backup-restore.js?v=20261105-queues"></script>
+<script src="tabs.js?v=20261105-queues"></script>
+<script src="render.js?v=20261105-queues"></script>
+<script src="row-actions.js?v=20261105-queues"></script>
+<script src="tmdb-search.js?v=20261105-queues"></script>
+<script src="collections-pull.js?v=20261105-queues"></script>
+<script src="universe-pull.js?v=20261105-queues"></script>
+<script src="person-pull.js?v=20261105-queues"></script>
+<script src="tmdb-match.js?v=20261105-queues"></script>
+<script src="derived-views.js?v=20261105-queues"></script>
+<script src="tv-shows.js?v=20261105-queues"></script>
+<script src="episodes.js?v=20261105-queues"></script>
+<script src="show-ratings.js?v=20261105-queues"></script>
+<script src="organization.js?v=20261105-queues"></script>
+<script src="organization-manage.js?v=20261105-queues"></script>
+<script src="collection-members.js?v=20261105-queues"></script>
+<script src="collection-updates.js?v=20261105-queues"></script>
+<script src="collection-research.js?v=20261105-queues"></script>
+<script src="collection-settings.js?v=20261105-queues"></script>
+<script src="browse-views.js?v=20261105-queues"></script>
+<script src="queues.js?v=20261105-queues"></script>
+<script src="history.js?v=20261105-queues"></script>
+<script src="library.js?v=20261105-queues"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -147,7 +152,7 @@
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let activeMediaType = 'tv'; // 'tv' | 'movie' — controls which views are visible (the last TV / Movies area, also while Collections or Settings is open)
-let activeArea = 'tv'; // S2: 'tv' | 'movie' | 'collections' | 'settings' — the primary area shown as current; set only by switchView (tabs.js areaOfView)
+let activeArea = 'tv'; // S2: 'tv' | 'movie' | 'collections' | 'queues' | 'settings' — the primary area shown as current; set only by switchView (tabs.js areaOfView)
 let activeViewId = 'watching'; // the open view (derived or browse)
 let tabData = {}; // per-run caches by name: tabData.films = the movie tools' films (library.js); no storage
 let libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(), seq: 0 }; // the newest catalog-governance snapshot (library.js)
@@ -225,6 +230,17 @@ let episodeNextMark = null; // EP4/EP5: the last row action (Mark E9 watched, a 
 let episodePanelSeq = 0; // EP1: bumped each time an episode list is loaded; a late TMDB answer for an earlier one changes nothing
 let showRatingCache = null; // item 2: TMDB show scores from this device's cache for this account (show-ratings.js); read once signed in
 let showRatingRequests = new Set(); // item 2: TMDB show ids whose score this page has requested (one request per show per page)
+let queuesData = null; // Q1: the Queues view's read: { loaded, queues (saved order), entries, rows } (queues.js); null until read
+let queuesLoadSeq = 0; // Q1: lets a late Queues read see that it's been superseded
+let activeQueueId = null; // Q1: the queue shown (this visit's choice; the last one shown on this browser when the view opens)
+let queueManageOpen = false; // Q1: Manage queues is open on the Queues page (page memory)
+let queueManageEdit = null; // Q1: a queue being renamed or confirmed for deletion: { id, mode: 'rename' | 'delete', value }
+let queueNewName = ''; // Q1: the New queue field as typed
+let queueFocusIntent = null; // Q1: where focus goes after the next Queues redraw (a drop, a rename); null: the list's rule
+let queueDrag = null; // Q1: an entry being dragged by its handle (queues.js); null when none
+let queueAdd = null; // Q1: the open Add to queue dialog (queues.js); null while closed
+let queueAddSeq = 0; // Q1: bumped each time the Add to queue dialog opens
+let pendingReveal = null; // Q1: { viewId, item, season }: the queued item to focus once that view is drawn (queues.js openQueueEntry)
 
 
 

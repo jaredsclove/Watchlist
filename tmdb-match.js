@@ -365,6 +365,8 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
     // Only a row that is still unmatched is updated; the database's unique indexes
     // are the final guard against a match made elsewhere at the same moment.
     let fresh;
+    // Q1: matching can adjust queues in its transaction (queues.js queueMatchReport says what changed).
+    const queuesBefore = typeof queueEntriesSnapshot === 'function' ? await queueEntriesSnapshot() : null;
     stage = 'write';
     if (viaShowFunction) {
       // library_match_season moves the season to its identified show (checked by
@@ -427,9 +429,11 @@ async function confirmTmdbMatch(withConfirmation, opts = {}) {
     cancelTMDBPreview();
     showSaved();
     const ok = activeViewId ? await reloadOpenView() : null;
-    const text = `Matched “${patch.title}”.${ok === false ? ' The list couldn’t be read again, so it may be out of date; use Retry.' : ''}`;
+    const queueText = typeof queueMatchReport === 'function' ? await queueMatchReport(queuesBefore) : '';
+    const text = `Matched “${patch.title}”.${queueText}${ok === false ? ' The list couldn’t be read again, so it may be out of date; use Retry.' : ''}`;
     if (libraryPanel) libraryReport(libraryContext(), text, ok === false);
     else if (ok === false) showError(text);
+    else if (queueText) showNotice(text);
   } catch(e) {
     if (m.inFlight === stamp.seq) m.inFlight = 0;
     const msg = String(e && e.message);

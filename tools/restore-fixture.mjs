@@ -1,5 +1,5 @@
 // Shared by the local restore tests: the migration replay, the page's own backup code, and a synthetic library with rows in all
-// nineteen tables of a format-7 backup. Every record is invented ("ZZ …", made-up TMDB ids).
+// nineteen tables of a format-7 backup (library8: all twenty-one of format 8). Every record is invented ("ZZ …", made-up TMDB ids).
 import fs from 'fs';
 import path from 'path';
 import vm from 'vm';
@@ -117,6 +117,24 @@ export function library(seed = 1, scale = 8) {
   return { format: 'watchlist-tracker-backup', formatVersion: 7, exportedAt: '2026-10-01T00:00:00.000Z',
     rowCounts: Object.fromEntries(Object.entries(t).map(([k, v]) => [k, v.length])), tables: t };
 }
+// The same library at format 8 (Q1): two queues, in their saved order, holding a whole show, a season of another show and a film.
+export const SPEC_Q1 = ['watch_queues', 'queue_entries'];
+export function library8(seed = 1, scale = 8) {
+  const d = library(seed, scale), id = n => `7${seed}000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  d.formatVersion = 8;
+  d.tables.watch_queues = [{ id: id(80001), name: `ZZ Queue ${seed}`, sort_order: 1, created_at: '2026-11-01T01:00:00.123456+00:00' },
+    { id: id(80002), name: `ZZ Other Queue ${seed}`, sort_order: 2, created_at: '2026-11-01T02:00:00.123456+00:00' }];
+  d.tables.queue_entries = [
+    { id: id(80011), queue_id: id(80001), show_id: id(1001), item_id: null, position: 1, created_at: '2026-11-01T03:00:00.123456+00:00' },
+    { id: id(80012), queue_id: id(80001), show_id: null, item_id: id(10000000 + 2 * 10 + 3), position: 2, created_at: '2026-11-01T04:00:00.123456+00:00' },
+    { id: id(80013), queue_id: id(80001), show_id: null, item_id: id(3001), position: 4, created_at: '2026-11-01T05:00:00.123456+00:00' },
+    { id: id(80014), queue_id: id(80002), show_id: null, item_id: id(3001), position: 1, created_at: '2026-11-01T06:00:00.123456+00:00' },
+    { id: id(80015), queue_id: id(80002), show_id: null, item_id: id(10000000 + 1 * 10 + 1), position: 2, created_at: '2026-11-01T07:00:00.123456+00:00' }];
+  d.rowCounts = Object.fromEntries(Object.entries(d.tables).map(([k, v]) => [k, v.length]));
+  return d;
+}
+// A format-8 document as format 7: no queue tables.
+export const as7 = d => { const x = JSON.parse(JSON.stringify(d)); SPEC_Q1.forEach(t => { delete x.tables[t]; delete x.rowCounts[t]; }); x.formatVersion = 7; return x; };
 export const clone = d => JSON.parse(JSON.stringify(d));
 // A file's table dropped or replaced, with rowCounts kept right.
 export const recount = d => { d.rowCounts = Object.fromEntries(Object.entries(d.tables).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])); return d; };
