@@ -3,9 +3,9 @@
 Migrations run as `postgres` in the Supabase SQL Editor, and every production step needs explicit approval and a validated backup first. The
 release tiers are in `docs/STATE.md`. What each script did when it ran, and the older rehearsals: `docs/history/DB_SCRIPTS.md`.
 
-**Current production state:** phase `contracted-cu1`, backup format 7, `access = members`, through CU1e, W1's removal and the simplification. The recovery
+**Current production state:** phase `contracted-q1`, backup format 8, `access = members`, through CU1e, W1's removal, the simplification and Q1. The recovery
 archive is retired, exported privately first. There is no schema rollback, and none of the old rollback scripts can run against this state: repairs are fix-forward, and
-data recovery is a format-7 restore through the page or `docs/ADMIN_RESTORE.md`.
+data recovery is a format-8 restore through the page or `docs/ADMIN_RESTORE.md`.
 
 ## Run order
 
@@ -22,6 +22,7 @@ To rebuild a local database, the order is the replay in `tools/db-rehearsal-cu1e
 | CU1 | `cu1_collection_updates.sql`, `cu1b_hold_edit.sql`, `cu1c_date_equivalence.sql`, `cu1d_network_and_marks.sql`, then `cu2_research_access.sql`, `cu1e_missing_season.sql` (each `watchlist.<name>_run`; CU2 also `watchlist.cu2_owner`) |
 | W1 (history) | `w1_write_scope.sql` then `w1_removal.sql`, applied in production and never to be run again there |
 | Simplification | `simplify_restore_cleanup.sql` (`watchlist.simplify_run`), applied in production and refused on a rerun: one flat `restore_backup`, the old chain, 36 dormant functions and the six archive and rollback tables removed. `simplify_preflight.sql` is its read-only check and the private archive export. Local builds include it through `tools/restore-fixture.mjs` |
+| Q1 | `q1_queues.sql` (`watchlist.q1_run`): the queue tables, their functions, completion and identity triggers, `restore_backup` at format 8, phase `contracted-q1`. Local tests: `tools/q1-test.mjs`, `tools/q1-local-api-test.mjs`; the restore suite and both tools apply it after the simplification. Its triggers (completion, identity) delete or move queue rows with the write flag set for themselves, and put the flag back |
 
 The local replays leave out W1 and its removal: the removal's test showed the catalog afterwards equals the one before W1, so together they add nothing to the state a replay needs.
 
@@ -44,6 +45,8 @@ ended; never rerun to find out); explicit revokes from `anon`, verified before c
 `test/` is for local runs only: `replica_schema.sql`, `supabase_shim.sql`, `m1_test_marker.sql` and the test-only reverse scripts that `tools/db-rehearsal-cu1.mjs` runs. Older rehearsals and self-checks are in git history (`docs/history/DB_SCRIPTS.md` describes them).
 
 Local tools:
+- `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/q1-test.mjs`: Q1 (queues) on PGlite, and simultaneous saves on real PostgreSQL with `PG_BIN`.
+- `LOCAL_SERVICE_KEY=<key> node tools/q1-local-api-test.mjs --api http://127.0.0.1:54321 --key <key> --container <db container>`: Q1 through real Auth and PostgREST on a fresh local stack.
 - `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/restore-test.mjs`: the restore suite. Without `PG_BIN` it skips the concurrency and timing checks on real PostgreSQL, with a notice.
 - `PGLITE_DIR=<dir> node tools/db-rehearsal-cu1.mjs --backup <format-6 file>`: CU1 through CU1e and CU2. It ends by reversing its migrations, so it tests those historical states, not the final one.
 - `PG_BIN=<postgres 17 bin> node tools/db-rehearsal-cu1e-pg.mjs`: real concurrency on a throwaway server.

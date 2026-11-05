@@ -9,7 +9,7 @@ Members sign in with an email and a password (accounts are created by the librar
 public sign-up). Each member's library is theirs alone: the database allows a signed-in member only their
 own rows, and nothing to anyone signed out. Collaborative editing of a shared library is not a goal.
 
-- **Views:** TV (Currently Watching, All TV, Coming Soon), Movies (All Movies), Collections
+- **Views:** TV (Currently Watching, All TV, Coming Soon), Movies (All Movies), Queues (Q1, below), Collections
   (personal collections: shows, seasons and, since S4, films editable there; Remove from a
   collection with Undo; Add to <collection>…, S5), Settings (Manage collections and watch-with
   choices, Collection updates, Backup & Restore; Backup & Restore is the first card, and Account's password form opens
@@ -44,7 +44,31 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   one group across the action columns (Match and Delete set apart after them); flat Seasons lists keep "Mark watched".
   Season progress reads "1/3 seasons watched". In show views (Currently Watching, All TV Shows, collections) the desktop
   column is "Action" and Up next has more room.
-- **Show ended (UI polish 2):** set in a show's Details, not the expanded show. It is part of Details' draft: Cancel
+- **Planning queues (Q1, item 7):** the app bar's Queues (`#/queues`) shows one of the member's named queues at a time,
+  chosen in a selector in their saved order (the last one shown is remembered on this browser). Manage queues, on the page,
+  makes, renames and deletes queues (the confirmation names the entry count; the library is never touched) and moves them up
+  and down. An entry is a film, a whole show or one season; the same item may be in several queues, once per queue, and a
+  queue never holds a whole show beside one of its seasons (several distinct seasons are fine). Entries are reordered by
+  dragging the ⠿ handle (mouse or touch; the handle alone takes the gesture, so the page scrolls as usual and Esc cancels), or
+  with ↑ / ↓ and the ⋯ menu's Move to top / bottom; every way sends one guarded move with the order the page showed (a
+  queue changed elsewhere is refused and read again). Focus stays on the control used, the other move button at an end, the
+  moved entry's move control after a drop, the next entry's ⋯ after Remove. Rows read the title (a link that opens the item:
+  a season or show in All TV as Shows for that visit, searched, expanded and focused; a film in All Movies), a kind line
+  ("Whole show · Up next Season 3", "Season 1 · Mar 4 · Upcoming", "Film · Jul 9, 2023") and a state label (Watched,
+  Skipped, Complete, the show's status). Films and seasons offer their ordinary Mark watched; a whole show its status select
+  and the show row's own action (Mark E9 watched / Mark S3 watched). Add to queue… is in shows' and films' ⋯ menus, and
+  Queue… beside a season in All TV's and a collection's Seasons lists and Coming Soon: one dialog, reading the queues fresh,
+  says per queue why the choice can't go there ("Already in this queue (#3)", "The whole show is in this queue", "Has
+  Season 2 of this show"), can make a new queue, and adds at the bottom without changing any status (already watched or
+  complete items may be added and keep their label). **Completion** is the database's, in the same transaction: a film or
+  season going from unwatched to watched leaves every queue; an ended show whose last unwatched regular season is marked
+  watched, or whose Show ended is turned on with every regular season watched (at least one regular season, none skipped;
+  specials never count), loses its whole-show entries everywhere. Nothing else removes an entry: reads, Refresh shows'
+  new seasons, restore, edits, Skip, episode marks (the last episode doesn't complete a season) and unmarking (removed entries
+  don't come back). An ongoing show caught up stays. **Matching** keeps the rule: a season moved into a show a queue holds
+  whole leaves that queue; a whole-show entry of the show the season emptied is carried to where it went (another show, or the
+  film it became), a duplicate merged into the entry already there at its place; Match reports any such queue change.
+  Deleting a film, season or show removes its entries. A change made from the queue reads it again once it ends. set in a show's Details, not the expanded show. It is part of Details' draft: Cancel
   discards it, Save sends what changed, the categories (`library_set_metadata_b45`) and then Show ended
   (`library_set_show_state_b45`), each with its own expected values, in one write lane; not one transaction. Save with
   Show ended unchanged sends the categories as before. A refused or unconfirmed categories save sends nothing more. Once
@@ -143,7 +167,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   (anything but true hides the controls) and a `research_not_enabled` refusal; the database decides. Review offers "Continue
   applying imported updates", on a click only, for findings an interrupted import left unevaluated (research; new season, date or
   alias; pending with no reason; record still present): the automatic rules (`p_review` false) on a fresh read.
-- **Data:** `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
+- **Data:** `watch_queues` and `queue_entries` (Q1), `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
   `catalog_film_links`, `episode_marks` (watched episodes of TMDB-matched seasons; no dates or titles), and since
   CU1 `update_setup`, `collection_definitions`, `collection_exclusions`, `update_holds`, `record_aliases`,
@@ -156,9 +180,10 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   `library_cu_sync_show_network`, `delete_tv_season`, `restore_backup`).
   Some take `p_expected` values and refuse a stale write; not every path does, so check each one before relying
   on it. `delete_tv_season` takes the mark count the page showed: a page from before EP1 can't delete a marked season.
-- **Backup** is format 7 (nineteen tables: format 6's nine plus collection updates' ten; no `user_id`). **Restore**
-  converts a format-5 or -6 file to format 7 first (a format-5 file has no marks, a format-6 file no collection
-  updates; the preview says what a restore removes) and leaves out any `conversion` or `recovery` section an old file carries, saying so.
+- **Backup** is format 8 (twenty-one tables: format 7's nineteen — format 6's nine plus collection updates' ten — plus the
+  two queue tables, with both orders; no `user_id`). **Restore** converts a file of format 5 to 7 to format 8 first (a
+  format-5 file has no marks, a format-6 file no collection updates, a format-7 file no queues; the preview says what a
+  restore removes) and leaves out any `conversion` or `recovery` section an old file carries, saying so.
   Formats 1 to 4 are refused (`docs/ADMIN_RESTORE.md` has the offline route). It validates the file, checks for identity loss, makes and validates a safety backup,
   then replaces the owner's rows in one database transaction and verifies field by field.
 
