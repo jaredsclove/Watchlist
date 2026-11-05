@@ -75,8 +75,8 @@ async function detectBackupFormat() {
   const cap = await stage5Capabilities();
   if (b45Stopped) throw new Error(STATE_MISMATCH_TEXT + ' No file was made.');
   if (cap && cap.access === 'members' && cap.member !== true) throw new Error(NOT_A_MEMBER_TEXT + ' No file was made.');
-  if (pageMayWrite(cap)) return 7;
-  throw new Error('This page makes backups only of a database in its own state (format 7), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
+  if (pageMayWrite(cap)) return PAGE_BACKUP_FORMAT;
+  throw new Error('This page makes backups only of a database in its own state (format 8), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
 }
 
 // At boot (doesn't hold up the first view): which phase this database is in. A database
@@ -203,7 +203,7 @@ function validateBackupObject(obj) {
   if (obj.format !== BACKUP_FORMAT) errors.push(`Unrecognized backup format ("${obj.format}") — this doesn't look like a Watchlist Tracker backup file.`);
   const spec = backupSpec(obj.formatVersion);
   if ([1, 2, 3, 4].includes(obj.formatVersion)) {
-    errors.push(`This is a format ${obj.formatVersion} backup, which this page no longer reads. It restores formats 5 to 7. Nothing was changed. The file is fine: docs/ADMIN_RESTORE.md in the project shows how to convert a format 3 or 4 file offline with the tools at commit ${LAST_FORMAT_3_4_COMMIT}.`);
+    errors.push(`This is a format ${obj.formatVersion} backup, which this page no longer reads. It restores formats 5 to 8. Nothing was changed. The file is fine: docs/ADMIN_RESTORE.md in the project shows how to convert a format 3 or 4 file offline with the tools at commit ${LAST_FORMAT_3_4_COMMIT}.`);
     return errors;
   }
   if (!spec) { errors.push(`Unsupported backup format version (${obj.formatVersion}).`); return errors; }
@@ -308,6 +308,17 @@ const RESTORE_COLUMNS_V7 = {
     decided_at: 'timestamp?', applied_at: 'timestamp?', result: 'json?' }
 };
 const BACKUP_FORMAT_V7 = { tables: Object.keys(RESTORE_COLUMNS_V7), columns: RESTORE_COLUMNS_V7 };
+// Format 8 (Q1, item 7): format 7 plus the named planning queues, in their saved order, and their entries (a film, a
+// whole show or one season, at a place in a queue) (db/q1_queues.sql).
+const Q1_TABLES = ['watch_queues', 'queue_entries'];
+const RESTORE_COLUMNS_V8 = {
+  ...RESTORE_COLUMNS_V7,
+  watch_queues: { id: 'uuid', name: 'text', sort_order: 'int', created_at: 'timestamp' },
+  queue_entries: { id: 'uuid', queue_id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', position: 'int', created_at: 'timestamp' }
+};
+const BACKUP_FORMAT_V8 = { tables: Object.keys(RESTORE_COLUMNS_V8), columns: RESTORE_COLUMNS_V8 };
+// The format this page makes and restores.
+const PAGE_BACKUP_FORMAT = 8;
 const CATALOG_GOVERNANCE_IDS = ['disney', '90day', 'sheridan'];
 const PRESENTATION_KEYS = ['disney', '90day', 'sheridan', 'truecrime'];
 // The last commit whose page and admin tool read formats 3 and 4 (docs/ADMIN_RESTORE.md has the offline route).
@@ -315,7 +326,7 @@ const LAST_FORMAT_3_4_COMMIT = '7f650da';
 
 // The tables and columns of a format this page reads; null for any other.
 function backupSpec(formatVersion) {
-  return formatVersion === 7 ? BACKUP_FORMAT_V7 : formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : null;
+  return formatVersion === 8 ? BACKUP_FORMAT_V8 : formatVersion === 7 ? BACKUP_FORMAT_V7 : formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : null;
 }
 
 const TV_SHOW_STATUSES = ['confirmed', 'watching', 'skipped'];
@@ -398,7 +409,8 @@ function validateBackupRows(tables, formatVersion) {
   validateFormat4Rows(tables, items, report, rowLabel, findDuplicates);
   validateFormat5Rows(tables, items, report, rowLabel);
   if (formatVersion >= 6) validateFormat6Rows(tables, items, report, rowLabel, findDuplicates);
-  if (formatVersion === 7) validateFormat7Rows(tables, items, report);
+  if (formatVersion >= 7) validateFormat7Rows(tables, items, report);
+  if (formatVersion >= 8) validateFormat8Rows(tables, items, report);
   return errors;
 }
 
@@ -477,7 +489,50 @@ function validateFormat7Rows(tables, items, report) {
   report('collection updates (format 7) references', problems);
 }
 
-// ─── Converting an older document to format 7 ─────────────────────────────────
+// Format 8: what the queue tables' keys and the queue rules enforce. Every entry names a queue, a show or a library row in
+// the file (exactly one of the two); places in a queue and the queues' order are positive and distinct; names are unique
+// ignoring case; a queue holds an item once, and never a whole show beside one of its seasons.
+function validateFormat8Rows(tables, items, report) {
+  const queues = (tables.watch_queues || []).filter(r => r && typeof r === 'object');
+  const entries = (tables.queue_entries || []).filter(r => r && typeof r === 'object');
+  const qIds = new Set(queues.map(q => q.id)), shows = new Set((tables.tv_shows || []).map(s => s && s.id));
+  const showOfItem = new Map(items.map(r => [r.id, r.show_id]));
+  const problems = [], seenName = new Set(), seenOrder = new Set(), seenPlace = new Set(), seenTarget = new Set();
+  queues.forEach((q, i) => {
+    if (typeof q.name !== 'string' || q.name !== q.name.trim() || !q.name || q.name.length > 100) problems.push(`watch_queues row ${i + 1} has a name the database refuses`);
+    const name = String(q.name).toLowerCase();
+    if (seenName.has(name)) problems.push(`watch_queues row ${i + 1} repeats a name`); seenName.add(name);
+    if (!(q.sort_order > 0)) problems.push(`watch_queues row ${i + 1} has an order below 1`);
+    if (seenOrder.has(q.sort_order)) problems.push(`watch_queues row ${i + 1} repeats a place`); seenOrder.add(q.sort_order);
+  });
+  entries.forEach((e, i) => {
+    const at = `queue_entries row ${i + 1}`;
+    if (!qIds.has(e.queue_id)) problems.push(`${at} names a queue that isn’t in the file`);
+    if ((e.show_id == null) === (e.item_id == null)) problems.push(`${at} must name exactly one of a show or an item`);
+    if (e.show_id != null && !shows.has(e.show_id)) problems.push(`${at} names a show that isn’t in the file`);
+    if (e.item_id != null && !showOfItem.has(e.item_id)) problems.push(`${at} names a library row that isn’t in the file`);
+    if (!(e.position > 0)) problems.push(`${at} has a place below 1`);
+    const place = `${e.queue_id}|${e.position}`, target = `${e.queue_id}|${e.show_id || e.item_id}`;
+    if (seenPlace.has(place)) problems.push(`${at} repeats a place in its queue`); seenPlace.add(place);
+    if (seenTarget.has(target)) problems.push(`${at} repeats an item in its queue`); seenTarget.add(target);
+  });
+  const wholeShows = new Set(entries.filter(e => e.show_id != null).map(e => `${e.queue_id}|${e.show_id}`));
+  entries.forEach((e, i) => {
+    const s = e.item_id != null ? showOfItem.get(e.item_id) : null;
+    if (s && wholeShows.has(`${e.queue_id}|${s}`)) problems.push(`queue_entries row ${i + 1} is a season of a show its queue holds whole`);
+  });
+  report('queues (format 8)', problems);
+}
+
+// ─── Converting an older document to format 8 ─────────────────────────────────
+// Format 8 adds the planning queues, which a format-7 file can't have: the converted document has none, every other
+// table kept as it is. Restoring it therefore removes the current queues (the safety backup keeps them).
+function convertFormat7To8(doc7) {
+  const tables = { ...doc7.tables };
+  Q1_TABLES.forEach(t => { tables[t] = []; });
+  return { format: doc7.format, formatVersion: 8, exportedAt: doc7.exportedAt,
+    rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
+}
 // Format 7 adds collection updates' ten tables, which a format-6 file can't have: the converted
 // document has them empty, and every other table is kept as it is. Restoring it therefore removes the
 // current definitions, exclusions, holds, aliases, removals, show settings, findings and the setup row;
@@ -494,16 +549,24 @@ function convertFormat5To6(doc5) {
   return { format: doc5.format, formatVersion: 6, exportedAt: doc5.exportedAt,
     rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
 }
-// What a restore sends for a validated file of format 5, 6 or 7: format 7, and only its library. A file
+// What a restore sends for a validated file of format 5 to 8: format 8, and only its library. A file
 // converted long ago can carry `conversion` and `recovery` sections from format 3; the archive they
 // belonged to is retired, so they are left out of what is sent (the file itself is never changed).
 function restoreDocument(doc) {
-  const doc7 = doc.formatVersion === 7 ? doc : convertFormat6To7(doc.formatVersion === 5 ? convertFormat5To6(doc) : doc);
-  return { format: doc7.format, formatVersion: 7, exportedAt: doc7.exportedAt, rowCounts: doc7.rowCounts, tables: doc7.tables };
+  const doc7 = doc.formatVersion >= 7 ? doc : convertFormat6To7(doc.formatVersion === 5 ? convertFormat5To6(doc) : doc);
+  const doc8 = doc7.formatVersion === 8 ? doc7 : convertFormat7To8(doc7);
+  return { format: doc8.format, formatVersion: 8, exportedAt: doc8.exportedAt, rowCounts: doc8.rowCounts, tables: doc8.tables };
+}
+function format7ConversionHtml(currentCounts) {
+  const queues = currentCounts.watch_queues || 0, entries = currentCounts.queue_entries || 0;
+  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 8 before restoring</div><ul class="manage-list">
+    <li>Format 8 adds planning queues. This backup was made before them, so it has none.</li>
+    ${queues ? `<li>Restoring it removes your ${queues} queue${queues === 1 ? '' : 's'} and their ${entries} entr${entries === 1 ? 'y' : 'ies'} (the safety backup keeps them). Your films, shows and progress come from the backup as usual.</li>` : ''}
+    <li>The file itself isn’t changed.</li></ul></div>`;
 }
 function format6ConversionHtml(currentCounts) {
   const lost = CU1_TABLES.reduce((n, t) => n + (currentCounts[t] || 0), 0);
-  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 7 before restoring</div><ul class="manage-list">
+  return `<div class="modal-section"><div class="modal-label">This backup also has no collection updates</div><ul class="manage-list">
     <li>Format 7 adds collection updates: collection definitions, exclusions, holds, aliases, remembered removals, show update settings and findings. This backup was made before them, so it has none.</li>
     ${lost ? `<li>Restoring it removes the ${lost} collection-update record${lost === 1 ? '' : 's'} you have now (the safety backup keeps them).${researchEnabled ? ' Automatic updates for catalog shows then pause until you import the collection setup file again (Settings → Collection updates).' : ''}</li>` : ''}
     <li>The file itself isn’t changed.</li></ul></div>`;
@@ -685,7 +748,7 @@ async function handleRestoreFileSelected(event) {
   await renderRestorePreview(parsed, session);
 }
 
-// A format-5 or -6 file is converted to format 7 first, and the preview says what that
+// A file of format 5 to 7 is converted to format 8 first, and the preview says what that
 // means; only the prepared document is ever sent. Nothing is converted or sent again
 // automatically if the database refuses it.
 async function renderRestorePreview(backup, session = restoreSessionSeq) {
@@ -696,13 +759,13 @@ async function renderRestorePreview(backup, session = restoreSessionSeq) {
   let currentItems = [];
   let dbFormat;
   try {
-    // A restore needs a database in this page's phase (format 7). Never a fallback to another format.
+    // A restore needs a database in this page's phase (format 8). Never a fallback to another format.
     const phaseCap = await stage5Capabilities();
     if (!restoreSessionLive(session)) return;
     if (!pageMayWrite(phaseCap)) {
       showRestoreModal(`<div class="modal-title">Restore isn't available</div>
         <div class="modal-error">${b45Stopped ? esc(STATE_MISMATCH_TEXT) : phaseCap
-          ? 'This page restores only into a database in its own state (format 7), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
+          ? 'This page restores only into a database in its own state (format 8), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
           : 'This page needs a database update that hasn’t been made yet, so it can’t restore here. Nothing was changed.'}</div>
         <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
       pendingRestoreData = null;
@@ -756,6 +819,7 @@ async function renderRestorePreview(backup, session = restoreSessionSeq) {
       <div class="modal-label">Backup created</div>
       <div>${esc(backupDate)}</div>
     </div>
+    ${fromFormat < 8 ? format7ConversionHtml(currentCounts) : ''}
     ${fromFormat < 7 ? format6ConversionHtml(currentCounts) : ''}
     ${fromFormat === 5 ? format5ConversionHtml() : ''}
     ${retiredSections ? retiredSectionsHtml() : ''}
@@ -894,12 +958,12 @@ async function sendRestore(preRestoreFilename) {
   // database rolls back to exactly what it was.
   const restoredTables = backupSpec(backup.formatVersion).tables;
   // The phase is read again right before sending: it must still be this page's, and only
-  // a format-7 document is ever sent (formats 5 and 6 were converted in the preview).
+  // a format-8 document is ever sent (formats 5 to 7 were converted in the preview).
   // Nothing is sent otherwise.
   let sendCap = null;
   try { sendCap = await stage5Capabilities(); } catch (e) { sendCap = null; }
   if (!restoreSessionLive(session) || pendingRestoreData !== backup) return;
-  if (!pageMayWrite(sendCap) || backup.formatVersion !== 7 || !pendingRestoreData) {
+  if (!pageMayWrite(sendCap) || backup.formatVersion !== PAGE_BACKUP_FORMAT || !pendingRestoreData) {
     showRestoreModal(`<div class="modal-title">Restore not sent</div>
       <div class="modal-error">The database’s update state ${sendCap ? 'changed after this restore was prepared' : 'couldn’t be confirmed'}, so nothing was sent and nothing was changed. Choose the file again to see what restoring it would do now.</div>
       <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);

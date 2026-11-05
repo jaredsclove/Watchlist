@@ -116,7 +116,7 @@ async function stoppedChecks(app, lib, label) {
   await app.ctx.setSeasonSkipped(lib.s3.id, true); await settle();
   assert.strictEqual(app.writes().length, n, `${label}: later writes are refused before sending, though the capability still reads B4/B5`);
   const cap = await (await app.ctx.fetch(`${app.get('SUPABASE_URL')}/rest/v1/rpc/stage5_capabilities`, {})).json();
-  assert.strictEqual(cap.phase, 'contracted-cu1', `${label}: (the capability really does still say the page's phase)`);
+  assert.strictEqual(cap.phase, 'contracted-q1', `${label}: (the capability really does still say the page's phase)`);
   const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
   assert.match(res, /This page and the database don’t match[\s\S]*Reload the page\. No file was made\./, `${label}: no backup file`);
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings

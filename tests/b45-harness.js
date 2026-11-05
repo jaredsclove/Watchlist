@@ -10,7 +10,7 @@ const B45_PHASE = 'contracted-b45';
 // The B4/B5 columns, guards and functions are the same in both.
 const EP1_PHASE = 'contracted-ep1';
 // CU1 (db/cu1_collection_updates.sql): EP1 plus collection updates; the page's own phase since CU1.
-const CU1_PHASE = 'contracted-cu1';
+const CU1_PHASE = 'contracted-q1';
 const isB45Schema = phase => phase === B45_PHASE || phase === EP1_PHASE || phase === CU1_PHASE;
 // The old names that refuse once B4/B5 is installed (an old page still open).
 const B45_STUBS = ['set_show_status', 'library_add_seasons', 'library_create_show', 'library_add_films', 'library_create_film',

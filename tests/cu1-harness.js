@@ -5,9 +5,10 @@
 // expected values; reconciliation with identified and unidentified rows; the date rules; identity
 // and alias rules; accepting with duplicates and remembered removals), the membership functions
 // recording removals, and the retired catalog application. Used by tests/app-harness.js when
-// createApp({ stage5: 'contracted-cu1' }) (the default).
+// createApp({ stage5: 'contracted-q1' }) (the default).
 
-const CU1_PHASE = 'contracted-cu1';
+// The current phase: CU1's tables and functions, with Q1's queues (tests/q1-harness.js) since contracted-q1.
+const CU1_PHASE = 'contracted-q1';
 const CU1_TABLES = ['update_setup', 'collection_definitions', 'collection_exclusions', 'update_holds', 'record_aliases',
   'membership_removals', 'show_update_settings', 'research_briefs', 'research_imports', 'update_findings'];
 const BUILTIN = ['disney', '90day', 'sheridan'];

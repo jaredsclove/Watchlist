@@ -620,7 +620,7 @@ test('no duplicate marker or storage name in All TV (Stage 5: one record per TMD
 // ─── Catalog updates from the Browse bar ──────────────────────────────────────
 // ─── Review fixes (2026-10-08) ────────────────────────────────────────────────
 test('a show by hand named like an unmatched show: pointed out first, nothing sent; "Add as a new show" sends the ids shown (distinct_from); adding a season is the checked alternative', async () => {
-  for (const phase of ['contracted-cu1']) { // (since CU1 the page writes only to the CU1 database)
+  for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to the CU1 database)
     const app = await boot(library(), { stage5: phase });
     await allTv(app); await openPanel(app, 'tv', 'manual');
     const local = showOf(app, 'Local Show');

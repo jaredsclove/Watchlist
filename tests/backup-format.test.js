@@ -36,7 +36,7 @@ test('a database without Stage 5 (format 1 or 2): no backup file, no format prob
     const app = await createApp({ ...opts, stage5: null });
     const before = app.requests.length;
     const res = await app.run('buildBackupObject()').then(() => 'made', e => e.message);
-    assert.match(res, /makes backups only of a database in its own state \(format 7\), and this database isn’t in it, so no file was made/);
+    assert.match(res, /makes backups only of a database in its own state \(format 8\), and this database isn’t in it, so no file was made/);
     const reads = app.requests.slice(before);
     assert.deepStrictEqual(reads.map(r => `${r.method} ${r.url.split('/rest/v1/')[1].split('?')[0]}`), ['GET rpc/stage5_capabilities']);
   }
@@ -61,7 +61,7 @@ test('a database without Stage 5 (format 1 or 2): restore isn’t offered for a 
 test('restore: a format 7 restore sends the flag as false', async () => {
   const app = await createApp({ rows: v2Rows(), tvShows: v2Shows() });
   const b = await app.run('buildBackupObject()');
-  assert.strictEqual(b.formatVersion, 7);
+  assert.strictEqual(b.formatVersion, 8);
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   app.ctx.__b = b;
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)');
@@ -69,7 +69,7 @@ test('restore: a format 7 restore sends the flag as false', async () => {
   await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`);
   const call = app.requests.find(r => r.url.includes('/rpc/restore_backup'));
   assert.strictEqual(call.body.p_allow_v1_reset, false);
-  assert.strictEqual(call.body.p_backup.formatVersion, 7);
+  assert.strictEqual(call.body.p_backup.formatVersion, 8);
 });
 
 T.run();
