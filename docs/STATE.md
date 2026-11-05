@@ -27,17 +27,17 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: UI refine (page only): matching searches with a Search
-  button and a compact pair, Up next without past premiere dates and closer to its action, "S35 · 8/12 episodes
-  watched", released 2026-11-03 UTC. Cache token `20261103-ui-refine`. Last database release: the simplification (PRs #46 and #47), the flat restore and
-  retired-object cleanup, released 2026-11-02 UTC.
-- Database phase `contracted-cu1`, backup format 7 (nineteen tables, no `user_id`), `access = members`, research per member. One flat
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: named planning queues (Q1, item 7;
+  PR #56, `6716da4`), released 2026-11-05 UTC: the Queues area, Add to queue, reordering by drag and buttons, completion in
+  the database, backup format 8. Cache token `20261105-queues`. Database: `db/q1_queues.sql` applied 2026-11-05 UTC before the
+  merge (run record confirmed by a separate read; library tables identical in the backups before and after).
+- Database phase `contracted-q1`, backup format 8 (twenty-one tables, no `user_id`), `access = members`, research per member. One flat
   `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one
   retained test account has no membership and reaches nothing (`docs/MEMBER_RECOVERY.md`).
 - **Standing decisions:** W1 is removed; item 11 is abandoned; item 10 (CU1e) stays. `pg_graphql` stays disabled: enabling it needs a new explicit
   decision (`db/README.md`). A member's crafted request on their own records is an accepted limitation; it can't reach another account.
 - **Restore** runs through the signed-in page or `docs/ADMIN_RESTORE.md`. Hosted restore performance has not been measured.
-- **Repairs are fix-forward.** Reopening anonymous access is never a recovery step. Data recovery is a format-7 restore.
+- **Repairs are fix-forward.** Reopening anonymous access is never a recovery step. Data recovery is a format-8 restore.
 
 ## Code map (classic globals; mutable page state is in `watchlist.html`)
 
@@ -47,7 +47,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views, the movie tools' film row), `metadata.js` (Details) |
 | Episodes, ratings | `episodes.js`, `show-ratings.js` |
-| Organization | `organization.js`, `organization-manage.js`, `collection-members.js` |
+| Organization | `organization.js`, `organization-manage.js`, `collection-members.js`; planning queues `queues.js` |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Collection updates | `collection-updates.js`, `collection-research.js`, `collection-settings.js` |
 | Backup / restore | `backup-restore.js` (reads formats 5–7) |
@@ -111,6 +111,10 @@ migration, merge after the migration's run record is confirmed.
 - Deleting a removed member's library is deferred (`docs/MEMBER_RECOVERY.md`). Every migration revokes from `anon` explicitly, because default
   privileges owned by `supabase_admin` can't be changed by `postgres`.
 - Optional: on an unknown database phase, a refused season toggle shows the raw refusal text.
+- Q1 not verified: real phones (touch dragging was checked with emulated pointer events only), completion through a real
+  watched mark on the live site (left unchanged; covered locally and through a local API stack).
+- Pre-existing (seen in Q1's review): a film with collection-update records of its own (an alias, a hold, a remembered removal)
+  can't be deleted from the page, because those tables guard deletes; queue entries don't add to this.
 
 ## Tests
 
