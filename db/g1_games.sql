@@ -234,9 +234,13 @@ end $$;
 -- ── 3. Helpers ─────────────────────────────────────────────────────────────────
 -- One member's game changes that read before they write (settings, follows, decisions, collections, the cache) run one after
 -- another. A game entry's own changes lock its row instead; anything touching queues then takes the queue lock (q1_lock) after.
+-- Like q1_lock: the game tables in row exclusive mode first (a restore's exclusive lock blocks this), then the advisory lock, so a
+-- games change and a restore of the same member wait for each other in one order instead of deadlocking.
 create function private.g1_lock(p_owner uuid) returns void
 language plpgsql set search_path = '' as $$
 begin
+  lock table public.game_settings, public.game_entries, public.game_follows, public.game_decisions, public.game_collections,
+    public.game_collection_members in row exclusive mode;
   perform pg_advisory_xact_lock(hashtextextended('watchlist.games ' || p_owner::text, 0));
 end $$;
 create function private.g1_entry_json(e public.game_entries) returns jsonb

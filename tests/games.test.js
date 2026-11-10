@@ -592,4 +592,47 @@ test('backup → restore with IGDB unavailable: a member’s whole games data co
   assert.deepStrictEqual(queueOrder(dst), [x.E(1), x.E(3), x.E(4)], 'the Switch game is hidden again, its place kept');
 });
 
+// ── Review fixes (Fable, 2026-11-10) ──
+test('a port record not read yet is never joined: saving reads it first, and joins it only when IGDB types it a port of that version', async () => {
+  const raw = { ...RAW, 102: { ...RAW[102], ports: [105, 106] }, 105: { id: 105, name: 'ZZ War 4 Remastered Collection', game_type: 9, parent_game: 110, release_dates: [] },
+    106: { id: 106, name: 'ZZ War 4 Remastered (Switch)', game_type: 11, parent_game: 102, release_dates: [rd(SWITCH, '2021-01-01')] } };
+  const app = await bootWith({ igdb: igdbStub(raw), noCache: true });
+  await openGames(app);
+  app.ctx.openGamesAdd(null);
+  app.run(`gamesAdd.related = new Map([[102, igdbRecord(${JSON.stringify(raw[102])})], [101, igdbRecord(${JSON.stringify(raw[101])})]])`);
+  await app.ctx.saveGameRecord(102); await settle();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rpcs(app, 'library_game_add')[0].body)).p_port_ids, [106], 'the real port joins; a remaster of another game listed among the ports doesn’t');
+});
+
+test('Refresh joins a new port only after reading its record (also for a saved version a franchise read already brings)', async () => {
+  const raw = { ...RAW, 102: { ...RAW[102], ports: [107, 108] }, 107: { id: 107, name: 'ZZ War 4 Remastered Ultimate', game_type: 3, release_dates: [] },
+    108: { id: 108, name: 'ZZ War 4 Remastered (Switch)', game_type: 11, parent_game: 102, release_dates: [] } };
+  const app = await bootWith({ igdb: igdbStub(raw), entries: [entry(1, 102, { spot: 101 })], follows: [follow(1, 7001, 'ZZ War')] });
+  await openGames(app);
+  await app.ctx.refreshGames(); await settle();
+  assert.deepStrictEqual(app.store.game_entries[0].port_ids, [108], 'only the record IGDB types as its port');
+});
+
+test('a saved game IGDB retypes (an edition, a bundle) keeps counting for its stored spot; Review says so once', async () => {
+  const f = follow(1, 7001, 'ZZ War');
+  const app = await bootWith({ follows: [f], entries: [entry(1, 102, { spot: 101, status: 'finished' })] });
+  const t = app.store.game_titles.find(x => x.igdb_id === 102);
+  t.data.versionParent = 101;
+  await openGames(app, 'gamesfranchises');
+  assert.match(franchiseOf(app, f.id), /Up next: ZZ War \(2019\)/, 'the 2007 spot stays finished');
+  assert.match(screen(app), /Review \(1\)/);
+  app.ctx.openGamesReview(null);
+  assert.match(text(dialog(app)), /IGDB now lists “ZZ War 4 Remastered” as an edition of another record\. It still counts for its franchise spot/);
+  await app.ctx.reviewKeep(0); await settle();
+  await openGames(app);
+  assert.doesNotMatch(screen(app), /Review \(/, 'decided: not asked again while IGDB says the same');
+  assert.strictEqual(app.store.game_entries[0].spot_igdb_id, 101);
+});
+
+test('no spot review while a saved version’s original hasn’t been read (after a restore onto an empty cache)', async () => {
+  const app = await bootWith({ entries: [entry(1, 102, { spot: 101 })], cache: [102] });
+  await openGames(app);
+  assert.doesNotMatch(screen(app), /Review \(/);
+});
+
 T.run();

@@ -11,7 +11,7 @@
 
 export const ENDPOINTS = ['games', 'release_dates', 'collections', 'collection_memberships', 'game_time_to_beats', 'platforms', 'franchises', 'external_games'];
 export const MAX_QUERIES = 10;
-export const MAX_BODY = 4000;
+export const MAX_BODY = 8000;
 const TOKEN_URL_DEFAULT = 'https://id.twitch.tv/oauth2/token';
 const IGDB_BASE_DEFAULT = 'https://api.igdb.com/v4';
 const SPACING_MS = 260; // under IGDB's 4 requests per second

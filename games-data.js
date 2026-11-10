@@ -187,10 +187,14 @@ function gameAmbiguousChain(rec, cache) {
   const p = cache.get(rec.parent);
   return !!p && p.type === 'port';
 }
-// The ports a saved version takes automatically: IGDB's ports of its record that IGDB types as ports with that parent.
-function gamePlainPorts(rec, cache) {
-  return (rec ? rec.ports : []).filter(id => { const p = cache.get(id); return !p || (p.type === 'port' && (p.parent == null || p.parent === rec.id)); });
+// The ports a saved version takes automatically: IGDB's ports of its record that IGDB types as ports with that parent. For a write
+// (strict) the port's own record must have been read; for display a port not read yet counts as one.
+function gamePlainPorts(rec, cache, strict = false) {
+  return (rec ? rec.ports : []).filter(id => { const p = cache.get(id); return p ? p.type === 'port' && (p.parent == null || p.parent === rec.id) : !strict; });
 }
+// A saved record IGDB no longer lists as a game of its own (retyped to a bundle, pack, season… or made an edition): it keeps
+// counting for its stored spot, and Review says so once.
+function gameRetyped(rec) { return !!rec && (GAME_SKIP_TYPES.includes(rec.type) || !!rec.versionParent); }
 
 // A followed franchise's spots, in original release order, with the member's progress. follow: { igdb_collection_id };
 // state: { cache: Map(id → rec), entries: [game_entries], decisions: Map, platforms, today }.
@@ -208,9 +212,11 @@ function franchiseSpots(follow, state) {
   for (const id of consider) { const r = cache.get(id); if (r && r.type !== 'port') gamePlainPorts(r, cache).forEach(p => portOf.add(p)); }
   for (const id of consider) {
     const rec = cache.get(id);
-    if (!rec || GAME_SKIP_TYPES.includes(rec.type) || rec.versionParent) continue; // DLC, bundles, seasons, editions…
+    const entry = savedBy.get(rec && rec.id);
+    const ownEntry = !!entry && entry.igdb_id === rec.id;
+    // DLC, bundles, seasons, editions… are no versions, unless the member saved the record (its stored spot decides then).
+    if (!rec || (!ownEntry && (GAME_SKIP_TYPES.includes(rec.type) || rec.versionParent))) continue;
     if (portOf.has(rec.id) && !savedBy.has(rec.id)) continue;
-    const entry = savedBy.get(rec.id);
     if (entry && entry.igdb_id !== rec.id) continue; // a port joined to a saved game: part of that version
     // An unsaved version follows a research finding about its relationship, else IGDB; a saved one keeps its stored spot.
     const link = !entry && state.decisions.get(gameDecisionKey('research_link', rec.id));

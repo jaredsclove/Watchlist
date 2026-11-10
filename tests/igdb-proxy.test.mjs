@@ -73,7 +73,7 @@ const answer = async r => ({ status: r.status, body: await r.json().catch(() => 
   for (const [label, body] of [
     ['an unknown endpoint', { queries: [Q('x', 'private_endpoint', 'fields *;')] }],
     ['no queries', { queries: [] }], ['too many queries', { queries: Array.from({ length: 11 }, (_, i) => Q(`q${i}`, 'games', 'fields id;')) }],
-    ['a body too long', { queries: [Q('x', 'games', `fields ${'a,'.repeat(3000)}id;`)] }],
+    ['a body too long', { queries: [Q('x', 'games', `fields ${'a,'.repeat(5000)}id;`)] }],
     ['an unknown clause', { queries: [Q('x', 'games', 'fields id; delete everything;')] }],
     ['a limit over 500', { queries: [Q('x', 'games', 'fields id; limit 501;')] }], ['a query without a name', { queries: [{ endpoint: 'games', body: 'fields id;' }] }],
     ['not JSON', null]]) {
@@ -83,6 +83,8 @@ const answer = async r => ({ status: r.status, body: await r.json().catch(() => 
   ok(!n.log.some(l => l.url.startsWith(ENV.IGDB_BASE)), 'none of them reached IGDB');
   ok(ENDPOINTS.every(e => queryProblem(Q('n', e, 'fields id; where id = (1,2); sort id asc; limit 500; offset 0;')) === null), 'every allowed endpoint takes an ordinary read');
   ok(queryProblem(Q('n', 'games', 'search "ZZ"; fields name;')) === null, 'search is allowed');
+  const big = `fields id,name,slug,game_type,game_status,first_release_date,parent_game,version_parent,ports,remasters,remakes,collections.name,franchises.name,genres.name,aggregated_rating,aggregated_rating_count,rating,rating_count,external_games.external_game_source,external_games.url,release_dates.platform,release_dates.date,release_dates.y,release_dates.m,release_dates.date_format,release_dates.status,release_dates.release_region; where id = (${Array.from({ length: 400 }, (_, i) => 9000000 + i).join(',')}); limit 500;`;
+  ok(queryProblem(Q('n', 'games', big)) === null, `a full page batch (400 seven-digit ids, every field the page asks for: ${big.length} characters) is allowed`);
 }
 
 // ── The app token, spacing and retries ──

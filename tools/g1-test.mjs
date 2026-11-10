@@ -293,6 +293,23 @@ else {
     const out = await s2.done(m);
     ok(/target_changed/.test(out) && !ids().includes(L9.tables.queue_entries.find(x => x.game_entry_id === G).id) && ids().length === e.length - 1, 'then the reorder is refused (the queue changed) and the game is gone from it', out);
   }
+  {
+    // A games change and a restore of the same member: each waits for the other in one lock order (the game tables first, then the
+    // advisory locks), so neither deadlocks.
+    ok(/lock table public\.game_settings[\s\S]*pg_advisory_xact_lock/.test(psql(`select prosrc from pg_proc where proname = 'g1_lock'`)), 'g1_lock takes the game tables before its advisory lock');
+    await s1.run(`begin; select public.library_game_follow(7777, 'ZZ Lock Test') is not null;`);
+    const m = s2.send(`\\set doc \`cat ${f}\`\nselect public.restore_backup(:'doc'::jsonb, false) is not null;`);
+    ok(await waiting(), 'a restore waits while a games change is open');
+    await s1.run('commit;');
+    const out = await s2.done(m);
+    ok(/^t$/m.test(out) && !/deadlock/.test(out), 'then it runs, no deadlock', out);
+    await s2.run(`begin;\n\\set doc \`cat ${f}\`\nselect public.restore_backup(:'doc'::jsonb, false) is not null;`);
+    const m2 = s1.send(`select public.library_game_follow(7778, 'ZZ Lock Test 2') is not null;`);
+    ok(await waiting(), 'a games change waits while a restore is open');
+    await s2.run('commit;');
+    const out2 = await s1.done(m2);
+    ok(/^t$/m.test(out2) && !/deadlock/.test(out2), 'then it runs, no deadlock', out2);
+  }
   s1.end(); s2.end();
 }
 

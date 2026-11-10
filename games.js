@@ -322,8 +322,8 @@ async function igdbQueries(queries) {
 async function igdbRecords(ids) {
   const list = [...new Set(ids)].filter(Number.isInteger);
   const queries = [];
-  for (let i = 0; i < list.length; i += 500) {
-    const part = list.slice(i, i + 500).join(',');
+  for (let i = 0; i < list.length; i += 400) { // (400 ids keep a query well under the function's body limit)
+    const part = list.slice(i, i + 400).join(',');
     queries.push({ name: `g${i}`, endpoint: 'games', body: `fields ${IGDB_GAME_FIELDS}; where id = (${part}); limit 500;` },
       { name: `t${i}`, endpoint: 'game_time_to_beats', body: `fields game_id,hastily,normally,completely,count; where game_id = (${part}); limit 500;` });
   }
@@ -443,7 +443,10 @@ async function saveGameRecord(id) {
   const rec = cache.get(id);
   if (!rec) return;
   const taken = new Set(); (gamesData ? gamesData.entries : []).forEach(e => { taken.add(e.igdb_id); (e.port_ids || []).forEach(p => taken.add(p)); });
-  const ports = gamePlainPorts(rec, cache).filter(p => !taken.has(p));
+  // Its ports are joined only once their own records have been read (a port not read yet is fetched first).
+  const unread = rec.ports.filter(p => !cache.get(p));
+  if (unread.length) { try { (await igdbRecords(unread)).forEach((v, k) => cache.set(k, v)); } catch (e) { showError(`${e.message} Nothing was changed.`); return; } }
+  const ports = gamePlainPorts(rec, cache, true).filter(p => !taken.has(p));
   const spot = gameAnchor(rec, cache);
   const keep = new Map([[rec.id, rec], ...ports.map(p => [p, cache.get(p)]).filter(x => x[1]), ...(cache.get(spot) ? [[spot, cache.get(spot)]] : []),
     ...relatedIds(rec).map(x => [x, cache.get(x)]).filter(x => x[1])]);
@@ -610,8 +613,9 @@ async function refreshGames() {
   let recs = new Map();
   try {
     for (const f of gamesData.follows) (await readFranchise(f.igdb_collection_id, old)).forEach((v, k) => recs.set(k, { ...(recs.get(k) || {}), ...v, m: { ...((recs.get(k) || {}).m || {}), ...v.m } }));
-    const savedIds = gamesData.entries.flatMap(e => [e.igdb_id, ...(e.port_ids || [])]).filter(id => !recs.has(id));
-    (await igdbRecordsWithRelated(savedIds, old)).forEach((v, k) => { if (!recs.has(k)) recs.set(k, v); });
+    // Every saved record with its related records (ports included), also those the franchises read: a port is joined only once read.
+    const savedIds = gamesData.entries.flatMap(e => [e.igdb_id, ...(e.port_ids || [])]);
+    (await igdbRecordsWithRelated(savedIds, old)).forEach((v, k) => { recs.set(k, recs.has(k) ? { ...v, m: { ...(v.m || {}), ...(recs.get(k).m || {}) } } : v); });
   } catch (e) {
     gamesRefreshing = false; gamesReport = '';
     showError(`Refresh couldn’t read IGDB (${e.message}), so nothing was changed.`);
@@ -625,7 +629,7 @@ async function refreshGames() {
       // New ordinary ports of saved games join them (IGDB types them as ports of that record), guarded by what was read.
       const cache = gamesData.cache, taken = new Set(gamesData.entries.flatMap(e => [e.igdb_id, ...(e.port_ids || [])]));
       for (const e of gamesData.entries) {
-        const add = gamePlainPorts(cache.get(e.igdb_id), cache).filter(p => !taken.has(p));
+        const add = gamePlainPorts(cache.get(e.igdb_id), cache, true).filter(p => !taken.has(p));
         if (!add.length) continue;
         const ports = [...(e.port_ids || []), ...add];
         await sbRpc('library_game_relink', { p_entry_id: e.id, p_expected: { spot_igdb_id: e.spot_igdb_id, port_ids: e.port_ids || [] }, p_spot_igdb_id: e.spot_igdb_id, p_port_ids: ports });
@@ -662,6 +666,13 @@ function gamesReviewItems(data) {
     const derived = gameAnchor(rec, cache);
     const keep = data.decisions.get(gameDecisionKey('keep_link', e.igdb_id));
     const kept = keep && keep.value && keep.value.spot_igdb_id === derived;
+    if (gameRetyped(rec)) {
+      const what = rec.versionParent ? 'an edition of another record' : `a ${rec.type}`;
+      if (!(keep && keep.value && keep.value.retype === what)) items.push({ kind: 'retype', entry: e, rec, derived: e.spot_igdb_id, what,
+        text: `IGDB now lists “${rec.name}” as ${what}. It still counts for its franchise spot, with its status and queue places.` });
+      continue;
+    }
+    if (rec.parent && !cache.get(rec.parent)) continue; // (its original not read yet: nothing to compare until Refresh)
     if (gameAmbiguousChain(rec, cache) && !keep) {
       items.push({ kind: 'chain', entry: e, rec, derived, text: `IGDB lists “${rec.name}” as a ${rec.type} of a port (${(cache.get(rec.parent) || {}).name || 'another record'}). It counts for the same franchise spot as ${(cache.get(derived) || {}).name || 'its original'}.` });
     } else if (derived !== e.spot_igdb_id && !kept) {
@@ -677,8 +688,9 @@ function openGamesReview(opener) {
   showGameDialog(`<h2 class="modal-title" id="gameDialogTitle">Review IGDB changes and research</h2>
     <p class="games-note">Your saved games, statuses and queue places don’t change until you choose. “Keep mine” stays decided until IGDB changes again.</p>
     <ul class="games-review">${items.map((it, i) => `<li><p>${esc(it.text)}</p>
-      ${it.kind === 'spot' ? `<button class="btn btn-accent" onclick="reviewUseIgdb(${i})">Use IGDB’s</button> ` : `<button class="btn btn-accent" onclick="reviewKeep(${i})">Keep it a separate version</button> `}
-      <button class="btn" onclick="reviewKeep(${i})">${it.kind === 'spot' ? 'Keep mine' : 'Decide later'}</button></li>`).join('')}
+      ${it.kind === 'retype' ? `<button class="btn btn-accent" onclick="reviewKeep(${i})">Keep counting it</button>`
+        : `${it.kind === 'spot' ? `<button class="btn btn-accent" onclick="reviewUseIgdb(${i})">Use IGDB’s</button> ` : `<button class="btn btn-accent" onclick="reviewKeep(${i})">Keep it a separate version</button> `}
+      <button class="btn" onclick="reviewKeep(${i})">${it.kind === 'spot' ? 'Keep mine' : 'Decide later'}</button>`}</li>`).join('')}
     ${research.map((it, i) => `<li data-research-item="${i}"><p>${esc(it.text)} <span class="muted">Evidence (Claude’s assessment): ${evidence(it.decision)}</span></p>
       ${it.action ? `<button class="btn btn-accent" onclick="gamesResearchChoose(${i}, true)">${esc(gamesResearchActionLabel(it.action))}</button> ` : '<span class="muted">Already as research says.</span> '}
       <button class="btn" onclick="gamesResearchChoose(${i}, false)">Dismiss</button></li>`).join('')}
@@ -702,7 +714,7 @@ function reviewKeep(i) {
   const it = gamesReviewItems(gamesData)[i];
   if (!it) return;
   closeGameDialog();
-  return setGameDecision('keep_link', it.entry.igdb_id, '', { spot_igdb_id: it.derived, port_ids: it.entry.port_ids || [], kind: it.kind }, `“${it.entry.title}” · keep`);
+  return setGameDecision('keep_link', it.entry.igdb_id, '', { spot_igdb_id: it.derived, port_ids: it.entry.port_ids || [], kind: it.kind, ...(it.what ? { retype: it.what } : {}) }, `“${it.entry.title}” · keep`);
 }
 
 // ── Collections ──
