@@ -71,6 +71,11 @@ function compareTitles(a, b) {
   return (a || '').localeCompare(b || '', undefined, { sensitivity: 'base' });
 }
 
+// The show views' usual order (and sorting's final tie-breaker, view-sort.js): A–Z by title, then show id.
+function compareShowItems(a, b) {
+  return compareTitles(a.title, b.title) || cmpStr(a.key, b.key);
+}
+
 // Watching shows (tv_shows.status), each with its seasons in sorted order, its up
 // next season and whether it is Up to date (none of its remaining seasons has
 // aired). Up to date is a state, not a stored status. Both lists are A–Z by
@@ -108,9 +113,7 @@ function deriveCurrentlyWatching(rows, shows, today) {
     };
     (item.upToDate ? upToDate : active).push(item);
   }
-  const byTitle = (a, b) => compareTitles(a.title, b.title)
-    || cmpStr(a.key, b.key);
-  return { active: active.sort(byTitle), upToDate: upToDate.sort(byTitle) };
+  return { active: active.sort(compareShowItems), upToDate: upToDate.sort(compareShowItems) };
 }
 
 // Every show with at least one linked season, whatever its status, each with its
@@ -153,8 +156,7 @@ function deriveAllTv(rows, shows, today) {
       allSkipped
     });
   }
-  items.sort((a, b) => compareTitles(a.title, b.title)
-    || cmpStr(a.key, b.key));
+  items.sort(compareShowItems);
   return { items, unlinked, missingShow };
 }
 
@@ -264,14 +266,17 @@ function deriveComingSoon(rows, shows, today) {
     const show = showOf(r);
     return !!show && show.status !== 'skipped';
   });
-  const order = (a, b) => cmpStr(a.date_sort, b.date_sort)
+  return {
+    dated: eligible.filter(r => !isTbaRow(r) && (r.date_sort || '') >= today).sort(comingSoonOrder),
+    tba: eligible.filter(isTbaRow).sort(comingSoonOrder)
+  };
+}
+// Coming Soon's usual order (and sorting's final tie-breaker): premiere date, title, season order, row id.
+function comingSoonOrder(a, b) {
+  return cmpStr(a.date_sort, b.date_sort)
     || compareTitles(a.title, b.title)
     || seasonOrder(a, b)
     || cmpStr(a.id, b.id);
-  return {
-    dated: eligible.filter(r => !isTbaRow(r) && (r.date_sort || '') >= today).sort(order),
-    tba: eligible.filter(isTbaRow).sort(order)
-  };
 }
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
@@ -601,8 +606,9 @@ function derivedEmptyHtml(msg, pad = '2rem', extra = '') {
 
 function renderCurrentlyWatching(today, keep) {
   const { active, upToDate } = deriveCurrentlyWatching(derivedData.rows, tvShowsById, today);
-  const shownActive = active.filter(keep);
-  const shownUpToDate = upToDate.filter(keep);
+  // Item 13: each section sorted on its own (view-sort.js).
+  const shownActive = sortForView(active.filter(keep), compareShowItems);
+  const shownUpToDate = sortForView(upToDate.filter(keep), compareShowItems);
 
   // B8: the counts are in the section headings (shows), not tiles.
   document.getElementById('statsRow').innerHTML = '';
@@ -667,8 +673,8 @@ function renderAllTv(today, keep, fStatus, fTheme = '', fProgress = '', fYear = 
   const listed = items.filter(x => keep(x) && allTvStatusMatches(x.show.status, fStatus));
   if (allTvPresentation === 'seasons') return renderAllTvSeasons(today, items, listed, unlinked + missingShow, fTheme, fYear);
   // Year: a show with any stored season of that year (it keeps all its seasons).
-  const shown = listed.filter(x => themeMatchesShow(x.seasons, fTheme) && allTvProgressMatches(x, fProgress)
-    && (!fYear || x.seasons.some(r => rowYear(r) === fYear)));
+  const shown = sortForView(listed.filter(x => themeMatchesShow(x.seasons, fTheme) && allTvProgressMatches(x, fProgress)
+    && (!fYear || x.seasons.some(r => rowYear(r) === fYear))), compareShowItems); // item 13 (view-sort.js)
 
   // B8: shows listed of every show with a linked season (all statuses), then those listed that are Watching and up to date.
   const breakdown = shown.length ? ` · ${shown.filter(x => x.show.status === 'watching').length} Watching · ${shown.filter(x => x.upToDate).length} up to date` : '';
@@ -1112,8 +1118,15 @@ function upToDateNextLabel(upNext, card = false) {
 
 function renderComingSoon(today, keep) {
   const { dated, tba } = deriveComingSoon(derivedData.rows, tvShowsById, today);
-  const shownDated = dated.filter(keep);
-  const shownTba = tba.filter(keep);
+  // Item 13: sorted within each month (months stay in date order) and within TBA (view-sort.js).
+  const byMonth = new Map();
+  dated.filter(keep).forEach(r => {
+    const month = r.date_sort.substring(0, 7);
+    if (!byMonth.has(month)) byMonth.set(month, []);
+    byMonth.get(month).push(r);
+  });
+  const shownDated = [...byMonth.values()].flatMap(list => sortForView(list, comingSoonOrder));
+  const shownTba = sortForView(tba.filter(keep), comingSoonOrder);
   const in30 = new Date();
   in30.setDate(in30.getDate() + 30);
   const cutoff30 = localTodayStr(in30);

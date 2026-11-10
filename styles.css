@@ -636,6 +636,39 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
 .filter-clear { font-size: 13px; }
 .empty-clear { margin-left: 8px; }
 
+/* ── Sorting (item 13): the toolbar's Sort list and, while a view has its own sort, the sort line
+   (each field with its ↑ / ↓ and ✕, then Reset to default). ── */
+.sort-wrap { position: relative; display: inline-flex; }
+.sort-btn { display: inline-flex; align-items: center; gap: 6px; }
+.sort-btn[aria-expanded="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.sort-menu { position: absolute; z-index: 60; top: 100%; left: 0; margin-top: 4px; min-width: 250px; max-width: min(320px, calc(100vw - 24px));
+  background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.45); }
+.sort-menu[hidden] { display: none; }
+.sort-menu-hint { font-size: 11px; color: var(--text2); margin: 2px 6px 6px; }
+.sort-option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 4px 8px; background: none; border: 0; border-radius: 6px;
+  color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.sort-option:hover, .sort-option:focus-visible { background: var(--accent-dim); }
+.sort-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sort-option-label { flex: 1 1 auto; min-width: 0; }
+.sort-option.current .sort-option-label { font-weight: 600; }
+.sort-option-dir { flex: none; font-size: 12px; color: var(--text2); }
+.sort-pos { flex: none; background: var(--accent); color: var(--bg); border-radius: 10px; font-size: 11px; font-weight: 700; padding: 0 6px; line-height: 17px; }
+.sort-line-box { order: 5; flex: 1 0 100%; min-width: 0; }
+.sort-line-box:empty { display: none; }
+.sort-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.sort-line-label, .sort-then { font-size: 12px; color: var(--text2); }
+.sort-chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--accent); background: var(--accent-dim); color: var(--text);
+  border-radius: 16px; padding: 1px 3px 1px 10px; font-size: 12px; font-weight: 600; max-width: 100%; min-width: 0; }
+.sort-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sort-dir, .sort-x { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border: 0; border-radius: 50%;
+  background: transparent; color: var(--text); font: inherit; cursor: pointer; flex: none; }
+.sort-dir { font-size: 15px; font-weight: 700; }
+.sort-x { font-size: 11px; color: var(--text2); }
+.sort-dir:hover, .sort-x:hover, .sort-dir:focus-visible, .sort-x:focus-visible { background: var(--surface2); color: var(--text); }
+.sort-dir:focus-visible, .sort-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sort-reset { font-size: 13px; }
+.sort-note { flex: 1 0 100%; font-size: 12px; color: var(--text2); }
+
 /* Desktop: the toolbar's TMDB search, where there's room for two search fields. Below that, + Add reaches the
    same search. In a collection the toggles take more of the row, so it needs a wider page. */
 .tmdb-quick { display: none; position: relative; }
@@ -744,6 +777,12 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .filter-line .season-vis-select { flex-basis: 165px; } /* F6: a collection's seasons choice stays readable, beside its neighbour where it fits */
   .filter-more-btn, .add-open-btn { min-height: 44px; flex: 0 0 auto; }
   .filter-more-btn { justify-content: center; }
+  .sort-btn { min-height: 44px; flex: 0 0 auto; justify-content: center; }
+  /* Phones: the open Sort list takes its own full-width line under the toolbar, as the Filters panel does */
+  .sort-wrap { display: contents; }
+  .sort-menu { position: static; order: 2; flex: 1 0 100%; min-width: 0; max-width: 100%; margin-top: 0; box-shadow: none; }
+  .sort-dir, .sort-x { min-width: 32px; height: 32px; }
+  .sort-reset, .sort-option { min-height: 44px; }
   .add-open-btn { order: 0; }
   .stats-row { flex: 1 0 100%; margin: -2px 0 0; }
   .filter-more { grid-template-columns: 1fr; }
@@ -766,7 +805,7 @@ select.filter-set { border-color: var(--accent); box-shadow: inset 0 0 0 1px var
   .view-toggle-btn { padding: 8px; }
   .filter-line .search-input { flex-basis: 120px; }
   .filter-line select { flex-basis: 142px; padding-left: 6px; padding-right: 2px; }
-  .filter-more-btn, .add-open-btn { padding: 6px; }
+  .filter-more-btn, .add-open-btn, .sort-btn { padding: 6px; }
   .add-open-btn { flex: 1 0 auto; }
   .browse-controls .view-toggle-btn { padding: 8px 6px; }
   .filter-line .search-input { padding-left: 24px; padding-right: 2px; background-position: 6px center; } /* the placeholder fits beside the status */

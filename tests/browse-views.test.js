@@ -118,7 +118,9 @@ const READ_ONLY_HANDLERS = new Set(['openAddToQueue', 'openAddToQueueFromMenu', 
   // Stage 4b: opens the Catalog updates chooser (it reads; applying needs Review → Apply in its dialog — tests/catalog-apply.test.js)
   'openCatalogChooser',
   // B10: More filters, its Escape, a chip's removal and Clear filters only change filters and redraw (tests/filter-bar.test.js)
-  'toggleFilterPanel', 'filterPanelKeydown', 'removeFilterChip', 'clearViewFilters']);
+  'toggleFilterPanel', 'filterPanelKeydown', 'removeFilterChip', 'clearViewFilters',
+  // Item 13: the Sort list and the sort line only change the order shown and redraw (tests/view-sort.test.js)
+  'toggleSortMenu', 'sortMenuKeydown', 'chooseSortField', 'reverseSortField', 'removeSortField', 'resetViewSort']);
 // S3: a collection's TV entries have All TV's controls (their parity is tests/collections-tv-edit.test.js);
 // its films stay read-only. The film-only form of this check: the heading, filters, counts and chooser
 // expose only navigation and filters as before; the list exposes nothing beyond All TV's TV controls and

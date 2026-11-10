@@ -219,10 +219,11 @@ function filterBarHtml({ lead = '', search2 = '', line = '', trail = '', cats = 
   return `${lead}
     <div class="filter-line">
       <input class="search-input" id="fSearch" type="text" placeholder="Search library…" aria-label="Search my library" oninput="renderTable()">${search2}${line}
-      <button type="button" class="btn filter-more-btn" id="filterMoreBtn" aria-expanded="${filterPanelOpen}" aria-controls="filterMore" onclick="toggleFilterPanel()">Filters<span class="filter-count" id="filterMoreCount" aria-hidden="true" hidden></span><span class="visually-hidden" id="filterMoreA11y"></span> <span id="filterMoreChevron" aria-hidden="true">${filterPanelOpen ? '▴' : '▾'}</span></button>${trail}
+      <button type="button" class="btn filter-more-btn" id="filterMoreBtn" aria-expanded="${filterPanelOpen}" aria-controls="filterMore" onclick="toggleFilterPanel()">Filters<span class="filter-count" id="filterMoreCount" aria-hidden="true" hidden></span><span class="visually-hidden" id="filterMoreA11y"></span> <span id="filterMoreChevron" aria-hidden="true">${filterPanelOpen ? '▴' : '▾'}</span></button>${typeof sortButtonHtml === 'function' ? sortButtonHtml() : ''}${trail}
     </div>
     <div class="filter-more" id="filterMore" role="group" aria-label="Filters" onkeydown="filterPanelKeydown(event)"${filterPanelOpen ? '' : ' hidden'}>${groups}</div>
-    <div class="filter-chips" id="filterChips"></div>`;
+    <div class="filter-chips" id="filterChips"></div>
+    <div class="sort-line-box" id="sortLine">${typeof sortLineNowHtml === 'function' ? sortLineNowHtml() : ''}</div>`;
 }
 
 // The panel's open state (proposal §4.2.1): kept for a redraw of the same visit (a filter,
@@ -368,6 +369,7 @@ function renderFilterBarState() {
     const el = document.getElementById(id);
     if (el) el.classList[marked.has(id) ? 'add' : 'remove']('filter-set');
   });
+  if (typeof renderSortLine === 'function') renderSortLine(); // item 13: the sort line (view-sort.js)
 }
 
 function filterChipOrder() {

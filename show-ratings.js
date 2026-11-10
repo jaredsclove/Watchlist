@@ -11,12 +11,16 @@
 // preview, Match) and from one request when a show is expanded whose score isn't cached or is older
 // than SHOW_RATING_MAX_AGE_MS. A failed request changes nothing and isn't repeated on this page.
 // Season and episode scores aren't shown (TMDB gives a season no vote count).
+// Sorting (view-sort.js) reads the same entries: the rounded score, and the show's first-air date
+// (TMDB's first_air_date, kept as "f"), which sorts Series premiere. An entry saved before the date was
+// kept has no "f", so the show's next expansion reads its details again; a read with no date keeps
+// f: null, under the same age rule as the score. Sorting never requests anything.
 
 const SHOW_RATINGS_KEY = 'watchlist-tmdb-show-ratings';
 const SHOW_RATING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const SHOW_RATINGS_LIMIT = 1000; // entries kept; the oldest go first
 
-// ── The per-device cache: { "<tmdb show id>": { a: vote_average, c: vote_count, t: fetched at (ms) } } ──
+// ── The per-device cache: { "<tmdb show id>": { a: vote_average, c: vote_count, f: first_air_date or null, t: fetched at (ms) } } ──
 function readStoredShowRatings() {
   try {
     const v = JSON.parse(userStorage.getItem(SHOW_RATINGS_KEY) || '{}');
@@ -35,7 +39,12 @@ function noteShowRating(tmdbId, details) {
   if (tmdbId == null || !details || typeof details !== 'object') return;
   const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const cache = readStoredShowRatings();
-  cache[String(tmdbId)] = { a: num(details.vote_average), c: num(details.vote_count), t: Date.now() };
+  const prev = cache[String(tmdbId)];
+  const entry = { a: num(details.vote_average), c: num(details.vote_count), t: Date.now() };
+  // The first-air date: a real date, else null (TMDB has none); details without the field keep what was known.
+  if ('first_air_date' in details) entry.f = isValidDateSort(details.first_air_date) ? details.first_air_date : null;
+  else if (prev && typeof prev === 'object' && 'f' in prev) entry.f = prev.f;
+  cache[String(tmdbId)] = entry;
   const keys = Object.keys(cache);
   if (keys.length > SHOW_RATINGS_LIMIT) {
     keys.sort((x, y) => (Number(cache[x] && cache[x].t) || 0) - (Number(cache[y] && cache[y].t) || 0))
@@ -60,6 +69,7 @@ function showRatingModel(entry) {
   // The explanation names the source and the scale, which the compact number leaves out.
   const note = `TMDB: ${shown} out of 10 · ${c.toLocaleString('en-US')} votes${limited ? ' · Limited votes' : ''}.`;
   return {
+    score,
     text: `${shown}${limited ? '*' : ''}`,
     band: score >= 8 ? 'high' : score >= 7 ? 'mid' : 'low',
     limited,
@@ -89,13 +99,28 @@ function toggleShowRatingNote(btn, ev) {
   else btn.setAttribute('data-open', '1');
 }
 
-// ── On demand: an expanded show whose score isn't cached, or is old ──
+// ── On demand: an expanded show whose score isn't cached, is old, or was cached without its first-air date ──
 function requestShowRating(show) {
   if (!show || show.tmdb_id == null) return;
   const id = String(show.tmdb_id);
   const had = showRatings()[id];
-  if (had && Date.now() - (Number(had.t) || 0) < SHOW_RATING_MAX_AGE_MS) return;
+  // Fresh, and with the first-air date known (or known to be missing): nothing to read.
+  if (had && Date.now() - (Number(had.t) || 0) < SHOW_RATING_MAX_AGE_MS && 'f' in had) return;
   if (showRatingRequests.has(id)) return;
   showRatingRequests.add(id);
   tmdbFetch(`/tv/${encodeURIComponent(id)}`).then(d => noteShowRating(id, d), () => { /* no score: nothing changes */ });
+}
+
+// The show's first-air date from this device's cache (view-sort.js Series premiere), or null when it
+// isn't known here: not matched to TMDB, not read yet, or TMDB has no date.
+function showFirstAirDate(show) {
+  if (!show || show.tmdb_id == null) return null;
+  const e = showRatings()[String(show.tmdb_id)];
+  return e && typeof e === 'object' && isValidDateSort(e.f) ? e.f : null;
+}
+// The rounded score a show's row shows, or null when it shows none (view-sort.js Rating).
+function showRatingScore(show) {
+  if (!show || show.tmdb_id == null) return null;
+  const m = showRatingModel(showRatings()[String(show.tmdb_id)]);
+  return m ? m.score : null;
 }
