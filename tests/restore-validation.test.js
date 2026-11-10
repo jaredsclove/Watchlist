@@ -50,7 +50,7 @@ tests.push({ name: 'a supported older format validates', fn: () => {
 } });
 rejects('format 3', 'format 3 backup, which this page no longer reads', b => { b.formatVersion = 3; });
 rejects('format 4', 'format 4 backup, which this page no longer reads', b => { b.formatVersion = 4; });
-rejects('a future format', 'Unsupported backup format version (9)', b => { b.formatVersion = 9; });
+rejects('a future format', 'Unsupported backup format version (10)', b => { b.formatVersion = 10; });
 rejects('missing rowCounts', 'Missing "rowCounts"', b => { delete b.rowCounts; });
 rejects('rowCounts missing one table', 'Row count for "update_holds" is missing', b => { delete b.rowCounts.update_holds; });
 rejects('rowCounts not a whole number', 'Row count for "watchlist_items" is missing or not a whole number', b => { b.rowCounts.watchlist_items = '3'; });

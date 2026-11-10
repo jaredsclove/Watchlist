@@ -170,12 +170,12 @@ test('watch-with: labels from your choices, tokens in the data; an archived choi
 });
 
 // ── backup format 3 ──
-test('backup (Q1) is format 8 with the twenty-one tables and exact organization columns; never user_id, is_film or item_is_film; it validates', async () => {
+test('backup (G1) is format 9 with the twenty-seven tables and exact organization columns; never user_id, is_film or item_is_film; it validates', async () => {
   const app = await boot(library());
   const b = await app.run('buildBackupObject()');
-  assert.strictEqual(b.formatVersion, 8);
+  assert.strictEqual(b.formatVersion, 9);
   assert.deepStrictEqual(Object.keys(b.tables).sort(), ['catalog_film_links', 'catalog_show_links', 'collection_definitions', 'collection_exclusions', 'collection_memberships', 'custom_collections',
-    'episode_marks', 'membership_removals', 'personal_collections', 'queue_entries', 'record_aliases', 'research_briefs', 'research_imports', 'show_update_settings', 'tv_shows', 'update_findings',
+    'episode_marks', 'game_collection_members', 'game_collections', 'game_decisions', 'game_entries', 'game_follows', 'game_settings', 'membership_removals', 'personal_collections', 'queue_entries', 'record_aliases', 'research_briefs', 'research_imports', 'show_update_settings', 'tv_shows', 'update_findings',
     'update_holds', 'update_setup', 'watch_queues', 'watch_with_choices', 'watchlist_items']);
   assert.strictEqual(Object.keys(b.tables.watchlist_items[0]).length, 30, 'format 4’s 20 columns and the 10 film columns of B4/B5');
   assert.strictEqual(Object.keys(b.tables.tv_shows[0]).length, 21, 'format 4’s 6 columns and the 15 show columns of B4/B5');
@@ -243,7 +243,7 @@ test('without personal collections: the page doesn’t start (the sign-in boot�
   assert.match(app.el('phaseBanner').innerHTML, /hasn’t been updated for signed-in libraries yet, so nothing is shown and nothing will be changed/);
   assert.deepStrictEqual(app.requests.map(r => r.url.split('/rest/v1/')[1]), ['rpc/stage5_capabilities']);
   const res = await app.run('buildBackupObject()').then(() => 'made', e => e.message);
-  assert.match(res, /makes backups only of a database in its own state \(format 8\), and this database isn’t in it, so no file was made/);
+  assert.match(res, /makes backups only of a database in its own state \(format 9\), and this database isn’t in it, so no file was made/);
 });
 
 // ── organization refresh (review finding 1) ──

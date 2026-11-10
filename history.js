@@ -21,7 +21,7 @@
 // Leaving the app can't be held: while a change is out or a restore has been sent, the page asks
 // the browser to warn first (D18; browsers may not show it). A page brought back from the browser's
 // back/forward cache reports a change that was out as not confirmed and reads the open view again.
-const ROUTE_VIEWS = { 'tv/watching': 'watching', 'tv/alltv': 'alltv', 'tv/comingsoon': 'comingsoon', movies: 'allmovies', collections: 'collections', queues: 'queues', settings: 'settings' };
+const ROUTE_VIEWS = { 'tv/watching': 'watching', 'tv/alltv': 'alltv', 'tv/comingsoon': 'comingsoon', movies: 'allmovies', collections: 'collections', queues: 'queues', games: 'games', 'games/franchises': 'gamesfranchises', 'games/collections': 'gamescollections', settings: 'settings' };
 
 function routeOfView(id) {
   if (isBrowseCollectionView(id)) return `#/collections/${encodeURIComponent(id.slice(BROWSE_VIEW_PREFIX.length))}`;

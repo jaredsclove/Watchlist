@@ -204,10 +204,10 @@ test('N7 rule R: every restore entry point runs only on Settings (Currently Watc
     await app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => text }], value: 'x' } }); await settle();
     assert.strictEqual(modalOpen(app) && app.el('restoreModalBox').innerHTML.includes('executeRestore()'), allowed, `${v[0]}: handleRestoreFileSelected`);
     app.ctx.__b = JSON.parse(text);
-    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 8');
+    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 9');
     await app.ctx.executeRestore(); await settle();
     assert.strictEqual(app.downloads, allowed ? 1 : 0, `${v[0]}: executeRestore (safety backup)`);
-    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 8');
+    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 9');
     await app.ctx.continueRestoreAfterSafetyConfirm('safety.json'); await settle();
     const sent = app.requests.filter(r => r.url.endsWith('/rpc/restore_backup')).length;
     assert.strictEqual(sent, allowed ? 1 : 0, `${v[0]}: continueRestoreAfterSafetyConfirm`);
@@ -266,7 +266,7 @@ test('N9 after submission navigation does not abandon the restore; it verifies a
     const { text } = await backupFile(app);
     app.ctx.openSettings(null);
     app.ctx.__b = JSON.parse(text);
-    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 8');
+    app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 9');
     const g = app.hold(r => r.url.endsWith('/rpc/restore_backup'));
     const sent = app.ctx.continueRestoreAfterSafetyConfirm('safety.json');
     await g.reached;

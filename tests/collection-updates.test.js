@@ -806,7 +806,7 @@ test('Settings: the card is drawn with no request; the status comes from what th
   app.ctx.openSettings(null); await settle();
   assert.match(text(app.el('settingsCuStatus').textContent), /Automatic updates for catalog shows are paused until the collection setup is imported/);
   const b = await app.ctx.buildBackupObject();
-  assert.strictEqual(b.formatVersion, 8);
+  assert.strictEqual(b.formatVersion, 9);
   for (const t of app.get('CU1_TABLES')) assert.ok(Array.isArray(b.tables[t]), t);
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(b)), []);
 });

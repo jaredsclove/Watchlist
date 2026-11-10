@@ -2,7 +2,7 @@
 // order, Manage queues (new, rename, delete, move up / down), entries (films, whole shows, seasons) with their labels and
 // actions, moving by buttons, the ⋯ menu and a drop, removing, focus after each, Add to queue from the ⋯ menus and the
 // flat season lists (refusals shown, nothing changed), completion read back after Mark watched, opening an entry in the
-// library, matching's queue report, and backup format 8. The database's rules are modelled in tests/q1-harness.js;
+// library, matching's queue report, and backup format 8 (since G1 format 9, with game_entry_id). The database's rules are modelled in tests/q1-harness.js;
 // the real ones are tested by tools/q1-test.mjs. Dragging is checked here by its drop rule; the pointer itself is a
 // browser check.
 // Run from the repo root: node tests/queues.test.js
@@ -291,13 +291,13 @@ test('matching: a queue adjustment made in the same transaction is reported', as
   void L;
 });
 
-test('backup is format 8 with both queue tables; it validates, and an overlap in a file is refused', async () => {
+test('backup is format 9 with both queue tables (entries name a game or not); it validates, and an overlap in a file is refused', async () => {
   const { data, queues } = seeded();
   const app = await boot(data, queues);
   const b = await app.ctx.buildBackupObject();
-  assert.strictEqual(b.formatVersion, 8);
+  assert.strictEqual(b.formatVersion, 9);
   assert.deepStrictEqual(Object.keys(b.tables.watch_queues[0]), ['id', 'name', 'sort_order', 'created_at'], JSON.stringify(b.tables.watch_queues[0]));
-  assert.deepStrictEqual(Object.keys(b.tables.queue_entries[0]), ['id', 'queue_id', 'show_id', 'item_id', 'position', 'created_at']);
+  assert.deepStrictEqual(Object.keys(b.tables.queue_entries[0]), ['id', 'queue_id', 'show_id', 'item_id', 'game_entry_id', 'position', 'created_at']);
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(b)), [], Array.from(app.ctx.validateBackupObject(b)).join(' | '));
   const bad = JSON.parse(JSON.stringify(b));
   bad.tables.queue_entries.push({ ...bad.tables.queue_entries[0], id: E(99), show_id: null, item_id: data.rows.find(r => r.show_id === bad.tables.queue_entries[0].show_id).id, position: 99 });

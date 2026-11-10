@@ -176,7 +176,7 @@ test('without access a backup is still complete, and restoring keeps research ro
   alias(app, coll, live, 'ZZ Kept');
   off(app);
   const b = await app.ctx.buildBackupObject();
-  assert.strictEqual(b.formatVersion, 8);
+  assert.strictEqual(b.formatVersion, 9);
   assert.strictEqual(b.tables.update_holds.length, 1); assert.strictEqual(b.tables.collection_definitions.length, 1);
   assert.ok(b.tables.update_findings.some(f => f.source === 'research'), 'research findings are in it');
   assert.ok(!('research_enabled' in b) && !('library_members' in b.tables), 'and the permission isn’t');

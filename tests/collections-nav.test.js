@@ -95,12 +95,12 @@ const holdOwnRead = app => app.hold(r => r.url.includes('/rest/v1/collection_mem
 const archive = (app, ...ks) => ks.forEach(k => { coll(app, k).archived_at = TS; });
 
 // ─── C1 (V2.1), C2 (V2.2), C10 ───────────────────────────────────────────────
-test('C1 the primary row: TV · Movies · Collections · Queues, words for names, the phone rules in styles.css', async () => {
+test('C1 the primary row: TV · Movies · Collections · Games · Queues, words for names, the phone rules in styles.css', async () => {
   const app = await boot();
   const m = app.el('mediaSwitch').innerHTML;
   const btns = [...m.matchAll(/<button class="media-switch-btn[^"]*" id="areaBtn-([a-z]+)"[^>]*onclick="([^"]+)">([^<]+)<\/button>/g)]
     .map(x => [x[1], x[2], x[3]]);
-  assert.deepStrictEqual(btns, [['tv', "switchMediaType('tv')", 'TV'], ['movie', "switchMediaType('movie')", 'Movies'], ['collections', 'openCollections(this)', 'Collections'], ['queues', 'openQueues()', 'Queues']], 'text only (UI polish; Q1 Queues)');
+  assert.deepStrictEqual(btns, [['tv', "switchMediaType('tv')", 'TV'], ['movie', "switchMediaType('movie')", 'Movies'], ['collections', 'openCollections(this)', 'Collections'], ['games', 'openGames()', 'Games'], ['queues', 'openQueues()', 'Queues']], 'text only (UI polish; Q1 Queues; G1 Games)');
   const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   const phone = css.slice(css.indexOf('@media (max-width: 700px)'));
   // One non-sticky row with Settings: words only, each label on one line, 44 px targets.

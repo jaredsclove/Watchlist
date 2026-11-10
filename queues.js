@@ -1,5 +1,5 @@
 // ─── Planning queues (Q1, next-gen item 7; db/q1_queues.sql) ──────────────────
-// A member's named, manually ordered queues of films, whole shows and single seasons. The Queues area shows one queue
+// A member's named, manually ordered queues of films, whole shows, single seasons and (G1) games. The Queues area shows one queue
 // at a time: a selector in the saved queue order, Manage queues (new, rename, delete, move up / down) and the entries,
 // reordered by dragging the handle (mouse or touch) or with Move up / down and the ⋯ menu's Move to top / bottom.
 // Adding never changes viewing status; removing an entry or deleting a queue never touches the library.
@@ -31,14 +31,14 @@ async function loadQueuesView() {
   else { showError(''); paintQueuesMessage('Loading…', false); }
   const showsRead = startShowsRead();
   try {
-    const [rows, shows, queues, entries, marks] = await Promise.all([fetchAllRows(TABLE), fetchAllRows('tv_shows'),
-      fetchAllRows('watch_queues'), fetchAllRows('queue_entries'), readEpisodeMarks(false)]);
+    const [rows, shows, queues, entries, marks, games] = await Promise.all([fetchAllRows(TABLE), fetchAllRows('tv_shows'),
+      fetchAllRows('watch_queues'), fetchAllRows('queue_entries'), readEpisodeMarks(false), readGamesData()]);
     requireB45Shape(shows, 'priority');
     publishAllTvShows(showsRead, shows);
     if (seq !== queuesLoadSeq || !isQueuesView()) return null;
     if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === queuesLoadSeq && isQueuesView()) loadQueuesView(); }); return null; }
     publishEpisodeMarks(marks);
-    queuesData = { loaded: true, queues: sortQueues(queues), entries, rows };
+    queuesData = { loaded: true, queues: sortQueues(queues), entries, rows, games };
     if (inPlace) endListReread(true);
     pickActiveQueue();
     renderQueuesView();
@@ -78,6 +78,14 @@ function selectQueue(id) {
 // ── What an entry shows ──
 // A film or season by its library row, a whole show by All TV's derivation (its up next, Up to date, its action).
 function queueEntryView(e, rowsById, showItems, today) {
+  if (e.game_entry_id) {
+    // G1: a game, as its Library row shows it; hidden while it is on none of the member's platforms (its place is kept).
+    const g = queuesData.games, ge = g && g.entries.find(x => x.id === e.game_entry_id);
+    if (!ge) return { kind: 'game', missing: true, title: 'A game no longer in your library' };
+    const v = gameEntryView(ge, gamesState(g, today));
+    return { kind: 'game', game: ge, title: v.title, hidden: v.hidden, kindLine: `Game · ${v.avail.line ? gameLineText(v.avail.line) : 'Not announced on your platforms'}`,
+      state: '', done: ge.status === 'finished', control: `<span class="state-action" data-action="status">${gameStatusSelectHtml(ge, 'queue')}</span>`, action: '' };
+  }
   if (e.show_id) {
     const item = showItems.get(e.show_id), show = tvShowsById.get(e.show_id);
     if (!show) return { kind: 'show', missing: true, title: 'A show no longer in your library' };
@@ -140,12 +148,15 @@ function renderQueuesView() {
   const qs = queuesData.queues, q = activeQueue();
   const rowsById = new Map(queuesData.rows.map(r => [r.id, r]));
   const showItems = new Map(deriveAllTv(queuesData.rows, tvShowsById, today).items.map(x => [x.key, x]));
-  const entries = q ? queueEntriesOf(q.id) : [];
+  const all = q ? queueEntriesOf(q.id) : [];
+  // G1: games on none of the member's platforms are hidden; they keep their places while the others move (queueMove).
+  const views = new Map(all.map(e => [e.id, queueEntryView(e, rowsById, showItems, today)]));
+  const entries = all.filter(e => !views.get(e.id).hidden), hiddenCount = all.length - entries.length;
   const select = qs.length
     ? `<label class="queue-select-label" for="queueSelect">Queue</label>
        <select id="queueSelect" class="queue-select" data-qaction="select" onchange="selectQueue(this.value)">${qs.map(x =>
          `<option value="${esc(x.id)}"${q && x.id === q.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
-       <span class="queue-count" id="queueCount">${countUnit(entries.length, 'entry', 'entries')}</span>` : '';
+       <span class="queue-count" id="queueCount">${countUnit(entries.length, 'entry', 'entries')}${hiddenCount ? ` (+${hiddenCount} hidden)` : ''}</span>` : '';
   const head = `<div class="queues-head">
       <h2 class="queues-title" id="queuesTitle" tabindex="-1">Queues</h2>
       <div class="queues-controls">${select}
@@ -157,11 +168,14 @@ function renderQueuesView() {
   if (!qs.length) {
     body = `<div class="queue-empty" data-queue-empty="1" tabindex="-1"><p>You have no queues yet. Use Manage queues to make one, for example “Films to watch together”.</p>
       <p>Then add films, whole shows or single seasons with <strong>Add to queue…</strong> in their ⋯ menu, or a season’s <strong>Queue…</strong> button.</p></div>`;
+  } else if (!entries.length && hiddenCount) {
+    body = `<div class="queue-empty" data-queue-empty="1" tabindex="-1"><p>Every entry in “${esc(q.name)}” is a game on none of your platforms, so they are hidden here. They keep their places and come back when you choose a platform that has them.</p></div>`;
   } else if (!entries.length) {
     body = `<div class="queue-empty" data-queue-empty="1" tabindex="-1"><p>“${esc(q.name)}” is empty. Add films, whole shows or single seasons with <strong>Add to queue…</strong> in their ⋯ menu, or a season’s <strong>Queue…</strong> button.</p></div>`;
   } else {
     const n = entries.length;
-    body = `<ol class="queue-list" id="queueList" aria-label="${esc(q.name)}">${entries.map((e, i) => queueEntryHtml(e, i, n, queueEntryView(e, rowsById, showItems, today))).join('')}</ol>`;
+    body = `<ol class="queue-list" id="queueList" aria-label="${esc(q.name)}">${entries.map((e, i) => queueEntryHtml(e, i, n, views.get(e.id))).join('')}</ol>`
+      + (hiddenCount ? `<p class="queue-hidden-note">${countUnit(hiddenCount, 'game on none of your platforms is', 'games on none of your platforms are')} hidden here and keep${hiddenCount === 1 ? 's' : ''} ${hiddenCount === 1 ? 'its place' : 'their places'} while you reorder the others.</p>` : '');
   }
   screen.innerHTML = head + manage + body;
   applyQueueFocus(rec);
@@ -282,14 +296,27 @@ function applyQueueFocus(rec) {
 
 // ── Entries: move and remove ──
 const queueMovedIds = (ids, id, to) => { const rest = ids.filter(x => x !== id), k = Math.max(1, Math.min(to, rest.length + 1)); return [...rest.slice(0, k - 1), id, ...rest.slice(k - 1)]; };
-// to: the 1-based place. One guarded change (library_queue_move) with the order the page shows.
+// The whole order after moving one shown entry to the 1-based place `to` among the shown ones: hidden entries keep their places
+// (their slots), and the shown ones are put back into the other slots in their new order. Pure.
+function queueOrderWithHidden(ids, shown, id, to) {
+  const visible = ids.filter(x => shown.has(x));
+  const moved = queueMovedIds(visible, id, to);
+  let k = 0;
+  return ids.map(x => (shown.has(x) ? moved[k++] : x));
+}
+// to: the 1-based place among the shown entries. One guarded change with the order the page has: library_queue_move when nothing
+// is hidden (as before G1), else library_queue_set_order with the whole order, hidden entries in their places.
 async function moveQueueEntry(entryId, to, focusAfter = null) {
   const q = activeQueue();
   if (!q) return;
-  const list = queueEntriesOf(q.id), expected = list.map(e => e.id), from = expected.indexOf(entryId);
+  const list = queueEntriesOf(q.id), expected = list.map(e => e.id);
+  const today = localTodayStr(), rowsById = new Map(queuesData.rows.map(r => [r.id, r]));
+  const shown = new Set(list.filter(e => !(e.game_entry_id && queueEntryView(e, rowsById, new Map(), today).hidden)).map(e => e.id));
+  const visible = expected.filter(id => shown.has(id)), from = visible.indexOf(entryId);
   if (from < 0) return;
-  const target = Math.max(1, Math.min(to, list.length));
+  const target = Math.max(1, Math.min(to, visible.length));
   if (target === from + 1) { renderQueuesView(); return; }
+  if (shown.size < list.length) return setQueueOrder(q, list, queueOrderWithHidden(expected, shown, entryId, target), focusAfter);
   const v = list[from];
   await runWrite(`“${q.name}” · order`, async lane => {
     lane.queueReread = true; // (showSaved: no second read)
@@ -299,6 +326,26 @@ async function moveQueueEntry(entryId, to, focusAfter = null) {
     renderQueuesView();
     try {
       await sbRpc('library_queue_move', { p_queue_id: q.id, p_expected: expected, p_entry_id: v.id, p_to_index: target });
+      showSaved();
+    } catch (e) {
+      before.forEach(([entry, p]) => { entry.position = p; });
+      if (stateNeedsReread(e)) { await reportStateFailure(e); return; }
+      showError(stateErrorText(e));
+      renderQueuesView();
+    }
+  }, { list: true });
+}
+
+async function setQueueOrder(q, list, order, focusAfter) {
+  const expected = list.map(e => e.id);
+  await runWrite(`“${q.name}” · order`, async lane => {
+    lane.queueReread = true;
+    const before = list.map(e => [e, e.position]);
+    order.forEach((id, i) => { list.find(e => e.id === id).position = i + 1; });
+    if (focusAfter) queueFocusIntent = focusAfter;
+    renderQueuesView();
+    try {
+      await sbRpc('library_queue_set_order', { p_queue_id: q.id, p_expected: expected, p_order: order });
       showSaved();
     } catch (e) {
       before.forEach(([entry, p]) => { entry.position = p; });
@@ -538,6 +585,13 @@ document.addEventListener('keydown', e => { if (queueDrag && e.key === 'Escape')
 function openQueueEntry(entryId) {
   const e = queuesData && queuesData.entries.find(x => x.id === entryId);
   if (!e) return;
+  if (e.game_entry_id) {
+    const g = queuesData.games && queuesData.games.entries.find(x => x.id === e.game_entry_id);
+    if (!g) return;
+    gamesFilters = { search: g.title, genre: '', status: 'all' };
+    switchView('games');
+    return;
+  }
   const row = e.item_id ? queuesData.rows.find(r => r.id === e.item_id) : null;
   if (row && !isTvSeason(row)) {
     activeMediaType = 'movie';
@@ -589,7 +643,11 @@ function openAddToQueueFromMenu(control, kind, id) {
 function openAddToQueue(kind, id, seasonId, opener) {
   if (writeLane) { showError(LANE_BUSY_TEXT(writeLane.label)); return; }
   let title = '', seasons = [];
-  if (kind === 'item') {
+  if (kind === 'game') {
+    const g = (gamesData && gamesData.entries.find(x => x.id === id)) || (queuesData && queuesData.games && queuesData.games.entries.find(x => x.id === id));
+    if (!g) return;
+    title = g.title;
+  } else if (kind === 'item') {
     const r = actionRows().find(x => x.id === id);
     if (!r) return;
     if (isTvSeason(r) && r.show_id) return openAddToQueue('show', r.show_id, r.id, opener);
@@ -632,6 +690,7 @@ function queueAddBlock(a, qid) {
   const list = a.entries.filter(e => e.queue_id === qid).sort((x, y) => x.position - y.position);
   const place = pred => list.findIndex(pred) + 1;
   if (a.kind === 'item') { const n = place(e => e.item_id === a.id); return n ? `Already in this queue (#${n})` : null; }
+  if (a.kind === 'game') { const n = place(e => e.game_entry_id === a.id); return n ? `Already in this queue (#${n})` : null; }
   const seasonIds = new Set(a.seasons.map(r => r.id));
   if (a.choice === 'show') {
     const n = place(e => e.show_id === a.id);
@@ -673,7 +732,7 @@ function renderQueueAdd() {
   box.innerHTML = `<h2 class="modal-title" id="queueAddTitle">Add to a queue</h2>
     <p class="queue-add-title">“${esc(a.title)}”</p>
     ${what}${queues}${note}
-    <p class="queue-add-help">It goes at the bottom. Its status isn’t changed.</p>
+    <p class="queue-add-help">It goes at the bottom. Its status isn’t changed.${a.kind === 'game' ? ' Setting it to Finished takes it out of every queue.' : ''}</p>
     <div class="modal-actions"><button class="btn" onclick="closeQueueAdd()">Cancel</button>
       <button class="btn btn-accent" id="queueAddSubmit" onclick="submitQueueAdd()"${canAdd ? '' : ' disabled'}>${a.busy ? 'Adding…' : 'Add'}</button></div>`;
 }
@@ -717,7 +776,8 @@ async function submitQueueAdd() {
   await runWrite(`“${label}” · queue`, async lane => {
     lane.queueReread = true;
     try {
-      const res = await sbRpc('library_queue_add', { p_queue_id: q.id, p_show_id: showId, p_item_id: itemId });
+      const res = a.kind === 'game' ? await sbRpc('library_queue_add_game', { p_queue_id: q.id, p_entry_id: a.id })
+        : await sbRpc('library_queue_add', { p_queue_id: q.id, p_show_id: showId, p_item_id: itemId });
       try { userStorage.setItem(QUEUE_ADD_LAST_KEY, q.id); } catch (e) { /* not remembered */ }
       showSaved();
       dismissQueueAdd(true);

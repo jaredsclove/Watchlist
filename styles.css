@@ -1228,3 +1228,57 @@ body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; 
   .queue-add-option { min-height: 44px; }
   .queue-season-btn { min-height: 44px; }
 }
+
+/* G1: games. Their own screen like Queues: rows wrap to one column on phones; the status select and ⋯ stay together. */
+.games-screen { max-width: 980px; }
+.games-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 10px; }
+.games-title { font-size: 20px; font-weight: 600; margin: 0; }
+.games-title:focus { outline: none; }
+.games-tabs { display: flex; flex-wrap: wrap; gap: 4px; border: 0; padding: 0; position: static; }
+.games-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.games-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.games-toolbar select, .games-screen select, .game-dialog-box select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; font: inherit; font-size: 13px; max-width: 100%; }
+.games-toolbar .search-input { min-width: 0; flex: 1 1 200px; max-width: 320px; }
+.games-count { font-size: 13px; color: var(--text2); }
+.games-note { font-size: 13px; color: var(--text2); margin: 6px 0; line-height: 1.5; }
+.games-report { font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 12px; margin: 8px 0; }
+.games-empty { background: var(--surface); border: 1px dashed var(--border2); border-radius: var(--radius-lg); padding: 16px; color: var(--text2); font-size: 14px; }
+.games-empty:focus { outline: none; }
+.games-list, .franchise-list, .spot-list, .spot-versions, .games-results, .games-review { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.game-row, .franchise-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 12px; }
+.game-row.game-skipped { opacity: 0.75; }
+.game-main, .franchise-main { flex: 1 1 320px; min-width: 0; }
+.game-title-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.game-title { padding: 0; font-size: 14px; font-weight: 600; color: var(--text); text-align: left; overflow-wrap: anywhere; }
+.game-title:hover { color: var(--accent); text-decoration: underline; }
+.game-prio { color: #f5c451; } .game-prio-low { font-size: 12px; color: var(--text3); }
+.game-line, .franchise-up, .franchise-coming, .spot-version-line { font-size: 12px; color: var(--text2); margin-top: 2px; overflow-wrap: anywhere; }
+.game-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; color: var(--text2); }
+.game-scores, .game-length { white-space: nowrap; }
+.muted { color: var(--text3); }
+.game-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.game-state { font-size: 12px; color: var(--text2); border: 1px solid var(--border2); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
+.franchise-row { flex-direction: column; align-items: stretch; }
+.franchise-top { display: flex; align-items: flex-start; gap: 8px; }
+.franchise-name { font-weight: 600; }
+.franchise-detail { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; }
+.spot { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; }
+.spot.spot-done { opacity: 0.8; } .spot.spot-excluded { border-style: dashed; }
+.spot-head { font-size: 13px; }
+.spot-title { font-weight: 600; }
+.spot-version { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; }
+.spot-version-name { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.spot-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.games-search-row { display: flex; gap: 8px; margin-bottom: 8px; } .games-search-row .search-input { flex: 1 1 auto; min-width: 0; }
+.games-preview h3 { font-size: 15px; margin: 8px 0 4px; }
+.games-follow { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.games-review li { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
+.game-dialog-box { max-width: 640px; }
+.game-dialog-box label { display: inline-flex; gap: 4px; align-items: center; margin: 2px 8px 2px 0; font-size: 13px; }
+.settings-fieldset { border: 0; padding: 0; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.settings-fieldset legend { font-size: 13px; font-weight: 600; margin-bottom: 4px; width: 100%; }
+.queue-hidden-note { font-size: 12px; color: var(--text2); margin: 6px 0 0; }
+@media (max-width: 700px) {
+  .games-actions { margin-left: 0; }
+  .game-actions { margin-left: 0; width: 100%; justify-content: space-between; }
+}
