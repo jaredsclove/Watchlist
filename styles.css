@@ -1282,3 +1282,8 @@ body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; 
   .games-actions { margin-left: 0; }
   .game-actions { margin-left: 0; width: 100%; justify-content: space-between; }
 }
+/* G1: five areas (TV · Movies · Collections · Games · Queues) don't fit one line beside Settings below 360 px: the row wraps. */
+@media (max-width: 359px) {
+  .media-switch { flex-wrap: wrap; row-gap: 2px; }
+  .media-switch-btn { flex: 0 1 auto; padding: 8px 6px; }
+}

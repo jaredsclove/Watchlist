@@ -449,4 +449,19 @@ test('focus: a status change keeps focus on that game’s status select; a delet
   assert.deepStrictEqual([b.closest('[data-game]').getAttribute('data-game'), b.getAttribute('data-gaction')], [ids[2], 'more'], 'the next game’s ⋯');
 });
 
+test('leaving Games for any other view (by route, Back or a button) hides the Games screen; Games hides Queues', async () => {
+  const app = await bootWith({ entries: [entry(1, 180)] });
+  await openGames(app);
+  assert.notStrictEqual(app.el('gamesScreen').style.display, 'none');
+  for (const v of ['queues', 'settings', 'watching', 'collections']) {
+    app.ctx.switchView(v); await settle();
+    assert.strictEqual(app.el('gamesScreen').style.display, 'none', `${v}: no Games screen`);
+    assert.strictEqual(app.el('gamesScreen').innerHTML, '');
+    await openGames(app);
+  }
+  app.ctx.openQueues(); await settle();
+  await openGames(app);
+  assert.strictEqual(app.el('queuesScreen').style.display, 'none', 'Games: no Queues screen');
+});
+
 T.run();

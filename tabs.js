@@ -123,6 +123,11 @@ function switchView(id) {
   // The Collections state may have resolved its default inside buildTabs (buildBrowseBar):
   // that opened a collection, so this entry is over.
   if (activeViewId !== id) return;
+  // Q1 / G1: a screen of its own shows only in its own area (an entry by route or Back included).
+  [['queuesScreen', isQueuesView(id)], ['gamesScreen', isGamesView(id)]].forEach(([sid, keep]) => {
+    const el = !keep && document.getElementById(sid);
+    if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+  });
   if (isSettingsView(id)) { renderSettings(); return; }
   if (isCollectionsStateView(id)) { renderCollectionsState(); return; }
   if (isQueuesView(id)) { queuesData = null; loadQueuesView(); return; }

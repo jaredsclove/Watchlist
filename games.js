@@ -171,7 +171,7 @@ function gameRowHtml(v, st) {
       <div class="game-main">
         <div class="game-title-line"><button type="button" class="btn-link game-title" data-gaction="open" onclick="openGameDetails(${e.igdb_id}, this)">${esc(v.title)}</button>${prio}</div>
         <div class="game-line">${esc(lineText)}</div>
-        <div class="game-meta">${v.genres.map(g => `<button type="button" class="pill genre-pill" data-gaction="genre" onclick="setGamesFilter('genre', '${jsArg(g)}')">${esc(g)}</button>`).join('')}
+        <div class="game-meta">${v.genres.map(g => `<button type="button" class="badge meta-chip meta-genres badge-clickable" data-gaction="genre" onclick="setGamesFilter('genre', '${jsArg(g)}')">${esc(g)}</button>`).join('')}
           ${v.rec && gameScoresText(v.rec) ? `<span class="game-scores">${esc(gameScoresText(v.rec))}</span>` : ''}
           <span class="game-length${v.length.reliable ? '' : ' muted'}">${esc(gameLengthText(v.length))} <span class="visually-hidden">(${esc(GAME_STYLE_LABELS[st.style])})</span></span></div>
       </div>
@@ -853,7 +853,9 @@ function closeGameDialog(returnFocus = true) {
   gamesAdd = null; gamesCollectionAdd = null; gamesDialogOpener = null;
   if (overlay) overlay.style.display = 'none';
   if (box) box.innerHTML = '';
-  if (returnFocus) returnDialogFocus(opener, () => document.getElementById('gamesTitle') || document.getElementById('mainContent'));
+  // (an opener redrawn meanwhile: its successor, found by its hook; else the heading)
+  const hook = opener && typeof opener.getAttribute === 'function' ? opener.getAttribute('data-gaction') : null;
+  if (returnFocus) returnDialogFocus(opener, () => (hook && document.querySelector(`#gamesScreen [data-gaction="${hook}"]`)) || document.getElementById('gamesTitle') || document.getElementById('mainContent'));
 }
 function gameDialogKeydown(event) {
   dialogKeydown(event, document.getElementById('gameDialogBox'), 'button, input, select, a, [tabindex="0"]', closeGameDialog);
