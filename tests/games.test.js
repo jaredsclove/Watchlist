@@ -464,4 +464,132 @@ test('leaving Games for any other view (by route, Back or a button) hides the Ga
   assert.strictEqual(app.el('queuesScreen').style.display, 'none', 'Games: no Queues screen');
 });
 
+// ── Games research (games-research.js) ──
+const EV = (source = 'playstation_store', url = 'https://store.playstation.com/zz/123') => [{ source, url, checked: day(-1) }];
+const findings = list => JSON.stringify({ format: 'watchlist-games-research-findings', version: 1, research_date: day(-1), findings: list });
+
+test('games research: the brief lists announcements, recent IGDB-only releases, PS4 games counted through Sony’s rule, unclear relationships and uncounted spin-offs; only with research access', async () => {
+  const app = await bootWith({ follows: [follow(1, 7001, 'ZZ War')], entries: [entry(1, 140), entry(2, 102, { spot: 999 }), entry(3, 120)] });
+  await openGames(app);
+  const brief = app.run('gamesBuildBrief(gamesData)');
+  assert.strictEqual(brief.format, 'watchlist-games-research-brief');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(brief.platforms)), ['ps5']);
+  const ids = k => JSON.parse(JSON.stringify(brief.checks[k].map(x => x.igdb_id))).sort((a, b) => a - b);
+  assert.deepStrictEqual(ids('announcements'), [120], 'ZZ War Next (TBA on PS5): ' + JSON.stringify(brief.checks.announcements));
+  assert.deepStrictEqual(ids('recent'), [140], 'released 18 days ago, dated only by IGDB');
+  assert.deepStrictEqual(ids('compatibility'), [102], 'Up next plays on PS5 only through the PS4 rule');
+  assert.ok(brief.checks.relationships.some(x => x.igdb_id === 102 && x.question === 'which_spot'), 'the saved remaster IGDB places elsewhere');
+  assert.deepStrictEqual(ids('roles'), [130], 'the uncounted spin-off');
+  app.ctx.openSettings(null); await settle();
+  assert.match(app.el('settingsScreen').innerHTML, /Download games research brief/);
+  const none = await bootWith({ research: false });
+  none.ctx.openSettings(null); await settle();
+  assert.doesNotMatch(none.el('settingsScreen').innerHTML, /games research/i, 'no research controls without access');
+  await none.ctx.gamesImportFindings(findings([]));
+  assert.match(none.el('errorBanner').innerHTML + none.el('banner').innerHTML, /Games findings: 0 decisions recorded|research access/);
+});
+
+test('games research: an import applies availability and compatibility findings with their evidence, keeps relationships and roles for Review, and skips what it can’t apply', async () => {
+  const app = await bootWith({ follows: [follow(1, 7001, 'ZZ War')], entries: [entry(1, 101, { status: 'skipped' }), entry(2, 140), entry(3, 120)] });
+  await openGames(app);
+  const r = await app.ctx.gamesImportFindings(findings([
+    { type: 'availability', igdb_id: 120, platform: 'ps5', status: 'available', precision: 'month', year: 2026, month: 10, evidence: EV() },
+    { type: 'availability', igdb_id: 140, platform: 'ps5', status: 'not_yet', evidence: EV('publisher', 'https://zz-publisher.example.com/news') },
+    { type: 'compatibility', igdb_id: 110, status: 'ps4_only', evidence: EV() },
+    { type: 'relationship', igdb_id: 103, relation: 'port_of', target_igdb_id: 101, evidence: EV('publisher', 'https://zz-publisher.example.com/a') },
+    { type: 'role', igdb_id: 130, role: 'main', igdb_collection_id: 7001, evidence: EV('publisher', 'https://zz-publisher.example.com/b') },
+    { type: 'availability', igdb_id: 999999, platform: 'ps5', status: 'available', precision: 'year', year: 2027, evidence: EV() },
+    { type: 'availability', igdb_id: 180, platform: 'ps5', status: 'not_found' }]));
+  await settle();
+  assert.ok(r, app.el('errorBanner').innerHTML);
+  assert.strictEqual(r.done.length, 5, JSON.stringify(r));
+  assert.strictEqual(r.skipped.length, 2);
+  const d = k => app.store.game_decisions.filter(x => x.kind === k).map(x => [x.igdb_id, x.platform, x.basis]);
+  assert.deepStrictEqual(d('available'), [[120, 'ps5', 'research']]);
+  assert.deepStrictEqual(d('not_out_yet').sort(), [[110, 'ps5', 'research'], [140, 'ps5', 'research']], 'holds that carry evidence are research');
+  assert.deepStrictEqual(d('research_link'), [[103, '', 'research']]);
+  assert.deepStrictEqual(d('research_role'), [[130, '', 'research']]);
+  await openGames(app);
+  assert.match(text(rowOf(app, ID('61000000', 3))), /PS5 · Oct 2026 · Store or publisher/, 'confirmed at the month the source gives');
+  assert.match(text(rowOf(app, ID('61000000', 2))), /not out yet \(your hold\)/);
+  assert.match(screen(app), /Review \(2\)/);
+  app.ctx.openGamesReview(null);
+  assert.match(text(dialog(app)), /Research \(\d{4}-\d{2}-\d{2}\) says “ZZ War 4 Handheld” is a port of ZZ War 4\. Evidence \(Claude’s assessment\): Publisher Join it to “ZZ War 4” as a port/);
+  assert.match(text(dialog(app)), /says “ZZ War Pocket” is main series\. .* Count it toward Caught up/);
+  await app.ctx.gamesResearchChoose(0, true); await settle();
+  assert.deepStrictEqual(app.store.game_entries.find(e => e.igdb_id === 101).port_ids, [103], 'joined as a port, guarded by what was shown');
+  assert.strictEqual(app.store.game_entries.find(e => e.igdb_id === 101).status, 'skipped', 'no status changed');
+  await openGames(app);
+  await app.ctx.gamesResearchChoose(0, false); await settle();
+  assert.deepStrictEqual(d('research_role'), [], 'dismissed: the finding is gone');
+  assert.ok(!app.store.game_decisions.some(x => x.kind === 'include_spinoff'), 'and nothing was counted');
+  const again = await app.ctx.gamesImportFindings(findings([{ type: 'availability', igdb_id: 120, platform: 'ps5', status: 'available', precision: 'month', year: 2026, month: 10, evidence: EV() }]));
+  assert.strictEqual(again.done.length, 0, 'the same finding again: already recorded, nothing sent');
+});
+
+test('games research: a findings file of the wrong shape, or with weak evidence, is refused whole', async () => {
+  const app = await bootWith({ entries: [entry(1, 120)] });
+  await openGames(app);
+  for (const [label, f] of [
+    ['no evidence', { type: 'availability', igdb_id: 120, platform: 'ps5', status: 'available', precision: 'year', year: 2027 }],
+    ['a Store page off playstation.com', { type: 'availability', igdb_id: 120, platform: 'ps5', status: 'available', precision: 'year', year: 2027, evidence: EV('playstation_store', 'https://zz.example.com/store') }],
+    ['an http address', { type: 'availability', igdb_id: 120, platform: 'ps5', status: 'available', precision: 'year', year: 2027, evidence: EV('publisher', 'http://zz.example.com/') }],
+    ['checked after the research date', { type: 'availability', igdb_id: 120, platform: 'ps5', status: 'available', precision: 'year', year: 2027, evidence: [{ source: 'publisher', url: 'https://zz.example.com', checked: day(5) }] }],
+    ['an unknown source', { type: 'availability', igdb_id: 120, platform: 'ps5', status: 'available', precision: 'year', year: 2027, evidence: [{ source: 'forum', url: 'https://zz.example.com', checked: day(-1) }] }],
+    ['an available release without a date', { type: 'availability', igdb_id: 120, platform: 'ps5', status: 'available', evidence: EV() }],
+    ['an unknown relation', { type: 'relationship', igdb_id: 120, relation: 'sequel', evidence: EV('publisher', 'https://zz.example.com') }]]) {
+    const before = app.writes().length;
+    await app.ctx.gamesImportFindings(findings([f]));
+    assert.match(app.el('errorBanner').innerHTML, /can’t be imported, so nothing was changed/, label);
+    assert.strictEqual(app.writes().length, before, `${label}: nothing sent`);
+  }
+  await app.ctx.gamesImportFindings(JSON.stringify({ format: 'watchlist-research-findings', version: 1, findings: [] }));
+  assert.match(app.el('errorBanner').innerHTML, /isn’t a games findings file/);
+});
+
+test('backup → restore with IGDB unavailable: a member’s whole games data comes back exactly — titles, statuses, priorities, collections, decisions, platforms and play style, ports, the mixed queue’s full order with its hidden game; a later Refresh fills details and changes no choice', async () => {
+  const x = exampleQueue();
+  const decisions = [{ id: ID('6d000000', 1), kind: 'not_out_yet', igdb_id: 140, platform: 'ps5', value: { date: day(-18), precision: 'day' }, basis: 'member', created_at: TS },
+    { id: ID('6d000000', 2), kind: 'include_spinoff', igdb_id: 130, platform: '', value: {}, basis: 'member', created_at: TS },
+    { id: ID('6d000000', 3), kind: 'research_role', igdb_id: 110, platform: '', value: { role: 'main', evidence: EV('publisher', 'https://zz.example.com'), research_date: day(-1) }, basis: 'research', created_at: TS }];
+  const entries = [...x.entries, entry(3, 101, { ports: [103], status: 'finished', priority: 'high' }), entry(4, 140, { status: 'paused', priority: 'low' })];
+  const collections = [{ id: ID('68000000', 1), name: 'ZZ Couch', created_at: TS }];
+  const members = [{ id: ID('69000000', 1), collection_id: collections[0].id, entry_id: entries[1].id, created_at: TS }, { id: ID('69000000', 2), collection_id: collections[0].id, entry_id: entries[2].id, created_at: TS }];
+  const src = await bootWith({ rows: x.rows, shows: x.shows, entries, queues: x.queues, follows: [follow(1, 7001, 'ZZ War')], decisions, collections, members, style: 'completionist' });
+  const backup = JSON.parse(JSON.stringify(await src.ctx.buildBackupObject()));
+  assert.strictEqual(backup.formatVersion, 9);
+  assert.ok(!('game_titles' in backup.tables), 'no provider details in the file');
+  assert.deepStrictEqual(Object.keys(backup.tables.game_entries[0]), ['id', 'igdb_id', 'spot_igdb_id', 'port_ids', 'title', 'status', 'priority', 'created_at', 'updated_at'], 'saved fields only');
+  // Another device, an empty library and no IGDB: restore the file through the page.
+  const dst = await bootWith({ rows: [], shows: [], settings: null, noCache: true, igdb: null, queues: { watch_queues: [], queue_entries: [] } });
+  dst.ctx.openSettings(null); await settle();
+  await dst.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => JSON.stringify(backup) }], value: 'x' } }); await settle();
+  await dst.ctx.executeRestore(); await settle();
+  await dst.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
+  assert.match(dst.el('restoreModalBox').innerHTML, /restored and verified/);
+  const pick = (st, t, keys) => st[t].map(r => keys.map(k => JSON.stringify(r[k])).join('|')).sort();
+  for (const [t, keys] of [['game_entries', ['id', 'igdb_id', 'spot_igdb_id', 'port_ids', 'title', 'status', 'priority']], ['game_settings', ['platforms', 'play_style']], ['game_follows', ['igdb_collection_id', 'name']],
+    ['game_decisions', ['kind', 'igdb_id', 'platform', 'value', 'basis']], ['game_collections', ['id', 'name']], ['game_collection_members', ['collection_id', 'entry_id']], ['queue_entries', ['id', 'queue_id', 'show_id', 'item_id', 'game_entry_id', 'position']]]) {
+    assert.deepStrictEqual(pick(dst.store, t, keys), pick(src.store, t, keys), `${t} restored exactly`);
+  }
+  // Without IGDB details every saved game is still there, by its saved title and status; the queue shows every entry in order.
+  await openGames(dst);
+  assert.deepStrictEqual(libraryOrder(dst).length, 4, 'all four games listed (nothing hidden without details)');
+  assert.match(text(rowOf(dst, entries[2].id)), /ZZ War 4 ★ Details not loaded yet: use Refresh/);
+  assert.match(rowOf(dst, entries[2].id), /<option value="finished" selected>/);
+  dst.ctx.openQueues(); await settle();
+  assert.deepStrictEqual(queueOrder(dst), [x.E(1), x.E(2), x.E(3), x.E(4)], 'the full order, the Switch game included, at its place');
+  // IGDB back: Refresh fills the details; no choice changes; the Switch game is hidden again in its place.
+  dst.igdb = igdbStub(); // (the harness asks app.igdb on each request)
+  const before = JSON.stringify(pick(dst.store, 'game_entries', ['status', 'priority', 'spot_igdb_id', 'port_ids', 'title'])) + JSON.stringify(pick(dst.store, 'game_decisions', ['kind', 'igdb_id', 'value'])) + JSON.stringify(pick(dst.store, 'queue_entries', ['id', 'position']));
+  await openGames(dst);
+  await dst.ctx.refreshGames(); await settle();
+  assert.ok(dst.store.game_titles.length > 0, 'details cached again');
+  assert.strictEqual(JSON.stringify(pick(dst.store, 'game_entries', ['status', 'priority', 'spot_igdb_id', 'port_ids', 'title'])) + JSON.stringify(pick(dst.store, 'game_decisions', ['kind', 'igdb_id', 'value'])) + JSON.stringify(pick(dst.store, 'queue_entries', ['id', 'position'])), before, 'no status, priority, link, decision or queue place changed');
+  await openGames(dst);
+  assert.match(text(rowOf(dst, entries[3].id)), /not out yet \(your hold\)/, 'the restored hold applies to the refreshed row');
+  dst.ctx.openQueues(); await settle();
+  assert.deepStrictEqual(queueOrder(dst), [x.E(1), x.E(3), x.E(4)], 'the Switch game is hidden again, its place kept');
+});
+
 T.run();

@@ -174,6 +174,18 @@ ok((await decide(A, 'skip_spot', 900001, '', null, {})).ok && (await decide(A, '
 ok(/invalid_input/.test((await decide(A, 'skip_spot', 900001, 'ps5', null, {})).message) && /invalid_input/.test((await decide(A, 'not_out_yet', 900001, '', null, {})).message)
   && /invalid_input/.test((await decide(A, 'nope', 900001, '', null, {})).message) && /invalid_input/.test((await decide(A, 'not_out_yet', 900001, 'ps5', null, [1])).message), 'decisions of the wrong shape are refused');
 ok((await call(A, `public.library_game_unfollow($1)`, [follow.r.id])).r.removed === true && (await as(A, `select count(*)::int n from public.game_decisions`))[0].n === 4, 'unfollowing keeps the decisions and saved games');
+// Research: a decision that carries evidence is research, and needs research access; clearing one is the member's own choice.
+const ev = { evidence: [{ source: 'playstation_store', url: 'https://store.playstation.com/zz', checked: '2026-11-01' }], research_date: '2026-11-01' };
+ok(/research_not_enabled/.test((await decide(B, 'research_link', 900070, '', null, { relation: 'own_spot', ...ev })).message), 'a relationship finding needs research access');
+ok(/research_not_enabled/.test((await decide(B, 'not_out_yet', 900071, 'ps5', null, { date: '2026-10-23', precision: 'day', ...ev })).message), 'so does a hold that carries evidence');
+const rl = await decide(A, 'research_link', 900070, '', null, { relation: 'port_of', target_igdb_id: 900001, ...ev });
+const rh = await decide(A, 'not_out_yet', 900071, 'ps5', null, { date: '2026-10-23', precision: 'day', ...ev });
+ok(rl.ok && rl.r.basis === 'research' && rh.ok && rh.r.basis === 'research', 'with research access both are recorded as research', [rl.message, rh.message].join(' / '));
+ok((await decide(A, 'not_out_yet', 900071, 'ps5', { date: '2026-10-23', precision: 'day', ...ev }, { date: '2026-10-23', precision: 'day' })).r.basis === 'member', 'the same hold without evidence is the member’s again');
+ok(/invalid_input/.test((await decide(A, 'research_role', 900072, 'ps5', null, { role: 'main', ...ev })).message), 'a series role takes no platform');
+await as(A, `select 1`);
+ok(/library_write_required|violates check/.test(await as(A, `insert into public.game_decisions (kind, igdb_id, platform, value, basis) values ('research_role', 5, '', '{}', 'member')`).then(() => 'inserted', e => e.message)), 'a research kind can’t be stored as a member’s');
+ok((await decide(A, 'research_link', 900070, '', { relation: 'port_of', target_igdb_id: 900001, ...ev }, null)).r.removed === true, 'research findings are dismissed by clearing them');
 
 section('collections are independent of follows and queues');
 const C1 = gc.r.id;
@@ -223,7 +235,7 @@ ok(same((await as(A, `select platforms, play_style from public.game_settings`))[
 const v9 = await as(A, `select igdb_id, spot_igdb_id, port_ids, status from public.game_entries order by igdb_id`);
 ok(same(v9.map(x => [x.igdb_id, x.spot_igdb_id, x.port_ids, x.status]), L9.tables.game_entries.map(x => [x.igdb_id, x.spot_igdb_id, x.port_ids, x.status]).sort((a, b) => a[0] - b[0])), 'versions keep their own status, spot and ports');
 ok((await as(A, `select count(*)::int n from public.game_titles`))[0].n === 2, 'the IGDB cache isn’t part of a restore (left as it was)');
-ok((await as(A, `select count(*)::int n from public.game_decisions where basis = 'research'`))[0].n === 1 && (await as(B, `select count(*)::int n from public.game_decisions where basis = 'research'`))[0].n === 1,
+ok((await as(A, `select count(*)::int n from public.game_decisions where basis = 'research'`))[0].n === 4 && (await as(B, `select count(*)::int n from public.game_decisions where basis = 'research'`))[0].n === 4,
   'decisions come back, research evidence included, for a member without research access too');
 const fpB = await as(B, `select md5(string_agg(to_jsonb(g)::text, '|' order by id)) h from public.game_entries g`);
 await restore(A, L9);

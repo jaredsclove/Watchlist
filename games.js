@@ -86,7 +86,7 @@ function renderGamesView() {
   screen.style.display = '';
   const st = gamesState(), view = GAMES_VIEWS[activeViewId];
   const tabs = Object.keys(GAMES_VIEWS).map(id => `<button type="button" class="tab${id === activeViewId ? ' active' : ''}"${id === activeViewId ? ' aria-current="page"' : ''} onclick="switchView('${id}')">${GAMES_VIEW_LABELS[id]}</button>`).join('');
-  const review = gamesReviewItems(gamesData);
+  const review = gamesReviewItems(gamesData).concat(typeof gamesResearchReviewItems === 'function' ? gamesResearchReviewItems(gamesData) : []);
   const noPlatforms = !st.platforms || !st.platforms.length;
   const head = `<div class="games-head"><h2 class="games-title" id="gamesTitle" tabindex="-1">Games</h2>
       <div class="games-tabs tabs" role="group" aria-label="Games views">${tabs}</div>
@@ -671,13 +671,18 @@ function gamesReviewItems(data) {
   return items;
 }
 function openGamesReview(opener) {
-  const items = gamesReviewItems(gamesData);
+  const items = gamesReviewItems(gamesData), research = typeof gamesResearchReviewItems === 'function' ? gamesResearchReviewItems(gamesData) : [];
   gamesReviewOpener = opener || null;
-  showGameDialog(`<h2 class="modal-title" id="gameDialogTitle">Review IGDB changes</h2>
+  const evidence = d => (d.value.evidence || []).map(e => `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(e.source === 'playstation_store' ? 'PlayStation Store' : 'Publisher')}</a>`).join(' · ');
+  showGameDialog(`<h2 class="modal-title" id="gameDialogTitle">Review IGDB changes and research</h2>
     <p class="games-note">Your saved games, statuses and queue places don’t change until you choose. “Keep mine” stays decided until IGDB changes again.</p>
     <ul class="games-review">${items.map((it, i) => `<li><p>${esc(it.text)}</p>
       ${it.kind === 'spot' ? `<button class="btn btn-accent" onclick="reviewUseIgdb(${i})">Use IGDB’s</button> ` : `<button class="btn btn-accent" onclick="reviewKeep(${i})">Keep it a separate version</button> `}
-      <button class="btn" onclick="reviewKeep(${i})">${it.kind === 'spot' ? 'Keep mine' : 'Decide later'}</button></li>`).join('') || '<li>Nothing to review.</li>'}</ul>
+      <button class="btn" onclick="reviewKeep(${i})">${it.kind === 'spot' ? 'Keep mine' : 'Decide later'}</button></li>`).join('')}
+    ${research.map((it, i) => `<li data-research-item="${i}"><p>${esc(it.text)} <span class="muted">Evidence (Claude’s assessment): ${evidence(it.decision)}</span></p>
+      ${it.action ? `<button class="btn btn-accent" onclick="gamesResearchChoose(${i}, true)">${esc(gamesResearchActionLabel(it.action))}</button> ` : '<span class="muted">Already as research says.</span> '}
+      <button class="btn" onclick="gamesResearchChoose(${i}, false)">Dismiss</button></li>`).join('')}
+    ${items.length || research.length ? '' : '<li>Nothing to review.</li>'}</ul>
     <div class="modal-actions"><button class="btn" onclick="closeGameDialog()">Close</button></div>`);
 }
 async function reviewUseIgdb(i) {
@@ -819,7 +824,7 @@ function openGameDetails(igdbId, opener) {
     <div class="modal-section"><div class="modal-label">Releases (dates per IGDB)</div><ul class="manage-list">${rows.map(({ r, row }) => `<li>${esc(GAME_PLATFORM_LABEL[row.p])} · ${esc(gameDateText(row))}${row.r != null ? ` · ${esc(IGDB_REGIONS[row.r] || '')}` : ''} · ${esc(statusWords[row.s] || row.s)}${r.id !== rec.id ? ` · ${esc(r.name)}` : ''}${row.p === 'ps4' && onPs4OnlyList(r) ? ' · on Sony’s PS4-only list' : ''}</li>`).join('') || '<li>None listed.</li>'}</ul></div>
     <div class="modal-section"><div class="modal-label">Length (IGDB time to beat, ${len ? countUnit(len.count, 'submission', 'submissions') : 'none'})</div><ul class="manage-list">${lens.map(({ s, l }) => `<li>${esc(GAME_STYLE_LABELS[s])}: ${l.value == null ? 'unknown' : `${l.value} h${l.reliable ? '' : ' — reported, but the estimate is unreliable'}`}${s === style ? ' (your play style)' : ''}</li>`).join('')}</ul>
       <p><a href="${esc(gameSearchHltbUrl(rec.name))}" target="_blank" rel="noopener noreferrer">Search HowLongToBeat</a>${rec.store ? ` · <a href="${esc(rec.store)}" target="_blank" rel="noopener noreferrer">PlayStation Store (US)</a>` : ''}</p></div>
-    ${holds.length ? `<div class="modal-section"><div class="modal-label">Your decisions</div><ul class="manage-list">${holds.map(d => `<li>${d.kind === 'not_out_yet' ? `Not out yet on ${esc(GAME_PLATFORM_LABEL[d.platform])} (IGDB’s ${esc(d.value.date)})` : `Available on ${esc(GAME_PLATFORM_LABEL[d.platform])} (Store or publisher evidence)`}</li>`).join('')}</ul></div>` : ''}
+    ${holds.length ? `<div class="modal-section"><div class="modal-label">Your decisions</div><ul class="manage-list">${holds.map(d => `<li>${d.kind === 'not_out_yet' ? `Not out yet on ${esc(GAME_PLATFORM_LABEL[d.platform])} (IGDB’s ${esc(d.value.date)})` : `Available on ${esc(GAME_PLATFORM_LABEL[d.platform])}`}${d.basis === 'research' ? ` · research ${esc(d.value.research_date || '')}: ${(d.value.evidence || []).map(e => `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(e.source === 'playstation_store' ? 'PlayStation Store' : 'publisher')}</a>`).join(', ')}` : ''}</li>`).join('')}</ul></div>` : ''}
     ${evidence}
     <div class="modal-actions"><button class="btn" onclick="closeGameDialog()">Close</button></div>`);
 }
@@ -875,7 +880,7 @@ function gamesSettingHtml() {
       <p class="settings-text">With PS5 chosen, PS4 games that play on PS5 show too, labelled “PS4 · Playable on PS5” with their PS4 date (unless Sony lists them as PS4 only). Games on none of your platforms are hidden but keep their status, priority, collections and queue places.</p>
       <fieldset class="settings-fieldset"><legend>My play style (for game length)</legend>${Object.entries(GAME_STYLE_LABELS).map(([v, l]) => `<label class="settings-check"><input type="radio" name="gamesStyle" class="games-style" value="${v}"${style === v ? ' checked' : ''} onchange="saveGamesSettings()"> ${esc(l)}</label>`).join('')}</fieldset>`;
   return `<section class="settings-card" aria-labelledby="settingsGamesTitle"><h3 id="settingsGamesTitle" tabindex="-1">Games</h3>${body}
-    <p class="settings-text">Saved with your library, so they follow you to every device and come back with a restore.</p></section>`;
+    <p class="settings-text">Saved with your library, so they follow you to every device and come back with a restore.</p>${typeof gamesResearchSettingHtml === 'function' ? gamesResearchSettingHtml() : ''}</section>`;
 }
 // Read once at sign-in (and again by Retry, or after a refused save), like the collections, so opening Settings reads nothing.
 async function readGamesSettings(redraw) {

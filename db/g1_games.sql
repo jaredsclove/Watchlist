@@ -10,7 +10,8 @@
 --   * public.game_follows: followed franchises (an IGDB series collection). Following is explicit; saving a game follows nothing.
 --   * public.game_decisions: the member's standing decisions about IGDB facts: Not out yet (a platform release held out of Up
 --     next while IGDB's row is unchanged), Available (title-specific Store or publisher evidence; research access only), Skip this
---     spot, Include a spin-off, Keep my link (an IGDB relationship change the member declined).
+--     spot, Include a spin-off, Keep my link (an IGDB relationship change the member declined), and research findings imported
+--     from a games findings file (a relationship or a series role, offered in Review). Evidence always needs research access.
 --   * public.game_collections and public.game_collection_members: private, hand-made game collections.
 --   * public.game_titles: this member's cache of IGDB details (replaceable; not in backups; library_game_titles_purge empties it).
 --   * public.queue_entries.game_entry_id: a queue entry may be a game. Exactly one of a show, a library row or a game.
@@ -157,14 +158,15 @@ create table public.game_decisions (
   created_at timestamptz not null default now(),
   constraint game_decisions_pkey primary key (id),
   constraint game_decisions_key unique (user_id, kind, igdb_id, platform),
-  constraint game_decisions_kind_check check (kind in ('not_out_yet', 'available', 'skip_spot', 'include_spinoff', 'keep_link')),
+  constraint game_decisions_kind_check check (kind in ('not_out_yet', 'available', 'skip_spot', 'include_spinoff', 'keep_link', 'research_link', 'research_role')),
   constraint game_decisions_platform_check check ((kind in ('not_out_yet', 'available')) = (platform <> '')
     and (platform = '' or private.g1_platforms_ok(array[platform]))),
   constraint game_decisions_igdb_check check (igdb_id > 0),
   constraint game_decisions_value_check check (jsonb_typeof(value) = 'object' and octet_length(value::text) <= 4000),
-  constraint game_decisions_basis_check check (basis in ('member', 'research') and (basis = 'research') = (kind = 'available'))
+  -- Research decisions (title-specific evidence) are always research; a hold or other decision is research when it carries evidence.
+  constraint game_decisions_basis_check check (basis in ('member', 'research') and (kind not in ('available', 'research_link', 'research_role') or basis = 'research'))
 );
-comment on table public.game_decisions is 'G1: standing decisions about IGDB facts (Not out yet, Available, Skip this spot, Include a spin-off, Keep my link).';
+comment on table public.game_decisions is 'G1: standing decisions about IGDB facts (Not out yet, Available, Skip this spot, Include a spin-off, Keep my link) and research findings about relationships and series roles.';
 
 create table public.game_collections (
   id uuid not null default gen_random_uuid(),
@@ -396,17 +398,21 @@ begin
 end $$;
 
 -- Sets or clears (p_value null) one standing decision. p_expected: the decision's value as the page showed it, or null for none.
--- Available needs research access (it records title-specific evidence); the others are every member's own.
+-- A decision that records evidence (Available, a research finding about a relationship or a series role, or any decision whose
+-- value carries a non-empty evidence list, such as a hold from a findings file) is research: it needs research access. The others
+-- are every member's own; clearing any decision is the member's own choice.
 create function public.library_game_decision_set(p_kind text, p_igdb_id integer, p_platform text, p_expected jsonb, p_value jsonb) returns jsonb
 language plpgsql security invoker set search_path = '' as $$
-declare v_owner uuid := private.current_owner_id(); d public.game_decisions; v_platform text := coalesce(p_platform, '');
+declare v_owner uuid := private.current_owner_id(); d public.game_decisions; v_platform text := coalesce(p_platform, ''); v_basis text;
 begin
-  if p_kind is null or p_kind not in ('not_out_yet', 'available', 'skip_spot', 'include_spinoff', 'keep_link') or p_igdb_id is null or p_igdb_id < 1
+  if p_kind is null or p_kind not in ('not_out_yet', 'available', 'skip_spot', 'include_spinoff', 'keep_link', 'research_link', 'research_role') or p_igdb_id is null or p_igdb_id < 1
      or (p_kind in ('not_out_yet', 'available')) <> (v_platform <> '') or (v_platform <> '' and not private.g1_platforms_ok(array[v_platform]))
      or (p_value is not null and (jsonb_typeof(p_value) is distinct from 'object' or octet_length(p_value::text) > 4000)) then
     raise exception 'invalid_input: decision' using errcode = '22023';
   end if;
-  if p_kind = 'available' and not private.research_enabled() then
+  v_basis := case when p_kind in ('available', 'research_link', 'research_role')
+    or (p_value is not null and jsonb_typeof(p_value -> 'evidence') = 'array' and jsonb_array_length(p_value -> 'evidence') > 0) then 'research' else 'member' end;
+  if p_value is not null and v_basis = 'research' and not private.research_enabled() then
     raise exception 'research_not_enabled: Recording release evidence needs research access. Nothing was changed.' using errcode = 'P0001';
   end if;
   perform private.g1_lock(v_owner);
@@ -419,9 +425,9 @@ begin
   end if;
   if d.id is null then
     insert into public.game_decisions (kind, igdb_id, platform, value, basis)
-    values (p_kind, p_igdb_id, v_platform, p_value, case when p_kind = 'available' then 'research' else 'member' end) returning * into d;
+    values (p_kind, p_igdb_id, v_platform, p_value, v_basis) returning * into d;
   else
-    update public.game_decisions set value = p_value, created_at = now() where id = d.id returning * into d;
+    update public.game_decisions set value = p_value, basis = v_basis, created_at = now() where id = d.id returning * into d;
   end if;
   return jsonb_build_object('id', d.id, 'kind', d.kind, 'igdb_id', d.igdb_id, 'platform', d.platform, 'value', d.value, 'basis', d.basis, 'created_at', d.created_at);
 end $$;
@@ -781,7 +787,7 @@ grant insert (id, platforms, play_style, updated_at), update (platforms, play_st
 grant insert (id, igdb_id, spot_igdb_id, port_ids, title, status, priority, created_at, updated_at),
   update (spot_igdb_id, port_ids, status, priority, updated_at) on public.game_entries to authenticated;
 grant insert (id, igdb_collection_id, name, created_at) on public.game_follows to authenticated;
-grant insert (id, kind, igdb_id, platform, value, basis, created_at), update (value, created_at) on public.game_decisions to authenticated;
+grant insert (id, kind, igdb_id, platform, value, basis, created_at), update (value, basis, created_at) on public.game_decisions to authenticated;
 grant insert (id, name, created_at), update (name) on public.game_collections to authenticated;
 grant insert (id, collection_id, entry_id, created_at) on public.game_collection_members to authenticated;
 grant insert (id, igdb_id, data, fetched_at), update (data, fetched_at) on public.game_titles to authenticated;

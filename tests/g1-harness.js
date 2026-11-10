@@ -81,13 +81,14 @@ function g1Handlers({ app, store, DbError }) {
     },
     library_game_decision_set({ p_kind: kind, p_igdb_id: igdb, p_platform: platform, p_expected: expected, p_value: value }) {
       const p = platform || '';
-      if (!['not_out_yet', 'available', 'skip_spot', 'include_spinoff', 'keep_link'].includes(kind) || (['not_out_yet', 'available'].includes(kind)) !== (p !== '')) invalid('decision');
-      if (kind === 'available' && app.research !== true) refuse('research_not_enabled', 'Recording release evidence needs research access. Nothing was changed.');
+      if (!['not_out_yet', 'available', 'skip_spot', 'include_spinoff', 'keep_link', 'research_link', 'research_role'].includes(kind) || (['not_out_yet', 'available'].includes(kind)) !== (p !== '')) invalid('decision');
+      const basis = ['available', 'research_link', 'research_role'].includes(kind) || (value && Array.isArray(value.evidence) && value.evidence.length) ? 'research' : 'member';
+      if (value != null && basis === 'research' && app.research !== true) refuse('research_not_enabled', 'Recording release evidence needs research access. Nothing was changed.');
       const d = store.game_decisions.find(x => x.kind === kind && x.igdb_id === igdb && x.platform === p);
       if (!!d !== (expected != null) || (d && !same(d.value, expected))) changed();
       if (value == null) { store.game_decisions = store.game_decisions.filter(x => x !== d); return { kind, igdb_id: igdb, platform: p, removed: !!d }; }
-      if (d) Object.assign(d, { value: clone(value), created_at: now() });
-      else store.game_decisions.push({ id: newId(), kind, igdb_id: igdb, platform: p, value: clone(value), basis: kind === 'available' ? 'research' : 'member', created_at: now() });
+      if (d) Object.assign(d, { value: clone(value), basis, created_at: now() });
+      else store.game_decisions.push({ id: newId(), kind, igdb_id: igdb, platform: p, value: clone(value), basis, created_at: now() });
       return json(store.game_decisions.find(x => x.kind === kind && x.igdb_id === igdb && x.platform === p));
     },
     library_game_collection_create({ p_name: name }) {

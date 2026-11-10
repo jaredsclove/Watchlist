@@ -212,7 +212,9 @@ function franchiseSpots(follow, state) {
     if (portOf.has(rec.id) && !savedBy.has(rec.id)) continue;
     const entry = savedBy.get(rec.id);
     if (entry && entry.igdb_id !== rec.id) continue; // a port joined to a saved game: part of that version
-    const anchorId = entry ? entry.spot_igdb_id : gameAnchor(rec, cache);
+    // An unsaved version follows a research finding about its relationship, else IGDB; a saved one keeps its stored spot.
+    const link = !entry && state.decisions.get(gameDecisionKey('research_link', rec.id));
+    const anchorId = entry ? entry.spot_igdb_id : link ? (link.value.relation === 'own_spot' ? rec.id : cache.get(link.value.target_igdb_id) ? gameAnchor(cache.get(link.value.target_igdb_id), cache) : link.value.target_igdb_id) : gameAnchor(rec, cache);
     const anchor = cache.get(anchorId) || rec;
     if (!spots.has(anchorId)) {
       const role = (anchor.m && anchor.m[cid]) || (rec.m && rec.m[cid]) || 'member';

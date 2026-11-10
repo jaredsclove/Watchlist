@@ -549,7 +549,8 @@ function validateFormat8Rows(tables, items, report) {
 const G1_PLATFORMS = ['ps5', 'ps4', 'switch2', 'switch', 'xbox_series', 'xbox_one', 'pc'];
 const G1_STATUSES = ['want', 'playing', 'paused', 'finished', 'skipped'];
 const G1_PRIORITIES = ['high', 'normal', 'low'];
-const G1_DECISION_KINDS = ['not_out_yet', 'available', 'skip_spot', 'include_spinoff', 'keep_link'];
+const G1_DECISION_KINDS = ['not_out_yet', 'available', 'skip_spot', 'include_spinoff', 'keep_link', 'research_link', 'research_role'];
+const G1_RESEARCH_KINDS = ['available', 'research_link', 'research_role'];
 function validateFormat9Rows(tables, report) {
   const rows = t => (tables[t] || []).filter(r => r && typeof r === 'object');
   const problems = [];
@@ -585,7 +586,7 @@ function validateFormat9Rows(tables, report) {
     if (!(d.igdb_id > 0)) problems.push(`${at} has an IGDB id the database refuses`);
     if (typeof d.platform !== 'string' || withPlatform !== (d.platform !== '') || (d.platform !== '' && !G1_PLATFORMS.includes(d.platform))) problems.push(`${at} has a platform the database refuses`);
     if (!d.value || typeof d.value !== 'object' || Array.isArray(d.value)) problems.push(`${at} has a value that isn’t an object`);
-    if (!['member', 'research'].includes(d.basis) || (d.basis === 'research') !== (d.kind === 'available')) problems.push(`${at} has a basis the database refuses`);
+    if (!['member', 'research'].includes(d.basis) || (G1_RESEARCH_KINDS.includes(d.kind) && d.basis !== 'research')) problems.push(`${at} has a basis the database refuses`);
     const key = `${d.kind}|${d.igdb_id}|${d.platform}`;
     if (seenDecision.has(key)) problems.push(`${at} repeats a decision`); seenDecision.add(key);
   });

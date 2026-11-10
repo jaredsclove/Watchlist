@@ -250,6 +250,7 @@ section('refusals leave everything as it was');
     'a Skip this spot with a platform': d => { d.tables.game_decisions.find(x => x.kind === 'skip_spot').platform = 'ps5'; },
     'a Not out yet without a platform': d => { d.tables.game_decisions.find(x => x.kind === 'not_out_yet').platform = ''; },
     'an Available decision by a member': d => { d.tables.game_decisions.find(x => x.kind === 'available').basis = 'member'; },
+    'a research finding recorded as a member’s': d => { d.tables.game_decisions.find(x => x.kind === 'research_link').basis = 'member'; },
     'a decision whose value isn’t an object': d => { d.tables.game_decisions[0].value = [1]; },
     'a repeated decision': d => { const g = d.tables.game_decisions; g.push({ ...g[0], id: '7a000000-0000-4000-8000-000000000005' }); recount(d); },
     'a repeated game collection name': d => { d.tables.game_collections.push({ ...d.tables.game_collections[0], id: '7a000000-0000-4000-8000-000000000006', name: d.tables.game_collections[0].name.toUpperCase() }); recount(d); },

@@ -152,7 +152,10 @@ export function library9(seed = 1, scale = 8) {
     { id: id(90032), kind: 'available', igdb_id: ig(21), platform: 'ps5', value: { precision: 'year', year: 2027, evidence: [{ url: 'https://zz.example.com/store' }] }, basis: 'research', created_at: at(3) },
     { id: id(90033), kind: 'skip_spot', igdb_id: ig(30), platform: '', value: {}, basis: 'member', created_at: at(4) },
     { id: id(90034), kind: 'include_spinoff', igdb_id: ig(31), platform: '', value: {}, basis: 'member', created_at: at(5) },
-    { id: id(90035), kind: 'keep_link', igdb_id: ig(2), platform: '', value: { spot_igdb_id: ig(9), port_ids: [] }, basis: 'member', created_at: at(6) }];
+    { id: id(90035), kind: 'keep_link', igdb_id: ig(2), platform: '', value: { spot_igdb_id: ig(9), port_ids: [] }, basis: 'member', created_at: at(6) },
+    { id: id(90036), kind: 'research_link', igdb_id: ig(22), platform: '', value: { relation: 'port_of', target_igdb_id: ig(1), evidence: [{ source: 'publisher', url: 'https://zz.example.com/a', checked: '2026-11-01' }], research_date: '2026-11-01' }, basis: 'research', created_at: at(7) },
+    { id: id(90037), kind: 'research_role', igdb_id: ig(31), platform: '', value: { role: 'main', evidence: [{ source: 'publisher', url: 'https://zz.example.com/b', checked: '2026-11-01' }], research_date: '2026-11-01' }, basis: 'research', created_at: at(7) },
+    { id: id(90038), kind: 'not_out_yet', igdb_id: ig(23), platform: 'ps5', value: { date: '2026-10-23', precision: 'day', evidence: [{ source: 'playstation_store', url: 'https://store.playstation.com/x', checked: '2026-11-01' }] }, basis: 'research', created_at: at(7) }];
   t.game_collections = [{ id: id(90041), name: `ZZ Couch Games ${seed}`, created_at: at(1) }];
   t.game_collection_members = [
     { id: id(90051), collection_id: id(90041), entry_id: id(90012), created_at: at(2) },

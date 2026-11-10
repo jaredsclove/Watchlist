@@ -1410,6 +1410,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     matchMedia: () => ({ matches: false }),
     crypto: require('crypto').webcrypto,
     TextEncoder,
+    URL, // (G1: games research checks evidence addresses as a browser parses them)
     // Test fixtures only: synthetic catalog entries in the shape config.js's retired lists had, so tests
     // can build records a catalog governs (the page itself no longer reads any catalog list).
     COLLECTIONS: CATALOG_FIXTURES

@@ -105,10 +105,29 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   HowLongToBeat" link and the PlayStation Store page when IGDB lists one. **IGDB** is reached only through the `igdb` function
   (`supabase/functions/igdb`): it holds the client secret, answers only members (it asks PostgREST's `stage5_capabilities` with
   the caller's token), and passes an allow-list of read-only queries; the page caches what it reads per member (`game_titles`,
-  replaceable, never in backups; `library_game_titles_purge` empties it). **Backups** hold IGDB ids and the provider's titles
-  and dates only as the member's own record of what they saved and decided (the Twitch Developer Services Agreement lets the
-  data serve the end user and bars sharing it with third parties; a downloaded backup is the member's own file; the database
-  copy can be deleted on request; that downloaded files can't be recalled is the accepted residual).
+  replaceable, never in backups; `library_game_titles_purge` empties it). **Games research** (members with research access;
+  `games-research.js`): Settings → Games → Download games research brief lists what IGDB alone can't settle (announced releases
+  on the member's platforms in followed franchises, releases in the last 60 days dated only by IGDB, PS4 games counted through
+  Sony's rule, ambiguous relationships, uncounted spin-offs); the owner researches it with Claude (the refresh-catalogs skill)
+  and imports the findings file (`watchlist-games-research-findings`, version 1) with Import games findings…. Every finding
+  needs title-specific evidence (a PlayStation Store page on playstation.com, or the publisher's official page) checked on or
+  before its research date; a file with any finding of the wrong shape is refused whole. Availability and compatibility
+  findings become decisions at once (Available at the precision the source gives; or a Not out yet hold carrying the
+  evidence, for a release not out yet or a PS4 game Sony's Store lists as PS4 only); relationship and series-role findings are
+  kept and offered in Games → Review ("Join it as a port", "Use research's spot", "Count it toward Caught up", "Skip this
+  spot", or Dismiss), and an unsaved version already follows a relationship finding in its franchise. A decision that carries
+  evidence is research: the database refuses it without research access. Evidence content is Claude's assessment, shown as
+  such; the page checks its shape only. **Backups (format 9)** carry the member's own game records: `game_settings`
+  (platforms, play style), `game_entries` (IGDB id, spot and joined port ids, the title as saved from IGDB, status, priority,
+  timestamps), `game_follows` (the IGDB series id and its name as saved), `game_decisions` (kind, IGDB id, platform, basis
+  and value: a hold's IGDB date and precision, evidence links and research dates, kept link choices), `game_collections`,
+  `game_collection_members`, and each queue entry's `game_entry_id`. IGDB's details stay out: release rows, genres, scores,
+  time to beat, store links and relationships are in the cache only and come back with Refresh. The basis (an
+  implementation choice, documented here): the Twitch Developer Services Agreement (12/04/2024), under which IGDB is offered,
+  allows Twitch data to be used to benefit the end user, bars sharing it with third parties, and requires deleting it on
+  request; a backup is the member's own file of their own choices, and the database copy (cache and records) can be deleted.
+  Unresolved: the agreement doesn't say whether its deletion duty reaches files a member has already downloaded, and those
+  can't be recalled.
 - **Games in queues (G1):** Add to queue… in a game's ⋯; the entry reads "Game · <platform line>" with the status select.
   Adding changes no status; setting a game to Finished takes it out of every queue (the database, in the same transaction); it
   can be queued again for a replay. A game on none of the member's platforms is hidden in the queue ("+N hidden") and keeps its
