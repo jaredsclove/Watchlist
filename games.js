@@ -612,10 +612,20 @@ async function refreshGames() {
   const before = new Map(gamesData.follows.map(f => [f.id, franchiseSummary(f, st)]));
   let recs = new Map();
   try {
-    for (const f of gamesData.follows) (await readFranchise(f.igdb_collection_id, old)).forEach((v, k) => recs.set(k, { ...(recs.get(k) || {}), ...v, m: { ...((recs.get(k) || {}).m || {}), ...v.m } }));
+    // Memberships of followed series come from this Refresh's franchise reads alone (a game IGDB drops from a series leaves it);
+    // other keys (series no longer followed) are kept as cached.
+    const followed = new Set(gamesData.follows.map(f => String(f.igdb_collection_id))), memberOf = new Map();
+    for (const f of gamesData.follows) (await readFranchise(f.igdb_collection_id, old)).forEach((v, k) => {
+      recs.set(k, v);
+      if (v.m && v.m[f.igdb_collection_id]) (memberOf.get(k) || memberOf.set(k, {}).get(k))[f.igdb_collection_id] = v.m[f.igdb_collection_id];
+    });
     // Every saved record with its related records (ports included), also those the franchises read: a port is joined only once read.
     const savedIds = gamesData.entries.flatMap(e => [e.igdb_id, ...(e.port_ids || [])]);
-    (await igdbRecordsWithRelated(savedIds, old)).forEach((v, k) => { recs.set(k, recs.has(k) ? { ...v, m: { ...(v.m || {}), ...(recs.get(k).m || {}) } } : v); });
+    (await igdbRecordsWithRelated(savedIds, old)).forEach((v, k) => recs.set(k, v));
+    recs.forEach((v, k) => {
+      const kept = Object.fromEntries(Object.entries((old.get(k) || {}).m || {}).filter(([c]) => !followed.has(String(c))));
+      v.m = { ...kept, ...(memberOf.get(k) || {}) };
+    });
   } catch (e) {
     gamesRefreshing = false; gamesReport = '';
     showError(`Refresh couldn’t read IGDB (${e.message}), so nothing was changed.`);

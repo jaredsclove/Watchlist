@@ -635,4 +635,14 @@ test('no spot review while a saved version’s original hasn’t been read (afte
   assert.doesNotMatch(screen(app), /Review \(/);
 });
 
+test('Refresh: a saved game IGDB drops from a followed series leaves that franchise; a game in two followed series keeps both', async () => {
+  const members = { 7001: [[101, 1], [110, 1], [120, 1], [130, 2]], 7002: [[170, 1], [110, 1]] }; // 102 dropped from ZZ War; 110 also in ZZ Saga
+  const app = await bootWith({ igdb: igdbStub(RAW, members), entries: [entry(1, 102, { spot: 102 }), entry(2, 110)], follows: [follow(1, 7001, 'ZZ War'), follow(2, 7002, 'ZZ Saga')] });
+  await openGames(app);
+  await app.ctx.refreshGames(); await settle();
+  const m = id => JSON.parse(JSON.stringify(app.store.game_titles.find(t => t.igdb_id === id).data.m));
+  assert.deepStrictEqual(m(102), {}, 'no longer a member of ZZ War');
+  assert.deepStrictEqual(m(110), { 7001: 'member', 7002: 'member' });
+});
+
 T.run();
