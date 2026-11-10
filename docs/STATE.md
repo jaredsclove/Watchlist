@@ -27,22 +27,28 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: sorting library views (item 13;
-  PR #58, `2dc1256`), released 2026-11-10 UTC, presentation tier: the Sort list and sort line, Series premiere from TMDB's
-  first-air date in the per-device show cache, Settings' "Remember each view’s sort when I reopen Watchlist" (default on). No
-  database or backup change. Cache token `20261110-sort` (30 versioned files). Verified: 55 offline suites; a local synthetic
-  check (desktop, 900 px, 375 / 300 px, keyboard, two members, the toggle on and off); the Pages build and the deployed files
-  byte-identical to `main`; a read-only live check of All TV (two fields, a reversed tie-breaker, kept after a reload with
-  remembering on, then reset to its prior usual order; no expansion, no database write).
-- Previous release: named planning queues (Q1, item 7; PR #56, `6716da4`), 2026-11-05 UTC; `db/q1_queues.sql` applied before the
-  merge (run record confirmed by a separate read; library tables identical in the backups before and after).
-- Database phase `contracted-q1`, backup format 8 (twenty-one tables, no `user_id`), `access = members`, research per member. One flat
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: games (G1, item 5; PR #60,
+  `5ada6c4`), released 2026-11-10 UTC, schema tier: the Games area (Library, Franchises, Collections), Settings → Games
+  (platforms, play style; games research with research access), games in queues with hidden games keeping their places,
+  backup format 9. The `igdb` Edge Function was deployed first (`verify_jwt` off; the owner set its two secrets); it answered
+  OPTIONS 204 and 401 signed out and to the publishable key as a token. `db/g1_games.sql` then ran in the SQL Editor (the file
+  at the reviewed commit, by hash; run record and phase `contracted-g1` confirmed by a separate read), then the merge. Cache
+  token `20261110-games` (33 versioned files); Pages built; 51 changed files byte-identical to `main`. Independent review:
+  Fable, once, with one focused follow-up (no blocking findings; five fixed). Verified: 57 offline suites (1369); the G1 and
+  restore suites on PGlite and PostgreSQL 17; the local stack with the function (47); a local synthetic browser check (desktop,
+  375 / 300 px, dark, keyboard; a queue drop finished with a dispatched pointerup, because the drag tool sends none). Live, the
+  owner's account only: PS5 set (the one lasting change), an IGDB search and save through the function, a temporary "ZZ Games
+  Test" queue with a film reordered, Finished taking the game out, everything made removed and the IGDB cache purged; the
+  backups before (format 8) and after (format 9) identical in every table but the new settings row.
+- Previous release: sorting library views (item 13; PR #58, `2dc1256`), 2026-11-10 UTC, presentation tier; Q1 (item 7; PR #56)
+  2026-11-05 UTC.
+- Database phase `contracted-g1`, backup format 9 (twenty-seven tables, no `user_id`, never the IGDB cache), `access = members`, research per member. One flat
   `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one
   retained test account has no membership and reaches nothing (`docs/MEMBER_RECOVERY.md`).
 - **Standing decisions:** W1 is removed; item 11 is abandoned; item 10 (CU1e) stays. `pg_graphql` stays disabled: enabling it needs a new explicit
   decision (`db/README.md`). A member's crafted request on their own records is an accepted limitation; it can't reach another account.
 - **Restore** runs through the signed-in page or `docs/ADMIN_RESTORE.md`. Hosted restore performance has not been measured.
-- **Repairs are fix-forward.** Reopening anonymous access is never a recovery step. Data recovery is a format-8 restore.
+- **Repairs are fix-forward.** Reopening anonymous access is never a recovery step. Data recovery is a format-9 restore.
 
 ## Code map (classic globals; mutable page state is in `watchlist.html`)
 
@@ -121,6 +127,12 @@ migration, merge after the migration's run record is confirmed.
   watched mark on the live site (left unchanged; covered locally and through a local API stack).
 - Item 13 not verified: real phones; Series premiere on production (the owner's device cache has no first-air dates until
   Refresh shows or a show's expansion reads its details, so the field is unknown for every show there for now).
+- G1 not verified: real phones (queue dragging on touch included; the browser check finished one drop with a dispatched
+  pointerup); live games research (no games brief researched or findings imported on production); a member's Not out yet and
+  franchise Up next on production data. IGDB time-to-beat figures can be implausibly low as well as high (a 2-hour main
+  story seen live); only out-of-order or over-cap values are marked unreliable. HowLongToBeat has no supported access: IGDB
+  hours with a search link only. Unresolved provider-terms point: whether the Twitch agreement's deletion duty reaches backup
+  files members have downloaded (`docs/APP_BEHAVIOR.md`, "Games").
 - Pre-existing (seen in Q1's review): a film with collection-update records of its own (an alias, a hold, a remembered removal)
   can't be deleted from the page, because those tables guard deletes; queue entries don't add to this.
 
