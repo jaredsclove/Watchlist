@@ -27,9 +27,14 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: named planning queues (Q1, item 7;
-  PR #56, `6716da4`), released 2026-11-05 UTC: the Queues area, Add to queue, reordering by drag and buttons, completion in
-  the database, backup format 8. Cache token `20261105-queues`. Database: `db/q1_queues.sql` applied 2026-11-05 UTC before the
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: sorting library views (item 13;
+  PR #58, `2dc1256`), released 2026-11-10 UTC, presentation tier: the Sort list and sort line, Series premiere from TMDB's
+  first-air date in the per-device show cache, Settings' "Remember each view’s sort when I reopen Watchlist" (default on). No
+  database or backup change. Cache token `20261110-sort` (30 versioned files). Verified: 55 offline suites; a local synthetic
+  check (desktop, 900 px, 375 / 300 px, keyboard, two members, the toggle on and off); the Pages build and the deployed files
+  byte-identical to `main`; a read-only live check of All TV (two fields, a reversed tie-breaker, kept after a reload with
+  remembering on, then reset to its prior usual order; no expansion, no database write).
+- Previous release: named planning queues (Q1, item 7; PR #56, `6716da4`), 2026-11-05 UTC; `db/q1_queues.sql` applied before the
   merge (run record confirmed by a separate read; library tables identical in the backups before and after).
 - Database phase `contracted-q1`, backup format 8 (twenty-one tables, no `user_id`), `access = members`, research per member. One flat
   `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one
@@ -113,6 +118,8 @@ migration, merge after the migration's run record is confirmed.
 - Optional: on an unknown database phase, a refused season toggle shows the raw refusal text.
 - Q1 not verified: real phones (touch dragging was checked with emulated pointer events only), completion through a real
   watched mark on the live site (left unchanged; covered locally and through a local API stack).
+- Item 13 not verified: real phones; Series premiere on production (the owner's device cache has no first-air dates until
+  Refresh shows or a show's expansion reads its details, so the field is unknown for every show there for now).
 - Pre-existing (seen in Q1's review): a film with collection-update records of its own (an alias, a hold, a remembered removal)
   can't be deleted from the page, because those tables guard deletes; queue entries don't add to this.
 
