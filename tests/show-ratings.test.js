@@ -148,7 +148,8 @@ test('expanding an uncached show reads its TMDB show details once; the score is 
 
 test('a fresh cached score (under 7 days) is not read again; an older one is read again on expansion and replaced', async () => {
   const now = Date.now();
-  const storage = memoryStorage(cached({ 900001: { a: 8.2, c: 500, t: now - 6 * DAY }, 900002: { a: 7.2, c: 500, t: now - 8 * DAY } }));
+  // (Item 13: a fresh entry with its first-air date, f; one without it is read once more: tests/view-sort.test.js.)
+  const storage = memoryStorage(cached({ 900001: { a: 8.2, c: 500, f: '2015-01-01', t: now - 6 * DAY }, 900002: { a: 7.2, c: 500, f: null, t: now - 8 * DAY } }));
   const { app, lib } = await boot({ storage, tmdb: details({ 900002: { vote_average: 7.6, vote_count: 520 } }) });
   app.ctx.toggleDerivedShow(lib.a.id); await settle();
   assert.deepStrictEqual(ratingReads(app), []);

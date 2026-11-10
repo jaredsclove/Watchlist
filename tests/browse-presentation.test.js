@@ -123,7 +123,8 @@ const READ_ONLY = new Set([...TV_EDIT, 'toggleFilterPill', 'toggleBrowseShow', '
   'openManage', // Stage 3b-2: opens the Manage collections dialog (organization only, never tracking)
   'openAddPicker', // S5: opens the Add to <collection> picker (reads nothing; adds only on its own button)
   'openAddToQueue', 'openAddToQueueFromMenu', // Q1: opens the Add to queue dialog (reads the queues; adds only on its own button)
-  'toggleFilterPanel', 'filterPanelKeydown', 'removeFilterChip', 'clearViewFilters']); // B10: filters only (tests/filter-bar.test.js)
+  'toggleFilterPanel', 'filterPanelKeydown', 'removeFilterChip', 'clearViewFilters', // B10: filters only (tests/filter-bar.test.js)
+  'toggleSortMenu', 'sortMenuKeydown', 'chooseSortField', 'reverseSortField', 'removeSortField', 'resetViewSort']); // item 13: the order shown only (tests/view-sort.test.js)
 // (The GET of rpc/stage5_capabilities is the read-only phase check made at startup.)
 const mutating = app => app.requests.filter(r => r.method !== 'GET' || (/\/rpc\//.test(r.url) && !r.url.endsWith('/rpc/stage5_capabilities')) || !r.url.includes('/rest/v1/'));
 const J = (app, expr) => JSON.parse(JSON.stringify(app.get(expr)));

@@ -1034,8 +1034,9 @@ function renderBrowseCollection(dest, today, f) {
     add(browseSectionHtml(section.label, countLabel[section.key], section.key));
     const entryHtml = (e, needsReview, part) => browseEntryHtml(e, today, v.combined, needsReview, part);
     if (!section.chrono) {
-      section.az.forEach(e => add(entryHtml(e, false, section.key)));
-      listing.sections.push({ name: section.key, shown: true, open: true, heading: true, keys: section.az.map(browseEntryId) });
+      const az = sortForView(section.az, compareBrowseAz); // item 13: each section on its own (view-sort.js)
+      az.forEach(e => add(entryHtml(e, false, section.key)));
+      listing.sections.push({ name: section.key, shown: true, open: true, heading: true, keys: az.map(browseEntryId) });
     } else {
       let lastYear = '';
       section.dated.forEach(e => {
@@ -1100,11 +1101,12 @@ function renderAllMovies(today, f) {
   if (unclassified > 0) {
     add(browseNoteHtml(`⚠️ ${plural(unclassified, 'saved entry is', 'saved entries are')} neither a TV season nor a film, so ${unclassified === 1 ? 'it isn’t' : 'they aren’t'} listed.`));
   }
-  shown.forEach(r => add(allMoviesFilmHtml(r, today, films)));
+  const sorted = sortForView(shown, compareFilms); // item 13 (view-sort.js)
+  sorted.forEach(r => add(allMoviesFilmHtml(r, today, films)));
   if (shown.length === 0) add(browseNoteHtml(films.length === 0 ? 'No films saved yet.' : 'No films match these filters.', films.length ? filterEmptyClearHtml() : ''));
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
-  return { sections: [{ name: 'film', shown: true, open: true, heading: false, keys: shown.map(r => r.id) }] };
+  return { sections: [{ name: 'film', shown: true, open: true, heading: false, keys: sorted.map(r => r.id) }] };
 }
 
 // A stored date as text, with what it means: TBA (text or sentinel, whatever the

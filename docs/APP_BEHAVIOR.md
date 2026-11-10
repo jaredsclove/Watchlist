@@ -68,7 +68,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   don't come back). An ongoing show caught up stays. **Matching** keeps the rule: a season moved into a show a queue holds
   whole leaves that queue; a whole-show entry of the show the season emptied is carried to where it went (another show, or the
   film it became), a duplicate merged into the entry already there at its place; Match reports any such queue change.
-  Deleting a film, season or show removes its entries. A change made from the queue reads it again once it ends. set in a show's Details, not the expanded show. It is part of Details' draft: Cancel
+  Deleting a film, season or show removes its entries. A change made from the queue reads it again once it ends.
+- **Show ended (UI polish 2):** set in a show's Details, not the expanded show. It is part of Details' draft: Cancel
   discards it, Save sends what changed, the categories (`library_set_metadata_b45`) and then Show ended
   (`library_set_show_state_b45`), each with its own expected values, in one write lane; not one transaction. Save with
   Show ended unchanged sends the categories as before. A refused or unconfirmed categories save sends nothing more. Once
@@ -76,6 +77,32 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   said ("Categories saved. Show ended wasn't changed: …") and kept as the draft; an unconfirmed one is never called
   unchanged: the list is read again and the dialog says what it shows (saved as chosen, or not yet, with the request
   possibly still completing), or that it isn't known when that read fails.
+- **Sorting (item 13, `view-sort.js`):** the toolbar's Sort lists the fields the open view offers, each with its
+  starting direction: Currently Watching Title, Series premiere, Next unwatched season premiere, Rating and Priority; All TV
+  in Shows the same plus Status; Coming Soon Title, Season premiere, Show rating, Status and Priority; All Movies Title,
+  Release date, Status and Priority; a collection by its layout (All media: Title, Premiere or release, Next unwatched
+  season premiere, Rating, Status, Priority; TV the same with Series premiere; Movies only as All Movies). The flat Seasons
+  presentations (All TV's and a collection's), Queues and the seasons inside an expanded show aren't sorted. Choosing a
+  field makes it first; fields already chosen keep their order behind it and break ties (a field chosen again keeps its
+  direction). The sort line, shown only while the view has its own sort, lists the fields in order, each with its ↑ or ↓
+  (reverses it in place) and ✕ (takes it out), then Reset to default, which clears the whole sort of that view (that
+  layout of a collection). The view's usual order is always the last tie-breaker. Sorting happens within each section
+  (Currently Watching's In progress and Caught up; Coming Soon within each month, months in date order and TBA last; a
+  collection's TV and Movies, or All media); filters still decide what is listed and counts are unchanged. Unknown
+  values go last in either direction: no date, TBA, no rating shown, or a field the item doesn't have (a film has no
+  rating or up-next season). Series premiere is TMDB's first-air date from the per-device show cache (`show-ratings.js`,
+  "f"), never a stored season's date: it fills from the show details the page already reads, so Refresh shows can fill
+  dates for the shows it checks, and expanding a show reads its details when its entry is missing, old or has no date
+  (a read without a date keeps it unknown until the entry is old). Sorting itself never fetches or writes. Next
+  unwatched season premiere is the date of the season the row's Up next / Next names (an active earlier-seasons range
+  first; skipped seasons passed over; TBA or nothing left is unknown). Rating is the rounded score the row shows; with a
+  rating field active and a listed show unrated, the line says "Some shows have no rating on this device." Status
+  groups: Watching → To Watch → Watched → Skipped (a Skipped film marked watched is Skipped); Priority High first. Rows
+  are sorted at every redraw, so a row can move after a change (focus follows the item). Each view's sort is page memory
+  while Watchlist is open; with Settings' "Remember each view’s sort when I reopen Watchlist" on (the default) it is also
+  saved per account in this browser (`watchlist_view_sorts`, a collection once per layout) and comes back after a
+  reload. Turning it off deletes that account's saved sorts on this browser (the open page keeps its sorts) and views then
+  open in their usual order; turning it on saves the open page's. Not in the database or backups.
 - **Films' delete (UI polish 2):** in the film's ⋯ menu ("Delete from library…", or "Skip film (built-in catalog)…"),
   with the same question and call as before; no separate ×. Season deletes are unchanged. Film collection tags are
   rounded pills like the categories, still teal.

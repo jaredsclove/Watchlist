@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261105-queues">
+<link rel="stylesheet" href="styles.css?v=20261110-sort">
 </head>
 <body>
 
@@ -102,34 +102,35 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261105-queues"></script>
-<script src="api.js?v=20261105-queues"></script>
-<script src="write-lane.js?v=20261105-queues"></script>
-<script src="ui-helpers.js?v=20261105-queues"></script>
-<script src="metadata.js?v=20261105-queues"></script>
-<script src="backup-restore.js?v=20261105-queues"></script>
-<script src="tabs.js?v=20261105-queues"></script>
-<script src="render.js?v=20261105-queues"></script>
-<script src="row-actions.js?v=20261105-queues"></script>
-<script src="tmdb-search.js?v=20261105-queues"></script>
-<script src="collections-pull.js?v=20261105-queues"></script>
-<script src="universe-pull.js?v=20261105-queues"></script>
-<script src="person-pull.js?v=20261105-queues"></script>
-<script src="tmdb-match.js?v=20261105-queues"></script>
-<script src="derived-views.js?v=20261105-queues"></script>
-<script src="tv-shows.js?v=20261105-queues"></script>
-<script src="episodes.js?v=20261105-queues"></script>
-<script src="show-ratings.js?v=20261105-queues"></script>
-<script src="organization.js?v=20261105-queues"></script>
-<script src="organization-manage.js?v=20261105-queues"></script>
-<script src="collection-members.js?v=20261105-queues"></script>
-<script src="collection-updates.js?v=20261105-queues"></script>
-<script src="collection-research.js?v=20261105-queues"></script>
-<script src="collection-settings.js?v=20261105-queues"></script>
-<script src="browse-views.js?v=20261105-queues"></script>
-<script src="queues.js?v=20261105-queues"></script>
-<script src="history.js?v=20261105-queues"></script>
-<script src="library.js?v=20261105-queues"></script>
+<script src="auth.js?v=20261110-sort"></script>
+<script src="api.js?v=20261110-sort"></script>
+<script src="write-lane.js?v=20261110-sort"></script>
+<script src="ui-helpers.js?v=20261110-sort"></script>
+<script src="metadata.js?v=20261110-sort"></script>
+<script src="backup-restore.js?v=20261110-sort"></script>
+<script src="tabs.js?v=20261110-sort"></script>
+<script src="render.js?v=20261110-sort"></script>
+<script src="row-actions.js?v=20261110-sort"></script>
+<script src="tmdb-search.js?v=20261110-sort"></script>
+<script src="collections-pull.js?v=20261110-sort"></script>
+<script src="universe-pull.js?v=20261110-sort"></script>
+<script src="person-pull.js?v=20261110-sort"></script>
+<script src="tmdb-match.js?v=20261110-sort"></script>
+<script src="derived-views.js?v=20261110-sort"></script>
+<script src="tv-shows.js?v=20261110-sort"></script>
+<script src="episodes.js?v=20261110-sort"></script>
+<script src="show-ratings.js?v=20261110-sort"></script>
+<script src="organization.js?v=20261110-sort"></script>
+<script src="organization-manage.js?v=20261110-sort"></script>
+<script src="collection-members.js?v=20261110-sort"></script>
+<script src="collection-updates.js?v=20261110-sort"></script>
+<script src="collection-research.js?v=20261110-sort"></script>
+<script src="collection-settings.js?v=20261110-sort"></script>
+<script src="browse-views.js?v=20261110-sort"></script>
+<script src="view-sort.js?v=20261110-sort"></script>
+<script src="queues.js?v=20261110-sort"></script>
+<script src="history.js?v=20261110-sort"></script>
+<script src="library.js?v=20261110-sort"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -230,6 +231,11 @@ let episodeNextMark = null; // EP4/EP5: the last row action (Mark E9 watched, a 
 let episodePanelSeq = 0; // EP1: bumped each time an episode list is loaded; a late TMDB answer for an earlier one changes nothing
 let showRatingCache = null; // item 2: TMDB show scores from this device's cache for this account (show-ratings.js); read once signed in
 let showRatingRequests = new Set(); // item 2: TMDB show ids whose score this page has requested (one request per show per page)
+let viewSorts = null; // item 13: each view's sort while the page is open: key → [{ f, d }] (view-sort.js); read from this browser once signed in when remembering is on
+let rememberSortsChoice = null; // item 13: this page's "Remember each view’s sort" choice once made here: { on, saved }; null: the stored choice (else on)
+let viewSortPass = null; // item 13: the list redraw's note for the sort line: { key, unrated } (a rating field active and a listed show unrated here)
+let viewSortLast = null; // item 13: the sort line's note as last drawn (a toolbar redraw draws it the same)
+let sortLineDrawn = null; // item 13: { box, html }: the sort line as last drawn, so an unchanged line isn't redrawn (focus stays)
 let queuesData = null; // Q1: the Queues view's read: { loaded, queues (saved order), entries, rows } (queues.js); null until read
 let queuesLoadSeq = 0; // Q1: lets a late Queues read see that it's been superseded
 let activeQueueId = null; // Q1: the queue shown (this visit's choice; the last one shown on this browser when the view opens)

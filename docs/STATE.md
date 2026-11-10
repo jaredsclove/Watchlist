@@ -47,10 +47,10 @@ membership enforcement, research permissions, holds, reliable backup and restore
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views, the movie tools' film row), `metadata.js` (Details) |
 | Episodes, ratings | `episodes.js`, `show-ratings.js` |
-| Organization | `organization.js`, `organization-manage.js`, `collection-members.js`; planning queues `queues.js` |
+| Organization | `organization.js`, `organization-manage.js`, `collection-members.js`; planning queues `queues.js`; sorting `view-sort.js` |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Collection updates | `collection-updates.js`, `collection-research.js`, `collection-settings.js` |
-| Backup / restore | `backup-restore.js` (reads formats 5–7) |
+| Backup / restore | `backup-restore.js` (reads formats 5–8 and writes format 8) |
 | Database | `db/` (migrations and tests; run order in `db/README.md`) |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (see `db/README.md`) |
 

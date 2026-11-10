@@ -297,6 +297,7 @@ function renderSettings() {
       </section>
       ${accountSectionHtml()}
       ${episodeTitlesSettingHtml()}
+      ${viewSortSettingHtml()}
       <section class="settings-card" aria-labelledby="settingsLibraryTitle">
         <h3 id="settingsLibraryTitle">Library management</h3>
         <div class="settings-sub">Collections</div>
