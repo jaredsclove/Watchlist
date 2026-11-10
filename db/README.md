@@ -3,9 +3,9 @@
 Migrations run as `postgres` in the Supabase SQL Editor, and every production step needs explicit approval and a validated backup first. The
 release tiers are in `docs/STATE.md`. What each script did when it ran, and the older rehearsals: `docs/history/DB_SCRIPTS.md`.
 
-**Current production state:** phase `contracted-q1`, backup format 8, `access = members`, through CU1e, W1's removal, the simplification and Q1. The recovery
+**Current production state:** phase `contracted-g1`, backup format 9, `access = members`, through CU1e, W1's removal, the simplification, Q1 and G1 (2026-11-10), with the `igdb` Edge Function deployed. The recovery
 archive is retired, exported privately first. There is no schema rollback, and none of the old rollback scripts can run against this state: repairs are fix-forward, and
-data recovery is a format-8 restore through the page or `docs/ADMIN_RESTORE.md`.
+data recovery is a format-9 restore through the page or `docs/ADMIN_RESTORE.md`.
 
 ## Run order
 
