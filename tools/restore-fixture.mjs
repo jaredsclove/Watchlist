@@ -133,6 +133,45 @@ export function library8(seed = 1, scale = 8) {
   d.rowCounts = Object.fromEntries(Object.entries(d.tables).map(([k, v]) => [k, v.length]));
   return d;
 }
+// The same library at format 9 (G1): platforms and play style, three saved game versions (an original Finished, its remaster with a
+// joined port, another game), a followed franchise, one decision of each kind, a game collection with two members, and two games in
+// the first queue between its other entries (places 3 and 5, as a hidden game keeps its place). Made-up IGDB ids.
+export const SPEC_G1 = ['game_settings', 'game_entries', 'game_follows', 'game_decisions', 'game_collections', 'game_collection_members'];
+export function library9(seed = 1, scale = 8) {
+  const d = library8(seed, scale), id = n => `7${seed}000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const ig = n => 9000000 + seed * 1000 + n, at = h => `2026-11-0${1 + (h % 8)}T1${h % 10}:00:00.123456+00:00`;
+  const t = {};
+  t.game_settings = [{ id: id(90001), platforms: ['ps5'], play_style: 'main_extra', updated_at: at(1) }];
+  t.game_entries = [
+    { id: id(90011), igdb_id: ig(1), spot_igdb_id: ig(1), port_ids: [], title: `ZZ Game ${seed} Original`, status: 'finished', priority: 'normal', created_at: at(2), updated_at: at(3) },
+    { id: id(90012), igdb_id: ig(2), spot_igdb_id: ig(1), port_ids: [ig(3)], title: `ZZ Game ${seed} Remastered`, status: 'want', priority: 'high', created_at: at(4), updated_at: at(4) },
+    { id: id(90013), igdb_id: ig(10), spot_igdb_id: ig(10), port_ids: [], title: `ZZ Game ${seed} Two`, status: 'playing', priority: 'low', created_at: at(5), updated_at: at(6) }];
+  t.game_follows = [{ id: id(90021), igdb_collection_id: 7000 + seed, name: `ZZ Series ${seed}`, created_at: at(1) }];
+  t.game_decisions = [
+    { id: id(90031), kind: 'not_out_yet', igdb_id: ig(20), platform: 'ps5', value: { date: '2026-10-23', precision: 'day' }, basis: 'member', created_at: at(2) },
+    { id: id(90032), kind: 'available', igdb_id: ig(21), platform: 'ps5', value: { precision: 'year', year: 2027, evidence: [{ url: 'https://zz.example.com/store' }] }, basis: 'research', created_at: at(3) },
+    { id: id(90033), kind: 'skip_spot', igdb_id: ig(30), platform: '', value: {}, basis: 'member', created_at: at(4) },
+    { id: id(90034), kind: 'include_spinoff', igdb_id: ig(31), platform: '', value: {}, basis: 'member', created_at: at(5) },
+    { id: id(90035), kind: 'keep_link', igdb_id: ig(2), platform: '', value: { spot_igdb_id: ig(9), port_ids: [] }, basis: 'member', created_at: at(6) }];
+  t.game_collections = [{ id: id(90041), name: `ZZ Couch Games ${seed}`, created_at: at(1) }];
+  t.game_collection_members = [
+    { id: id(90051), collection_id: id(90041), entry_id: id(90012), created_at: at(2) },
+    { id: id(90052), collection_id: id(90041), entry_id: id(90013), created_at: at(3) }];
+  const qe = d.tables.queue_entries.map(e => ({ id: e.id, queue_id: e.queue_id, show_id: e.show_id, item_id: e.item_id, game_entry_id: null, position: e.position, created_at: e.created_at }));
+  qe.push({ id: id(90061), queue_id: id(80001), show_id: null, item_id: null, game_entry_id: id(90012), position: 3, created_at: at(7) },
+    { id: id(90062), queue_id: id(80001), show_id: null, item_id: null, game_entry_id: id(90013), position: 5, created_at: at(7) });
+  const tables = {};
+  for (const [k, v] of Object.entries(d.tables)) { if (k === 'watch_queues') Object.assign(tables, t); tables[k] = v; }
+  tables.queue_entries = qe;
+  return { format: d.format, formatVersion: 9, exportedAt: d.exportedAt, rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
+}
+// A format-9 document as format 8: no game tables, queue entries without game_entry_id (and without the games in them).
+export const as8 = d => {
+  const x = JSON.parse(JSON.stringify(d));
+  SPEC_G1.forEach(t => { delete x.tables[t]; delete x.rowCounts[t]; });
+  x.tables.queue_entries = x.tables.queue_entries.filter(e => e.game_entry_id == null).map(({ game_entry_id, ...e }) => e);
+  x.rowCounts.queue_entries = x.tables.queue_entries.length; x.formatVersion = 8; return x;
+};
 // A format-8 document as format 7: no queue tables.
 export const as7 = d => { const x = JSON.parse(JSON.stringify(d)); SPEC_Q1.forEach(t => { delete x.tables[t]; delete x.rowCounts[t]; }); x.formatVersion = 7; return x; };
 export const clone = d => JSON.parse(JSON.stringify(d));
