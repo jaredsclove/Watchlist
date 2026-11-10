@@ -53,9 +53,10 @@ membership enforcement, research permissions, holds, reliable backup and restore
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views, the movie tools' film row), `metadata.js` (Details) |
 | Episodes, ratings | `episodes.js`, `show-ratings.js` |
 | Organization | `organization.js`, `organization-manage.js`, `collection-members.js`; planning queues `queues.js`; sorting `view-sort.js` |
+| Games (G1) | `games.js` (the area, Settings → Games), `games-data.js` (IGDB records and the rules), `games-research.js` (the games research brief and findings); the IGDB proxy `supabase/functions/igdb` |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Collection updates | `collection-updates.js`, `collection-research.js`, `collection-settings.js` |
-| Backup / restore | `backup-restore.js` (reads formats 5–8 and writes format 8) |
+| Backup / restore | `backup-restore.js` (reads formats 5–9 and writes format 9) |
 | Database | `db/` (migrations and tests; run order in `db/README.md`) |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (see `db/README.md`) |
 

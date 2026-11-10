@@ -69,7 +69,7 @@ const tmdb = p => {
   }
   return TMDB[p];
 };
-async function boot(stage5 = 'contracted-q1', opts = {}) {
+async function boot(stage5 = 'contracted-g1', opts = {}) {
   const lib = library();
   const app = await createApp({ rows: lib.rows, tvShows: lib.tvShows, tmdb, stage5, ...opts });
   return { app, lib };
@@ -88,7 +88,7 @@ const tick = (app, nums) => { app.el('tmdbPreview').querySelectorAll = sel => (s
 
 // ─── The phase ────────────────────────────────────────────────────────────────
 test('startup reads the phase once with GET (stage5_capabilities) and keeps it; nothing is written', async () => {
-  for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to the CU1 database)
+  for (const phase of ['contracted-g1']) { // (since CU1 the page writes only to the CU1 database)
     const { app } = await boot(phase);
     const reads = app.requests.filter(r => r.url.endsWith('/rpc/stage5_capabilities'));
     assert.deepStrictEqual(reads.map(r => r.method), ['GET'], phase);
@@ -110,7 +110,7 @@ test('a database without the Stage 5 update: the sign-in boot’s notice; nothin
 });
 
 // ─── Request scan (A13, app side) ─────────────────────────────────────────────
-for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to the CU1 database)
+for (const phase of ['contracted-g1']) { // (since CU1 the page writes only to the CU1 database)
   test(`request scan (${phase}): every view, the panel’s additions, Match, a catalog application, a membership and a backup — no storage value, no retired function, no refusal`, async () => {
     const { app, lib } = await boot(phase);
     for (const v of ['watching', 'alltv', 'comingsoon']) { app.ctx.switchView(v); await settle(); }
@@ -147,7 +147,7 @@ for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to t
     // A backup: format 7 on the CU1 database (no storage).
     const before = app.requests.length;
     const b = await app.ctx.buildBackupObject();
-    assert.strictEqual(b.formatVersion, 8);
+    assert.strictEqual(b.formatVersion, 9);
     const backupReads = app.requests.slice(before);
     assert.ok(backupReads.every(r => r.method === 'GET'));
     noStorage(app);
@@ -185,7 +185,7 @@ test('source scan: no app script names a storage value, a retired column or tabl
 
 // ─── Contracted flows ─────────────────────────────────────────────────────────
 test('contracted: Match into a show a catalog governs is refused (match_target_governed); the row and the show are unchanged; nothing is offered instead (U1)', async () => {
-  const { app, lib } = await boot('contracted-q1');
+  const { app, lib } = await boot('contracted-g1');
   // The governed Andor gets a TMDB identity; an unidentified season elsewhere is matched to it.
   lib.andor.tmdb_id = 1234;
   app.store.tv_shows.find(s => s.id === lib.andor.id).tmdb_id = 1234;
@@ -202,7 +202,7 @@ test('contracted: Match into a show a catalog governs is refused (match_target_g
 });
 
 test('contracted: Match is not offered for a governed entry (a governed film, a season of a governed show); the database refuses it too', async () => {
-  const { app, lib } = await boot('contracted-q1');
+  const { app, lib } = await boot('contracted-g1');
   const andorRow = lib.rows.find(r => r.show_id === lib.andor.id);
   await allTv(app);
   assert.strictEqual(app.get(`isTmdbMatchEligible(derivedData.rows.find(r => r.id === ${JSON.stringify(andorRow.id)}))`), false);
@@ -211,12 +211,12 @@ test('contracted: Match is not offered for a governed entry (a governed film, a 
 });
 
 test('CU1: backup is format 7 (no storage, theme_kind, governance tables, no othertv_shows, the B4/B5 columns); it validates and restores through restore_backup; verification passes', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   app.store.watchlist_items.push(filmOf({ collection: 'disney', title: 'Disney Film', media_type: null, tmdb_id: null, item_key: 'disney film|film' })); // a governed film
   const b = await app.ctx.buildBackupObject();
   assert.strictEqual(b.tables.catalog_show_links.length, 1);
   assert.strictEqual(b.tables.catalog_film_links.length, 1);
-  assert.strictEqual(b.formatVersion, 8);
+  assert.strictEqual(b.formatVersion, 9);
   assert.ok(!('othertv_shows' in b.tables));
   assert.ok(b.tables.tv_shows.every(s => 'priority' in s && 'resume_start_season_id' in s) && b.tables.watchlist_items.every(r => 'genres' in r));
   assert.ok(b.tables.watchlist_items.every(r => !('collection' in r) && 'theme_kind' in r));
@@ -240,21 +240,21 @@ for (const [label, shift, verified] of [['the same instant in the database’s f
 }
 
 test('B4/B5: a format-5 file into a database that is not B4/B5 is refused before anything happens', async () => {
-  const c = await boot('contracted-q1');
+  const c = await boot('contracted-g1');
   const f4 = await c.app.ctx.buildBackupObject();
   const { app } = await boot('contracted');
   app.ctx.__b = f4;
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; renderRestorePreview(__b)'); await settle();
   // (Its first view read lacked the B4/B5 columns, so the page has also stopped until it is reloaded.)
-  assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*(restores only into a database in its own state \(format 8\)|This page and the database don’t match)/); // the gate comes first since G8
+  assert.match(app.el('restoreModalBox').innerHTML, /Restore isn't available[\s\S]*(restores only into a database in its own state \(format 9\)|This page and the database don’t match)/); // the gate comes first since G8
   assert.ok(!app.el('restoreModalBox').innerHTML.includes('executeRestore()'));
   assert.deepStrictEqual(app.writes(), []);
 });
 
 // ─── Phase transitions while something is being prepared (#3) ─────────────────
 test('transition during a backup: the phase changes (B4/B5 → rolled back) between the first and last reads → no file, a clear message, nothing written', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
   const g = app.hold(r => r.method === 'GET' && r.url.includes('/tv_shows?') && r.headers.Range);
@@ -269,7 +269,7 @@ test('transition during a backup: the phase changes (B4/B5 → rolled back) betw
 });
 
 test('transition: the phase can’t be read (HTTP 500) → no backup file and no guess (never the format-3 shape by default)', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   app.failNext(r => r.url.endsWith('/rpc/stage5_capabilities'));
   const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
   assert.notStrictEqual(res, 'made');
@@ -277,7 +277,7 @@ test('transition: the phase can’t be read (HTTP 500) → no backup file and no
 });
 
 test('transition after a restore was previewed: the safety backup finds the database changed → aborted before any download or restore call', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
   const f4 = await app.ctx.buildBackupObject();
@@ -293,7 +293,7 @@ test('transition after a restore was previewed: the safety backup finds the data
 });
 
 test('transition after the safety backup was confirmed: the phase is read again before sending; a changed phase sends nothing (no conversion, no retry)', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   const f4 = await app.ctx.buildBackupObject();
   app.ctx.__b = f4;
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
@@ -307,7 +307,7 @@ test('transition after the safety backup was confirmed: the phase is read again 
 });
 
 test('a database without the Stage 5 update (or one rolled back meanwhile): no restore is offered, nothing is sent at any step, and no write of any kind leaves the page', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   let downloads = 0;
   app.ctx.downloadJSON = () => { downloads++; };
   const b = await app.ctx.buildBackupObject(); // a format-4 file
@@ -352,14 +352,14 @@ test('G8 N1: a rolled-back (5c) database: Backup makes no file; only the phase i
 
 for (const [label, stage5] of [['no Stage 5 (no capability)', null], ['an unknown phase', 'later_phase']]) {
   test(`G8 N2: ${label}: no backup file and no format probe; restore is not offered; nothing written`, async () => {
-    const { app } = await boot('contracted-q1');
+    const { app } = await boot('contracted-g1');
     const f4 = await app.ctx.buildBackupObject();
     app.stage5 = stage5;
     app.run('stage5Phase = null');
     const before = app.requests.length;
     const res = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
     assert.notStrictEqual(res, 'made');
-    assert.match(res, /makes backups only of a database in its own state \(format 8\), and this database isn’t in it, so no file was made/);
+    assert.match(res, /makes backups only of a database in its own state \(format 9\), and this database isn’t in it, so no file was made/);
     assert.deepStrictEqual(app.requests.slice(before).map(pathOf), ['GET rpc/stage5_capabilities'], 'no personal_collections / tv_shows probe');
     app.ctx.__b = f4;
     app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
@@ -372,7 +372,7 @@ for (const [label, stage5] of [['no Stage 5 (no capability)', null], ['an unknow
 }
 
 test('G8 N4 (B4/B5): a document that is not format 7 is never sent at the send step', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   app.ctx.__b = { ...JSON.parse(JSON.stringify(await app.ctx.buildBackupObject())), formatVersion: 6 };
   app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
   await app.run('pendingRestoreData = __b; pendingRestoreDbFormat = 6');
@@ -392,15 +392,15 @@ test('G8 N5 (B4/B5, finding 4): a page that found the database out of step stays
   const again = await app.ctx.buildBackupObject().then(() => 'made', e => e.message);
   assert.match(again, /This page and the database don’t match[\s\S]*Reload the page\. No file was made\./, 'still stopped until reload');
   assert.match(app.el('phaseBanner').innerHTML, /Reload the page\. Until then this page changes nothing\./);
-  const reloaded = await boot('contracted-q1');
+  const reloaded = await boot('contracted-g1');
   const b = await reloaded.app.ctx.buildBackupObject();
-  assert.strictEqual(b.formatVersion, 8);
+  assert.strictEqual(b.formatVersion, 9);
   assert.deepStrictEqual(app.writes(), []);
 });
 
 test('G8 N8: contracted: format 1 to 4 files are refused when chosen, before any safety backup, download or write', async () => {
   for (const v of [1, 2, 3, 4]) {
-    const { app } = await boot('contracted-q1');
+    const { app } = await boot('contracted-g1');
     let downloads = 0;
     app.ctx.downloadJSON = () => { downloads++; };
     app.ctx.openSettings(null); // S1 (D11): restore runs only on Settings
@@ -414,7 +414,7 @@ test('G8 N8: contracted: format 1 to 4 files are refused when chosen, before any
 });
 
 test('transition while an addition is prepared: B4/B5 rolled back between the preview and Add → the _b45 function is missing: refused, nothing added, no older function tried, no further writes', async () => {
-  const { app, lib } = await boot('contracted-q1');
+  const { app, lib } = await boot('contracted-g1');
   await allTv(app);
   app.ctx.openLibraryPanel('tv'); await settle();
   await choose(app, 95396, 'Severance'); tick(app, [2]);
@@ -430,7 +430,7 @@ test('transition while an addition is prepared: B4/B5 rolled back between the pr
 });
 
 test('transition while an addition is out: no clear answer → reported unconfirmed, never resent, no fallback', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   await allTv(app);
   app.ctx.openLibraryPanel('tv'); await settle();
   await choose(app, 95396, 'Severance'); tick(app, [2]);
@@ -446,7 +446,7 @@ test('transition while an addition is out: no clear answer → reported unconfir
 
 // ─── Catalog conflicts (U7) ───────────────────────────────────────────────────
 // ─── True Crime / Docs presentation (no storage routing) ──────────────────────
-for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to the CU1 database)
+for (const phase of ['contracted-g1']) { // (since CU1 the page writes only to the CU1 database)
   test(`(${phase}) True Crime / Docs keeps its note and its remembered layout key through its presentation key; nothing reads storage`, async () => {
     const { app } = await boot(phase);
     const tc = app.store.personal_collections.find(c => c.legacy_source === 'truecrime');
@@ -468,7 +468,7 @@ async function withCatalogShow(phase, title) {
   r.app.store.watchlist_items.push(seasonOf(s));
   return { ...r, catalogShow: s };
 }
-for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to the CU1 database)
+for (const phase of ['contracted-g1']) { // (since CU1 the page writes only to the CU1 database)
   test(`(${phase}) a TMDB show titled like a catalog show (different key): shown first; "Add as a new show" sends that id (distinct_from) and is created`, async () => {
     const { app, catalogShow } = await withCatalogShow(phase, 'Brand New');
     await allTv(app);
@@ -486,7 +486,7 @@ for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to t
 }
 
 test('a catalog show that appears after the preview: nothing is sent (the preview no longer applies); the database refuses an unacknowledged twin anyway', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   await allTv(app);
   app.ctx.openLibraryPanel('tv'); await settle();
   await choose(app, 777, 'Brand New');
@@ -503,7 +503,7 @@ test('a catalog show that appears after the preview: nothing is sent (the previe
 });
 
 test('a film by hand titled like a catalog film: shown first; the confirmation acknowledges it (distinct_from) and the film is created', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   const cat = filmOf({ title: 'Hell or High Water', collection: 'sheridan', media_type: null, tmdb_id: null, item_key: 'hell or high water|film' });
   app.store.watchlist_items.push(cat);
   app.ctx.switchMediaType('movie'); await settle();
@@ -518,7 +518,7 @@ test('a film by hand titled like a catalog film: shown first; the confirmation a
 });
 
 test('movie tools: a TMDB film titled like a catalog film is not added (catalog_candidate) and is named in the notice; the others are added', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   app.store.watchlist_items.push(filmOf({ title: 'Twin Film', collection: 'sheridan', media_type: null, tmdb_id: null, item_key: 'twin film|film' }));
   app.ctx.switchMediaType('movie'); await settle();
   app.ctx.openLibraryPanel('movie', 'tools'); await settle();
@@ -549,7 +549,7 @@ async function showTwins(phase) {
   r.app.run(`window.__tmdbMatch = { rowId: ${JSON.stringify(row.id)}, results: [], target: { mediaType: 'tv', seasonNumber: 1, details: { id: 889, name: 'Local Show Renamed', networks: [], seasons: [{ season_number: 1, air_date: '2019-01-01' }] } } };`);
   return { ...r, keyTwin, row };
 }
-for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to the CU1 database)
+for (const phase of ['contracted-g1']) { // (since CU1 the page writes only to the CU1 database)
   test(`(${phase}) Match close to two catalog shows (one only by key, another title): both are read and shown with their catalog beside the target; confirming sends exactly those two`, async () => {
     const { app, catalogShow, keyTwin, row } = await showTwins(phase);
     await app.ctx.confirmTmdbMatch(); await settle();
@@ -572,7 +572,7 @@ for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to t
 }
 
 test('Match candidates: a failed read can’t be confirmed (nothing sent); Retry only reads, then confirming works', async () => {
-  const { app, row } = await showTwins('contracted-q1');
+  const { app, row } = await showTwins('contracted-g1');
   app.failNext(r => r.method === 'GET' && r.url.includes('tv_shows?id=in.'));
   await app.ctx.confirmTmdbMatch(); await settle();
   assert.match(twinsText(app), /Couldn’t read those records .* so this can’t be confirmed yet\. Retry/);
@@ -589,7 +589,7 @@ test('Match candidates: a failed read can’t be confirmed (nothing sent); Retry
 });
 
 test('Match candidates: a read that misses a candidate (or its catalog) is incomplete: not confirmable, nothing acknowledged', async () => {
-  const { app, keyTwin } = await showTwins('contracted-q1');
+  const { app, keyTwin } = await showTwins('contracted-g1');
   const g = app.hold(r => r.method === 'GET' && r.url.includes('library_catalog_shows?show_id=in.'));
   const p = app.ctx.confirmTmdbMatch();
   await g.reached;
@@ -606,7 +606,7 @@ test('Match candidates: a read that misses a candidate (or its catalog) is incom
 });
 
 test('Match candidates: a catalog show that appears after the confirmation is refused, then shown with the others for a new confirmation (never acknowledged unseen)', async () => {
-  const { app, catalogShow, keyTwin, row } = await showTwins('contracted-q1');
+  const { app, catalogShow, keyTwin, row } = await showTwins('contracted-g1');
   await app.ctx.confirmTmdbMatch(); await settle();
   const late = showOf({ title: 'local show renamed', show_key: 'something else', collection: '90day' });
   app.store.tv_shows.push(late); app.store.watchlist_items.push(seasonOf(late)); // added by a catalog meanwhile
@@ -627,7 +627,7 @@ test('Match candidates: a catalog show that appears after the confirmation is re
 });
 
 test('Match candidates for a film: the catalog film is read and shown beside the target; confirming sends its id to library_match_film_b45', async () => {
-  const { app } = await boot('contracted-q1');
+  const { app } = await boot('contracted-g1');
   const cat = filmOf({ title: 'Hand Film', collection: 'sheridan', media_type: null, tmdb_id: null, item_key: 'hand film (catalog)|film', display_date: 'Mar 3, 2003' });
   app.store.watchlist_items.push(cat);
   app.ctx.switchMediaType('movie'); await settle();
@@ -649,7 +649,7 @@ test('Match candidates for a film: the catalog film is read and shown beside the
 });
 
 test('Match candidates: Back while they are being read; the late read never replaces the panel', async () => {
-  const { app } = await showTwins('contracted-q1');
+  const { app } = await showTwins('contracted-g1');
   const g = app.hold(r => r.method === 'GET' && r.url.includes('tv_shows?id=in.'));
   const p = app.ctx.confirmTmdbMatch();
   await g.reached;
@@ -660,7 +660,7 @@ test('Match candidates: Back while they are being read; the late read never repl
 });
 
 // ─── Genre-theme film to TV season: still refused (as before Stage 5) ─────────
-for (const phase of ['contracted-q1']) { // (since CU1 the page writes only to the CU1 database)
+for (const phase of ['contracted-g1']) { // (since CU1 the page writes only to the CU1 database)
   test(`(${phase}) a film whose theme is a genre can’t become a TV season: the page sends nothing; the database refuses it too (genre_film_season)`, async () => {
     const { app } = await boot(phase);
     app.ctx.switchMediaType('movie'); await settle();

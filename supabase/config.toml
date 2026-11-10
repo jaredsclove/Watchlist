@@ -1,0 +1,6 @@
+# Only the Edge Function settings this repository deploys (G1). The database is managed by the migrations in db/, never by
+# `supabase db` commands, and this file configures no local stack.
+[functions.igdb]
+# core.mjs checks the caller itself (PostgREST rpc/stage5_capabilities with the caller's token), so the platform's own JWT check,
+# which depends on the project's signing keys, stays off.
+verify_jwt = false

@@ -2,11 +2,11 @@
 // the page or sign-in can't be used, with the page's own safeguards. Offline; it never connects
 // to anything. Every check uses the page's code (backup-restore.js).
 //
-// The database's backup format is 8. Files of format 5 to 7 are converted as the page converts them. Formats 3 and 4 are refused:
+// The database's backup format is 9. Files of format 5 to 8 are converted as the page converts them. Formats 3 and 4 are refused:
 // convert them offline with this tool at the commit docs/ADMIN_RESTORE.md names.
 //
 //   node tools/admin-restore.mjs export-sql --owner <auth user id>
-//       Prints the read-only SQL that exports that member's library as a format-8 backup (the safety backup), acting as that member (role authenticated + their JWT claims), in one repeatable-read
+//       Prints the read-only SQL that exports that member's library as a format-9 backup (the safety backup), acting as that member (role authenticated + their JWT claims), in one repeatable-read
 //       snapshot whose first statement refuses unless that account is a member (a non-member reads no rows,
 //       which must never become an "empty" backup).
 //   node tools/admin-restore.mjs export-owner-sql --user <auth user id>
@@ -15,15 +15,15 @@
 //       membership, so it never reopens access to the account. Its rowCounts are that snapshot's counts.
 //   node tools/admin-restore.mjs check --file <backup.json> --safety <safety.json> [--out <converted.json>]
 //       The page's checks, refusing as the page refuses: the file and the safety backup validate; the document to restore is prepared
-//       exactly as the page prepares it (format 5 to 7 converted; conversion and recovery sections left out; written to --out when it
+//       exactly as the page prepares it (format 5 to 8 converted; conversion and recovery sections left out; written to --out when it
 //       differs from the file, which is never changed); then the identity-loss check against the safety backup. Any finding: exit 1, and
 //       the runbook stops. No override.
 //       It also reports how many episode marks the file and the safety backup hold (a restore
 //       replaces the library's marks with the file's).
-//   node tools/admin-restore.mjs restore-sql --file <format8.json> --owner <id> --email <email> --run <run id>
+//   node tools/admin-restore.mjs restore-sql --file <format9.json> --owner <id> --email <email> --run <run id>
 //       Prints the restore SQL: the run label, the destination check (that id is that email and
 //       a member), then restore_backup as that member, in one transaction.
-//   node tools/admin-restore.mjs verify --file <format8.json> --after <export after restore.json>
+//   node tools/admin-restore.mjs verify --file <format9.json> --after <export after restore.json>
 //       Field by field, as the page verifies after a restore. Exit 1 on any difference.
 // Output: counts, hashes and pass/fail; never record contents (except the identity-loss
 // examples the page itself shows).
@@ -49,8 +49,8 @@ for (const f of ['config.js', 'ui-helpers.js', 'metadata.js', 'api.js', 'backup-
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), page, { filename: f });
 }
 const P = expr => vm.runInContext(expr, page);
-const FORMAT = 8;
-if (opt('--format') !== null) die('--format is gone: the database and this tool use format 8');
+const FORMAT = 9;
+if (opt('--format') !== null) die('--format is gone: the database and this tool use format 9');
 const specOf = v => P(`backupSpec(${v})`);
 // The database names the format it writes: an export or restore for another format stops before anything runs.
 const FORMAT_GUARD = (v, what) => `if (public.stage5_capabilities() ->> 'backup_format') is distinct from '${v}' then
@@ -107,7 +107,7 @@ rollback;`);
   const f = readDoc(opt('--file')), s = readDoc(opt('--safety'));
   const problems = [];
   const safetyErrors = arr(P('validateBackupObject')(s.doc));
-  if (safetyErrors.length || s.doc.formatVersion !== FORMAT) problems.push(`the safety backup isn’t a valid format-8 backup: ${safetyErrors.concat(s.doc.formatVersion !== FORMAT ? [`format ${s.doc.formatVersion}`] : []).join('; ')}`);
+  if (safetyErrors.length || s.doc.formatVersion !== FORMAT) problems.push(`the safety backup isn’t a valid format-9 backup: ${safetyErrors.concat(s.doc.formatVersion !== FORMAT ? [`format ${s.doc.formatVersion}`] : []).join('; ')}`);
   const fileErrors = arr(P('validateBackupObject')(f.doc));
   if (fileErrors.length) problems.push(`the file doesn’t validate: ${fileErrors.join('; ')}`);
   let doc = f.doc;
@@ -137,7 +137,7 @@ rollback;`);
   const f = readDoc(opt('--file'));
   const owner = opt('--owner'), email = opt('--email'), run = opt('--run');
   if (!UUID.test(owner || '') || !/^[^@\s']+@[^@\s']+$/.test(email || '') || !/^[A-Za-z0-9_-]{6,64}$/.test(run || '')) die('--owner <id> --email <email> --run <run id>');
-  if (f.doc.formatVersion !== FORMAT || f.doc.conversion !== undefined || f.doc.recovery !== undefined) die('restore-sql takes the plain format-8 document from check (--out for a prepared file)', 1);
+  if (f.doc.formatVersion !== FORMAT || f.doc.conversion !== undefined || f.doc.recovery !== undefined) die('restore-sql takes the plain format-9 document from check (--out for a prepared file)', 1);
   let tag = 'wlr';
   while (f.text.includes(`$${tag}$`)) tag += 'x';
   console.log(`-- Admin restore runbook, step 5: restore. Only after check printed OK for this exact file and the
@@ -162,7 +162,7 @@ commit;`);
   const f = readDoc(opt('--file')), a = readDoc(opt('--after'));
   const errors = [];
   const spec = specOf(f.doc.formatVersion);
-  if (f.doc.formatVersion !== FORMAT || a.doc.formatVersion !== FORMAT) die('verify compares a format-8 file with a format-8 export', 1);
+  if (f.doc.formatVersion !== FORMAT || a.doc.formatVersion !== FORMAT) die('verify compares a format-9 file with a format-9 export', 1);
   for (const t of spec.tables) {
     const want = f.doc.tables[t] || [], have = a.doc.tables[t] || [];
     if (want.length !== have.length) { errors.push(`${t}: expected ${want.length} rows, found ${have.length}`); continue; }

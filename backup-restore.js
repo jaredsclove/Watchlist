@@ -76,7 +76,7 @@ async function detectBackupFormat() {
   if (b45Stopped) throw new Error(STATE_MISMATCH_TEXT + ' No file was made.');
   if (cap && cap.access === 'members' && cap.member !== true) throw new Error(NOT_A_MEMBER_TEXT + ' No file was made.');
   if (pageMayWrite(cap)) return PAGE_BACKUP_FORMAT;
-  throw new Error('This page makes backups only of a database in its own state (format 8), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
+  throw new Error('This page makes backups only of a database in its own state (format 9), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
 }
 
 // At boot (doesn't hold up the first view): which phase this database is in. A database
@@ -203,7 +203,7 @@ function validateBackupObject(obj) {
   if (obj.format !== BACKUP_FORMAT) errors.push(`Unrecognized backup format ("${obj.format}") — this doesn't look like a Watchlist Tracker backup file.`);
   const spec = backupSpec(obj.formatVersion);
   if ([1, 2, 3, 4].includes(obj.formatVersion)) {
-    errors.push(`This is a format ${obj.formatVersion} backup, which this page no longer reads. It restores formats 5 to 8. Nothing was changed. The file is fine: docs/ADMIN_RESTORE.md in the project shows how to convert a format 3 or 4 file offline with the tools at commit ${LAST_FORMAT_3_4_COMMIT}.`);
+    errors.push(`This is a format ${obj.formatVersion} backup, which this page no longer reads. It restores formats 5 to 9. Nothing was changed. The file is fine: docs/ADMIN_RESTORE.md in the project shows how to convert a format 3 or 4 file offline with the tools at commit ${LAST_FORMAT_3_4_COMMIT}.`);
     return errors;
   }
   if (!spec) { errors.push(`Unsupported backup format version (${obj.formatVersion}).`); return errors; }
@@ -317,8 +317,26 @@ const RESTORE_COLUMNS_V8 = {
   queue_entries: { id: 'uuid', queue_id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', position: 'int', created_at: 'timestamp' }
 };
 const BACKUP_FORMAT_V8 = { tables: Object.keys(RESTORE_COLUMNS_V8), columns: RESTORE_COLUMNS_V8 };
+// Format 9 (G1, item 5): format 8 plus the games: a member's platforms and play style, saved game versions with their status,
+// priority, franchise spot and joined ports, followed franchises, standing decisions about IGDB facts, and private game
+// collections; queue entries may name a game (db/g1_games.sql). The IGDB cache (game_titles) is never in a backup: it is the
+// provider's data and Refresh fills it again. A backup holds IGDB ids and the provider's titles and dates only as the member's
+// own record of what they saved and decided (docs/APP_BEHAVIOR.md, "Games").
+const G1_TABLES = ['game_settings', 'game_entries', 'game_follows', 'game_decisions', 'game_collections', 'game_collection_members'];
+const RESTORE_COLUMNS_V9 = {
+  ...RESTORE_COLUMNS_V7,
+  game_settings: { id: 'uuid', platforms: 'text[]', play_style: 'text', updated_at: 'timestamp' },
+  game_entries: { id: 'uuid', igdb_id: 'int', spot_igdb_id: 'int', port_ids: 'int[]', title: 'text', status: 'text', priority: 'text', created_at: 'timestamp', updated_at: 'timestamp' },
+  game_follows: { id: 'uuid', igdb_collection_id: 'int', name: 'text', created_at: 'timestamp' },
+  game_decisions: { id: 'uuid', kind: 'text', igdb_id: 'int', platform: 'text', value: 'json', basis: 'text', created_at: 'timestamp' },
+  game_collections: { id: 'uuid', name: 'text', created_at: 'timestamp' },
+  game_collection_members: { id: 'uuid', collection_id: 'uuid', entry_id: 'uuid', created_at: 'timestamp' },
+  watch_queues: RESTORE_COLUMNS_V8.watch_queues,
+  queue_entries: { id: 'uuid', queue_id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', game_entry_id: 'uuid?', position: 'int', created_at: 'timestamp' }
+};
+const BACKUP_FORMAT_V9 = { tables: Object.keys(RESTORE_COLUMNS_V9), columns: RESTORE_COLUMNS_V9 };
 // The format this page makes and restores.
-const PAGE_BACKUP_FORMAT = 8;
+const PAGE_BACKUP_FORMAT = 9;
 const CATALOG_GOVERNANCE_IDS = ['disney', '90day', 'sheridan'];
 const PRESENTATION_KEYS = ['disney', '90day', 'sheridan', 'truecrime'];
 // The last commit whose page and admin tool read formats 3 and 4 (docs/ADMIN_RESTORE.md has the offline route).
@@ -326,7 +344,7 @@ const LAST_FORMAT_3_4_COMMIT = '7f650da';
 
 // The tables and columns of a format this page reads; null for any other.
 function backupSpec(formatVersion) {
-  return formatVersion === 8 ? BACKUP_FORMAT_V8 : formatVersion === 7 ? BACKUP_FORMAT_V7 : formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : null;
+  return formatVersion === 9 ? BACKUP_FORMAT_V9 : formatVersion === 8 ? BACKUP_FORMAT_V8 : formatVersion === 7 ? BACKUP_FORMAT_V7 : formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : null;
 }
 
 const TV_SHOW_STATUSES = ['confirmed', 'watching', 'skipped'];
@@ -344,6 +362,7 @@ function restoreValueProblem(type, v) {
     case 'bool': return typeof v === 'boolean' ? null : 'is not true/false';
     case 'int': return Number.isInteger(v) && v >= -2147483648 && v <= 2147483647 ? null : 'is not a whole number';
     case 'text[]': return Array.isArray(v) && v.every(x => typeof x === 'string') ? null : 'is not a list of text';
+    case 'int[]': return Array.isArray(v) && v.every(x => Number.isInteger(x) && x >= -2147483648 && x <= 2147483647) ? null : 'is not a list of whole numbers';
     case 'json': return v !== undefined ? null : 'is missing';
   }
   return 'has an unknown type';
@@ -411,6 +430,7 @@ function validateBackupRows(tables, formatVersion) {
   if (formatVersion >= 6) validateFormat6Rows(tables, items, report, rowLabel, findDuplicates);
   if (formatVersion >= 7) validateFormat7Rows(tables, items, report);
   if (formatVersion >= 8) validateFormat8Rows(tables, items, report);
+  if (formatVersion >= 9) validateFormat9Rows(tables, report);
   return errors;
 }
 
@@ -508,11 +528,12 @@ function validateFormat8Rows(tables, items, report) {
   entries.forEach((e, i) => {
     const at = `queue_entries row ${i + 1}`;
     if (!qIds.has(e.queue_id)) problems.push(`${at} names a queue that isn’t in the file`);
-    if ((e.show_id == null) === (e.item_id == null)) problems.push(`${at} must name exactly one of a show or an item`);
+    // (format 9: or a game; validateFormat9Rows checks that it is in the file)
+    if ([e.show_id, e.item_id, e.game_entry_id].filter(x => x != null).length !== 1) problems.push(`${at} must name exactly one of a show, an item${'game_entry_id' in e ? ' or a game' : ''}`);
     if (e.show_id != null && !shows.has(e.show_id)) problems.push(`${at} names a show that isn’t in the file`);
     if (e.item_id != null && !showOfItem.has(e.item_id)) problems.push(`${at} names a library row that isn’t in the file`);
     if (!(e.position > 0)) problems.push(`${at} has a place below 1`);
-    const place = `${e.queue_id}|${e.position}`, target = `${e.queue_id}|${e.show_id || e.item_id}`;
+    const place = `${e.queue_id}|${e.position}`, target = `${e.queue_id}|${e.show_id || e.item_id || e.game_entry_id}`;
     if (seenPlace.has(place)) problems.push(`${at} repeats a place in its queue`); seenPlace.add(place);
     if (seenTarget.has(target)) problems.push(`${at} repeats an item in its queue`); seenTarget.add(target);
   });
@@ -524,7 +545,87 @@ function validateFormat8Rows(tables, items, report) {
   report('queues (format 8)', problems);
 }
 
-// ─── Converting an older document to format 8 ─────────────────────────────────
+// Format 9: what the game tables' keys and checks enforce (db/g1_games.sql), before anything is sent.
+const G1_PLATFORMS = ['ps5', 'ps4', 'switch2', 'switch', 'xbox_series', 'xbox_one', 'pc'];
+const G1_STATUSES = ['want', 'playing', 'paused', 'finished', 'skipped'];
+const G1_PRIORITIES = ['high', 'normal', 'low'];
+const G1_DECISION_KINDS = ['not_out_yet', 'available', 'skip_spot', 'include_spinoff', 'keep_link', 'research_link', 'research_role'];
+const G1_RESEARCH_KINDS = ['available', 'research_link', 'research_role'];
+function validateFormat9Rows(tables, report) {
+  const rows = t => (tables[t] || []).filter(r => r && typeof r === 'object');
+  const problems = [];
+  const trimmed = (v, max) => typeof v === 'string' && v === v.trim() && v !== '' && v.length <= max;
+  const ids = v => Array.isArray(v) && v.length <= 50 && v.every(x => Number.isInteger(x) && x > 0) && new Set(v).size === v.length;
+  const settings = rows('game_settings');
+  if (settings.length > 1) problems.push('more than one game_settings row');
+  settings.forEach((s, i) => {
+    if (!Array.isArray(s.platforms) || s.platforms.length > 7 || !s.platforms.every(p => G1_PLATFORMS.includes(p)) || new Set(s.platforms).size !== s.platforms.length) problems.push(`game_settings row ${i + 1} has platforms the database refuses`);
+    if (!['main', 'main_extra', 'completionist'].includes(s.play_style)) problems.push(`game_settings row ${i + 1} has an unknown play style`);
+  });
+  const entries = rows('game_entries'), entryIds = new Set(entries.map(e => e.id)), saved = new Map();
+  entries.forEach((e, i) => {
+    const at = `game_entries row ${i + 1}`;
+    if (!(e.igdb_id > 0) || !(e.spot_igdb_id > 0) || !ids(e.port_ids) || (Array.isArray(e.port_ids) && e.port_ids.includes(e.igdb_id))) problems.push(`${at} has IGDB ids the database refuses`);
+    if (!trimmed(e.title, 300)) problems.push(`${at} has a title the database refuses`);
+    if (!G1_STATUSES.includes(e.status)) problems.push(`${at} has an unknown status`);
+    if (!G1_PRIORITIES.includes(e.priority)) problems.push(`${at} has an unknown priority`);
+    [e.igdb_id].concat(Array.isArray(e.port_ids) ? e.port_ids : []).forEach(x => {
+      if (saved.has(x) && saved.get(x) !== e.id) problems.push(`${at} saves IGDB record ${x}, which another game in the file saves too`);
+      saved.set(x, e.id);
+    });
+  });
+  const follows = rows('game_follows'), seenFollow = new Set();
+  follows.forEach((f, i) => {
+    if (!(f.igdb_collection_id > 0) || !trimmed(f.name, 200)) problems.push(`game_follows row ${i + 1} has values the database refuses`);
+    if (seenFollow.has(f.igdb_collection_id)) problems.push(`game_follows row ${i + 1} repeats a franchise`); seenFollow.add(f.igdb_collection_id);
+  });
+  const seenDecision = new Set();
+  rows('game_decisions').forEach((d, i) => {
+    const at = `game_decisions row ${i + 1}`, withPlatform = d.kind === 'not_out_yet' || d.kind === 'available';
+    if (!G1_DECISION_KINDS.includes(d.kind)) problems.push(`${at} has an unknown kind`);
+    if (!(d.igdb_id > 0)) problems.push(`${at} has an IGDB id the database refuses`);
+    if (typeof d.platform !== 'string' || withPlatform !== (d.platform !== '') || (d.platform !== '' && !G1_PLATFORMS.includes(d.platform))) problems.push(`${at} has a platform the database refuses`);
+    if (!d.value || typeof d.value !== 'object' || Array.isArray(d.value)) problems.push(`${at} has a value that isn’t an object`);
+    if (!['member', 'research'].includes(d.basis) || (G1_RESEARCH_KINDS.includes(d.kind) && d.basis !== 'research')) problems.push(`${at} has a basis the database refuses`);
+    const key = `${d.kind}|${d.igdb_id}|${d.platform}`;
+    if (seenDecision.has(key)) problems.push(`${at} repeats a decision`); seenDecision.add(key);
+  });
+  const collections = rows('game_collections'), collIds = new Set(collections.map(c => c.id)), seenName = new Set();
+  collections.forEach((c, i) => {
+    if (!trimmed(c.name, 100)) problems.push(`game_collections row ${i + 1} has a name the database refuses`);
+    const n = String(c.name).toLowerCase();
+    if (seenName.has(n)) problems.push(`game_collections row ${i + 1} repeats a name`); seenName.add(n);
+  });
+  const seenMember = new Set();
+  rows('game_collection_members').forEach((m, i) => {
+    const at = `game_collection_members row ${i + 1}`;
+    if (!collIds.has(m.collection_id)) problems.push(`${at} names a collection that isn’t in the file`);
+    if (!entryIds.has(m.entry_id)) problems.push(`${at} names a game that isn’t in the file`);
+    const key = `${m.collection_id}|${m.entry_id}`;
+    if (seenMember.has(key)) problems.push(`${at} repeats a game in its collection`); seenMember.add(key);
+  });
+  rows('queue_entries').forEach((e, i) => {
+    if (e.game_entry_id != null && !entryIds.has(e.game_entry_id)) problems.push(`queue_entries row ${i + 1} names a game that isn’t in the file`);
+  });
+  report('games (format 9)', problems);
+}
+
+// ─── Converting an older document to format 9 ─────────────────────────────────
+// Format 9 adds the games, which a format-8 file can't have: the converted document has none, and every queue entry gains an
+// empty game_entry_id; every other table is kept as it is. Restoring it therefore removes the current games, their settings,
+// follows, decisions and collections, and games in queues (the safety backup keeps them). The IGDB cache isn't touched.
+function convertFormat8To9(doc8) {
+  const tables = { ...doc8.tables };
+  G1_TABLES.forEach(t => { tables[t] = []; });
+  tables.queue_entries = (doc8.tables.queue_entries || []).map(e => {
+    const { id, queue_id, show_id, item_id, position, created_at } = e;
+    return { id, queue_id, show_id, item_id, game_entry_id: null, position, created_at };
+  });
+  const ordered = {};
+  BACKUP_FORMAT_V9.tables.forEach(t => { ordered[t] = tables[t]; });
+  return { format: doc8.format, formatVersion: 9, exportedAt: doc8.exportedAt,
+    rowCounts: Object.fromEntries(Object.entries(ordered).map(([k, v]) => [k, v.length])), tables: ordered };
+}
 // Format 8 adds the planning queues, which a format-7 file can't have: the converted document has none, every other
 // table kept as it is. Restoring it therefore removes the current queues (the safety backup keeps them).
 function convertFormat7To8(doc7) {
@@ -549,18 +650,26 @@ function convertFormat5To6(doc5) {
   return { format: doc5.format, formatVersion: 6, exportedAt: doc5.exportedAt,
     rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
 }
-// What a restore sends for a validated file of format 5 to 8: format 8, and only its library. A file
+// What a restore sends for a validated file of format 5 to 9: format 9, and only its library. A file
 // converted long ago can carry `conversion` and `recovery` sections from format 3; the archive they
 // belonged to is retired, so they are left out of what is sent (the file itself is never changed).
 function restoreDocument(doc) {
   const doc7 = doc.formatVersion >= 7 ? doc : convertFormat6To7(doc.formatVersion === 5 ? convertFormat5To6(doc) : doc);
-  const doc8 = doc7.formatVersion === 8 ? doc7 : convertFormat7To8(doc7);
-  return { format: doc8.format, formatVersion: 8, exportedAt: doc8.exportedAt, rowCounts: doc8.rowCounts, tables: doc8.tables };
+  const doc8 = doc7.formatVersion >= 8 ? doc7 : convertFormat7To8(doc7);
+  const doc9 = doc8.formatVersion === 9 ? doc8 : convertFormat8To9(doc8);
+  return { format: doc9.format, formatVersion: 9, exportedAt: doc9.exportedAt, rowCounts: doc9.rowCounts, tables: doc9.tables };
+}
+function format8ConversionHtml(currentCounts) {
+  const games = currentCounts.game_entries || 0, other = G1_TABLES.filter(t => t !== 'game_entries').reduce((n, t) => n + (currentCounts[t] || 0), 0);
+  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 9 before restoring</div><ul class="manage-list">
+    <li>Format 9 adds games: your platforms and play style, saved games, followed franchises, your decisions about release dates and versions, and game collections. This backup was made before them, so it has none.</li>
+    ${games || other ? `<li>Restoring it removes your ${games} saved game${games === 1 ? '' : 's'}${other ? ` and ${other} other game record${other === 1 ? '' : 's'} (settings, follows, decisions, collections)` : ''}, and any games in your queues (the safety backup keeps them). Your films, shows, queues and progress come from the backup as usual.</li>` : ''}
+    <li>The file itself isn’t changed.</li></ul></div>`;
 }
 function format7ConversionHtml(currentCounts) {
   const queues = currentCounts.watch_queues || 0, entries = currentCounts.queue_entries || 0;
-  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 8 before restoring</div><ul class="manage-list">
-    <li>Format 8 adds planning queues. This backup was made before them, so it has none.</li>
+  return `<div class="modal-section"><div class="modal-label">This backup also has no planning queues</div><ul class="manage-list">
+    <li>Format 8 added planning queues. This backup was made before them, so it has none.</li>
     ${queues ? `<li>Restoring it removes your ${queues} queue${queues === 1 ? '' : 's'} and their ${entries} entr${entries === 1 ? 'y' : 'ies'} (the safety backup keeps them). Your films, shows and progress come from the backup as usual.</li>` : ''}
     <li>The file itself isn’t changed.</li></ul></div>`;
 }
@@ -748,7 +857,7 @@ async function handleRestoreFileSelected(event) {
   await renderRestorePreview(parsed, session);
 }
 
-// A file of format 5 to 7 is converted to format 8 first, and the preview says what that
+// A file of format 5 to 8 is converted to format 9 first, and the preview says what that
 // means; only the prepared document is ever sent. Nothing is converted or sent again
 // automatically if the database refuses it.
 async function renderRestorePreview(backup, session = restoreSessionSeq) {
@@ -759,13 +868,13 @@ async function renderRestorePreview(backup, session = restoreSessionSeq) {
   let currentItems = [];
   let dbFormat;
   try {
-    // A restore needs a database in this page's phase (format 8). Never a fallback to another format.
+    // A restore needs a database in this page's phase (format 9). Never a fallback to another format.
     const phaseCap = await stage5Capabilities();
     if (!restoreSessionLive(session)) return;
     if (!pageMayWrite(phaseCap)) {
       showRestoreModal(`<div class="modal-title">Restore isn't available</div>
         <div class="modal-error">${b45Stopped ? esc(STATE_MISMATCH_TEXT) : phaseCap
-          ? 'This page restores only into a database in its own state (format 8), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
+          ? 'This page restores only into a database in its own state (format 9), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
           : 'This page needs a database update that hasn’t been made yet, so it can’t restore here. Nothing was changed.'}</div>
         <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
       pendingRestoreData = null;
@@ -819,6 +928,7 @@ async function renderRestorePreview(backup, session = restoreSessionSeq) {
       <div class="modal-label">Backup created</div>
       <div>${esc(backupDate)}</div>
     </div>
+    ${fromFormat < 9 ? format8ConversionHtml(currentCounts) : ''}
     ${fromFormat < 8 ? format7ConversionHtml(currentCounts) : ''}
     ${fromFormat < 7 ? format6ConversionHtml(currentCounts) : ''}
     ${fromFormat === 5 ? format5ConversionHtml() : ''}
@@ -958,7 +1068,7 @@ async function sendRestore(preRestoreFilename) {
   // database rolls back to exactly what it was.
   const restoredTables = backupSpec(backup.formatVersion).tables;
   // The phase is read again right before sending: it must still be this page's, and only
-  // a format-8 document is ever sent (formats 5 to 7 were converted in the preview).
+  // a format-9 document is ever sent (formats 5 to 8 were converted in the preview).
   // Nothing is sent otherwise.
   let sendCap = null;
   try { sendCap = await stage5Capabilities(); } catch (e) { sendCap = null; }

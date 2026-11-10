@@ -9,6 +9,7 @@ const vm = require('vm');
 const B45 = require('./b45-harness');
 const CU1 = require('./cu1-harness');
 const Q1 = require('./q1-harness');
+const G1 = require('./g1-harness');
 // The database phases the harness models (createApp({ stage5 })): B4/B5 (the default,
 // tests/b45-harness.js); 'contracted', a database rolled back from B4/B5 (Stage 5c: reads
 // without the B4/B5 columns, no _b45 function); null, a database without Stage 5 (no
@@ -692,6 +693,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
   Object.assign(handlers, B45.b45Handlers({ app, store, handlers, newId, org, DbError, isFilmRow, BUILTIN }));
   Object.assign(handlers, CU1.cu1Handlers({ app, store, DbError, isFilmRow }));
   if (isCu1(app)) Object.assign(handlers, Q1.q1Handlers({ store, DbError, isFilmRow, handlers: { ...handlers }, newId }));
+  if (isCu1(app)) Object.assign(handlers, G1.g1Handlers({ app, store, DbError, newId }));
   return Object.fromEntries(Object.entries(handlers).map(([name, fn]) => [name, body => {
     try {
       // B4/B5 installed: the old names refuse (an old page still open), before anything is read.
@@ -870,7 +872,7 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null, access = 'members', session, episodeMarks = [], pageRoot = null, cu1 = null, queues = null, research = true } = {}) {
+  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null, access = 'members', session, episodeMarks = [], pageRoot = null, cu1 = null, queues = null, games = null, igdb = null, research = true } = {}) {
   // pageRoot: the page from another directory (a release exported from git), for old-page tests.
   const page = pageRoot ? pageOf(pageRoot) : PAGE;
   // The default phase is B4/B5 (production's schema once B4/B5 is installed); a database
@@ -885,7 +887,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   const selectors = {};
   let nextId = 1;
   // research: CU2's capability for this member: true, false, or null for a database that doesn't send it.
-  const app = { store, requests, selectors, consoleErrors, countOverride, configText, stage5, recoveryArchive, research };
+  // igdb: queries => results for the IGDB function (functions/v1/igdb); a thrown error is a network failure; default: no answer (502).
+  const app = { store, requests, selectors, consoleErrors, countOverride, configText, stage5, recoveryArchive, research, igdb };
   if (store.tv_shows) linkFixtureRows(store, () => `new-${nextId++}`);
   // B4/B5 (the default phase): the fixtures as db/b45_expand.sql would leave them.
   if (B45.isB45Schema(stage5) && store.tv_shows) B45.migrateFixtures(store, isFilmRow);
@@ -894,6 +897,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   // CU1: collection updates' ten tables (cu1: { table: rows } seeds them).
   if (stage5 === CU1.CU1_PHASE) CU1.CU1_TABLES.forEach(t => { store[t] = clone((cu1 || {})[t] || []); });
   if (stage5 === CU1.CU1_PHASE) Q1.Q1_TABLES.forEach(t => { store[t] = clone((queues || {})[t] || []); });
+  if (stage5 === CU1.CU1_PHASE) G1.G1_TABLES.forEach(t => { store[t] = clone((games || {})[t] || []); }); // G1: the game tables (games: { table: rows } seeds them)
 
   // ── personal organization (db/phase3b_org.sql) ──
   const orgOn = !format1 && org !== false;
@@ -1046,8 +1050,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       // episode_marks); B4/B5 before EP1: format 5.
       const cu1 = isCu1(app), ep1 = isEp1(app);
       if (ep1 || app.stage5 === B45.B45_PHASE) {
-        const want = cu1 ? 8 : ep1 ? 6 : 5, sources = cu1 ? [3, 4, 5, 6, 7] : ep1 ? [3, 4, 5] : [3, 4];
-        if (b.formatVersion !== want) return pgError(400, '22023', `restore_invalid: format ${b.formatVersion} backups ${[3, 4, 5, 6, 7].includes(b.formatVersion) && b.formatVersion < want ? 'are converted in the page first (Restore shows what the conversion keeps and what it can\'t); nothing was changed' : 'can\'t be restored here'}`);
+        const want = cu1 ? 9 : ep1 ? 6 : 5, sources = cu1 ? [3, 4, 5, 6, 7, 8] : ep1 ? [3, 4, 5] : [3, 4];
+        if (b.formatVersion !== want) return pgError(400, '22023', `restore_invalid: format ${b.formatVersion} backups ${[3, 4, 5, 6, 7, 8].includes(b.formatVersion) && b.formatVersion < want ? 'are converted in the page first (Restore shows what the conversion keeps and what it can\'t); nothing was changed' : 'can\'t be restored here'}`);
         if (b.conversion && (!sources.includes(Number(b.conversion.source_format)) || !/^[0-9a-f]{64}$/.test(b.conversion.source_sha256 || ''))) return pgError(400, '22023', 'restore_invalid: the conversion record is malformed');
         if (ep1) {
           const marks = b.tables.episode_marks;
@@ -1076,6 +1080,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
         if (ep1) store.episode_marks = clone(t.episode_marks);
         if (cu1) CU1.CU1_TABLES.forEach(k => { store[k] = clone(t[k] || []); });
         if (cu1) Q1.Q1_TABLES.forEach(k => { store[k] = clone(t[k] || []); });
+        if (cu1) G1.G1_TABLES.filter(k => k !== 'game_titles').forEach(k => { store[k] = clone(t[k] || []); }); // (the IGDB cache isn't restored)
         store.othertv_shows = clone((b.recovery || {}).othertv_shows || []);
         store.__links = { shows: clone(t.catalog_show_links), films: clone(t.catalog_film_links) };
         app.restored = (app.restored || 0) + 1;
@@ -1147,6 +1152,14 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       if (out && out.__status) return response(out.__status, { status_message: 'simulated' }); // { __status: 500 }: an HTTP error
       return out === undefined ? response(404, { status_message: 'not found' }) : response(200, out);
     }
+    // G1: the IGDB function (supabase/functions/igdb): members only, through the caller's own token.
+    if (url === `${SUPABASE_URL}/functions/v1/igdb`) {
+      if (method !== 'POST') return response(405, { error: 'method_not_allowed' });
+      if (!isCu1(app) || app.member === false) return response(403, { error: 'not_a_member', message: 'This account has no library here.' });
+      if (!app.igdb) return response(502, { error: 'igdb_unreachable', message: 'IGDB couldn’t be reached. Try again later.' });
+      const results = app.igdb((body || {}).queries || []);
+      return response(200, { results });
+    }
     const prefix = `${SUPABASE_URL}/rest/v1/`;
     if (!url.startsWith(prefix)) throw new Error(`harness: refused request to ${url}`);
     const u = new URL(url);
@@ -1177,8 +1190,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     }
     if (u.pathname.includes('/rpc/') && table === 'stage5_capabilities') {
       if (!app.stage5) return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.stage5_capabilities in the schema cache' });
-      return response(200, { stage5: 1, phase: app.stage5, backup_format: isCu1(app) ? 8 : ep1 ? 6 : b45 ? 5 : contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none',
-        ...(b45 ? { b45: 1 } : {}), ...(ep1 ? { ep1: 1 } : {}), ...(isCu1(app) ? { cu1: 1, q1: 1 } : {}), ...(isCu1(app) && app.research !== null ? { research: app.research !== false } : {}), ...(app.access ? { access: app.access, member: app.member !== false } : {}) });
+      return response(200, { stage5: 1, phase: app.stage5, backup_format: isCu1(app) ? 9 : ep1 ? 6 : b45 ? 5 : contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none',
+        ...(b45 ? { b45: 1 } : {}), ...(ep1 ? { ep1: 1 } : {}), ...(isCu1(app) ? { cu1: 1, q1: 1, g1: 1 } : {}), ...(isCu1(app) && app.research !== null ? { research: app.research !== false } : {}), ...(app.access ? { access: app.access, member: app.member !== false } : {}) });
     }
     // EP1: library_set_episode_marks exists only once EP1 is installed.
     if (u.pathname.includes('/rpc/') && table === 'library_set_episode_marks' && !ep1) {
@@ -1190,7 +1203,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       return pgError(400, 'P0001', 'library_write_required: This change is made only through the app\'s library functions. Reload the page. Nothing was changed.');
     }
     // CU1: collection updates' tables change only through the library_cu_* functions or a restore.
-    if (isCu1(app) && !u.pathname.includes('/rpc/') && method !== 'GET' && (CU1.CU1_TABLES.includes(table) || Q1.Q1_TABLES.includes(table))) {
+    if (isCu1(app) && !u.pathname.includes('/rpc/') && method !== 'GET' && (CU1.CU1_TABLES.includes(table) || Q1.Q1_TABLES.includes(table) || G1.G1_TABLES.includes(table))) {
       return pgError(400, 'P0001', 'library_write_required: This change is made only through the app\'s library functions. Reload the page. Nothing was changed.');
     }
     // A B4/B5 function on a database without B4/B5 doesn't exist.
@@ -1397,6 +1410,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     matchMedia: () => ({ matches: false }),
     crypto: require('crypto').webcrypto,
     TextEncoder,
+    URL, // (G1: games research checks evidence addresses as a browser parses them)
     // Test fixtures only: synthetic catalog entries in the shape config.js's retired lists had, so tests
     // can build records a catalog governs (the page itself no longer reads any catalog list).
     COLLECTIONS: CATALOG_FIXTURES

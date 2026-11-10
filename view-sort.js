@@ -27,8 +27,14 @@ const SORT_FIELD_DEFS = {
   season: { dir: 'asc', words: { asc: 'earliest first', desc: 'latest first' } },
   rating: { dir: 'desc', words: { asc: 'lowest first', desc: 'highest first' } },
   status: { dir: 'asc', words: null },
-  priority: { dir: 'desc', words: { asc: 'Low first', desc: 'High first' } }
+  priority: { dir: 'desc', words: { asc: 'Low first', desc: 'High first' } },
+  // G1 (games): critic and player scores are separate fields; length uses the member's play style.
+  release: { dir: 'desc', words: { asc: 'oldest first', desc: 'newest first' } },
+  critic: { dir: 'desc', words: { asc: 'lowest first', desc: 'highest first' } },
+  player: { dir: 'desc', words: { asc: 'lowest first', desc: 'highest first' } },
+  length: { dir: 'asc', words: { asc: 'shortest first', desc: 'longest first' } }
 };
+const SORT_GAME_STATUS_RANK = { playing: 0, paused: 1, want: 2, finished: 3, skipped: 4 };
 // Status groups in their default order (ascending); a Skipped film marked watched is Skipped.
 const SORT_STATUS_RANK = { watching: 0, confirmed: 1, to_watch: 1, watched: 2, skipped: 3, pair: 3 };
 const SORT_PRIORITY_RANK = { high: 3, normal: 2, low: 1 };
@@ -49,6 +55,8 @@ function viewSortContext(viewId = activeViewId) {
     return { key: 'comingsoon', fields: [fd('title', 'Title'), fd('season', 'Season premiere'), fd('rating', 'Show rating'), fd('status', 'Status'), fd('priority', 'Priority')],
       statusOrder: ['Watching', 'To Watch'] };
   }
+  if (viewId === 'games') return { key: 'games', fields: [fd('title', 'Title'), fd('release', 'Release date'), fd('status', 'Status'), fd('priority', 'Priority'),
+    fd('critic', 'Critic score'), fd('player', 'Player score'), fd('length', 'Length (your play style)')], statusOrder: ['Playing', 'Paused', 'Want to play', 'Finished', 'Skipped'] };
   if (typeof ALL_MOVIES_VIEW !== 'undefined' && viewId === ALL_MOVIES_VIEW.id) return { key: 'allmovies', fields: filmFields, statusOrder: ['To Watch', 'Watched', 'Skipped'] };
   if (typeof isBrowseCollectionView === 'function' && isBrowseCollectionView(viewId)) {
     if (browseMedia === 'movie') return { key: `${viewId}:movie`, fields: filmFields, statusOrder: ['To Watch', 'Watched', 'Skipped'] };
@@ -77,6 +85,7 @@ const sortArrow = d => (d === 'asc' ? '↑' : '↓');
 // Any listed item as what sorting reads: its show (a show, a season's show), item (a show item with
 // its up-next season), season (a Coming Soon row) or film.
 function sortSubject(x) {
+  if (x && x.kind === 'game') return { game: x.v, title: x.v.title };
   if (x && x.kind === 'show') return { show: x.item.show, item: x.item, title: x.item.title };
   if (x && x.kind === 'film') return { film: x.row, title: x.row.title };
   if (x && x.kind === 'season') return { show: x.show, season: x.row, title: x.show ? x.show.title : x.row.title };
@@ -90,14 +99,20 @@ function sortDateOf(r) {
 }
 const SORT_VALUE = {
   title: s => s.title || '',
+  // Games (G1): the date the row shows (its platform line), the scores IGDB gives, the length for the play style (an unreliable
+  // estimate counts as unknown).
+  release: s => (s.game && s.game.dateKey && s.game.dateKey !== '9999-12-31' ? s.game.dateKey : null),
+  critic: s => (s.game && s.game.rec && s.game.rec.critic ? s.game.rec.critic.score : null),
+  player: s => (s.game && s.game.rec && s.game.rec.player ? s.game.rec.player.score : null),
+  length: s => (s.game && s.game.length.reliable ? s.game.length.value : null),
   // Series premiere: TMDB's first-air date (this device's cache); a film's own release date.
   premiere: s => (s.film ? sortDateOf(s.film) : showFirstAirDate(s.show)),
   // The season the row's Up next / Next names (an active earlier-seasons range first; skipped seasons passed over).
   next: s => (s.item ? sortDateOf(s.item.upNext) : null),
   season: s => (s.season ? sortDateOf(s.season) : null),
   rating: s => (s.film ? null : showRatingScore(s.show)),
-  status: s => (s.film ? SORT_STATUS_RANK[filmViewState(s.film)] : s.show ? SORT_STATUS_RANK[s.show.status] : null) ?? null,
-  priority: s => SORT_PRIORITY_RANK[(s.film || s.show || {}).priority] ?? null
+  status: s => (s.game ? SORT_GAME_STATUS_RANK[s.game.entry.status] : s.film ? SORT_STATUS_RANK[filmViewState(s.film)] : s.show ? SORT_STATUS_RANK[s.show.status] : null) ?? null,
+  priority: s => SORT_PRIORITY_RANK[(s.game ? s.game.entry : s.film || s.show || {}).priority] ?? null
 };
 
 // The comparator for a sort: its fields in order, unknown last either way, then the usual order.
@@ -128,7 +143,7 @@ function sortForView(list, usual) {
     spec.forEach(({ f }) => { v[f] = SORT_VALUE[f](s); });
     return { x, s, v };
   });
-  if (spec.some(e => e.f === 'rating') && decorated.some(o => !o.s.film && o.s.show && o.v.rating == null)) {
+  if (spec.some(e => e.f === 'rating') && decorated.some(o => !o.s.film && !o.s.game && o.s.show && o.v.rating == null)) {
     viewSortPass = { key: ctx.key, unrated: true };
   } else if (!viewSortPass || viewSortPass.key !== ctx.key) viewSortPass = { key: ctx.key, unrated: false };
   return decorated.sort(viewSortComparator(spec, usual)).map(o => o.x);

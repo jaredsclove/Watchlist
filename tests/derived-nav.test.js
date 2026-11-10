@@ -73,7 +73,9 @@ test('startup: Currently Watching opens with one paginated GET of the TV rows, o
   assert.strictEqual(app.requests.filter(r => /\/rest\/v1\/episode_marks\?/.test(r.url)).length, 1);
   // Item 4: the per-show update settings (the "New season" flag) are read with the rows.
   assert.strictEqual(app.requests.filter(r => /\/rest\/v1\/show_update_settings\?/.test(r.url)).length, 1);
-  assert.strictEqual(app.requests.length, 12, 'no per-storage loads, no seeding reads');
+  // G1: the member's game settings (platforms and play style), read once at sign-in so Settings reads nothing.
+  assert.strictEqual(app.requests.filter(r => /\/rest\/v1\/game_settings\?/.test(r.url)).length, 1);
+  assert.strictEqual(app.requests.length, 13, 'no per-storage loads, no seeding reads');
   assert.ok(reads[0].url.includes('is_film=eq.false') && !reads[0].url.includes('collection='), 'TV rows by kind, never by storage');
   assert.strictEqual(reads[0].headers['Prefer'], 'count=exact');
   noStorage(app);

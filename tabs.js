@@ -7,7 +7,7 @@ function buildTabs() {
   // content heading names the view (B9).
   // Settings (S1) has no view tabs, and nor has the Collections area (S2): its chooser is drawn
   // by buildBrowseBar.
-  const views = isSettingsView() || activeArea === 'collections' || activeArea === 'queues' ? [] : tabViewsFor(activeMediaType);
+  const views = isSettingsView() || activeArea === 'collections' || activeArea === 'queues' || activeArea === 'games' ? [] : tabViewsFor(activeMediaType); // (Games draws its own tabs)
   // A redraw keeps keyboard focus on the view tabs (the open view's tab takes it).
   const active = document.activeElement;
   const hadFocus = !!active && typeof active.closest === 'function' && !!active.closest('#tabBar');
@@ -39,6 +39,7 @@ function buildMediaSwitch() {
     el.innerHTML = `<button class="media-switch-btn${cls('tv')}" id="areaBtn-tv"${cur('tv')} onclick="switchMediaType('tv')">TV</button>`
       + `<button class="media-switch-btn${cls('movie')}" id="areaBtn-movie"${cur('movie')} onclick="switchMediaType('movie')">Movies</button>`
       + `<button class="media-switch-btn${cls('collections')}" id="areaBtn-collections"${cur('collections')} onclick="openCollections(this)">Collections</button>`
+      + `<button class="media-switch-btn${cls('games')}" id="areaBtn-games"${cur('games')} onclick="openGames()">Games</button>`
       + `<button class="media-switch-btn${cls('queues')}" id="areaBtn-queues"${cur('queues')} onclick="openQueues()">Queues</button>`;
     const again = keepCollections ? document.getElementById('areaBtn-collections') : null;
     if (again && again !== active && typeof again.focus === 'function') again.focus();
@@ -87,6 +88,7 @@ function switchView(id) {
   removeNotice = null;
   if (typeof addPickerOnNavigate === 'function') addPickerOnNavigate(); // S5: an idle picker closes; a running batch stops after its current request
   if (typeof queueOnNavigate === 'function') queueOnNavigate(); // Q1: an idle Add to queue dialog closes; a drag ends
+  if (typeof gamesOnNavigate === 'function') gamesOnNavigate(); // G1: an idle games dialog closes
   activeViewId = id;
   activeArea = areaOfView(id);
   // Back from a collection keeps its origin only while the Collections area is open,
@@ -121,9 +123,15 @@ function switchView(id) {
   // The Collections state may have resolved its default inside buildTabs (buildBrowseBar):
   // that opened a collection, so this entry is over.
   if (activeViewId !== id) return;
+  // Q1 / G1: a screen of its own shows only in its own area (an entry by route or Back included).
+  [['queuesScreen', isQueuesView(id)], ['gamesScreen', isGamesView(id)]].forEach(([sid, keep]) => {
+    const el = !keep && document.getElementById(sid);
+    if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+  });
   if (isSettingsView(id)) { renderSettings(); return; }
   if (isCollectionsStateView(id)) { renderCollectionsState(); return; }
   if (isQueuesView(id)) { queuesData = null; loadQueuesView(); return; }
+  if (isGamesView(id)) { gamesData = null; loadGamesView(); return; } // G1
   showListContainers();
   if (isBrowseView(id)) loadBrowseView();
   else loadDerivedView();
@@ -158,6 +166,7 @@ function areaOfView(id) {
   if (isSettingsView(id)) return 'settings';
   if (isCollectionsAreaView(id)) return 'collections';
   if (isQueuesView(id)) return 'queues';
+  if (typeof isGamesView === 'function' && isGamesView(id)) return 'games';
   return activeMediaType;
 }
 
@@ -198,7 +207,7 @@ function openSettings(opener, section) {
     settingsOrigin = origin;
     buildMediaSwitch();
   }
-  const target = document.getElementById(section === 'backup' ? 'settingsBackupTitle' : 'settingsTitle');
+  const target = document.getElementById(section === 'backup' ? 'settingsBackupTitle' : section === 'games' ? 'settingsGamesTitle' : 'settingsTitle');
   if (target && typeof target.focus === 'function') target.focus();
 }
 
@@ -236,6 +245,8 @@ function showListContainers() {
   if (screen) { screen.style.display = 'none'; screen.innerHTML = ''; }
   const queues = document.getElementById('queuesScreen'); // Q1
   if (queues) { queues.style.display = 'none'; queues.innerHTML = ''; }
+  const games = document.getElementById('gamesScreen'); // G1
+  if (games) { games.style.display = 'none'; games.innerHTML = ''; }
   SETTINGS_LIST_CONTAINERS.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
 }
 
@@ -267,6 +278,7 @@ function creditsSectionHtml() {
         <a class="tmdb-credit-logo" href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer"><img src="assets/tmdb-logo.svg" alt="TMDB (The Movie Database)" width="110" height="14"></a>
         <p class="settings-text">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
         <p class="settings-text">Show, season, episode and film details, and the TMDB scores shown with shows, come from TMDB.</p>
+        <p class="settings-text">Game data, including release dates, critic and player scores and time-to-beat estimates, comes from <a href="https://www.igdb.com/" target="_blank" rel="noopener noreferrer">IGDB.com</a>.</p>
       </section>`;
 }
 
@@ -298,6 +310,7 @@ function renderSettings() {
       ${accountSectionHtml()}
       ${episodeTitlesSettingHtml()}
       ${viewSortSettingHtml()}
+      ${typeof gamesSettingHtml === 'function' ? gamesSettingHtml() : ''}
       <section class="settings-card" aria-labelledby="settingsLibraryTitle">
         <h3 id="settingsLibraryTitle">Library management</h3>
         <div class="settings-sub">Collections</div>
