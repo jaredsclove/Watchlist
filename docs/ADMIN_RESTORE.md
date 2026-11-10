@@ -10,7 +10,7 @@ Tools: `node tools/admin-restore.mjs` (offline; it never connects to anything). 
 page's own code.
 
 1. **Validate the file offline.** Keep the backup file you mean to restore. `check` (step 4) validates
-   it and prepares what is sent exactly as the page does: formats 5 to 7 are converted to format 8 (a format-7 file has no queues; a format-6
+   it and prepares what is sent exactly as the page does: formats 5 to 8 are converted to format 9 (a format-8 file has no games, a format-7 file no queues; a format-6
    file has no collection updates, a format-5 file no episode marks either), and any `conversion` or `recovery`
    section is left out. The file itself is never changed.
 2. **Confirm the destination account.** In the SQL Editor:
@@ -26,7 +26,7 @@ page's own code.
    validates the safety backup and the file, prepares the document to send, then compares it with the
    safety backup for identity loss. **Any finding stops the runbook. There is no override:** bypassing the identity-loss refusal would be
    removing a safeguard, which needs its own proposal and the owner's explicit authorization.
-5. **Restore.** `node tools/admin-restore.mjs restore-sql --file <the checked or prepared format-8 file> --owner <id> --email <email> --run <fresh run id>`
+5. **Restore.** `node tools/admin-restore.mjs restore-sql --file <the checked or prepared format-9 file> --owner <id> --email <email> --run <fresh run id>`
    prints one transaction: a run label, the destination check (that id is that email and a
    member), then `restore_backup` as that member. Check the printed file hash, paste, run.
 6. **Verify.** Export again (step 3's query) as `after.json`, then

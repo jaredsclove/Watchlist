@@ -82,6 +82,6 @@ administrative access.
 
 - The owner is a member like any other and recovers the same way, using the dashboard.
 - Losing the Supabase account itself (its sign-in, its MFA) is Supabase account recovery, outside the app. The
-  format-8 backups (format 7 before Q1, format 6 before CU1, format 5 before EP1) remain the library's safety net.
+  format-9 backups (format 8 before G1, format 7 before Q1, format 6 before CU1, format 5 before EP1) remain the library's safety net.
 - Self-service "forgot password" by email is not offered. It would need email delivery (custom SMTP) and could be
   added later without other changes.

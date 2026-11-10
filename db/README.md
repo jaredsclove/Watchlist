@@ -24,6 +24,10 @@ To rebuild a local database, the order is the replay in `tools/db-rehearsal-cu1e
 | Simplification | `simplify_restore_cleanup.sql` (`watchlist.simplify_run`), applied in production and refused on a rerun: one flat `restore_backup`, the old chain, 36 dormant functions and the six archive and rollback tables removed. `simplify_preflight.sql` is its read-only check and the private archive export. Local builds include it through `tools/restore-fixture.mjs` |
 | Q1 | `q1_queues.sql` (`watchlist.q1_run`): the queue tables, their functions, completion and identity triggers, `restore_backup` at format 8, phase `contracted-q1`. Local tests: `tools/q1-test.mjs`, `tools/q1-local-api-test.mjs`; the restore suite and both tools apply it after the simplification. Its triggers (completion, identity) delete or move queue rows with the write flag set for themselves, and put the flag back. Queue entries guard inserts and updates only, so a film's direct delete cascades to them; lock order everywhere is library rows, then the queue tables, then the member's queue lock |
 
+| G1 | `g1_games.sql` (`watchlist.g1_run`): the six game tables and the IGDB cache, their functions, `queue_entries.game_entry_id` (exactly one of a show, a library row or a game), `library_queue_add_game` and `library_queue_set_order` (a whole queue's order in one guarded write), completion (a game set to Finished leaves every queue), `restore_backup` at format 9, phase `contracted-g1`. Every existing row is fingerprinted unchanged. Local tests: `tools/g1-test.mjs`, `tools/g1-local-api-test.mjs`; the restore suite applies it after Q1. Lock order: a game entry's row, then the member's games lock (`private.g1_lock`) or the queue lock |
+
+The `igdb` Edge Function (`supabase/functions/igdb`, deployed with `verify_jwt = false`, `supabase/config.toml`) is the page's only route to IGDB; its secrets `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` are set in the dashboard by the owner. It checks membership itself through `rpc/stage5_capabilities` with the caller's token. Offline: `tests/igdb-proxy.test.mjs`; on a local stack: `tools/g1-local-api-test.mjs`. `tools/igdb-feasibility.mjs` runs read-only IGDB requests from this machine with a credential file kept outside the repo.
+
 The local replays leave out W1 and its removal: the removal's test showed the catalog afterwards equals the one before W1, so together they add nothing to the state a replay needs.
 
 Conventions for a migration: one transaction; a run label and lock first, then its preconditions; a run id in the preamble, recorded in
@@ -46,6 +50,8 @@ ended; never rerun to find out); explicit revokes from `anon`, verified before c
 
 Local tools:
 - `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/q1-test.mjs`: Q1 (queues) on PGlite, and simultaneous saves on real PostgreSQL with `PG_BIN`.
+- `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/g1-test.mjs`: G1 (games) on PGlite, and simultaneous saves on real PostgreSQL with `PG_BIN`.
+- `LOCAL_SERVICE_KEY=<key> node tools/g1-local-api-test.mjs --api http://127.0.0.1:54321 --key <key> --container <db container> --project <a folder under $HOME with the stack's supabase/config.toml>`: G1 through real Auth, PostgREST and the Edge Function runtime (a fake IGDB; Colima mounts only the home folder, so the function's folder must be there).
 - `LOCAL_SERVICE_KEY=<key> node tools/q1-local-api-test.mjs --api http://127.0.0.1:54321 --key <key> --container <db container>`: Q1 through real Auth and PostgREST on a fresh local stack.
 - `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/restore-test.mjs`: the restore suite. Without `PG_BIN` it skips the concurrency and timing checks on real PostgreSQL, with a notice.
 - `PGLITE_DIR=<dir> node tools/db-rehearsal-cu1.mjs --backup <format-6 file>`: CU1 through CU1e and CU2. It ends by reversing its migrations, so it tests those historical states, not the final one.

@@ -69,6 +69,53 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   whole leaves that queue; a whole-show entry of the show the season emptied is carried to where it went (another show, or the
   film it became), a duplicate merged into the entry already there at its place; Match reports any such queue change.
   Deleting a film, season or show removes its entries. A change made from the queue reads it again once it ends.
+- **Games (G1, item 5; `games.js`, `games-data.js`, `db/g1_games.sql`):** the app bar's Games (`#/games`, `#/games/franchises`,
+  `#/games/collections`) has three views. **Library:** each saved game version (an IGDB record) with its platform line, status
+  (Want to play, Playing, Paused, Finished, Skipped; a select), priority (⋯; ★ High, Low), genres (chips that filter), separate
+  source-labelled scores ("Critics 87 · IGDB (9)", "Players 78 · IGDB (258)") and length for the member's play style ("6 h ·
+  IGDB", "Estimate unreliable", "Length unknown"); search, Genre and Status filters (default All except Skipped); Sort with
+  Title, Release date, Status, Priority, Critic score, Player score and Length (item 13's sort line and remembering). **Platforms**
+  (Settings → Games, with the play style; one row in the database, so they follow the member and are in backups; read once at
+  sign-in, so opening Settings reads nothing): a game shows only when a qualifying release on a chosen platform exists; with PS5
+  chosen, a released PS4 game counts as "PS4 · Playable on PS5" with its PS4 date unless it is on Sony's PS4-only list
+  (`games-data.js`, with the date checked). Hidden games keep their status, priority, collections and queue places and come back
+  when a chosen platform has them; a note counts them. **Release rule** (owner, 2026-11-10): a qualifying row (Full Release or
+  no status; never beta, alpha, early or advanced access, a compatibility listing, an optimization patch, offline or cancelled)
+  with a full date on a chosen platform (North America or Worldwide rows first) is playable on that date, labelled "PS5 · Oct 23,
+  2026 · per IGDB"; a month, quarter, year or TBA never becomes playable by its period ending and stays under Coming; Store or
+  publisher evidence recorded with research access (Details) confirms availability at the precision it gives ("· Store or
+  publisher"). **Not out yet** (⋯, and beside a franchise's Up next; every member) holds that one platform release out of the
+  member's Up next while IGDB's row keeps that date and precision; a changed row ends it by itself; "It's out" ends it.
+  **Franchises:** following is explicit (a game's ⋯ or + Add game) and saving follows nothing. A followed franchise (an IGDB
+  series) is a collapsed row: "Up next: <version> · <platform line>" or Caught up, and "Coming: …" (+N more). Up next is the earliest
+  counted spot, by its original's release date, that isn't Finished or skipped and has a playable version: the member's saved
+  version first (Playing, Paused, Want to play), else a native release, else one playable through compatibility. A spot is an
+  original with its remasters and remakes (separate games, saved and queued on their own; finishing any completes the spot) and
+  its plain ports (IGDB records typed Port of that version, joined to its saved entry, their dates kept per platform). A Skipped
+  version is passed over alone; "Skip this spot" passes the whole spot. Main-series games count (IGDB's series membership
+  Member); spin-offs count once "Count it toward Caught up" is chosen. Coming lists announced releases on a chosen platform for
+  counted spots not done, and a native edition coming for any version (a native PS5 release after a finished PS4 version) without
+  moving the franchise off Caught up. **Refresh** reads each followed series' membership (new games) and every known record
+  (new platform rows, dates, ports), saves the cache, joins new plain ports to saved games (guarded by what was read) and reports
+  new titles under Coming and Up next changes; it adds nothing to Want to play or a queue. **Review** lists saved games whose IGDB
+  spot changed, or that sit on an ambiguous chain (a remaster of a port); nothing changes until the member picks "Use IGDB's"
+  (a guarded relink) or "Keep mine" (kept until IGDB changes again). **Collections:** private, hand-made game collections
+  (create, rename, delete, add from a game's ⋯, Remove); membership is independent of queues, following and status. **Details:**
+  IGDB's release rows (with the ones that don't count named), the three lengths with their submission count, a "Search
+  HowLongToBeat" link and the PlayStation Store page when IGDB lists one. **IGDB** is reached only through the `igdb` function
+  (`supabase/functions/igdb`): it holds the client secret, answers only members (it asks PostgREST's `stage5_capabilities` with
+  the caller's token), and passes an allow-list of read-only queries; the page caches what it reads per member (`game_titles`,
+  replaceable, never in backups; `library_game_titles_purge` empties it). **Backups** hold IGDB ids and the provider's titles
+  and dates only as the member's own record of what they saved and decided (the Twitch Developer Services Agreement lets the
+  data serve the end user and bars sharing it with third parties; a downloaded backup is the member's own file; the database
+  copy can be deleted on request; that downloaded files can't be recalled is the accepted residual).
+- **Games in queues (G1):** Add to queue… in a game's ⋯; the entry reads "Game · <platform line>" with the status select.
+  Adding changes no status; setting a game to Finished takes it out of every queue (the database, in the same transaction); it
+  can be queued again for a replay. A game on none of the member's platforms is hidden in the queue ("+N hidden") and keeps its
+  numbered place: moving a shown entry puts the shown ones back into the other places in their new order, saved as one guarded
+  write of the whole order (`library_queue_set_order`, with the order the page has, hidden entries included). Example: [Dune,
+  hidden Switch game, Severance S2, Astro Bot] with Astro Bot to the top is [Astro Bot, hidden, Dune, Severance S2]; Dune to
+  the bottom is [Severance S2, hidden, Astro Bot, Dune]. A queue with nothing hidden moves as before (`library_queue_move`).
 - **Show ended (UI polish 2):** set in a show's Details, not the expanded show. It is part of Details' draft: Cancel
   discards it, Save sends what changed, the categories (`library_set_metadata_b45`) and then Show ended
   (`library_set_show_state_b45`), each with its own expected values, in one write lane; not one transaction. Save with
@@ -194,7 +241,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   (anything but true hides the controls) and a `research_not_enabled` refusal; the database decides. Review offers "Continue
   applying imported updates", on a click only, for findings an interrupted import left unevaluated (research; new season, date or
   alias; pending with no reason; record still present): the automatic rules (`p_review` false) on a fresh read.
-- **Data:** `watch_queues` and `queue_entries` (Q1), `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
+- **Data:** `game_settings`, `game_entries`, `game_follows`, `game_decisions`, `game_collections`, `game_collection_members` and the
+  cache `game_titles` (G1), `watch_queues` and `queue_entries` (Q1), `watchlist_items` (seasons and films), `tv_shows`, `custom_collections`,
   `personal_collections`, `collection_memberships`, `watch_with_choices`, `catalog_show_links`,
   `catalog_film_links`, `episode_marks` (watched episodes of TMDB-matched seasons; no dates or titles), and since
   CU1 `update_setup`, `collection_definitions`, `collection_exclusions`, `update_holds`, `record_aliases`,
@@ -207,10 +255,10 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   `library_cu_sync_show_network`, `delete_tv_season`, `restore_backup`).
   Some take `p_expected` values and refuse a stale write; not every path does, so check each one before relying
   on it. `delete_tv_season` takes the mark count the page showed: a page from before EP1 can't delete a marked season.
-- **Backup** is format 8 (twenty-one tables: format 7's nineteen — format 6's nine plus collection updates' ten — plus the
-  two queue tables, with both orders; no `user_id`). **Restore** converts a file of format 5 to 7 to format 8 first (a
-  format-5 file has no marks, a format-6 file no collection updates, a format-7 file no queues; the preview says what a
-  restore removes) and leaves out any `conversion` or `recovery` section an old file carries, saying so.
+- **Backup** is format 9 (twenty-seven tables: format 8's twenty-one — format 7's nineteen plus the two queue tables, with
+  both orders — plus six game tables; queue entries carry `game_entry_id`; no `user_id`; never the IGDB cache). **Restore**
+  converts a file of format 5 to 8 to format 9 first (a format-5 file has no marks, a format-6 file no collection updates, a
+  format-7 file no queues, a format-8 file no games; the preview says what a restore removes) and leaves out any `conversion` or `recovery` section an old file carries, saying so.
   Formats 1 to 4 are refused (`docs/ADMIN_RESTORE.md` has the offline route). It validates the file, checks for identity loss, makes and validates a safety backup,
   then replaces the owner's rows in one database transaction and verifies field by field.
 
