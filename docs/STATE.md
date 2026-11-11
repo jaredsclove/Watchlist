@@ -27,18 +27,23 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Games walkthrough fixes (PR #73,
-  `215a409`), 2026-11-11 UTC, presentation tier: an expanded franchise lists only versions with a release on a chosen platform
-  (PS4 playable on PS5, upcoming and TBA included) and no spot left without one, as visibility only (progress, Up next, Caught
-  up and Coming use every version); a saved version's status there is the Library's select and guarded change; the Library's
-  usual order stays High first, then A to Z (owner's decision: status plays no part). Cache token `20261111-franchisefix` (33
-  versioned files). Verified: 58 offline suites (1391; four new tests: platform filtering with switching back and forth, the
-  franchise status control with the walkthrough's sequence and focus, the order on redraw, reread and Refresh); a local
-  synthetic Chrome check (keyboard changes on rows and 820 px cards, Save by keyboard, 390 and 820 px without overflow,
-  platforms PS5 → Switch → PS4 → PS5 through Settings with no saved row changed). Pages built; the changed files byte-identical
-  to `main`. Live on the owner's account, read-only: Uncharted expanded shows no PS3 original, Golden Abyss or "Not on your
-  platforms" line (7 versions hidden, noted) and status selects on saved versions; no status was changed live.
-- Previous release: genre colour families (PR #71, `78cb7fd`), 2026-11-11 UTC: genre pills in six muted families on TV, films
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Franchise / release order (owner's
+  plan with two amendments; PR #75, `63dd87a`), 2026-11-11 UTC, presentation tier: the default order of the Games Library and
+  each game collection groups saved games by broad franchise (IGDB `franchises` from the cache: the stored spot's records first,
+  then the game's own; main `franchise` when read, else A to Z then id; a series the same way; else alone under its title; never
+  by library counts), franchises and standalone games A to Z, whole spots by original date (unknown last), title and id, each
+  original before its remasters and remakes; a small heading over two or more visible games. An explicit sort lists the whole
+  list without headings, ties in this order; game collections have their own remembered Sort. IGDB's main franchise is read with
+  each record from now on (no function deploy: fields aren't allow-listed). Cache token `20261111-franchiseorder`. No schema,
+  backup or saved-data change. Verified: a read-only look at the owner's production cache first (every saved record lists its
+  franchise); 58 offline suites (1397; six new tests); a local synthetic Chrome check (keyboard Sort and Reset, filters, Refresh
+  moving a game with focus kept, 390 and 820 px, a sort saved before the release, a collection's own sort). Pages built; the
+  changed files byte-identical to `main`. Live on the owner's account, read-only: Uncharted under one heading in release order,
+  Grand Theft Auto VI and 007 First Light as single rows by franchise name. Not verified live: game collections (the owner has
+  none); headings in dark mode.
+- Previous release: Games walkthrough fixes (PR #73, `215a409`), 2026-11-11 UTC: franchises list only versions on the chosen
+  platforms; a saved version's status is editable in its franchise row.
+- Earlier: genre colour families (PR #71, `78cb7fd`), 2026-11-11 UTC: genre pills in six muted families on TV, films
   and games.
 - Earlier: Games drawn as TV (PR #69, `8579546`), 2026-11-11 UTC: TV's tabs, toolbar, rows and cards for Games.
 - Earlier: Search your games caret fix (PR #67, `2dfba5b`), 2026-11-11 UTC: the screen's focus record keeps a text
