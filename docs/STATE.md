@@ -27,7 +27,18 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: games (G1, item 5; PR #60,
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: game length removed (owner's
+  decision; PR #62, `ef444b1`, then the function in PR #63, `5587a0b`), 2026-11-10/11 UTC, presentation tier with a function
+  redeploy: no time-to-beat reads, estimates, play-style setting, Length sort or HowLongToBeat link; no migration and no backup
+  format change (`game_settings.play_style` stays as a legacy value, sent back unchanged). Rollout: the page first (cache token
+  `20261110-nolength`, 33 versioned files; Pages built; the 11 changed files byte-identical to `main`), then, after the 10-minute
+  cache window, the `igdb` function (version 2) without `game_time_to_beats`, except that such a query from a page opened before
+  the change is answered with an empty list and never sent to IGDB (temporary; the pre-change page, run offline against it,
+  completed search, add, follow and Refresh). Verified: 57 offline suites (1378); the restore suite (182); a local synthetic
+  browser check (a remembered "Length, then Critic" sort became Critic alone); live on the owner's account: Settings showing
+  PS5 with no play style, IGDB search, preview, save and Refresh through the new function and with the old one, an old-style
+  batch answered empty; the temporary game and the IGDB cache removed; the backups before and after identical in every table.
+- Previous release: games (G1, item 5; PR #60,
   `5ada6c4`), released 2026-11-10 UTC, schema tier: the Games area (Library, Franchises, Collections), Settings → Games
   (platforms, play style; games research with research access), games in queues with hidden games keeping their places,
   backup format 9. The `igdb` Edge Function was deployed first (`verify_jwt` off; the owner set its two secrets); it answered
@@ -40,7 +51,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
   owner's account only: PS5 set (the one lasting change), an IGDB search and save through the function, a temporary "ZZ Games
   Test" queue with a film reordered, Finished taking the game out, everything made removed and the IGDB cache purged; the
   backups before (format 8) and after (format 9) identical in every table but the new settings row.
-- Previous release: sorting library views (item 13; PR #58, `2dc1256`), 2026-11-10 UTC, presentation tier; Q1 (item 7; PR #56)
+- Earlier: sorting library views (item 13; PR #58, `2dc1256`), 2026-11-10 UTC, presentation tier; Q1 (item 7; PR #56)
   2026-11-05 UTC.
 - Database phase `contracted-g1`, backup format 9 (twenty-seven tables, no `user_id`, never the IGDB cache), `access = members`, research per member. One flat
   `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one
@@ -132,6 +143,9 @@ migration, merge after the migration's run record is confirmed.
   franchise Up next on production data. (Game length, whose IGDB figures were unreliable, was removed by the owner's decision on
   2026-11-10.) Unresolved provider-terms point: whether the Twitch agreement's deletion duty reaches backup
   files members have downloaded (`docs/APP_BEHAVIOR.md`, "Games").
+- Temporary: the `igdb` function answers `game_time_to_beats` with an empty list for pages opened before game length was
+  removed (`EMPTY_ENDPOINTS` in `supabase/functions/igdb/core.mjs`). Remove it in a later function deploy, once no such page can
+  still be open.
 - Pre-existing (seen in Q1's review): a film with collection-update records of its own (an alias, a hold, a remembered removal)
   can't be deleted from the page, because those tables guard deletes; queue entries don't add to this.
 
