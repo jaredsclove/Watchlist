@@ -119,7 +119,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   version first (Playing, Paused, Want to play), else a native release, else one playable through compatibility. A spot is an
   original with its remasters and remakes (separate games, saved and queued on their own; finishing any completes the spot) and
   its plain ports (IGDB records typed Port of that version, joined to its saved entry, their dates kept per platform). A Skipped
-  version is passed over alone; "Skip this spot" passes the whole spot. Main-series games count (IGDB's series membership
+  version is passed over alone; "Skip all versions" (undone with "Unskip all versions"; labelled "All versions skipped";
+  the `skip_spot` decision) leaves the whole game, every version, out of Up next and Caught up until undone. The page says
+  "game" and "versions" rather than "spot" (owner, 2026-11-11): finishing any version counts the game as done. Main-series games count (IGDB's series membership
   Member); spin-offs count once "Count it toward Caught up" is chosen. Coming lists announced releases on a chosen platform for
   counted spots not done, and a native edition coming for any version (a native PS5 release after a finished PS4 version) without
   moving the franchise off Caught up. **Refresh** reads each followed series' membership (new games) and every known record
@@ -141,8 +143,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   before its research date; a file with any finding of the wrong shape is refused whole. Availability and compatibility
   findings become decisions at once (Available at the precision the source gives; or a Not out yet hold carrying the
   evidence, for a release not out yet or a PS4 game Sony's Store lists as PS4 only); relationship and series-role findings are
-  kept and offered in Games → Review ("Join it as a port", "Use research's spot", "Count it toward Caught up", "Skip this
-  spot", or Dismiss), and an unsaved version already follows a relationship finding in its franchise. A decision that carries
+  kept and offered in Games → Review ("Join it as a port", "Use research's answer", "Count it toward Caught up", "Skip all
+  versions", or Dismiss), and an unsaved version already follows a relationship finding in its franchise. A decision that carries
   evidence is research: the database refuses it without research access. Evidence content is Claude's assessment, shown as
   such; the page checks its shape only. **Backups (format 9)** carry the member's own game records: `game_settings`
   (platforms, and the legacy `play_style`), `game_entries` (IGDB id, spot and joined port ids, the title as saved from IGDB, status, priority,
