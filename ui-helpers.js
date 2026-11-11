@@ -1,3 +1,27 @@
+// ─── Genre colour families (owner, 2026-11-11) ────────────────────────────────
+// One muted colour per family of related genres, the same wherever a genre pill is drawn (TV and film rows and
+// cards, render.js metadataChipsHtml; games, games.js gameGenrePillsHtml). Colour only supplements the label:
+// the text, filtering, overflow and focus are unchanged. A label is matched loosely (case, "&" / "and",
+// punctuation and brackets don't matter), so "Role-playing (RPG)", "RPG" and "Role-playing" are one genre.
+// Anything not listed, and History, War, Western and Politics (owner's choice), stay neutral gray.
+// Maintenance: add a label (or an alias spelling) to its family's list. Colours: styles.css --chip-g-*.
+const GENRE_FAMILIES = {
+  rust: ['Action', 'Adventure', 'Action & Adventure', 'Shooter', 'Fighting', 'Platform', 'Platformer', 'Hack and slash/Beat \'em up',
+    'Hack and slash', 'Beat \'em up', 'Arcade'],
+  violet: ['Science Fiction', 'Sci-Fi', 'Sci-fi', 'Fantasy', 'Sci-Fi & Fantasy', 'Role-playing (RPG)', 'Role-playing', 'RPG', 'Role-playing game'],
+  rose: ['Comedy', 'Romance', 'Family', 'Kids'],
+  slate: ['Drama', 'Crime', 'Mystery', 'Thriller', 'Horror', 'Point-and-click', 'Visual Novel'],
+  sage: ['Puzzle', 'Strategy', 'Real Time Strategy (RTS)', 'Real-time strategy', 'RTS', 'Turn-based strategy (TBS)', 'Turn-based strategy', 'TBS',
+    'Tactical', 'Simulator', 'Simulation', 'Card & Board Game', 'Card and board game', 'Quiz/Trivia', 'MOBA'],
+  sky: ['Sport', 'Sports', 'Racing', 'Music', 'Musical', 'Pinball']
+};
+function genreKey(label) {
+  return String(label == null ? '' : label).toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+const GENRE_FAMILY_OF = new Map(Object.entries(GENRE_FAMILIES).flatMap(([family, labels]) => labels.map(l => [genreKey(l), family])));
+// The family a genre label belongs to, or 'other' (neutral gray).
+function genreFamily(label) { return GENRE_FAMILY_OF.get(genreKey(label)) || 'other'; }
+
 // Hardcoded network colors; unknown networks fall back to a hashed color.
 function networkColor(name) {
   if (NETWORK_COLORS[name]) return NETWORK_COLORS[name];

@@ -158,7 +158,7 @@ test('genres: a clickable one stays a filter button with the pills\' hover and f
   const app = await boot(all(a));
   app.ctx.switchView('alltv'); await settle();
   const h = rowOf(app, a.show.id);
-  assert.match(h, /<button type="button" class="badge meta-chip meta-genres badge-clickable filter-pill"[^>]*data-filter-kind="genres" data-filter-value="Crime"/);
+  assert.match(h, /<button type="button" class="badge meta-chip meta-genres g-slate badge-clickable filter-pill"[^>]*data-filter-kind="genres" data-filter-value="Crime"/);
   assert.strictEqual(app.get("filterPillHtml('watchwith', 'x', 'X', { cls: 'ww-tag' })").startsWith('<span'), app.el('fWatchWith') === null, 'no filter control, no button');
   assert.match(css, /\.filter-pill:focus-visible \{ outline: 2px solid var\(--accent\);/);
   assert.match(phone, /\.filter-pill \{ min-height: 32px;/);

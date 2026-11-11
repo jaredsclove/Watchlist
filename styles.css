@@ -917,6 +917,17 @@ button.meta-more:focus-visible { outline: 2px solid var(--accent); outline-offse
 .meta-chip.meta-forms { background: var(--chip-form-bg); color: var(--chip-form-fg); border-color: var(--chip-form-border); }
 .meta-chip.meta-franchises { background: var(--chip-fr-bg); color: var(--chip-fr-fg); border-color: var(--chip-fr-border); }
 .meta-chip.meta-genres { background: var(--chip-genre-bg); color: var(--chip-genre-fg); border-color: var(--chip-genre-border); }
+/* Genre colour families (ui-helpers.js GENRE_FAMILIES): muted, opaque tints, quieter than the network, franchise (amber) and
+   form (teal) chips; an unmapped genre keeps the gray above. tests/genre-colors.test.js checks the text at 4.5:1 or more on the
+   rendered pill (plain, hover, pressed) in both themes. */
+:root { --chip-g-rust-bg: #2e1f1a; --chip-g-rust-fg: #e3a993; --chip-g-rust-border: #4a3027; --chip-g-violet-bg: #251f33; --chip-g-violet-fg: #c6b3f2; --chip-g-violet-border: #3b3150; --chip-g-rose-bg: #2f1d26; --chip-g-rose-fg: #e8a9c3; --chip-g-rose-border: #4a2e3c; --chip-g-slate-bg: #1c2433; --chip-g-slate-fg: #adc0e2; --chip-g-slate-border: #2e3b52; --chip-g-sage-bg: #1c2a22; --chip-g-sage-fg: #a2d1b0; --chip-g-sage-border: #2d4436; --chip-g-sky-bg: #182a33; --chip-g-sky-fg: #93cde7; --chip-g-sky-border: #274351; }
+@media (prefers-color-scheme: light) { :root { --chip-g-rust-bg: #f8ece7; --chip-g-rust-fg: #8a3a1f; --chip-g-rust-border: #e9d0c5; --chip-g-violet-bg: #f1ecfa; --chip-g-violet-fg: #5a3d9e; --chip-g-violet-border: #dbcff0; --chip-g-rose-bg: #faebf1; --chip-g-rose-fg: #8c2d57; --chip-g-rose-border: #edccda; --chip-g-slate-bg: #e9eef7; --chip-g-slate-fg: #33507d; --chip-g-slate-border: #cfd9ea; --chip-g-sage-bg: #e8f3ec; --chip-g-sage-fg: #2c6942; --chip-g-sage-border: #c9e1d1; --chip-g-sky-bg: #e5f2f8; --chip-g-sky-fg: #1d5e7b; --chip-g-sky-border: #c5dfeb; } }
+.meta-chip.meta-genres.g-rust { background: var(--chip-g-rust-bg); color: var(--chip-g-rust-fg); border-color: var(--chip-g-rust-border); }
+.meta-chip.meta-genres.g-violet { background: var(--chip-g-violet-bg); color: var(--chip-g-violet-fg); border-color: var(--chip-g-violet-border); }
+.meta-chip.meta-genres.g-rose { background: var(--chip-g-rose-bg); color: var(--chip-g-rose-fg); border-color: var(--chip-g-rose-border); }
+.meta-chip.meta-genres.g-slate { background: var(--chip-g-slate-bg); color: var(--chip-g-slate-fg); border-color: var(--chip-g-slate-border); }
+.meta-chip.meta-genres.g-sage { background: var(--chip-g-sage-bg); color: var(--chip-g-sage-fg); border-color: var(--chip-g-sage-border); }
+.meta-chip.meta-genres.g-sky { background: var(--chip-g-sky-bg); color: var(--chip-g-sky-fg); border-color: var(--chip-g-sky-border); }
 td > :is(.meta-chip, .meta-more):not(:last-child) { margin-right: 4px; }
 @media (min-width: 1100px) {
   /* A genre keeps its 24 px target on a row without making the pill or the row taller. */

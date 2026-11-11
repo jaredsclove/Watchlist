@@ -135,7 +135,7 @@ test('text chips (no filter control in the view) keep the same classes and netwo
   assert.strictEqual(app.ctx.document.getElementById('fNetwork'), null, 'All Movies has no network filter');
   const out = app.ctx.metadataChipsHtml(meta(['Drama'], [], [], 'HBO'), 'x');
   assert.ok(/<span class="badge meta-chip meta-network" style="background:#8b5cf622; color:#[0-9a-f]{6}; border-color:#8b5cf655">HBO<\/span>/.test(out), out);
-  assert.ok(/<button type="button" class="badge meta-chip meta-genres badge-clickable filter-pill"/.test(out), 'genre stays a filter pill');
+  assert.ok(/<button type="button" class="badge meta-chip meta-genres g-slate badge-clickable filter-pill"/.test(out), 'genre stays a filter pill (Drama: its colour family)');
 });
 
 test('filtering: a network chip toggles its filter, shows the pressed state and keeps its colours', async () => {
