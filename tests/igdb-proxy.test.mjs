@@ -76,7 +76,6 @@ const answer = async r => ({ status: r.status, body: await r.json().catch(() => 
     ['a body too long', { queries: [Q('x', 'games', `fields ${'a,'.repeat(5000)}id;`)] }],
     ['an unknown clause', { queries: [Q('x', 'games', 'fields id; delete everything;')] }],
     ['a limit over 500', { queries: [Q('x', 'games', 'fields id; limit 501;')] }], ['a query without a name', { queries: [{ endpoint: 'games', body: 'fields id;' }] }],
-    ['time to beat (removed with game length)', { queries: [Q('x', 'game_time_to_beats', 'fields id;')] }],
     ['not JSON', null]]) {
     const r = body === null ? await answer(await handle(new Request('https://fn.test/igdb', { method: 'POST', headers: { Authorization: `Bearer ${MEMBER}`, apikey: KEY }, body: 'not json' }), ENV, n.deps())) : await send(body);
     ok(r.status === 400 && r.body.error === 'invalid_request', `${label}: refused`, JSON.stringify(r.body));
@@ -120,6 +119,24 @@ const answer = async r => ({ status: r.status, body: await r.json().catch(() => 
   resetTokenCache();
   const r6 = await answer(await handle(req(MEMBER, search), { ...ENV, IGDB_CLIENT_SECRET: '' }, network().deps()));
   ok(r6.status === 502 && r6.body.error === 'igdb_not_configured', 'without secrets set: says it isn’t configured');
+}
+
+// ── Temporary compatibility: a page from before game length was removed ──
+{
+  resetTokenCache();
+  const n = network();
+  // That page's batch of records: games and time to beat together (its Refresh, add and follow).
+  const old = { queries: [Q('g0', 'games', 'fields id,name; where id = (1); limit 500;'), Q('t0', 'game_time_to_beats', 'fields game_id,hastily,normally,completely,count; where game_id = (1); limit 500;')] };
+  const r = await answer(await handle(req(MEMBER, old), ENV, n.deps()));
+  ok(r.status === 200 && r.body.results.map(x => x.name).join() === 'g0,t0' && r.body.results[1].data.length === 0 && r.body.results[0].data[0].name === 'ZZ Game',
+    'an older page’s records batch is answered: its games as usual, time to beat as an empty list', JSON.stringify(r.body));
+  ok(n.log.filter(l => l.url.startsWith(ENV.IGDB_BASE)).map(l => l.url.split('/').pop()).join() === 'games', 'time to beat is never asked of IGDB');
+  ok(n.sleeps.length === 0, 'and costs no rate-limit spacing');
+  const only = await answer(await handle(req(MEMBER, { queries: [Q('t', 'game_time_to_beats', 'fields id;')] }), network().deps ? ENV : ENV, network().deps()));
+  ok(only.status === 200 && only.body.results[0].data.length === 0, 'a time-to-beat query alone: an empty list');
+  const out = await answer(await handle(req(null, old), ENV, network().deps()));
+  ok(out.status === 401, 'still members only');
+  ok(queryProblem(Q('t', 'game_time_to_beats', 'fields id; delete x;')) !== null, 'its body is still checked');
 }
 
 console.log(`\n${passed}/${passed + failed} passed`);

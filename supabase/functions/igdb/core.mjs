@@ -10,6 +10,10 @@
 // IGDB or Twitch can't be reached or refuse. Pure: everything it reaches goes through deps.fetch (tests pass a fake).
 
 export const ENDPOINTS = ['games', 'release_dates', 'collections', 'collection_memberships', 'platforms', 'franchises', 'external_games'];
+// Temporary compatibility (2026-11-10, game length removed): a page from before that change, still open, sends a
+// game_time_to_beats query with every batch of records. It is answered with an empty list, without asking IGDB, so that page's
+// add, follow and Refresh still complete (it then shows "Length unknown"). Remove once no such page can be open.
+export const EMPTY_ENDPOINTS = ['game_time_to_beats'];
 export const MAX_QUERIES = 10;
 export const MAX_BODY = 8000;
 const TOKEN_URL_DEFAULT = 'https://id.twitch.tv/oauth2/token';
@@ -28,7 +32,7 @@ const json = (status, body) => new Response(JSON.stringify(body), { status, head
 // sort / limit / offset / exclude), and a limit of at most 500.
 export function queryProblem(q) {
   if (!q || typeof q !== 'object') return 'not an object';
-  if (!ENDPOINTS.includes(q.endpoint)) return `endpoint ${JSON.stringify(q.endpoint)} isn’t allowed`;
+  if (!ENDPOINTS.includes(q.endpoint) && !EMPTY_ENDPOINTS.includes(q.endpoint)) return `endpoint ${JSON.stringify(q.endpoint)} isn’t allowed`;
   if (typeof q.body !== 'string' || !q.body.trim() || q.body.length > MAX_BODY) return 'body missing or too long';
   const clauses = q.body.split(';').map(s => s.trim()).filter(Boolean);
   for (const c of clauses) {
@@ -99,9 +103,11 @@ export async function handle(req, env, deps) {
   }
   const results = [];
   try {
-    for (let i = 0; i < queries.length; i++) {
-      if (i) await d.sleep(SPACING_MS);
-      results.push(await igdb(env, d, queries[i], d.now()));
+    let asked = 0;
+    for (const q of queries) {
+      if (EMPTY_ENDPOINTS.includes(q.endpoint)) { results.push({ name: q.name, data: [] }); continue; } // (never sent to IGDB)
+      if (asked++) await d.sleep(SPACING_MS);
+      results.push(await igdb(env, d, q, d.now()));
     }
   } catch (e) {
     const m = String(e && e.message || e);
