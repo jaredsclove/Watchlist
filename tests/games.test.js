@@ -3,7 +3,7 @@
 // (native, "PS4 · Playable on PS5", Sony's PS4-only list, betas and patches left out), the release rule (a full date passing
 // on a selected platform, partial dates and TBA staying under Coming, Not out yet held only while IGDB's row is unchanged),
 // hiding games outside the selection, followed franchises (Up next, Caught up, Coming; versions sharing a spot; Skipped
-// versions; Skip this spot; spin-offs counted by choice; a native edition coming after a finished PS4 version), + Add game
+// versions; Skip all versions; spin-offs counted by choice; a native edition coming after a finished PS4 version), + Add game
 // (IGDB through the function; saving follows nothing; following saves nothing), mixed queues with hidden games keeping their
 // places (the worked example), Finished leaving queues, collections, genre filter and sort, Refresh (new titles under Coming,
 // joined ports, nothing added), review, and backups (format 9 without the IGDB cache; a restore shows saved games with IGDB
@@ -290,7 +290,7 @@ test('followed franchise: Up next through a remaster that became playable later 
   assert.deepStrictEqual(app.writes().filter(r => !/functions\/v1\/igdb/.test(r.url)).map(r => r.url), [], 'no database write (the IGDB function is a read)');
 });
 
-test('versions and spots: finishing the remaster completes the spot; a skipped original leaves its remaster eligible; Skip this spot passes the whole spot; a spin-off counts once chosen', async () => {
+test('versions and spots: finishing the remaster completes the spot; a skipped original leaves its remaster eligible; Skip all versions passes the whole game; a spin-off counts once chosen', async () => {
   const f = follow(1, 7001, 'ZZ War');
   const skipOriginal = await bootWith({ follows: [f], entries: [entry(1, 101, { status: 'skipped' })] });
   await openGames(skipOriginal, 'gamesfranchises');
@@ -306,7 +306,7 @@ test('versions and spots: finishing the remaster completes the spot; a skipped o
   assert.match(franchiseOf(app, f.id), /Up next: ZZ War Pocket/, 'a counted spin-off takes its place by original release');
   await app.ctx.toggleSkipSpot(130, false); await settle();
   await openGames(app, 'gamesfranchises');
-  assert.match(franchiseOf(app, f.id), /Up next: ZZ War \(2019\)/, 'Skip this spot passes over it');
+  assert.match(franchiseOf(app, f.id), /Up next: ZZ War \(2019\)/, 'Skip all versions passes over it');
   assert.deepStrictEqual(app.store.game_decisions.map(d => [d.kind, d.igdb_id]).sort(), [['include_spinoff', 130], ['skip_spot', 130]]);
   assert.strictEqual(app.store.game_entries[0].status, 'finished', 'decisions change no status');
 });
@@ -826,7 +826,7 @@ test('a saved game IGDB retypes (an edition, a bundle) keeps counting for its st
   assert.match(franchiseOf(app, f.id), /Up next: ZZ War \(2019\)/, 'the 2007 spot stays finished');
   assert.match(screen(app), /Review \(1\)/);
   app.ctx.openGamesReview(null);
-  assert.match(text(dialog(app)), /IGDB now lists “ZZ War 4 Remastered” as an edition of another record\. It still counts for its franchise spot/);
+  assert.match(text(dialog(app)), /IGDB now lists “ZZ War 4 Remastered” as an edition of another record\. It still counts as the same game in its franchise/);
   await app.ctx.reviewKeep(0); await settle();
   await openGames(app);
   assert.doesNotMatch(screen(app), /Review \(/, 'decided: not asked again while IGDB says the same');
@@ -1183,6 +1183,24 @@ test('one visible game of a franchise is placed by its own title; a second makes
     assert.deepStrictEqual(at(), [E(1), 'cremove']);
     assert.deepStrictEqual(app.store.game_entries.map(e => e.status), ['want', 'want', 'want', 'want', 'want'], 'statuses as set: nothing else changed');
   } finally { cleanOrderRaw(); }
+});
+
+test('franchise wording: Skip all versions and Unskip all versions (named for the game), All versions skipped, and a note in plain words; a single version’s Skipped stays separate', async () => {
+  const f = follow(1, 7001, 'ZZ War');
+  const app = await bootWith({ follows: [f], entries: [entry(1, 102, { spot: 101 }), entry(2, 110, { status: 'skipped' })] });
+  await openGames(app, 'gamesfranchises'); app.ctx.toggleFranchise(f.id);
+  const t = () => tableOf(app);
+  assert.match(t(), /data-gaction="skipspot-101" aria-label="Skip all versions of ZZ War 4" title="Leave this game and all its versions out of Up next and Caught up until you unskip it"[^>]*>Skip all versions<\/button>/);
+  assert.doesNotMatch(screen(app), /this spot|Spot skipped|share one spot/);
+  assert.match(text(screen(app)), /A game’s original, remasters and remakes are versions of that one game: finishing any version counts the game as done\. Skip all versions leaves the game out of Up next and Caught up until you unskip it; a single version set to Skipped is passed over on its own\./);
+  assert.match(t(), /data-gaction="status-v110"[\s\S]*?<option value="skipped" selected>Skipped<\/option>/, 'a version’s own Skipped is its status');
+  assert.doesNotMatch(text(screen(app)), /ZZ War \(2019\) 2019 All versions skipped/, 'one skipped version doesn’t skip the game');
+  await app.ctx.toggleSkipSpot(101, false); await settle();
+  assert.match(t(), /data-gaction="skipspot-101" aria-label="Unskip all versions of ZZ War 4" title="Count this game in Up next and Caught up again"[^>]*>Unskip all versions<\/button>/);
+  assert.match(text(screen(app)), /ZZ War 4 2007 All versions skipped/);
+  assert.deepStrictEqual(app.store.game_decisions.map(d => [d.kind, d.igdb_id]), [['skip_spot', 101]], 'the same saved decision as before');
+  await app.ctx.toggleSkipSpot(101, true); await settle();
+  assert.deepStrictEqual(app.store.game_decisions, [], 'Unskip all versions clears it');
 });
 
 T.run();

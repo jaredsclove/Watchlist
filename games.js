@@ -342,12 +342,14 @@ function franchiseParts(f, st) {
     : `<button class="btn btn-link" data-gaction="save-${v.rec.id}" onclick="saveGameRecord(${v.rec.id})">Save</button>`);
   const versionName = v => `${esc(v.rec.name)}${v.rec.type !== 'main' ? ` <span class="muted">(${esc(v.rec.type === 'standalone' ? 'standalone' : v.rec.type)})</span>` : ''}`;
   const versionLine = v => (v.avail.line ? gameLineHtml(v.avail.line) : '<span class="game-line muted">Not on your platforms</span>');
-  const spotLabel = s => (s.skipped ? 'Spot skipped' : s.finished ? 'Finished' : s.spinoff && !s.included ? 'Spin-off (not counted)' : s.spinoff ? 'Spin-off (counted)' : '');
-  const spotActions = s => `<button class="btn btn-link" data-gaction="skipspot-${s.id}" onclick="toggleSkipSpot(${s.id}, ${s.skipped})">${s.skipped ? 'Unskip this spot' : 'Skip this spot'}</button>${s.spinoff
+  const spotLabel = s => (s.skipped ? 'All versions skipped' : s.finished ? 'Finished' : s.spinoff && !s.included ? 'Spin-off (not counted)' : s.spinoff ? 'Spin-off (counted)' : '');
+  // Skip all versions (the skip_spot decision): this game, with its remasters and remakes, leaves Up next and Caught up until undone.
+  // (A single version's Skipped status is separate: that version alone is passed over.)
+  const spotActions = s => `<button class="btn btn-link" data-gaction="skipspot-${s.id}" aria-label="${esc(`${s.skipped ? 'Unskip' : 'Skip'} all versions of ${s.title}`)}" title="${s.skipped ? 'Count this game in Up next and Caught up again' : 'Leave this game and all its versions out of Up next and Caught up until you unskip it'}" onclick="toggleSkipSpot(${s.id}, ${s.skipped})">${s.skipped ? 'Unskip all versions' : 'Skip all versions'}</button>${s.spinoff
     ? ` <button class="btn btn-link" data-gaction="include-${s.id}" onclick="toggleIncludeSpinoff(${s.id}, ${s.included})">${s.included ? 'Don’t count it' : 'Count it toward Caught up'}</button>` : ''}`;
   const spotHead = s => `<span class="season-lbl spot-title">${esc(s.title)}</span> <span class="muted">${esc(s.first ? s.first.slice(0, 4) : 'TBA')}</span>${spotLabel(s) ? ` <span class="state-tag">${esc(spotLabel(s))}</span>` : ''}`;
   const hiddenNote = hiddenVersions ? ` ${countUnit(hiddenVersions, 'version isn’t', 'versions aren’t')} on your platforms, so ${hiddenVersions === 1 ? 'it is' : 'they are'} hidden here (${hiddenVersions === 1 ? 'its' : 'their'} progress still counts).` : '';
-  const note = `<p class="games-note">Main-series games count toward Caught up; spin-offs only when you count them. An original, a remaster and a remake share one spot: finishing any of them completes it.${hiddenNote}</p>`;
+  const note = `<p class="games-note">Main-series games count toward Caught up; spin-offs only when you count them. A game’s original, remasters and remakes are versions of that one game: finishing any version counts the game as done. Skip all versions leaves the game out of Up next and Caught up until you unskip it; a single version set to Skipped is passed over on its own.${hiddenNote}</p>`;
   const unfollow = `<button class="btn" data-gaction="unfollow" onclick="unfollowFranchise('${idArg}')">Stop following ${esc(f.name)}</button>`;
   const of = `data-follow-of="${id}"`;
   let row = `<tr class="show-group-row franchise-row" data-follow="${id}" onclick="toggleFranchise('${idArg}')">
@@ -584,7 +586,7 @@ function gamesAddPreviewHtml(a) {
     return on ? `<span class="game-state">Following ${esc(c.name)}</span>` : `<button class="btn" data-gaction="followc-${c.id}" onclick="followFranchise(${c.id}, '${jsArg(c.name)}')">Follow ${esc(c.name)}</button>`;
   }).join(' ');
   return `<div class="games-preview"><h3>${esc(pick.name)}</h3>
-    <p class="games-note">Versions of this game. An original, a remaster and a remake are separate games you can save and queue on their own; finishing any of them completes the franchise spot. Ports for another system join the version they port.</p>
+    <p class="games-note">Versions of this game. An original, a remaster and a remake are separate games you can save and queue on their own; finishing any of them counts this game as done in its franchise. Ports for another system join the version they port.</p>
     <ul class="spot-versions">${rows}</ul>
     ${follows ? `<div class="games-follow">${follows}</div>` : ''}
     <button class="btn-link" onclick="gamesAdd.pick = null; showGameDialog(renderGamesAddHtml())">← Back to results</button></div>`;
@@ -707,7 +709,7 @@ function setNotOutYet(igdbId, platform, dateKey, precision) {
   return setGameDecision('not_out_yet', igdbId, platform, { date: dateKey, precision }, `Not out yet on ${GAME_PLATFORM_LABEL[platform] || platform}`);
 }
 function clearNotOutYet(igdbId, platform) { return setGameDecision('not_out_yet', igdbId, platform, null, 'It’s out'); }
-function toggleSkipSpot(spotId, skipped) { return setGameDecision('skip_spot', spotId, '', skipped ? null : {}, skipped ? 'Unskip this spot' : 'Skip this spot'); }
+function toggleSkipSpot(spotId, skipped) { return setGameDecision('skip_spot', spotId, '', skipped ? null : {}, skipped ? 'Unskip all versions' : 'Skip all versions'); }
 function toggleIncludeSpinoff(spotId, included) { return setGameDecision('include_spinoff', spotId, '', included ? null : {}, included ? 'Don’t count the spin-off' : 'Count the spin-off'); }
 
 // ── Following ──
@@ -833,12 +835,12 @@ function gamesReviewItems(data) {
     if (gameRetyped(rec)) {
       const what = rec.versionParent ? 'an edition of another record' : `a ${rec.type}`;
       if (!(keep && keep.value && keep.value.retype === what)) items.push({ kind: 'retype', entry: e, rec, derived: e.spot_igdb_id, what,
-        text: `IGDB now lists “${rec.name}” as ${what}. It still counts for its franchise spot, with its status and queue places.` });
+        text: `IGDB now lists “${rec.name}” as ${what}. It still counts as the same game in its franchise, with its status and queue places.` });
       continue;
     }
     if (rec.parent && !cache.get(rec.parent)) continue; // (its original not read yet: nothing to compare until Refresh)
     if (gameAmbiguousChain(rec, cache) && !keep) {
-      items.push({ kind: 'chain', entry: e, rec, derived, text: `IGDB lists “${rec.name}” as a ${rec.type} of a port (${(cache.get(rec.parent) || {}).name || 'another record'}). It counts for the same franchise spot as ${(cache.get(derived) || {}).name || 'its original'}.` });
+      items.push({ kind: 'chain', entry: e, rec, derived, text: `IGDB lists “${rec.name}” as a ${rec.type} of a port (${(cache.get(rec.parent) || {}).name || 'another record'}). It counts as a version of the same game as ${(cache.get(derived) || {}).name || 'its original'}.` });
     } else if (derived !== e.spot_igdb_id && !kept) {
       items.push({ kind: 'spot', entry: e, rec, derived, text: `IGDB now places “${rec.name}” under ${(cache.get(derived) || {}).name || `IGDB ${derived}`}; your progress counts it under ${(cache.get(e.spot_igdb_id) || {}).name || `IGDB ${e.spot_igdb_id}`}.` });
     }

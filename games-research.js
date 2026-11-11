@@ -176,7 +176,7 @@ async function gamesImportFindings(text) {
 }
 
 // ── 3. Review: what research says about relationships and series roles ──
-// Kept as research decisions; nothing changes until the member chooses (Use research's / Count it / Skip this spot / Dismiss).
+// Kept as research decisions; nothing changes until the member chooses (Use research's / Count it / Skip all versions / Dismiss).
 function gamesResearchReviewItems(data) {
   const cache = data.cache, items = [];
   const savedBy = new Map(); data.entries.forEach(e => { savedBy.set(e.igdb_id, e); (e.port_ids || []).forEach(p => savedBy.set(p, e)); });
@@ -186,7 +186,7 @@ function gamesResearchReviewItems(data) {
       const entry = savedBy.get(d.igdb_id), targetEntry = d.value.target_igdb_id ? savedBy.get(d.value.target_igdb_id) : null;
       const spot = d.value.relation === 'own_spot' ? d.igdb_id : target ? gameAnchor(target, cache) : d.value.target_igdb_id;
       const name = rec ? rec.name : `IGDB ${d.igdb_id}`, tname = target ? target.name : `IGDB ${d.value.target_igdb_id}`;
-      const words = d.value.relation === 'own_spot' ? `is its own franchise spot` : d.value.relation === 'port_of' ? `is a port of ${tname}` : `counts for the same spot as ${tname}`;
+      const words = d.value.relation === 'own_spot' ? `is a game of its own in the franchise` : d.value.relation === 'port_of' ? `is a port of ${tname}` : `is a version of the same game as ${tname}`;
       let action = null;
       if (d.value.relation === 'port_of' && !entry && targetEntry && targetEntry.igdb_id !== d.igdb_id) action = { kind: 'join', entry: targetEntry };
       else if (entry && entry.igdb_id === d.igdb_id && entry.spot_igdb_id !== spot) action = { kind: 'spot', entry, spot };
@@ -200,7 +200,7 @@ function gamesResearchReviewItems(data) {
   }
   return items;
 }
-const gamesResearchActionLabel = a => (!a ? '' : a.kind === 'join' ? `Join it to “${a.entry.title}” as a port` : a.kind === 'spot' ? 'Use research’s spot' : a.kind === 'include' ? 'Count it toward Caught up' : 'Skip this spot');
+const gamesResearchActionLabel = a => (!a ? '' : a.kind === 'join' ? `Join it to “${a.entry.title}” as a port` : a.kind === 'spot' ? 'Use research’s answer' : a.kind === 'include' ? 'Count it toward Caught up' : 'Skip all versions');
 // The member's choice on a research item: apply it (a guarded relink, or a counting decision), then the finding is done.
 async function gamesResearchChoose(i, apply) {
   const it = gamesResearchReviewItems(gamesData)[i];
