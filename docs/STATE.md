@@ -28,13 +28,15 @@ membership enforcement, research permissions, holds, reliable backup and restore
 ## Production now
 
 - `main` is the source of truth; check it with `git ls-remote origin main`. Last release: genre colour families (owner's
-  plan; PR #71), 2026-11-11 UTC, presentation tier: genre pills on TV, films and games take one of six muted families
+  plan; PR #71, `78cb7fd`), 2026-11-11 UTC, presentation tier: genre pills on TV, films and games take one of six muted families
   (`GENRE_FAMILIES`, aliases included); History, War, Western, Politics and unmapped labels stay gray; network, franchise and
   form pills unchanged. Cache token `20261111-genrecolors` (33 versioned files). Verified: 58 offline suites (1387; the new
   suite checks the mapping, the same family everywhere, and 4.5:1 text on each rendered pill, plain, hovered and pressed, in
   both themes: worst 5.32:1, light sage hovered); a local synthetic Chrome check in the real light theme and a forced-dark
   preview copy (outside the repo) at desktop, 820 and 390 px, measuring every visible genre pill as rendered (worst 5.76:1
-  light, 7.38:1 dark), no page overflow, a pill pressed and cleared by keyboard with focus kept.
+  light, 7.38:1 dark), no page overflow, a pill pressed and cleared by keyboard with focus kept. Pages built; the changed files byte-identical to
+  `main`. Live on the owner's account, read-only, light theme: TV and Games genre pills in their families as rendered (worst
+  6.26:1); network, franchise and form pills unchanged. Dark was checked on the local preview only.
 - Previous release: Games drawn as TV (PR #69, `8579546`), 2026-11-11 UTC: TV's tabs, toolbar, rows and cards for Games.
 - Earlier: Search your games caret fix (PR #67, `2dfba5b`), 2026-11-11 UTC: the screen's focus record keeps a text
   box's caret and selection.
