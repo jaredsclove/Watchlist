@@ -27,16 +27,16 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: + Add game's search box caret
-  fix (PR #65, `ebde4fe`), 2026-11-11 UTC, presentation tier: a search's redraws left the box focused with its caret at the start, so
-  Backspace did nothing and typing went in on the left; the Games dialog now keeps a focused text box's caret and selection
-  across a redraw, and a text box focused anew gets its caret at the end, as the Library search does. Cache token
-  `20261111-addcaret` (33 versioned files). Verified: 57 offline suites (1379, a new caret test failing without the fix); a
-  local synthetic Chrome check (typing, Backspace / Delete, arrows, Home / End, selecting and replacing, paste, Enter and
-  the Search button, the selection kept through the results). Pages built; the changed files byte-identical to `main`. Live
-  on the owner's account, IGDB searches only (nothing saved): the caret stayed at the end after Enter, Backspace / Delete /
-  arrows edited normally, and a selection survived a second search.
-- Previous release: game length removed (owner's
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Search your games caret fix
+  (PR #67), 2026-11-11 UTC, presentation tier: each keystroke redraws the Games screen, whose focus restore refocused the
+  new box with its caret at the start (and the filter's own end-of-text step then skipped a box already focused), so typing
+  went in on the left; the screen's focus record now keeps a text box's caret and selection. PR #65 had fixed only the
+  + Add game dialog. Cache token `20261111-gamescaret` (33 versioned files). Verified: 57 offline suites (1380, a new
+  Library search test failing without the fix); a local synthetic Chrome check (typing, Backspace / Delete, arrows,
+  Home / End, selecting and replacing, paste, select-all and delete, focus kept through every redraw).
+- Previous release: + Add game's search caret (PR #65, `ebde4fe`), 2026-11-11 UTC: the dialog keeps a focused text box's caret
+  and selection across a redraw; a text box focused anew gets its caret at the end.
+- Earlier: game length removed (owner's
   decision; PR #62, `ef444b1`, then the function in PR #63, `5587a0b`), 2026-11-10/11 UTC, presentation tier with a function
   redeploy: no time-to-beat reads, estimates, play-style setting, Length sort or HowLongToBeat link; no migration and no backup
   format change (`game_settings.play_style` stays as a legacy value, sent back unchanged). Rollout: the page first (cache token

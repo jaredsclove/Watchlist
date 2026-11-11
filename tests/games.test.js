@@ -259,22 +259,43 @@ test('+ Add game: IGDB through the function; the preview groups an original with
 
 // The harness's DOM keeps no caret: the search box gets one here (a browser's focus() leaves a
 // fresh input's caret at the start), and the dialog knows what it holds.
-function caretDom(app) {
+function caretDom(app, boxId = 'gAddSearch', value = () => app.get('gamesAdd').query, inside = 'gameDialogBox') {
   const doc = app.ctx.document, orig = doc.getElementById;
   doc.getElementById = id => {
     const e = orig(id);
-    if (e && id === 'gAddSearch' && !e.__caret) {
-      Object.assign(e, { __caret: true, tagName: 'INPUT', type: 'search', value: app.get('gamesAdd').query, selectionStart: 0, selectionEnd: 0, selectionDirection: 'none' });
+    if (e && id === boxId && !e.__caret) {
+      Object.assign(e, { __caret: true, tagName: 'INPUT', type: 'search', value: value(), selectionStart: 0, selectionEnd: 0, selectionDirection: 'none' });
       e.focus = () => { doc.activeElement = e; };
       e.setSelectionRange = (a, b, d) => Object.assign(e, { selectionStart: a, selectionEnd: b, selectionDirection: d || 'none' });
+      e.closest = sel => (sel === `#${inside}` ? orig(inside) : null);
+      e.getAttribute = () => null;
     }
     return e;
   };
-  const box = orig('gameDialogBox');
-  box.contains = n => !!n && n === orig('gAddSearch');
+  const box = orig(inside);
+  box.contains = n => !!n && n === orig(boxId);
   box.focus = () => { doc.activeElement = box; };
-  return () => doc.getElementById('gAddSearch');
+  return () => doc.getElementById(boxId);
 }
+
+test('Search your games: each keystroke’s redraw keeps the box focused with its caret and selection where they were', async () => {
+  const app = await bootWith({ igdb: igdbStub(), noCache: true });
+  await openGames(app);
+  const search = caretDom(app, 'gSearch', () => app.get('gamesFilters').search || '', 'gamesScreen'), doc = app.ctx.document;
+  let el = search(); el.focus();
+  // "zz wr" typed, then the caret moved back between "w" and "r" and "a" typed: "zz war".
+  for (const [v, at] of [['z', 1], ['zz', 2], ['zz w', 4], ['zz wr', 5], ['zz war', 5]]) {
+    el.value = v; el.setSelectionRange(at, at);
+    app.ctx.setGamesFilter('search', v);
+    const now = search();
+    assert.notStrictEqual(now, el, 'the screen was redrawn');
+    assert.strictEqual(doc.activeElement, now, `still focused after "${v}"`);
+    assert.deepStrictEqual([now.selectionStart, now.selectionEnd], [at, at], `the caret where it was after "${v}"`);
+    el = now;
+  }
+  el.setSelectionRange(3, 6, 'backward'); app.ctx.setGamesFilter('search', 'zz war');
+  assert.deepStrictEqual([search().selectionStart, search().selectionEnd, search().selectionDirection], [3, 6, 'backward'], 'a selection kept too');
+});
 
 test('+ Add game: the search box keeps its focus, caret and selection across a search’s redraws; focused anew, its caret is at the end', async () => {
   const app = await bootWith({ igdb: igdbStub(), noCache: true });
