@@ -28,12 +28,14 @@ membership enforcement, research permissions, holds, reliable backup and restore
 ## Production now
 
 - `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Search your games caret fix
-  (PR #67), 2026-11-11 UTC, presentation tier: each keystroke redraws the Games screen, whose focus restore refocused the
+  (PR #67, `2dfba5b`), 2026-11-11 UTC, presentation tier: each keystroke redraws the Games screen, whose focus restore refocused the
   new box with its caret at the start (and the filter's own end-of-text step then skipped a box already focused), so typing
   went in on the left; the screen's focus record now keeps a text box's caret and selection. PR #65 had fixed only the
   + Add game dialog. Cache token `20261111-gamescaret` (33 versioned files). Verified: 57 offline suites (1380, a new
   Library search test failing without the fix); a local synthetic Chrome check (typing, Backspace / Delete, arrows,
-  Home / End, selecting and replacing, paste, select-all and delete, focus kept through every redraw).
+  Home / End, selecting and replacing, paste, select-all and delete, focus kept through every redraw). Pages built;
+  the changed files byte-identical to `main`. Live on the owner's account, typing in Search your games only: the caret
+  stayed where it was through each redraw, and Backspace / Delete / arrows edited normally.
 - Previous release: + Add game's search caret (PR #65, `ebde4fe`), 2026-11-11 UTC: the dialog keeps a focused text box's caret
   and selection across a redraw; a text box focused anew gets its caret at the end.
 - Earlier: game length removed (owner's
