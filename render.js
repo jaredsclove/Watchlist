@@ -381,8 +381,12 @@ function filterChipOrder() {
 function focusFilterTarget(id) {
   const el = document.getElementById(id);
   if (!el || typeof el.focus !== 'function') return;
+  const already = document.activeElement === el;
   el.focus();
-  if (id === 'fSearch' && typeof el.setSelectionRange === 'function') el.setSelectionRange(el.value.length, el.value.length);
+  // A text box newly focused after a redraw gets its caret at the end (a browser's focus() leaves
+  // a fresh input's caret at the start); one already being typed in keeps its caret.
+  const text = el.tagName === 'INPUT' && ['text', 'search'].includes(el.type);
+  if ((id === 'fSearch' || (text && !already)) && typeof el.setSelectionRange === 'function') el.setSelectionRange(el.value.length, el.value.length);
 }
 
 // A chip's ✕: that one value back to its starting value (the control, or the kept value of a

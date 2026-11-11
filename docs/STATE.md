@@ -27,7 +27,14 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: game length removed (owner's
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: + Add game's search box caret
+  fix (PR #65), 2026-11-11 UTC, presentation tier: a search's redraws left the box focused with its caret at the start, so
+  Backspace did nothing and typing went in on the left; the Games dialog now keeps a focused text box's caret and selection
+  across a redraw, and a text box focused anew gets its caret at the end, as the Library search does. Cache token
+  `20261111-addcaret` (33 versioned files). Verified: 57 offline suites (1379, a new caret test failing without the fix); a
+  local synthetic Chrome check (typing, Backspace / Delete, arrows, Home / End, selecting and replacing, paste, Enter and
+  the Search button, the selection kept through the results).
+- Previous release: game length removed (owner's
   decision; PR #62, `ef444b1`, then the function in PR #63, `5587a0b`), 2026-11-10/11 UTC, presentation tier with a function
   redeploy: no time-to-beat reads, estimates, play-style setting, Length sort or HowLongToBeat link; no migration and no backup
   format change (`game_settings.play_style` stays as a legacy value, sent back unchanged). Rollout: the page first (cache token
@@ -38,20 +45,8 @@ membership enforcement, research permissions, holds, reliable backup and restore
   browser check (a remembered "Length, then Critic" sort became Critic alone); live on the owner's account: Settings showing
   PS5 with no play style, IGDB search, preview, save and Refresh through the new function and with the old one, an old-style
   batch answered empty; the temporary game and the IGDB cache removed; the backups before and after identical in every table.
-- Previous release: games (G1, item 5; PR #60,
-  `5ada6c4`), released 2026-11-10 UTC, schema tier: the Games area (Library, Franchises, Collections), Settings → Games
-  (platforms, play style; games research with research access), games in queues with hidden games keeping their places,
-  backup format 9. The `igdb` Edge Function was deployed first (`verify_jwt` off; the owner set its two secrets); it answered
-  OPTIONS 204 and 401 signed out and to the publishable key as a token. `db/g1_games.sql` then ran in the SQL Editor (the file
-  at the reviewed commit, by hash; run record and phase `contracted-g1` confirmed by a separate read), then the merge. Cache
-  token `20261110-games` (33 versioned files); Pages built; 51 changed files byte-identical to `main`. Independent review:
-  Fable, once, with one focused follow-up (no blocking findings; five fixed). Verified: 57 offline suites (1369); the G1 and
-  restore suites on PGlite and PostgreSQL 17; the local stack with the function (47); a local synthetic browser check (desktop,
-  375 / 300 px, dark, keyboard; a queue drop finished with a dispatched pointerup, because the drag tool sends none). Live, the
-  owner's account only: PS5 set (the one lasting change), an IGDB search and save through the function, a temporary "ZZ Games
-  Test" queue with a film reordered, Finished taking the game out, everything made removed and the IGDB cache purged; the
-  backups before (format 8) and after (format 9) identical in every table but the new settings row.
-- Earlier: sorting library views (item 13; PR #58, `2dc1256`), 2026-11-10 UTC, presentation tier; Q1 (item 7; PR #56)
+- Earlier: games (G1, item 5; PR #60, `5ada6c4`), 2026-11-10 UTC, schema tier (backup format 9; Fable review once, five fixed).
+  Sorting library views (item 13; PR #58, `2dc1256`), 2026-11-10 UTC, presentation tier; Q1 (item 7; PR #56)
   2026-11-05 UTC.
 - Database phase `contracted-g1`, backup format 9 (twenty-seven tables, no `user_id`, never the IGDB cache), `access = members`, research per member. One flat
   `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one
