@@ -105,7 +105,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   (create, rename, delete, add from a game's ⋯, Remove); membership is independent of queues, following and status. **Details:**
   IGDB's release rows (with the ones that don't count named) and the PlayStation Store page when IGDB lists one. **IGDB** is reached only through the `igdb` function
   (`supabase/functions/igdb`): it holds the client secret, answers only members (it asks PostgREST's `stage5_capabilities` with
-  the caller's token), and passes an allow-list of read-only queries; the page caches what it reads per member (`game_titles`,
+  the caller's token), and passes an allow-list of read-only queries (a `game_time_to_beats` query from a page opened before game length was removed is
+  answered with an empty list, temporarily); the page caches what it reads per member (`game_titles`,
   replaceable, never in backups; `library_game_titles_purge` empties it). **Games research** (members with research access;
   `games-research.js`): Settings → Games → Download games research brief lists what IGDB alone can't settle (announced releases
   on the member's platforms in followed franchises, releases in the last 60 days dated only by IGDB, PS4 games counted through
