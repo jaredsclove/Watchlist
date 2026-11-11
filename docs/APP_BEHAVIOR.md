@@ -191,7 +191,15 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   order). A desktop row shows one line: the pills that fit its view's character budget (smaller below 1240 px, where the
   show views' column is at its minimum), the first always whole, then a "+N" button that shows the rest inline and reads
   "Fewer" while they are shown (page memory per row, reset on reload; focus stays on it). An unusually long label may wrap.
-  Cards list every pill; every pill filters as before.
+  Cards list every pill; every pill filters as before. **Genre colours (owner, 2026-11-11):** a genre pill takes one muted
+  family colour, the same for TV, films and games (`ui-helpers.js` `GENRE_FAMILIES`, matched loosely so aliases such as
+  "Role-playing (RPG)" / "RPG" or "Sci-Fi & Fantasy" agree): rust (Action, Adventure, Shooter, Fighting, Platform, Arcade),
+  violet (Science Fiction, Fantasy, Role-playing), rose (Comedy, Romance, Family, Kids), slate blue (Drama, Crime, Mystery,
+  Thriller, Horror, Point-and-click, Visual Novel), sage (Puzzle, Strategy, Tactical, Simulator, Card & Board Game, Quiz,
+  MOBA), sky (Sport, Racing, Music, Musical, Pinball); History, War, Western, Politics and any unmapped label stay neutral
+  gray. Colour supplements the label; network, franchise (amber) and form (teal) pills are unchanged, and the filter chips
+  stay neutral. Every family reads at 4.5:1 or more on its pill as rendered, plain, hovered and pressed, in both themes
+  (`tests/genre-colors.test.js`).
 - **Show rows' Up next / Next (UI refine):** a released season reads by its label alone ("Season 2"); its premiere is
   in its expanded row, its Episodes summary and Coming Soon. An upcoming season keeps its date or TBA text and Upcoming.
   Flat Seasons lists and Coming Soon keep their dates. The column is narrower and wraps, so the action sits beside it.

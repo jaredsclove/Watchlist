@@ -101,7 +101,7 @@ function metadataEmpty(m) {
 // Fewer while they are shown. Without a budget (cards), every pill.
 function metadataChipsHtml(m, owner, fallback = '', opts = {}) {
   if (!m || (metadataEmpty(m) && !m.metadata_owner_set)) return fallback;
-  const chip = ([kind, v]) => filterPillHtml(kind, v, v, { cls: `badge meta-chip meta-${kind}`, attrs: kind === 'network' ? networkChipStyle(v) : '', title: `Filter by “${v}”`, owner });
+  const chip = ([kind, v]) => filterPillHtml(kind, v, v, { cls: `badge meta-chip meta-${kind}${kind === 'genres' ? ` g-${genreFamily(v)}` : ''}`, attrs: kind === 'network' ? networkChipStyle(v) : '', title: `Filter by “${v}”`, owner });
   const all = (m.network ? [['network', m.network]] : [])
     .concat((m.franchises || []).map(v => ['franchises', v]), (m.genres || []).map(v => ['genres', v]), (m.forms || []).map(v => ['forms', v]));
   const open = expandedCategoryOwners.has(owner);

@@ -212,9 +212,9 @@ function gameGenrePillsHtml(v, budget = 0, plain = false) {
   const open = expandedCategoryOwners.has(owner);
   const fit = budget ? categoryFitCount(all.map(g => ['genres', g]), budget) : all.length;
   const shown = open ? all.length : fit, hidden = all.length - fit;
-  const pill = g => { if (plain) return `<span class="badge meta-chip meta-genres">${esc(g)}</span>`; // (a collection: the Library's filter isn't here)
+  const pill = g => { if (plain) return `<span class="badge meta-chip meta-genres g-${genreFamily(g)}">${esc(g)}</span>`; // (a collection: the Library's filter isn't here)
     const pressed = gamesFilters.genre === g;
-    return `<button type="button" class="badge meta-chip meta-genres badge-clickable filter-pill" data-gaction="${esc(`genre:${g}`)}" aria-pressed="${pressed}" title="${esc(pressed ? `Remove this filter (${g})` : `Filter by “${g}”`)}" onclick="event.stopPropagation(); toggleGamesGenre('${jsArg(g)}')">${esc(g)}</button>`; };
+    return `<button type="button" class="badge meta-chip meta-genres g-${genreFamily(g)} badge-clickable filter-pill" data-gaction="${esc(`genre:${g}`)}" aria-pressed="${pressed}" title="${esc(pressed ? `Remove this filter (${g})` : `Filter by “${g}”`)}" onclick="event.stopPropagation(); toggleGamesGenre('${jsArg(g)}')">${esc(g)}</button>`; };
   const more = hidden ? `<button type="button" class="meta-more" data-gaction="cats-more" aria-expanded="${open}" aria-label="${open ? 'Show fewer genres' : `Show ${hidden} more genre${hidden === 1 ? '' : 's'}`}" onclick="event.stopPropagation(); toggleGameGenres('${jsArg(owner)}')">${open ? 'Fewer' : `+${hidden}`}</button>` : '';
   return all.slice(0, shown).map(pill).join('') + more;
 }

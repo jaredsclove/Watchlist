@@ -27,17 +27,16 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Games drawn as TV (owner's request;
-  PR #69, `8579546`), 2026-11-11 UTC, presentation tier: Library, Franchises and Collections use TV's tab row, toolbar (Filters with chips),
-  aligned table rows and its cards below 1100 px; compact C / P scores beside the title with their source behind tap or focus;
-  TV's genre pills (+N), quiet status select, priority marks and ⋯; one-line platform and release (Upcoming, TBA, PS4 on PS5);
-  franchises expand as TV's shows. No data, sort or behaviour change. Cache token `20261111-gamestv` (33 versioned files).
-  Verified: 57 offline suites (1383, three new presentation tests); a local synthetic Chrome check at 1426, 820 and 390 px
-  (long titles, both / one / no score, many genres, PS4 on PS5, upcoming and TBA, an expanded franchise, a collection; search
-  editing, a status change, the ⋯ priority, a genre pill, Filters, Sort and the Add game search keeping focus or caret). Pages built; the changed files byte-identical to `main`. Live on the owner's
-  account, read-only: the Library as rows with C / P beside a title and its note on tap, Filters, the tab row; no franchise
-  followed there, so the expanded franchise was checked locally only.
-- Previous release: Search your games caret fix (PR #67, `2dfba5b`), 2026-11-11 UTC: the screen's focus record keeps a text
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: genre colour families (owner's
+  plan; PR #71), 2026-11-11 UTC, presentation tier: genre pills on TV, films and games take one of six muted families
+  (`GENRE_FAMILIES`, aliases included); History, War, Western, Politics and unmapped labels stay gray; network, franchise and
+  form pills unchanged. Cache token `20261111-genrecolors` (33 versioned files). Verified: 58 offline suites (1387; the new
+  suite checks the mapping, the same family everywhere, and 4.5:1 text on each rendered pill, plain, hovered and pressed, in
+  both themes: worst 5.32:1, light sage hovered); a local synthetic Chrome check in the real light theme and a forced-dark
+  preview copy (outside the repo) at desktop, 820 and 390 px, measuring every visible genre pill as rendered (worst 5.76:1
+  light, 7.38:1 dark), no page overflow, a pill pressed and cleared by keyboard with focus kept.
+- Previous release: Games drawn as TV (PR #69, `8579546`), 2026-11-11 UTC: TV's tabs, toolbar, rows and cards for Games.
+- Earlier: Search your games caret fix (PR #67, `2dfba5b`), 2026-11-11 UTC: the screen's focus record keeps a text
   box's caret and selection.
 - Earlier: + Add game's search caret (PR #65, `ebde4fe`), 2026-11-11 UTC: the dialog keeps a focused text box's caret
   and selection across a redraw; a text box focused anew gets its caret at the end.
