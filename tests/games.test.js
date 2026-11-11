@@ -257,6 +257,48 @@ test('+ Add game: IGDB through the function; the preview groups an original with
   assert.ok(app.requests.filter(r => /functions\/v1\/igdb/.test(r.url)).every(r => /^Bearer /.test(r.headers.Authorization) && r.headers.apikey), 'the function is called with the member’s token and the publishable key');
 });
 
+// The harness's DOM keeps no caret: the search box gets one here (a browser's focus() leaves a
+// fresh input's caret at the start), and the dialog knows what it holds.
+function caretDom(app) {
+  const doc = app.ctx.document, orig = doc.getElementById;
+  doc.getElementById = id => {
+    const e = orig(id);
+    if (e && id === 'gAddSearch' && !e.__caret) {
+      Object.assign(e, { __caret: true, tagName: 'INPUT', type: 'search', value: app.get('gamesAdd').query, selectionStart: 0, selectionEnd: 0, selectionDirection: 'none' });
+      e.focus = () => { doc.activeElement = e; };
+      e.setSelectionRange = (a, b, d) => Object.assign(e, { selectionStart: a, selectionEnd: b, selectionDirection: d || 'none' });
+    }
+    return e;
+  };
+  const box = orig('gameDialogBox');
+  box.contains = n => !!n && n === orig('gAddSearch');
+  box.focus = () => { doc.activeElement = box; };
+  return () => doc.getElementById('gAddSearch');
+}
+
+test('+ Add game: the search box keeps its focus, caret and selection across a search’s redraws; focused anew, its caret is at the end', async () => {
+  const app = await bootWith({ igdb: igdbStub(), noCache: true });
+  await openGames(app);
+  const search = caretDom(app), doc = app.ctx.document;
+  app.ctx.openGamesAdd(null);
+  let el = search();
+  assert.strictEqual(doc.activeElement, el, 'focused on opening');
+  // Typing "zz war 4" with "war" selected backwards, then Enter: two redraws (Searching…, the results).
+  el.value = 'zz war 4'; app.run(`gamesAdd.query = 'zz war 4'`); el.setSelectionRange(3, 6, 'backward');
+  await app.ctx.searchGamesAdd(); await settle();
+  assert.match(text(dialog(app)), /ZZ War 4 Remastered/);
+  const after = search();
+  assert.notStrictEqual(after, el, 'the box was redrawn');
+  assert.strictEqual(doc.activeElement, after, 'still focused');
+  assert.deepStrictEqual([after.selectionStart, after.selectionEnd, after.selectionDirection], [3, 6, 'backward'], 'the same caret and selection');
+  // From the Search button: the redrawn box takes focus with its caret at the end, not the start.
+  doc.activeElement = null;
+  await app.ctx.searchGamesAdd(); await settle();
+  el = search();
+  assert.strictEqual(doc.activeElement, el);
+  assert.deepStrictEqual([el.selectionStart, el.selectionEnd], [8, 8], 'caret after the text, so Backspace deletes from the end');
+});
+
 test('IGDB unavailable: search says so and nothing is written', async () => {
   const app = await bootWith({ igdb: null });
   await openGames(app);

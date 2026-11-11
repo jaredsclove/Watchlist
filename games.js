@@ -864,9 +864,18 @@ function showGameDialog(html) {
   const overlay = document.getElementById('gameDialogOverlay'), box = document.getElementById('gameDialogBox');
   if (!overlay || !box) return;
   if (overlay.style.display === 'none') gamesDialogOpener = document.activeElement || null;
+  // A text box being typed in keeps its focus, caret and selection across the redraw (a search
+  // finishing, a save or follow ending), as the app's other search boxes do.
+  const was = document.activeElement, keep = was && was.id && box.contains(was) && typeof was.selectionStart === 'number'
+    ? { id: was.id, start: was.selectionStart, end: was.selectionEnd, dir: was.selectionDirection } : null;
   box.innerHTML = html;
   overlay.style.display = 'flex';
   if (document.activeElement && !box.contains(document.activeElement) && typeof box.focus === 'function') box.focus();
+  const again = keep && document.getElementById(keep.id);
+  if (again && box.contains(again) && typeof again.focus === 'function') {
+    again.focus();
+    if (typeof again.setSelectionRange === 'function') again.setSelectionRange(keep.start, keep.end, keep.dir || 'none');
+  }
 }
 function closeGameDialog(returnFocus = true) {
   const overlay = document.getElementById('gameDialogOverlay'), box = document.getElementById('gameDialogBox');
