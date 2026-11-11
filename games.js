@@ -144,7 +144,8 @@ function gamesLibraryHtml(st) {
     : `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>No games match these filters.</p></div>`);
 }
 // The visible games in the view's order: an explicit sort (view-sort.js) across the whole list, its ties in Franchise / release
-// order; else Franchise / release order itself, with a small heading over each franchise that has two or more visible games.
+// order; else Franchise / release order itself, with a small heading over each franchise that has two or more visible games
+// and a divider where such a franchise ends and games without a heading follow.
 // Counted after filters and platforms: a franchise with one visible game is placed by that game's shown title, as a standalone
 // game (owner, 2026-11-11), so filtering a group down to one, or a second game joining it, can move it (focus follows the game).
 function gamesOrderedParts(views, partsOf) {
@@ -159,6 +160,12 @@ function gamesOrderedParts(views, partsOf) {
   const out = [];
   sorted.forEach((v, i) => {
     const g = placed.get(v), prev = sorted[i - 1] && placed.get(sorted[i - 1]);
+    // A headed franchise followed by a game without a heading: a gap and a divider close the franchise (a heading already
+    // marks the other boundaries, so they get no second gap). Decorative: hidden from assistive technology.
+    if (grouped && !g.grouped && prev && prev.grouped) {
+      out.push({ row: '<tr class="game-group-end" aria-hidden="true"><td colspan="4"></td></tr>',
+        card: '<div class="game-group-end" aria-hidden="true"></div>' });
+    }
     if (grouped && g.grouped && !(prev && prev.key === g.key)) {
       out.push({ row: `<tr class="game-group-head" data-group="${esc(g.key)}"><td colspan="4"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></td></tr>`,
         card: `<div class="game-group-head" data-group="${esc(g.key)}"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></div>` });

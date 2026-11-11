@@ -1025,6 +1025,43 @@ test('Franchise / release order: franchises and standalone games A to Z; whole s
   } finally { cleanOrderRaw(); }
 });
 
+// The table and the cards as a sequence: H:<heading>, | (a franchise's end) or a game's entry number.
+const boundsOf = (html, row, end) => [...html.matchAll(new RegExp(`<${row} class="game-group-head"[^>]*><(?:td colspan="4"><)?span class="game-group-name"[^>]*>([^<]+)<|<${row} class="game-group-end" aria-hidden="true">${end}|<${row} class="(?:game-row|item-card game-card)[^"]*" data-game="([^"]+)"`, 'g'))]
+  .map(m => m[1] ? `H:${m[1]}` : m[2] ? Number(m[2].slice(-12)) : '|');
+const rowBounds = app => boundsOf(tableOf(app), 'tr', '<td colspan="4"></td></tr>');
+const cardBounds = app => boundsOf(screen(app).split('</tbody>')[1], 'div', '</div>');
+
+test('franchise boundaries: a divider where a headed franchise ends and games without a heading follow, nowhere else (a heading marks the rest); the same in the cards; redrawn as filters change; none under an explicit sort', async () => {
+  try {
+    const app = await orderApp();
+    await openGames(app);
+    const want = [6, 'H:ZZ Call of Duty', 9, 3, 2, 7, 12, 'H:ZZ Charted', 5, 10, 4, 8, '|', 11, 40, 1, 'H:ZZ Twin', 16, 15, 13, 17, 14, 20, 19, 21, 18];
+    assert.deepStrictEqual(rowBounds(app), want, 'standalone → franchise: the heading; franchise → franchise: the heading alone; franchise → standalone: one divider');
+    assert.deepStrictEqual(cardBounds(app), want, 'the cards the same');
+    // Filtering Charted down to one game: it is placed by its title, so the divider moves to Call of Duty's end.
+    const fewer = await orderApp({ status: { 5: 'skipped', 10: 'skipped', 4: 'skipped' } });
+    await openGames(fewer);
+    const after = rowBounds(fewer);
+    assert.deepStrictEqual(after.slice(0, 8), [6, 'H:ZZ Call of Duty', 9, 3, 2, 7, 12, '|'], 'Call of Duty is now followed by single games');
+    assert.ok(!after.includes('H:ZZ Charted') && after.filter(x => x === '|').length === 1, 'one divider, no Charted heading');
+    assert.deepStrictEqual(cardBounds(fewer), after);
+    fewer.ctx.setGamesFilter('status', 'all');
+    assert.deepStrictEqual(rowBounds(fewer), want, 'the filter widened: the Charted heading and its divider are back');
+    fewer.ctx.setGamesFilter('genre', 'Racing');
+    assert.deepStrictEqual(rowBounds(fewer), [7], 'one game: no heading, no divider');
+    fewer.ctx.setGamesFilter('genre', '');
+    // The view ending in a franchise: no divider after it.
+    fewer.run("gamesFilters.search = 'Twin'; renderGamesView()");
+    assert.deepStrictEqual(rowBounds(fewer).filter(x => typeof x === 'string'), ['H:ZZ Twin']);
+    fewer.run("gamesFilters.search = ''; renderGamesView()");
+    // An explicit sort: flat.
+    app.ctx.chooseSortField('title');
+    assert.ok(rowBounds(app).every(x => typeof x === 'number') && cardBounds(app).every(x => typeof x === 'number'), 'no headings or dividers');
+    app.ctx.resetViewSort();
+    assert.deepStrictEqual(rowBounds(app), want);
+  } finally { cleanOrderRaw(); }
+});
+
 test('the franchise a game belongs to: the stored spot first (a relink is authoritative), a remaster through its original, IGDB’s main franchise, else A to Z then id; a series the same way; never the rest of the library', async () => {
   try {
     const app = await orderApp();

@@ -1286,6 +1286,10 @@ tr.game-group-head:first-child td { padding-top: 6px; }
 .game-group-name { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
 div.game-group-head { padding: 8px 2px 0; }
 div.game-group-head:first-child { padding-top: 0; }
+/* Where a headed franchise ends and games without a heading follow: the heading's gap, closed by a firmer line. */
+tr.game-group-end td { padding: 0; height: 12px; border-bottom: 1px solid var(--border2); background: none; }
+tbody tr.game-group-end:hover td { background: none; }
+div.game-group-end { margin: 4px 2px 0; border-top: 1px solid var(--border2); }
 .sort-default { margin: 0; font-size: 12px; color: var(--text2); }
 /* Franchises: TV's show rows; spots and versions as its season sub-rows. */
 .fr-name { display: block; color: var(--text); font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
