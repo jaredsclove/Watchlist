@@ -27,15 +27,16 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: single games placed by title (owner's
-  adjustment; PR #77, `de9ca11`), 2026-11-11 UTC, presentation tier: in Franchise / release order (Games Library and game
-  collections), counted after filters and platforms, a franchise with one visible game is an ordinary row placed by that
-  game's title; two or more keep the heading and the franchise name. Cache token `20261111-singletitle`. Verified: 58 offline
-  suites (1398; a new test of one-to-many transitions by filter, status and Remove in the Library and a collection, with focus
-  kept, and Reset); a local synthetic Chrome check (Status All and back, Refresh filling missing details, a collection's Remove,
-  keyboard Sort and Reset, 390 px). Pages built; the changed files byte-identical to `main`. Live on the owner's account,
-  read-only: 007 First Light, Grand Theft Auto VI, then Uncharted under its heading.
-- Previous release: Franchise / release order (PR #75, `63dd87a`), 2026-11-11 UTC: the Games Library's and game collections'
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: "Skip all versions" wording (owner's
+  request; PR #79, `95daceb`), 2026-11-11 UTC, presentation tier: franchise rows say Skip all versions / Unskip all versions
+  (accessible names include the game) and "All versions skipped"; the franchise note, the add preview, Review and research
+  texts say "game" and "versions" instead of "spot"; the same `skip_spot` decision and actions. Cache token
+  `20261111-skipall`. Verified: 58 offline suites (1399; a new wording test); Pages built; the changed files byte-identical to
+  `main`. Live on the owner's account, read-only: an expanded franchise shows the new buttons, names and note. Not checked in a
+  local browser (wording only).
+- Previous release: single games placed by title (PR #77, `de9ca11`), 2026-11-11 UTC: in Franchise / release order, a
+  franchise with one visible game is placed by that game's title.
+- Earlier: Franchise / release order (PR #75, `63dd87a`), 2026-11-11 UTC: the Games Library's and game collections'
   default groups saved games by broad franchise, spots in original release order, with headings; collections have their own
   sort. Not verified live: game collections (the owner has none); headings in dark mode.
 - Earlier: Games walkthrough fixes (PR #73, `215a409`), 2026-11-11 UTC: franchises list only versions on the chosen
