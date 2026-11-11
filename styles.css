@@ -1278,6 +1278,15 @@ body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; 
 .game-basis.game-held { color: var(--amber); }
 .game-status-cell { white-space: nowrap; }
 .game-card .card-actions { margin-left: auto; }
+/* Franchise / release order (the Library's and collections' default): a small heading over a franchise's games and a
+   little space above it, as quiet as TV's month groups. */
+tr.game-group-head td { padding: 12px 8px 3px; border-bottom: 1px solid var(--border); background: none; }
+tbody tr.game-group-head:hover td { background: none; }
+tr.game-group-head:first-child td { padding-top: 6px; }
+.game-group-name { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
+div.game-group-head { padding: 8px 2px 0; }
+div.game-group-head:first-child { padding-top: 0; }
+.sort-default { margin: 0; font-size: 12px; color: var(--text2); }
 /* Franchises: TV's show rows; spots and versions as its season sub-rows. */
 .fr-name { display: block; color: var(--text); font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
 .spot-row .spot-title { font-weight: 500; }

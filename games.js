@@ -59,7 +59,7 @@ function gameEntryView(e, st) {
   const recs = rec ? [rec].concat((e.port_ids || []).map(p => st.cache.get(p)).filter(Boolean)) : [];
   const avail = gameAvailability(recs, st);
   return { entry: e, rec, avail, title: rec ? rec.name : e.title, hidden: !!avail.hiddenByPlatforms,
-    genres: rec ? rec.genres : [], dateKey: avail.line ? avail.line.key : null };
+    genres: rec ? rec.genres : [], dateKey: avail.line ? avail.line.key : null, group: gameGroupOf(e, st.cache) };
 }
 
 // ── Drawing ──
@@ -95,7 +95,7 @@ function renderGamesView() {
   else if (view === 'franchises') body = gamesFranchisesHtml(st);
   else body = gamesCollectionsHtml(st);
   screen.innerHTML = head + body;
-  if (view === 'library' && typeof renderSortLine === 'function') renderSortLine();
+  if ((view === 'library' || view === 'collections') && typeof renderSortLine === 'function') renderSortLine();
   applyGamesFocus(rec);
 }
 // + Add game, Refresh and Review: after the line's other controls, as TV's + Add.
@@ -121,8 +121,6 @@ function gamesLibraryHtml(st) {
   const list = shown.filter(v => (!term || normalTitle(v.title).includes(term))
     && (!f.genre || v.genres.includes(f.genre))
     && (f.status === 'all' ? true : f.status === 'notskipped' ? v.entry.status !== 'skipped' : v.entry.status === f.status));
-  const usual = (a, b) => (b.entry.priority === 'high') - (a.entry.priority === 'high') || compareTitles(a.title, b.title) || cmpStr(a.entry.id, b.entry.id);
-  const sorted = typeof sortForView === 'function' ? sortForView(list.map(v => ({ kind: 'game', v })), (a, b) => usual(a.v, b.v)).map(x => x.v) : list.sort(usual);
   const statusOpts = [['notskipped', 'All except Skipped'], ['all', 'All'], ...Object.entries(GAME_STATUS_LABELS)];
   const applied = [f.genre ? ['genre', 'Genre', f.genre] : null, f.status !== 'notskipped' ? ['status', 'Status', (statusOpts.find(o => o[0] === f.status) || [])[1] || f.status] : null].filter(Boolean);
   const open = gamesFiltersOpen;
@@ -142,8 +140,24 @@ function gamesLibraryHtml(st) {
   const toolbar = gamesToolbarHtml({ line, panel, chips, sort: true, count });
   const hiddenNote = hidden ? `<p class="games-note">${countUnit(hidden, 'saved game isn’t', 'saved games aren’t')} on your platforms, so ${hidden === 1 ? 'it is' : 'they are'} hidden here and in your queues (${hidden === 1 ? 'its' : 'their'} status, priority, collections and queue places are kept). ${hidden === 1 ? 'It comes' : 'They come'} back when a platform you choose has ${hidden === 1 ? 'it' : 'them'}.</p>` : '';
   if (!gamesData.entries.length) return toolbar + `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>No games yet. Use <strong>+ Add game</strong> to search IGDB and save one.</p></div>`;
-  return toolbar + hiddenNote + (sorted.length ? gamesTableHtml(sorted.map(v => gameRowParts(v)), 'Your games', 'Status')
+  return toolbar + hiddenNote + (list.length ? gamesTableHtml(gamesOrderedParts(list, v => gameRowParts(v)), 'Your games', 'Status')
     : `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>No games match these filters.</p></div>`);
+}
+// The visible games in the view's order: an explicit sort (view-sort.js) across the whole list, its ties in Franchise / release
+// order; else Franchise / release order itself, with a small heading over each franchise that has two or more visible games.
+function gamesOrderedParts(views, partsOf) {
+  const usual = (a, b) => gameDefaultCompare(a.v.group, b.v.group);
+  const sorted = typeof sortForView === 'function' ? sortForView(views.map(v => ({ kind: 'game', v })), usual).map(x => x.v) : views.slice().sort((a, b) => gameDefaultCompare(a.group, b.group));
+  const grouped = !(typeof viewSortActive === 'function' && viewSortActive());
+  const out = [];
+  sorted.forEach((v, i) => {
+    const g = v.group, prev = sorted[i - 1], next = sorted[i + 1];
+    const starts = grouped && g.grouped && !(prev && prev.group.key === g.key) && !!next && next.group.key === g.key;
+    if (starts) out.push({ row: `<tr class="game-group-head" data-group="${esc(g.key)}"><td colspan="4"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></td></tr>`,
+      card: `<div class="game-group-head" data-group="${esc(g.key)}"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></div>` });
+    out.push(partsOf(v));
+  });
+  return out;
 }
 // The desktop table and the narrow-screen cards (styles.css shows one of them, at TV's breakpoint).
 function gamesTableHtml(parts, label, last) {
@@ -379,15 +393,16 @@ function gamesCollectionsHtml(st) {
   if (!c) body = '<div class="games-empty" data-games-empty="1" tabindex="-1"><p>No game collections yet. Make one here, then add games with <strong>Add to collection…</strong> in a game’s ⋯ menu.</p></div>';
   else {
     const ms = gamesData.members.filter(m => m.collection_id === c.id);
-    const views = ms.map(m => ({ m, e: gamesData.entries.find(e => e.id === m.entry_id) })).filter(x => x.e).map(x => ({ ...x, v: gameEntryView(x.e, st) }))
-      .sort((a, b) => compareTitles(a.v.title, b.v.title));
-    const shown = views.filter(x => !x.v.hidden);
+    const views = ms.map(m => ({ m, e: gamesData.entries.find(e => e.id === m.entry_id) })).filter(x => x.e).map(x => ({ ...gameEntryView(x.e, st), member: x.m }));
+    const shown = views.filter(v => !v.hidden);
     count = countUnit(shown.length, 'game', 'games');
-    body = shown.length ? gamesTableHtml(shown.map(x => gameRowParts(x.v, { member: x.m })), c.name, 'Status')
+    body = shown.length ? gamesTableHtml(gamesOrderedParts(shown, v => gameRowParts(v, { member: v.member })), c.name, 'Status')
       : `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>“${esc(c.name)}” has no games${views.length ? ' on your platforms' : ''} yet.</p></div>`;
     if (views.length > shown.length) body += `<p class="games-note">${countUnit(views.length - shown.length, 'game in this collection isn’t', 'games in this collection aren’t')} on your platforms and ${views.length - shown.length === 1 ? 'is' : 'are'} hidden; ${views.length - shown.length === 1 ? 'it stays' : 'they stay'} in the collection.</p>`;
   }
-  return gamesToolbarHtml({ line: `${select}${manage ? ` <span class="games-collection-manage">${manage}</span>` : ''}`, count }) + create + body;
+  // Sort (its own per collection, view-sort.js), when a collection is open.
+  const sortBtn = c && typeof sortButtonHtml === 'function' ? sortButtonHtml() : '';
+  return gamesToolbarHtml({ line: `${select}${sortBtn}${manage ? ` <span class="games-collection-manage">${manage}</span>` : ''}`, count, sort: !!c }) + create + body;
 }
 function selectGameCollection(id) {
   gamesCollectionId = id; gamesCollectionEdit = null;
@@ -897,6 +912,7 @@ async function deleteGameCollection() {
     try {
       await sbRpc('library_game_collection_delete', { p_collection_id: c.id, p_expected_count: count });
       gamesData.collections = gamesData.collections.filter(x => x.id !== c.id);
+      if (typeof setViewSortSpec === 'function') setViewSortSpec({ key: `gamescollections:${c.id}` }, []); // (its sort is forgotten too)
       gamesData.members = gamesData.members.filter(m => m.collection_id !== c.id);
       gamesCollectionEdit = null; gamesCollectionId = null; gamesFocusIntent = { id: 'gCollectionNew' };
       showSaved(); showNotice(`“${c.name}” was deleted. Its games stay in your library.`); renderGamesView();
