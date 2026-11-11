@@ -27,14 +27,15 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: "Skip all versions" wording (owner's
-  request; PR #79, `95daceb`), 2026-11-11 UTC, presentation tier: franchise rows say Skip all versions / Unskip all versions
-  (accessible names include the game) and "All versions skipped"; the franchise note, the add preview, Review and research
-  texts say "game" and "versions" instead of "spot"; the same `skip_spot` decision and actions. Cache token
-  `20261111-skipall`. Verified: 58 offline suites (1399; a new wording test); Pages built; the changed files byte-identical to
-  `main`. Live on the owner's account, read-only: an expanded franchise shows the new buttons, names and note. Not checked in a
-  local browser (wording only).
-- Previous release: single games placed by title (PR #77, `de9ca11`), 2026-11-11 UTC: in Franchise / release order, a
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Skip / Unskip all versions named with
+  the release year (owner's request; PR #81, `c223b7a`), 2026-11-11 UTC, presentation tier: their accessible names and tooltips
+  read "Skip all versions of God of War (2005)" ("release year unknown" without one); the visible label is unchanged. Cache
+  token `20261111-skipyear`. Verified: 58 offline suites (1400; a new test of shared titles and a missing year); Pages built;
+  the changed files byte-identical to `main`. Live on the owner's account, read-only: all 12 Skip names in God of War and
+  Uncharted distinct, God of War (2005) and (2018) included.
+- Previous release: "Skip all versions" wording (PR #79, `95daceb`), 2026-11-11 UTC: franchise views say Skip all versions and
+  "game" and "versions" instead of "spot".
+- Earlier: single games placed by title (PR #77, `de9ca11`), 2026-11-11 UTC: in Franchise / release order, a
   franchise with one visible game is placed by that game's title.
 - Earlier: Franchise / release order (PR #75, `63dd87a`), 2026-11-11 UTC: the Games Library's and game collections'
   default groups saved games by broad franchise, spots in original release order, with headings; collections have their own
