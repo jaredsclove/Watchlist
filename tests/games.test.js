@@ -268,8 +268,8 @@ test('franchises as TV’s shows: expand, aligned Up next and Coming; expanded, 
   app.ctx.toggleFranchise(ID('62000000', 1));
   assert.match(t(), /aria-expanded="true" aria-label="Hide the games of ZZ War"/);
   const spots = [...t().matchAll(/<tr class="sub-row spot-row[^"]*" data-follow-of="[^"]+" data-spot="(\d+)">/g)].map(m => Number(m[1]));
-  assert.ok(spots.length >= 3 && spots[0] === 101, 'the spots, oldest first');
-  assert.match(t(), /<tr class="sub-row spot-version" data-follow-of="[^"]+" data-spot-of="\d+"><td class="spot-version-name">ZZ War 4 Remastered <span class="muted">\(remaster\)<\/span><\/td>[\s\S]*?<span class="status-pill s-watching">Playing<\/span>/, 'a saved version shows its status');
+  assert.deepStrictEqual(spots, [130, 102, 110, 120], 'the spots, oldest first; the PS3-only original (no release on PS5) isn’t listed');
+  assert.match(t(), /<tr class="sub-row spot-version" data-follow-of="[^"]+" data-spot-of="\d+"><td class="spot-version-name">ZZ War 4 Remastered <span class="muted">\(remaster\)<\/span><\/td>[\s\S]*?data-gaction="status-v102"[^>]*>[\s\S]*?<option value="playing" selected>Playing<\/option>/, 'a saved version shows its status control');
   assert.match(t(), /data-gaction="save-110"[^>]*>Save<\/button>/, 'an unsaved one offers Save');
   assert.match(t(), /data-gaction="unfollow"[^>]*>Stop following ZZ War<\/button>/);
   assert.match(screen(app).split('</tbody>')[1], /<div class="item-card show-group-card franchise-card" data-follow="[^"]+">[\s\S]*class="card-subseasons"/, 'the card expands too');
@@ -847,6 +847,122 @@ test('Refresh: a saved game IGDB drops from a followed series leaves that franch
   const m = id => JSON.parse(JSON.stringify(app.store.game_titles.find(t => t.igdb_id === id).data.m));
   assert.deepStrictEqual(m(102), {}, 'no longer a member of ZZ War');
   assert.deepStrictEqual(m(110), { 7001: 'member', 7002: 'member' });
+});
+
+// ── Walkthrough fixes (2026-11-11): platform filtering in expanded franchises, status in franchise rows, the Library's order ──
+const versionNames = app => [...tableOf(app).matchAll(/<td class="spot-version-name">([^<]+)/g)].map(m => m[1].trim());
+const spotIds = app => [...tableOf(app).matchAll(/<tr class="sub-row spot-row[^"]*" data-follow-of="[^"]+" data-spot="(\d+)">/g)].map(m => Number(m[1]));
+const rpcCalls = (app, fn) => app.writes().filter(r => r.url.includes(`/rpc/${fn}`)).map(r => JSON.parse(JSON.stringify(r.body)));
+test('an expanded franchise lists only versions on the chosen platforms (PS4 playable on PS5, TBA and partial dates included) and no spot left with none; progress, Up next and saved data are unchanged, also switching platforms back and forth', async () => {
+  RAW[135] = { id: 135, name: 'ZZ War Vita Tales', game_type: 0, first_release_date: unix('2012-02-15'), collections: [{ id: 7001, name: 'ZZ War' }], release_dates: [rd(PS3, '2012-02-15')] };
+  MEMBERS[7001].push([135, 1]);
+  try {
+    const f = follow(1, 7001, 'ZZ War');
+    const queues = { watch_queues: [{ id: ID('66000000', 9), name: 'ZZ Q', sort_order: 1, created_at: TS }],
+      queue_entries: [{ id: ID('67000000', 9), queue_id: ID('66000000', 9), show_id: null, item_id: null, game_entry_id: ID('61000000', 2), position: 1, created_at: TS }] };
+    const app = await bootWith({ follows: [f], entries: [entry(1, 101, { status: 'finished' }), entry(2, 110)], queues, cache: [101, 102, 103, 110, 120, 130, 135] });
+    const before = JSON.stringify([app.store.game_entries, app.store.queue_entries, app.store.game_decisions]);
+    const look = async () => { await openGames(app, 'gamesfranchises'); if (!app.get('gamesExpanded').has(f.id)) app.ctx.toggleFranchise(f.id); };
+    const ps5 = async () => {
+      await look();
+      assert.deepStrictEqual(versionNames(app), ['ZZ War 4 Remastered', 'ZZ War Pocket', 'ZZ War (2019)', 'ZZ War Next'], 'the PS3 original and the PS3-only game are hidden; PS4 games playable on PS5 and the TBA one stay');
+      assert.deepStrictEqual(spotIds(app), [101, 130, 110, 120], 'the PS3-only game’s spot is gone; the 2007 spot stays through its remaster');
+      assert.doesNotMatch(tableOf(app), /Not on your platforms/);
+      const open = text(screen(app));
+      assert.match(open, /ZZ War 4 2007 Finished/, 'the hidden, finished original still completes its spot');
+      assert.match(franchiseOf(app, f.id), /Up next: ZZ War \(2019\) · PS4 · Playable on PS5/);
+      assert.match(franchiseOf(app, f.id), /Coming: ZZ War Next · PS5 · Date TBA/);
+      assert.match(open, /2 versions aren’t on your platforms, so they are hidden here \(their progress still counts\)\./);
+    };
+    await ps5();
+    app.store.game_settings[0].platforms = ['switch'];
+    app.ctx.switchView('games'); await settle(); await look();
+    assert.deepStrictEqual(spotIds(app), [], 'nothing of ZZ War is on Switch');
+    assert.match(text(screen(app)), /6 versions aren’t on your platforms/);
+    app.store.game_settings[0].platforms = ['ps5', 'ps4'];
+    app.ctx.switchView('games'); await settle(); await look();
+    assert.ok(versionNames(app).includes('ZZ War (2019)') && !versionNames(app).includes('ZZ War Vita Tales'), 'PS4 chosen: native PS4 versions');
+    app.store.game_settings[0].platforms = ['ps5'];
+    app.ctx.switchView('games'); await settle();
+    await ps5();
+    assert.strictEqual(JSON.stringify([app.store.game_entries, app.store.queue_entries, app.store.game_decisions]), before, 'visibility only: statuses, spots, queue places and decisions unchanged');
+    assert.deepStrictEqual(app.writes().filter(r => !/functions\/v1\/igdb/.test(r.url)).map(r => r.url), [], 'no write');
+  } finally { delete RAW[135]; MEMBERS[7001].pop(); }
+});
+
+test('a franchise with no platforms chosen lists every version; a saved version whose details are missing (after a restore) still shows in the Library', async () => {
+  const app = await bootWith({ follows: [follow(1, 7001, 'ZZ War')], settings: null });
+  await openGames(app, 'gamesfranchises'); app.ctx.toggleFranchise(ID('62000000', 1));
+  assert.ok(versionNames(app).includes('ZZ War 4'), 'nothing chosen: everything shows');
+  const restored = await bootWith({ entries: [entry(1, 101, { status: 'finished' })], igdb: null, noCache: true });
+  await openGames(restored);
+  assert.deepStrictEqual(libraryOrder(restored), [ID('61000000', 1)], 'missing IGDB details never hide a saved game');
+});
+
+test('a saved version’s status in its franchise row is the Library’s control and its guarded change: Up next, Caught up and queues follow at once, the franchise stays open, focus stays; Save hands focus to the new control', async () => {
+  const f = follow(1, 7001, 'ZZ War');
+  const queues = { watch_queues: [{ id: ID('66000000', 9), name: 'ZZ Q', sort_order: 1, created_at: TS }],
+    queue_entries: [1, 2].map(k => ({ id: ID('67000000', k), queue_id: ID('66000000', 9), show_id: null, item_id: null, game_entry_id: ID('61000000', k), position: k, created_at: TS })) };
+  const app = await bootWith({ follows: [f], entries: [entry(1, 102, { spot: 101 }), entry(2, 110)], queues });
+  await openGames(app, 'gamesfranchises'); app.ctx.toggleFranchise(f.id);
+  const sel = id => (tableOf(app).match(new RegExp(`<select class="status-select game-status [^"]*" data-gaction="status-v${id}" aria-label="([^"]+)"[^>]*>([\\s\\S]*?)</select>`)) || []);
+  assert.strictEqual(sel(102)[1], 'Status of ZZ War 4 Remastered');
+  assert.match(sel(102)[2], /<option value="want" selected>Want to play<\/option>/);
+  assert.match(screen(app).split('</tbody>')[1], /data-gaction="status-v102"/, 'the card has it too');
+  assert.doesNotMatch(tableOf(app), /status-pill s-confirmed">Want to play/, 'no plain status text');
+  assert.match(franchiseOf(app, f.id), /Up next: ZZ War 4 Remastered/);
+  // Keyboard: the select focused, Finished chosen.
+  app.dom.focus('gamesScreen', '[data-gaction="status-v102"]');
+  await app.ctx.setGameStatus(ID('61000000', 1), 'finished', 'franchise'); await settle();
+  assert.deepStrictEqual(rpcCalls(app, 'library_game_set')[0], { p_entry_id: ID('61000000', 1), p_expected: { status: 'want', priority: 'normal' }, p_status: 'finished', p_priority: 'normal' }, 'the guarded change, with what was shown');
+  assert.strictEqual(app.dom.active().getAttribute('data-gaction'), 'status-v102', 'focus stays on that version’s control');
+  assert.ok(app.get('gamesExpanded').has(f.id), 'still expanded');
+  assert.match(sel(102)[2], /<option value="finished" selected>/);
+  assert.match(text(screen(app)), /ZZ War 4 2007 Finished/);
+  assert.match(franchiseOf(app, f.id), /Up next: ZZ War \(2019\)/, 'Up next moves on');
+  assert.deepStrictEqual(app.store.queue_entries.map(e => [e.game_entry_id, e.position]), [[ID('61000000', 2), 2]], 'Finished took that game out of its queue; the other keeps its place');
+  assert.match(app.el('banner').innerHTML, /“ZZ War 4 Remastered” is Finished, so it left 1 queue\./);
+  app.dom.focus('gamesScreen', '[data-gaction="status-v110"]');
+  await app.ctx.setGameStatus(ID('61000000', 2), 'finished', 'franchise'); await settle();
+  assert.match(franchiseOf(app, f.id), /Caught up/, 'every counted spot done');
+  await app.ctx.toggleIncludeSpinoff(130, false); await settle();
+  assert.match(franchiseOf(app, f.id), /Up next: ZZ War Pocket/, 'a counted spin-off becomes Up next');
+  app.dom.focus('gamesScreen', '[data-gaction="save-130"]');
+  await app.ctx.saveGameRecord(130); await settle();
+  assert.strictEqual(app.dom.active().getAttribute('data-gaction'), 'status-v130', 'after Save, focus is on the new status control');
+  const pocket = app.store.game_entries.find(e => e.igdb_id === 130);
+  await app.ctx.setGameStatus(pocket.id, 'finished', 'franchise'); await settle();
+  assert.match(franchiseOf(app, f.id), /Caught up/, 'finishing it returns the franchise to Caught up');
+  assert.deepStrictEqual(app.store.game_entries.map(e => e.status), ['finished', 'finished', 'finished']);
+});
+
+test('the Library’s usual order (High first, then A to Z) doesn’t use status: a status change moves nothing, the same on redraw, reread and Refresh; an explicit sort with its directions applies at once, focus following the moved row', async () => {
+  const app = await bootWith({ entries: [entry(1, 102), entry(2, 140), entry(3, 180), entry(4, 110, { priority: 'high' })] });
+  await openGames(app);
+  const usual = libraryOrder(app);
+  assert.deepStrictEqual(usual, [4, 3, 2, 1].map(k => ID('61000000', k)), 'High first, then A to Z');
+  app.dom.focus('gamesScreen', `[data-game="${ID('61000000', 3)}"] [data-gaction="status"]`);
+  await app.ctx.setGameStatus(ID('61000000', 3), 'finished'); await settle();
+  assert.deepStrictEqual(libraryOrder(app), usual, 'redrawn after the save: unchanged');
+  await app.ctx.loadGamesView(); await settle();
+  assert.deepStrictEqual(libraryOrder(app), usual, 'read again: the same');
+  await app.ctx.refreshGames(); await settle();
+  assert.deepStrictEqual(libraryOrder(app), usual, 'Refresh: the same');
+  // Status (Playing first … Skipped last), then Title Z to A.
+  app.ctx.chooseSortField('title'); app.ctx.reverseSortField('title'); app.ctx.chooseSortField('status');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(app.ctx.viewSortSpec(app.ctx.viewSortContext()))), [{ f: 'status', d: 'asc' }, { f: 'title', d: 'desc' }]);
+  const sorted = libraryOrder(app);
+  assert.deepStrictEqual(sorted, [1, 4, 2, 3].map(k => ID('61000000', k)), 'Want to play Z to A (“ZZ War 4…” after “ZZ War (2019)” A to Z), then the Finished one');
+  app.dom.focus('gamesScreen', `[data-game="${ID('61000000', 1)}"] [data-gaction="status"]`);
+  await app.ctx.setGameStatus(ID('61000000', 1), 'finished'); await settle();
+  const moved = libraryOrder(app);
+  assert.deepStrictEqual(moved, [4, 2, 1, 3].map(k => ID('61000000', k)), 'at once: the newly Finished game among the Finished, Z to A');
+  const a = app.dom.active();
+  assert.deepStrictEqual([a.closest('[data-game]').getAttribute('data-game'), a.getAttribute('data-gaction')], [ID('61000000', 1), 'status'], 'focus follows the moved row');
+  await app.ctx.loadGamesView(); await settle();
+  assert.deepStrictEqual(libraryOrder(app), moved, 'read again: the same order');
+  app.ctx.reverseSortField('status');
+  assert.deepStrictEqual(libraryOrder(app), [1, 3, 4, 2].map(k => ID('61000000', k)), 'reversed: Finished before Want to play, each still Z to A');
 });
 
 T.run();

@@ -79,7 +79,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   +N shows the rest); the platform and release on one line ("PS4 · Playable on PS5 · Oct 10, 2021"; upcoming dates blue with
   TV's Upcoming tag; Date TBA faint; "per IGDB" is screen-reader text and a tooltip, Details lists every release; a hold or Store
   / publisher evidence stays visible); status as TV's quiet select (Want to play, Playing, Paused, Finished, Skipped). Filters:
-  Genre and Status (default All except Skipped); Sort with Title, Release date, Status, Priority, Critic score and Player score (item 13's sort line and
+  Genre and Status (default All except Skipped); the usual order is High priority first, then A to Z (status plays no part, so a
+  status change moves no row; owner, 2026-11-11); Sort with Title, Release date, Status, Priority, Critic score and Player score (item 13's sort line and
   remembering). **Game length was removed by the owner's decision (2026-11-10):** no estimates, play style, Length sort,
   HowLongToBeat link or time-to-beat reads; a remembered sort that included Length keeps its other fields (the usual order when
   none remain), and `game_settings.play_style` stays as a legacy value, never shown, sent back unchanged on each save and kept in
@@ -97,7 +98,12 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   **Franchises:** following is explicit (a game's ⋯ or + Add game) and saving follows nothing. A followed franchise (an IGDB
   series) is a collapsed row as TV's shows (an expand button; Up next and Coming in aligned columns, labelled on cards): the Up next
   version and its platform line, or Caught up, and the earliest Coming (+N more); expanded, its spots in release order as TV's
-  season rows, each version beneath with its platform line and status (or Save), then Stop following. Up next is the earliest
+  season rows, each version beneath with its platform line and status (or Save), then Stop following. A saved version's status
+  is the Library's select and its guarded change (Up next, Caught up and Coming follow at once, the franchise stays open, focus
+  stays on it; after Save, focus goes to the new select). With platforms chosen, an expanded franchise lists only versions with
+  a release on one (native, PS4 playable on PS5, upcoming and TBA included) and no spot left without one; a note counts the
+  hidden versions. Visibility only (owner, 2026-11-11): progress, Up next, Caught up and Coming use every version, so a hidden
+  Finished original still completes its spot. Up next is the earliest
   counted spot, by its original's release date, that isn't Finished or skipped and has a playable version: the member's saved
   version first (Playing, Paused, Want to play), else a native release, else one playable through compatibility. A spot is an
   original with its remasters and remakes (separate games, saved and queued on their own; finishing any completes the spot) and
