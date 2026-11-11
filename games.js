@@ -281,7 +281,9 @@ function captureGamesFocus() {
   const screen = document.getElementById('gamesScreen');
   const ids = attr ? [...screen.querySelectorAll(`[${attr}]`)].map(x => x.getAttribute(attr)) : [];
   const row = rowEl ? rowEl.getAttribute(attr) : null, at = ids.indexOf(row);
-  return { attr, row, hook: hookEl ? hookEl.getAttribute('data-gaction') : null, id: a.id || null,
+  // (a text box being typed in, such as Search your games, keeps its caret and selection)
+  const sel = a.id && typeof a.selectionStart === 'number' ? [a.selectionStart, a.selectionEnd, a.selectionDirection || 'none'] : null;
+  return { attr, row, hook: hookEl ? hookEl.getAttribute('data-gaction') : null, id: a.id || null, sel,
     next: at >= 0 ? ids.slice(at + 1) : [], prev: at >= 0 ? ids.slice(0, at).reverse() : [] };
 }
 function applyGamesFocus(rec) {
@@ -299,7 +301,9 @@ function applyGamesFocus(rec) {
   } else if (rec.id) el = document.getElementById(rec.id);
   else if (rec.hook) el = screen.querySelector(`[data-gaction=${q(rec.hook)}]`);
   if (!usable(el)) el = screen.querySelector('[data-games-empty], #gSearch, #gamesTitle');
-  if (usable(el)) el.focus();
+  if (!usable(el)) return;
+  el.focus();
+  if (rec.sel && el.id === rec.id && typeof el.setSelectionRange === 'function') el.setSelectionRange(...rec.sel);
 }
 
 // ── IGDB, through the igdb function ──

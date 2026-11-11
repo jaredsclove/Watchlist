@@ -307,8 +307,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   redraw keeps the focused control, its value and caret. Two additions: when the focused season is hidden because it
   is now skipped, focus goes to its show's "Show skipped seasons" control; when a focused "Mark E6 watched" is gone,
   focus goes to its season's Episodes toggle. Deletions and other redraws follow the chain (a show row's action that is
-  gone, as after its last listed episode, falls to the show's expand button). A Games dialog redraw (+ Add game's search
-  finishing, a save or follow ending) keeps a focused text box's focus, caret and selection the same way; a text box
+  gone, as after its last listed episode, falls to the show's expand button). A Games screen redraw (each keystroke in Search
+  your games) and a Games dialog redraw (+ Add game's search finishing, a save or follow ending) keep a focused text box's
+  focus, caret and selection the same way; a text box
   focused anew after a redraw (from the Search button, a Rename) gets its caret at the end.
 - **Accepted limitations (Batch A):** after a refused change is rolled back,
   focus doesn't return to the control it started from; focus doesn't follow a pending save across the
