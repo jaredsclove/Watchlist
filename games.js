@@ -51,14 +51,14 @@ function gamesDataFrom(t) {
 function gamesState(data = gamesData, today = localTodayStr()) {
   const s = data && data.settings;
   return { cache: data ? data.cache : new Map(), entries: data ? data.entries : [], decisions: data ? data.decisions : new Map(),
-    platforms: s ? s.platforms : null, style: s ? s.play_style : 'main', today };
+    platforms: s ? s.platforms : null, today };
 }
 // A saved game as its rows show it.
 function gameEntryView(e, st) {
   const rec = st.cache.get(e.igdb_id) || null;
   const recs = rec ? [rec].concat((e.port_ids || []).map(p => st.cache.get(p)).filter(Boolean)) : [];
   const avail = gameAvailability(recs, st);
-  return { entry: e, rec, avail, title: rec ? rec.name : e.title, hidden: !!avail.hiddenByPlatforms, length: gameLengthOf(rec, st.style),
+  return { entry: e, rec, avail, title: rec ? rec.name : e.title, hidden: !!avail.hiddenByPlatforms,
     genres: rec ? rec.genres : [], dateKey: avail.line ? avail.line.key : null };
 }
 
@@ -172,8 +172,7 @@ function gameRowHtml(v, st) {
         <div class="game-title-line"><button type="button" class="btn-link game-title" data-gaction="open" onclick="openGameDetails(${e.igdb_id}, this)">${esc(v.title)}</button>${prio}</div>
         <div class="game-line">${esc(lineText)}</div>
         <div class="game-meta">${v.genres.map(g => `<button type="button" class="badge meta-chip meta-genres badge-clickable" data-gaction="genre" onclick="setGamesFilter('genre', '${jsArg(g)}')">${esc(g)}</button>`).join('')}
-          ${v.rec && gameScoresText(v.rec) ? `<span class="game-scores">${esc(gameScoresText(v.rec))}</span>` : ''}
-          <span class="game-length${v.length.reliable ? '' : ' muted'}">${esc(gameLengthText(v.length))} <span class="visually-hidden">(${esc(GAME_STYLE_LABELS[st.style])})</span></span></div>
+          ${v.rec && gameScoresText(v.rec) ? `<span class="game-scores">${esc(gameScoresText(v.rec))}</span>` : ''}</div>
       </div>
       <div class="game-actions">${gameStatusSelectHtml(e)}${menu}</div>
     </li>`;
@@ -318,21 +317,18 @@ async function igdbQueries(queries) {
   }
   return out;
 }
-// IGDB records by id (and their time to beat), in batches; Map(id → cache record).
+// IGDB records by id, in batches; Map(id → cache record).
 async function igdbRecords(ids) {
   const list = [...new Set(ids)].filter(Number.isInteger);
   const queries = [];
   for (let i = 0; i < list.length; i += 400) { // (400 ids keep a query well under the function's body limit)
     const part = list.slice(i, i + 400).join(',');
-    queries.push({ name: `g${i}`, endpoint: 'games', body: `fields ${IGDB_GAME_FIELDS}; where id = (${part}); limit 500;` },
-      { name: `t${i}`, endpoint: 'game_time_to_beats', body: `fields game_id,hastily,normally,completely,count; where game_id = (${part}); limit 500;` });
+    queries.push({ name: `g${i}`, endpoint: 'games', body: `fields ${IGDB_GAME_FIELDS}; where id = (${part}); limit 500;` });
   }
   const out = new Map();
   if (!queries.length) return out;
   const r = await igdbQueries(queries);
-  const ttb = new Map();
-  Object.keys(r).filter(k => k[0] === 't').forEach(k => (r[k] || []).forEach(t => ttb.set(t.game_id, igdbHours(t))));
-  Object.keys(r).filter(k => k[0] === 'g').forEach(k => (r[k] || []).forEach(g => out.set(g.id, igdbRecord(g, { hours: ttb.get(g.id) || null }))));
+  Object.keys(r).forEach(k => (r[k] || []).forEach(g => out.set(g.id, igdbRecord(g))));
   return out;
 }
 // The records a version brings along: its parent, ports, remasters and remakes (one level).
@@ -830,7 +826,6 @@ function openGameDetails(igdbId, opener) {
   const rows = recs.flatMap(r => r.releases.map(row => ({ r, row }))).sort((a, b) => cmpStr(a.row.p, b.row.p) || cmpStr(gameDateKey(a.row), gameDateKey(b.row)));
   const statusWords = { full: 'Full release', none: 'Release', beta: 'Beta (doesn’t count)', alpha: 'Alpha (doesn’t count)', early: 'Early access (doesn’t count)', advanced: 'Advanced access (doesn’t count)',
     offline: 'Offline', cancelled: 'Cancelled', compat: 'Compatibility listing (doesn’t count)', patch: 'Optimization patch (doesn’t count)', other: 'Other' };
-  const len = recs[0].hours, style = st.style, lens = ['main', 'main_extra', 'completionist'].map(s => ({ s, l: gameLengthOf(rec, s) }));
   const holds = gamesData.decisionRows.filter(d => (d.kind === 'not_out_yet' || d.kind === 'available') && recs.some(r => r.id === d.igdb_id));
   const evidence = researchEnabled ? `<div class="modal-section"><div class="modal-label">Record Store or publisher evidence (research)</div>
       <p class="games-note">A current PlayStation Store or publisher page that says this version is available confirms it, even without an exact day.</p>
@@ -844,8 +839,7 @@ function openGameDetails(igdbId, opener) {
       <p>${esc([rec.type === 'main' ? 'Game' : rec.type, rec.first ? `first released ${rec.first}` : 'not released yet', rec.genres.join(', ')].filter(Boolean).join(' · '))}</p>
       <p>${esc(gameScoresText(rec) || 'No scores on IGDB.')}</p></div>
     <div class="modal-section"><div class="modal-label">Releases (dates per IGDB)</div><ul class="manage-list">${rows.map(({ r, row }) => `<li>${esc(GAME_PLATFORM_LABEL[row.p])} · ${esc(gameDateText(row))}${row.r != null ? ` · ${esc(IGDB_REGIONS[row.r] || '')}` : ''} · ${esc(statusWords[row.s] || row.s)}${r.id !== rec.id ? ` · ${esc(r.name)}` : ''}${row.p === 'ps4' && onPs4OnlyList(r) ? ' · on Sony’s PS4-only list' : ''}</li>`).join('') || '<li>None listed.</li>'}</ul></div>
-    <div class="modal-section"><div class="modal-label">Length (IGDB time to beat, ${len ? countUnit(len.count, 'submission', 'submissions') : 'none'})</div><ul class="manage-list">${lens.map(({ s, l }) => `<li>${esc(GAME_STYLE_LABELS[s])}: ${l.value == null ? 'unknown' : `${l.value} h${l.reliable ? '' : ' — reported, but the estimate is unreliable'}`}${s === style ? ' (your play style)' : ''}</li>`).join('')}</ul>
-      <p><a href="${esc(gameSearchHltbUrl(rec.name))}" target="_blank" rel="noopener noreferrer">Search HowLongToBeat</a>${rec.store ? ` · <a href="${esc(rec.store)}" target="_blank" rel="noopener noreferrer">PlayStation Store (US)</a>` : ''}</p></div>
+    ${rec.store ? `<p><a href="${esc(rec.store)}" target="_blank" rel="noopener noreferrer">PlayStation Store (US)</a></p>` : ''}
     ${holds.length ? `<div class="modal-section"><div class="modal-label">Your decisions</div><ul class="manage-list">${holds.map(d => `<li>${d.kind === 'not_out_yet' ? `Not out yet on ${esc(GAME_PLATFORM_LABEL[d.platform])} (IGDB’s ${esc(d.value.date)})` : `Available on ${esc(GAME_PLATFORM_LABEL[d.platform])}`}${d.basis === 'research' ? ` · research ${esc(d.value.research_date || '')}: ${(d.value.evidence || []).map(e => `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(e.source === 'playstation_store' ? 'PlayStation Store' : 'publisher')}</a>`).join(', ')}` : ''}</li>`).join('')}</ul></div>` : ''}
     ${evidence}
     <div class="modal-actions"><button class="btn" onclick="closeGameDialog()">Close</button></div>`);
@@ -893,14 +887,14 @@ function gamesOnNavigate() {
   gamesCollectionEdit = null; gamesReport = '';
 }
 
-// ── Settings → Games (platforms and play style; they follow the member across devices and are in backups) ──
+// ── Settings → Games (platforms; they follow the member across devices and are in backups) ──
+// game_settings.play_style is a legacy field (game length was removed, 2026-11-10): never shown, kept as saved on every save.
 function gamesSettingHtml() {
   const s = gamesSettingsRead && gamesSettingsRead.settings, state = gamesSettingsRead ? gamesSettingsRead.status : 'loading';
-  const plats = s ? s.platforms : [], style = s ? s.play_style : 'main';
+  const plats = s ? s.platforms : [];
   const body = state === 'loading' ? '<p class="settings-text">Loading…</p>' : state === 'error' ? `<p class="settings-status warn">Couldn’t be read. <button class="btn" onclick="readGamesSettings(true)">Retry</button></p>`
     : `<fieldset class="settings-fieldset"><legend>My platforms</legend>${GAME_PLATFORMS.map(p => `<label class="settings-check"><input type="checkbox" class="games-platform" value="${p.key}"${plats.includes(p.key) ? ' checked' : ''} onchange="saveGamesSettings()"> ${esc(p.label)}</label>`).join('')}</fieldset>
-      <p class="settings-text">With PS5 chosen, PS4 games that play on PS5 show too, labelled “PS4 · Playable on PS5” with their PS4 date (unless Sony lists them as PS4 only). Games on none of your platforms are hidden but keep their status, priority, collections and queue places.</p>
-      <fieldset class="settings-fieldset"><legend>My play style (for game length)</legend>${Object.entries(GAME_STYLE_LABELS).map(([v, l]) => `<label class="settings-check"><input type="radio" name="gamesStyle" class="games-style" value="${v}"${style === v ? ' checked' : ''} onchange="saveGamesSettings()"> ${esc(l)}</label>`).join('')}</fieldset>`;
+      <p class="settings-text">With PS5 chosen, PS4 games that play on PS5 show too, labelled “PS4 · Playable on PS5” with their PS4 date (unless Sony lists them as PS4 only). Games on none of your platforms are hidden but keep their status, priority, collections and queue places.</p>`;
   return `<section class="settings-card" aria-labelledby="settingsGamesTitle"><h3 id="settingsGamesTitle" tabindex="-1">Games</h3>${body}
     <p class="settings-text">Saved with your library, so they follow you to every device and come back with a restore.</p>${typeof gamesResearchSettingHtml === 'function' ? gamesResearchSettingHtml() : ''}</section>`;
 }
@@ -927,15 +921,14 @@ function redrawGamesSetting() {
 }
 function refocusGamesSetting(value) {
   if (!value) return;
-  const el = document.querySelector(`.games-platform[value=${JSON.stringify(value)}], .games-style[value=${JSON.stringify(value)}]`);
+  const el = document.querySelector(`.games-platform[value=${JSON.stringify(value)}]`);
   if (el && typeof el.focus === 'function') el.focus();
 }
 async function saveGamesSettings() {
   if (!gamesSettingsRead || gamesSettingsRead.status !== 'ready') return;
   const s = gamesSettingsRead.settings;
   const platforms = [...document.querySelectorAll('.games-platform')].filter(x => x.checked).map(x => x.value);
-  const styleEl = [...document.querySelectorAll('.games-style')].find(x => x.checked);
-  const style = styleEl ? styleEl.value : (s ? s.play_style : 'main');
+  const style = s ? s.play_style : 'main'; // (the legacy value, sent back unchanged)
   const focused = document.activeElement && document.activeElement.value;
   await runWrite('Games settings', async lane => {
     try {

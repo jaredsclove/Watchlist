@@ -129,9 +129,8 @@ migration, merge after the migration's run record is confirmed.
   Refresh shows or a show's expansion reads its details, so the field is unknown for every show there for now).
 - G1 not verified: real phones (queue dragging on touch included; the browser check finished one drop with a dispatched
   pointerup); live games research (no games brief researched or findings imported on production); a member's Not out yet and
-  franchise Up next on production data. IGDB time-to-beat figures can be implausibly low as well as high (a 2-hour main
-  story seen live); only out-of-order or over-cap values are marked unreliable. HowLongToBeat has no supported access: IGDB
-  hours with a search link only. Unresolved provider-terms point: whether the Twitch agreement's deletion duty reaches backup
+  franchise Up next on production data. (Game length, whose IGDB figures were unreliable, was removed by the owner's decision on
+  2026-11-10.) Unresolved provider-terms point: whether the Twitch agreement's deletion duty reaches backup
   files members have downloaded (`docs/APP_BEHAVIOR.md`, "Games").
 - Pre-existing (seen in Q1's review): a film with collection-update records of its own (an alias, a hold, a remembered removal)
   can't be deleted from the page, because those tables guard deletes; queue entries don't add to this.

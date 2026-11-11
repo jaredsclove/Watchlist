@@ -317,7 +317,7 @@ const RESTORE_COLUMNS_V8 = {
   queue_entries: { id: 'uuid', queue_id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', position: 'int', created_at: 'timestamp' }
 };
 const BACKUP_FORMAT_V8 = { tables: Object.keys(RESTORE_COLUMNS_V8), columns: RESTORE_COLUMNS_V8 };
-// Format 9 (G1, item 5): format 8 plus the games: a member's platforms and play style, saved game versions with their status,
+// Format 9 (G1, item 5): format 8 plus the games: a member's platforms (and play_style, a legacy value since game length was removed), saved game versions with their status,
 // priority, franchise spot and joined ports, followed franchises, standing decisions about IGDB facts, and private game
 // collections; queue entries may name a game (db/g1_games.sql). The IGDB cache (game_titles) is never in a backup: it is the
 // provider's data and Refresh fills it again. A backup holds IGDB ids and the provider's titles and dates only as the member's
@@ -560,6 +560,7 @@ function validateFormat9Rows(tables, report) {
   if (settings.length > 1) problems.push('more than one game_settings row');
   settings.forEach((s, i) => {
     if (!Array.isArray(s.platforms) || s.platforms.length > 7 || !s.platforms.every(p => G1_PLATFORMS.includes(p)) || new Set(s.platforms).size !== s.platforms.length) problems.push(`game_settings row ${i + 1} has platforms the database refuses`);
+    // (play_style: a legacy value since game length was removed; the database still checks it)
     if (!['main', 'main_extra', 'completionist'].includes(s.play_style)) problems.push(`game_settings row ${i + 1} has an unknown play style`);
   });
   const entries = rows('game_entries'), entryIds = new Set(entries.map(e => e.id)), saved = new Map();
@@ -662,7 +663,7 @@ function restoreDocument(doc) {
 function format8ConversionHtml(currentCounts) {
   const games = currentCounts.game_entries || 0, other = G1_TABLES.filter(t => t !== 'game_entries').reduce((n, t) => n + (currentCounts[t] || 0), 0);
   return `<div class="modal-section"><div class="modal-label">This backup is converted to format 9 before restoring</div><ul class="manage-list">
-    <li>Format 9 adds games: your platforms and play style, saved games, followed franchises, your decisions about release dates and versions, and game collections. This backup was made before them, so it has none.</li>
+    <li>Format 9 adds games: your platforms, saved games, followed franchises, your decisions about release dates and versions, and game collections. This backup was made before them, so it has none.</li>
     ${games || other ? `<li>Restoring it removes your ${games} saved game${games === 1 ? '' : 's'}${other ? ` and ${other} other game record${other === 1 ? '' : 's'} (settings, follows, decisions, collections)` : ''}, and any games in your queues (the safety backup keeps them). Your films, shows, queues and progress come from the backup as usual.</li>` : ''}
     <li>The file itself isn’t changed.</li></ul></div>`;
 }

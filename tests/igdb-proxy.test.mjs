@@ -76,6 +76,7 @@ const answer = async r => ({ status: r.status, body: await r.json().catch(() => 
     ['a body too long', { queries: [Q('x', 'games', `fields ${'a,'.repeat(5000)}id;`)] }],
     ['an unknown clause', { queries: [Q('x', 'games', 'fields id; delete everything;')] }],
     ['a limit over 500', { queries: [Q('x', 'games', 'fields id; limit 501;')] }], ['a query without a name', { queries: [{ endpoint: 'games', body: 'fields id;' }] }],
+    ['time to beat (removed with game length)', { queries: [Q('x', 'game_time_to_beats', 'fields id;')] }],
     ['not JSON', null]]) {
     const r = body === null ? await answer(await handle(new Request('https://fn.test/igdb', { method: 'POST', headers: { Authorization: `Bearer ${MEMBER}`, apikey: KEY }, body: 'not json' }), ENV, n.deps())) : await send(body);
     ok(r.status === 400 && r.body.error === 'invalid_request', `${label}: refused`, JSON.stringify(r.body));
@@ -91,7 +92,7 @@ const answer = async r => ({ status: r.status, body: await r.json().catch(() => 
 {
   resetTokenCache();
   const n = network();
-  const many = { queries: [Q('a', 'games', 'fields id;'), Q('b', 'release_dates', 'fields id;'), Q('c', 'game_time_to_beats', 'fields id;')] };
+  const many = { queries: [Q('a', 'games', 'fields id;'), Q('b', 'release_dates', 'fields id;'), Q('c', 'collection_memberships', 'fields id;')] };
   const r = await answer(await handle(req(MEMBER, many), ENV, n.deps()));
   ok(r.status === 200 && r.body.results.map(x => x.name).join() === 'a,b,c' && n.tokens() === 1, 'several queries, in order, with one app token');
   ok(n.sleeps.filter(ms => ms === 260).length === 2, 'they are spaced under IGDB’s rate limit');

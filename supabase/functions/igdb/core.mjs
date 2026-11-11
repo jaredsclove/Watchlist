@@ -9,7 +9,7 @@
 // Answers: 401 signed out or an invalid token; 403 signed in but not a member; 400 a request outside the allow-list; 502 when
 // IGDB or Twitch can't be reached or refuse. Pure: everything it reaches goes through deps.fetch (tests pass a fake).
 
-export const ENDPOINTS = ['games', 'release_dates', 'collections', 'collection_memberships', 'game_time_to_beats', 'platforms', 'franchises', 'external_games'];
+export const ENDPOINTS = ['games', 'release_dates', 'collections', 'collection_memberships', 'platforms', 'franchises', 'external_games'];
 export const MAX_QUERIES = 10;
 export const MAX_BODY = 8000;
 const TOKEN_URL_DEFAULT = 'https://id.twitch.tv/oauth2/token';

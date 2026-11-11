@@ -1254,7 +1254,7 @@ body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; 
 .game-prio { color: #f5c451; } .game-prio-low { font-size: 12px; color: var(--text3); }
 .game-line, .franchise-up, .franchise-coming, .spot-version-line { font-size: 12px; color: var(--text2); margin-top: 2px; overflow-wrap: anywhere; }
 .game-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; color: var(--text2); }
-.game-scores, .game-length { white-space: nowrap; }
+.game-scores { white-space: nowrap; }
 .muted { color: var(--text3); }
 .game-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .game-state { font-size: 12px; color: var(--text2); border: 1px solid var(--border2); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
