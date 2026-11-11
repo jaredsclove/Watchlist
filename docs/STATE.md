@@ -27,17 +27,20 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: genre colour families (owner's
-  plan; PR #71, `78cb7fd`), 2026-11-11 UTC, presentation tier: genre pills on TV, films and games take one of six muted families
-  (`GENRE_FAMILIES`, aliases included); History, War, Western, Politics and unmapped labels stay gray; network, franchise and
-  form pills unchanged. Cache token `20261111-genrecolors` (33 versioned files). Verified: 58 offline suites (1387; the new
-  suite checks the mapping, the same family everywhere, and 4.5:1 text on each rendered pill, plain, hovered and pressed, in
-  both themes: worst 5.32:1, light sage hovered); a local synthetic Chrome check in the real light theme and a forced-dark
-  preview copy (outside the repo) at desktop, 820 and 390 px, measuring every visible genre pill as rendered (worst 5.76:1
-  light, 7.38:1 dark), no page overflow, a pill pressed and cleared by keyboard with focus kept. Pages built; the changed files byte-identical to
-  `main`. Live on the owner's account, read-only, light theme: TV and Games genre pills in their families as rendered (worst
-  6.26:1); network, franchise and form pills unchanged. Dark was checked on the local preview only.
-- Previous release: Games drawn as TV (PR #69, `8579546`), 2026-11-11 UTC: TV's tabs, toolbar, rows and cards for Games.
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Games walkthrough fixes (PR #73,
+  `215a409`), 2026-11-11 UTC, presentation tier: an expanded franchise lists only versions with a release on a chosen platform
+  (PS4 playable on PS5, upcoming and TBA included) and no spot left without one, as visibility only (progress, Up next, Caught
+  up and Coming use every version); a saved version's status there is the Library's select and guarded change; the Library's
+  usual order stays High first, then A to Z (owner's decision: status plays no part). Cache token `20261111-franchisefix` (33
+  versioned files). Verified: 58 offline suites (1391; four new tests: platform filtering with switching back and forth, the
+  franchise status control with the walkthrough's sequence and focus, the order on redraw, reread and Refresh); a local
+  synthetic Chrome check (keyboard changes on rows and 820 px cards, Save by keyboard, 390 and 820 px without overflow,
+  platforms PS5 → Switch → PS4 → PS5 through Settings with no saved row changed). Pages built; the changed files byte-identical
+  to `main`. Live on the owner's account, read-only: Uncharted expanded shows no PS3 original, Golden Abyss or "Not on your
+  platforms" line (7 versions hidden, noted) and status selects on saved versions; no status was changed live.
+- Previous release: genre colour families (PR #71, `78cb7fd`), 2026-11-11 UTC: genre pills in six muted families on TV, films
+  and games.
+- Earlier: Games drawn as TV (PR #69, `8579546`), 2026-11-11 UTC: TV's tabs, toolbar, rows and cards for Games.
 - Earlier: Search your games caret fix (PR #67, `2dfba5b`), 2026-11-11 UTC: the screen's focus record keeps a text
   box's caret and selection.
 - Earlier: + Add game's search caret (PR #65, `ebde4fe`), 2026-11-11 UTC: the dialog keeps a focused text box's caret
@@ -142,7 +145,7 @@ migration, merge after the migration's run record is confirmed.
 - Item 13 not verified: real phones; Series premiere on production (the owner's device cache has no first-air dates until
   Refresh shows or a show's expansion reads its details, so the field is unknown for every show there for now).
 - G1 not verified: real phones (the TV-style Games rows and cards were checked at 390 and 820 px in desktop Chrome only; queue dragging on touch included; the browser check finished one drop with a dispatched
-  pointerup); live games research (no games brief researched or findings imported on production); a member's Not out yet and
+  pointerup); a status change from a franchise row on production (checked locally with synthetic data only); live games research (no games brief researched or findings imported on production); a member's Not out yet and
   franchise Up next on production data. (Game length, whose IGDB figures were unreliable, was removed by the owner's decision on
   2026-11-10.) Unresolved provider-terms point: whether the Twitch agreement's deletion duty reaches backup
   files members have downloaded (`docs/APP_BEHAVIOR.md`, "Games").
