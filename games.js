@@ -153,9 +153,9 @@ function gamesTableHtml(parts, label, last) {
 }
 // A game's status, as quiet as TV's (the status-select colours: Want to play and Skipped plain).
 const GAME_STATUS_LOOK = { want: 'confirmed', playing: 'watching', paused: 'maybe', finished: 'complete', skipped: 'skipped' };
-function gameStatusSelectHtml(e, where = 'library') {
+function gameStatusSelectHtml(e, where = 'library', hook = 'status') {
   const idArg = jsArg(e.id);
-  return `<select class="status-select game-status s-${GAME_STATUS_LOOK[e.status] || 'confirmed'}" data-gaction="status" aria-label="${esc(`Status of ${e.title}`)}" onchange="setGameStatus('${idArg}', this.value, '${where}')">${Object.entries(GAME_STATUS_LABELS)
+  return `<select class="status-select game-status s-${GAME_STATUS_LOOK[e.status] || 'confirmed'}" data-gaction="${hook}" aria-label="${esc(`Status of ${e.title}`)}" onchange="setGameStatus('${idArg}', this.value, '${where}')">${Object.entries(GAME_STATUS_LABELS)
     .map(([v, l]) => `<option value="${v}"${e.status === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
 }
 const jsArg = s => esc(String(s)).replace(/'/g, "\\'");
@@ -308,8 +308,15 @@ function franchiseParts(f, st) {
   const coming = sum.coming.length ? gameNextHtml('Coming', sum.coming[0].version.rec.name, sum.coming[0].c, sum.coming.length > 1 ? ` <span class="muted">(+${sum.coming.length - 1} more)</span>` : '') : '<span class="muted">—</span>';
   const expand = `<button type="button" class="expand-btn" data-gaction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Hide' : 'Show'} the games of ${f.name}`)}" onclick="event.stopPropagation(); toggleFranchise('${idArg}')"><span class="expand-chevron">${open ? '▾' : '▸'}</span></button>`;
   const name = `<span class="show-title-main"><span class="show-title">${esc(f.name)}</span></span>`;
-  const spots = open ? sum.spots : [];
-  const versionStatus = v => (v.entry ? `<span class="status-pill s-${GAME_STATUS_LOOK[v.entry.status] || 'confirmed'}">${esc(GAME_STATUS_LABELS[v.entry.status])}</span>`
+  // Visibility only (as the Library's hidden games): a version with no release on a chosen platform (native, or a PS4 game
+  // playable on PS5; upcoming and TBA releases count) isn't listed, and a spot left with none isn't either. Progress, Up next,
+  // Caught up and Coming are worked out from every version, so a hidden one keeps counting (a Finished PS3 original still
+  // completes its spot). A saved game without IGDB details (as after a restore) still shows in the Library, unchanged.
+  const shownSpots = sum.spots.map(s => ({ ...s, versions: s.versions.filter(v => !v.avail.hiddenByPlatforms) })).filter(s => s.versions.length);
+  const hiddenVersions = sum.spots.reduce((n, s) => n + s.versions.filter(v => v.avail.hiddenByPlatforms).length, 0);
+  const spots = open ? shownSpots : [];
+  // A saved version: the Library's status control (the same guarded change); else Save.
+  const versionStatus = v => (v.entry ? `<span class="state-action">${gameStatusSelectHtml(v.entry, 'franchise', `status-v${v.rec.id}`)}</span>`
     : `<button class="btn btn-link" data-gaction="save-${v.rec.id}" onclick="saveGameRecord(${v.rec.id})">Save</button>`);
   const versionName = v => `${esc(v.rec.name)}${v.rec.type !== 'main' ? ` <span class="muted">(${esc(v.rec.type === 'standalone' ? 'standalone' : v.rec.type)})</span>` : ''}`;
   const versionLine = v => (v.avail.line ? gameLineHtml(v.avail.line) : '<span class="game-line muted">Not on your platforms</span>');
@@ -317,7 +324,8 @@ function franchiseParts(f, st) {
   const spotActions = s => `<button class="btn btn-link" data-gaction="skipspot-${s.id}" onclick="toggleSkipSpot(${s.id}, ${s.skipped})">${s.skipped ? 'Unskip this spot' : 'Skip this spot'}</button>${s.spinoff
     ? ` <button class="btn btn-link" data-gaction="include-${s.id}" onclick="toggleIncludeSpinoff(${s.id}, ${s.included})">${s.included ? 'Don’t count it' : 'Count it toward Caught up'}</button>` : ''}`;
   const spotHead = s => `<span class="season-lbl spot-title">${esc(s.title)}</span> <span class="muted">${esc(s.first ? s.first.slice(0, 4) : 'TBA')}</span>${spotLabel(s) ? ` <span class="state-tag">${esc(spotLabel(s))}</span>` : ''}`;
-  const note = '<p class="games-note">Main-series games count toward Caught up; spin-offs only when you count them. An original, a remaster and a remake share one spot: finishing any of them completes it.</p>';
+  const hiddenNote = hiddenVersions ? ` ${countUnit(hiddenVersions, 'version isn’t', 'versions aren’t')} on your platforms, so ${hiddenVersions === 1 ? 'it is' : 'they are'} hidden here (${hiddenVersions === 1 ? 'its' : 'their'} progress still counts).` : '';
+  const note = `<p class="games-note">Main-series games count toward Caught up; spin-offs only when you count them. An original, a remaster and a remake share one spot: finishing any of them completes it.${hiddenNote}</p>`;
   const unfollow = `<button class="btn" data-gaction="unfollow" onclick="unfollowFranchise('${idArg}')">Stop following ${esc(f.name)}</button>`;
   const of = `data-follow-of="${id}"`;
   let row = `<tr class="show-group-row franchise-row" data-follow="${id}" onclick="toggleFranchise('${idArg}')">
@@ -393,12 +401,13 @@ function captureGamesFocus() {
   if (!documentHasFocus()) return null;
   const a = document.activeElement;
   if (!a || typeof a.closest !== 'function' || !a.closest('#gamesScreen')) return null;
-  const rowEl = a.closest('[data-game], [data-follow]');
+  // (an expanded franchise's rows in the table are siblings of its row, marked data-follow-of; on cards they are inside it)
+  const rowEl = a.closest('[data-game], [data-follow], [data-follow-of]');
   const hookEl = a.closest('[data-gaction]');
   const attr = rowEl ? (rowEl.getAttribute('data-game') != null ? 'data-game' : 'data-follow') : null;
   const screen = document.getElementById('gamesScreen');
   const ids = attr ? [...new Set([...screen.querySelectorAll(`[${attr}]`)].map(x => x.getAttribute(attr)))] : []; // (a game's row and its card)
-  const row = rowEl ? rowEl.getAttribute(attr) : null, at = ids.indexOf(row);
+  const row = rowEl ? rowEl.getAttribute(attr) ?? rowEl.getAttribute('data-follow-of') : null, at = ids.indexOf(row);
   // (a text box being typed in, such as Search your games, keeps its caret and selection)
   const sel = a.id && typeof a.selectionStart === 'number' ? [a.selectionStart, a.selectionEnd, a.selectionDirection || 'none'] : null;
   return { attr, row, hook: hookEl ? hookEl.getAttribute('data-gaction') : null, id: a.id || null, sel,
@@ -414,8 +423,10 @@ function applyGamesFocus(rec) {
   const shownOf = sel => { const all = [...screen.querySelectorAll(sel)]; return all.find(x => typeof x.getClientRects !== 'function' || x.getClientRects().length > 0) || all[0] || null; };
   let el = null;
   if (rec.row) {
-    const inRow = (r, sel) => shownOf(`[${rec.attr}=${q(String(r))}] ${sel}`);
+    const inRow = (r, sel) => shownOf(`[${rec.attr}=${q(String(r))}] ${sel}, [${rec.attr}-of=${q(String(r))}] ${sel}`);
     if (rec.hook) el = inRow(rec.row, `[data-gaction=${q(rec.hook)}]`);
+    // A franchise version just saved: its new status control (Save is gone).
+    if (!usable(el) && rec.hook && /^save-\d+$/.test(rec.hook)) el = inRow(rec.row, `[data-gaction=${q(`status-v${rec.hook.slice(5)}`)}]`);
     if (!usable(el)) el = inRow(rec.row, '[data-gaction="more"], [data-gaction="expand"]');
     for (const r of rec.next.concat(rec.prev)) { if (usable(el)) break; el = inRow(r, '[data-gaction="more"], [data-gaction="expand"]'); }
   } else if (rec.id) el = document.getElementById(rec.id);
