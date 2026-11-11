@@ -89,7 +89,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   date, title and id. A franchise with two or more visible games (counted after filters and platforms) has a small heading
   (rows and cards) and is placed by its name; one alone is an ordinary row placed by its own title, as a standalone game
   (owner, 2026-11-11: 007 First Light before Grand Theft Auto VI), so a group can move when a filter leaves one game or a
-  second joins it (focus stays on the game's control). Release order, not story chronology; priority and status
+  second joins it (focus stays on the game's control). Where a headed franchise ends and games without a heading follow, a
+  gap the size of a heading's and a firmer line (`--border2`) close it, in rows and cards (decorative, hidden from assistive
+  technology); a heading marks every other boundary, so there is no second gap. Redrawn with the view, so filters move it. Release order, not story chronology; priority and status
   play no part (a status change moves no row). Grouping follows the cache: after a save, Refresh or a reread, never fetched to
   draw. Sort with Title, Release date, Status, Priority, Critic score and Player score (item 13's sort line and
   remembering). **Game length was removed by the owner's decision (2026-11-10):** no estimates, play style, Length sort,
