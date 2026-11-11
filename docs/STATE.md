@@ -27,16 +27,17 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Search your games caret fix
-  (PR #67, `2dfba5b`), 2026-11-11 UTC, presentation tier: each keystroke redraws the Games screen, whose focus restore refocused the
-  new box with its caret at the start (and the filter's own end-of-text step then skipped a box already focused), so typing
-  went in on the left; the screen's focus record now keeps a text box's caret and selection. PR #65 had fixed only the
-  + Add game dialog. Cache token `20261111-gamescaret` (33 versioned files). Verified: 57 offline suites (1380, a new
-  Library search test failing without the fix); a local synthetic Chrome check (typing, Backspace / Delete, arrows,
-  Home / End, selecting and replacing, paste, select-all and delete, focus kept through every redraw). Pages built;
-  the changed files byte-identical to `main`. Live on the owner's account, typing in Search your games only: the caret
-  stayed where it was through each redraw, and Backspace / Delete / arrows edited normally.
-- Previous release: + Add game's search caret (PR #65, `ebde4fe`), 2026-11-11 UTC: the dialog keeps a focused text box's caret
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Games drawn as TV (owner's request;
+  PR #69), 2026-11-11 UTC, presentation tier: Library, Franchises and Collections use TV's tab row, toolbar (Filters with chips),
+  aligned table rows and its cards below 1100 px; compact C / P scores beside the title with their source behind tap or focus;
+  TV's genre pills (+N), quiet status select, priority marks and ⋯; one-line platform and release (Upcoming, TBA, PS4 on PS5);
+  franchises expand as TV's shows. No data, sort or behaviour change. Cache token `20261111-gamestv` (33 versioned files).
+  Verified: 57 offline suites (1383, three new presentation tests); a local synthetic Chrome check at 1426, 820 and 390 px
+  (long titles, both / one / no score, many genres, PS4 on PS5, upcoming and TBA, an expanded franchise, a collection; search
+  editing, a status change, the ⋯ priority, a genre pill, Filters, Sort and the Add game search keeping focus or caret).
+- Previous release: Search your games caret fix (PR #67, `2dfba5b`), 2026-11-11 UTC: the screen's focus record keeps a text
+  box's caret and selection.
+- Earlier: + Add game's search caret (PR #65, `ebde4fe`), 2026-11-11 UTC: the dialog keeps a focused text box's caret
   and selection across a redraw; a text box focused anew gets its caret at the end.
 - Earlier: game length removed (owner's
   decision; PR #62, `ef444b1`, then the function in PR #63, `5587a0b`), 2026-11-10/11 UTC, presentation tier with a function
@@ -137,7 +138,7 @@ migration, merge after the migration's run record is confirmed.
   watched mark on the live site (left unchanged; covered locally and through a local API stack).
 - Item 13 not verified: real phones; Series premiere on production (the owner's device cache has no first-air dates until
   Refresh shows or a show's expansion reads its details, so the field is unknown for every show there for now).
-- G1 not verified: real phones (queue dragging on touch included; the browser check finished one drop with a dispatched
+- G1 not verified: real phones (the TV-style Games rows and cards were checked at 390 and 820 px in desktop Chrome only; queue dragging on touch included; the browser check finished one drop with a dispatched
   pointerup); live games research (no games brief researched or findings imported on production); a member's Not out yet and
   franchise Up next on production data. (Game length, whose IGDB figures were unreliable, was removed by the owner's decision on
   2026-11-10.) Unresolved provider-terms point: whether the Twitch agreement's deletion duty reaches backup

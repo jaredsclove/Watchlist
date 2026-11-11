@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261111-gamescaret">
+<link rel="stylesheet" href="styles.css?v=20261111-gamestv">
 </head>
 <body>
 
@@ -107,38 +107,38 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261111-gamescaret"></script>
-<script src="api.js?v=20261111-gamescaret"></script>
-<script src="write-lane.js?v=20261111-gamescaret"></script>
-<script src="ui-helpers.js?v=20261111-gamescaret"></script>
-<script src="metadata.js?v=20261111-gamescaret"></script>
-<script src="backup-restore.js?v=20261111-gamescaret"></script>
-<script src="tabs.js?v=20261111-gamescaret"></script>
-<script src="render.js?v=20261111-gamescaret"></script>
-<script src="row-actions.js?v=20261111-gamescaret"></script>
-<script src="tmdb-search.js?v=20261111-gamescaret"></script>
-<script src="collections-pull.js?v=20261111-gamescaret"></script>
-<script src="universe-pull.js?v=20261111-gamescaret"></script>
-<script src="person-pull.js?v=20261111-gamescaret"></script>
-<script src="tmdb-match.js?v=20261111-gamescaret"></script>
-<script src="derived-views.js?v=20261111-gamescaret"></script>
-<script src="tv-shows.js?v=20261111-gamescaret"></script>
-<script src="episodes.js?v=20261111-gamescaret"></script>
-<script src="show-ratings.js?v=20261111-gamescaret"></script>
-<script src="organization.js?v=20261111-gamescaret"></script>
-<script src="organization-manage.js?v=20261111-gamescaret"></script>
-<script src="collection-members.js?v=20261111-gamescaret"></script>
-<script src="collection-updates.js?v=20261111-gamescaret"></script>
-<script src="collection-research.js?v=20261111-gamescaret"></script>
-<script src="collection-settings.js?v=20261111-gamescaret"></script>
-<script src="browse-views.js?v=20261111-gamescaret"></script>
-<script src="view-sort.js?v=20261111-gamescaret"></script>
-<script src="queues.js?v=20261111-gamescaret"></script>
-<script src="games-data.js?v=20261111-gamescaret"></script>
-<script src="games.js?v=20261111-gamescaret"></script>
-<script src="games-research.js?v=20261111-gamescaret"></script>
-<script src="history.js?v=20261111-gamescaret"></script>
-<script src="library.js?v=20261111-gamescaret"></script>
+<script src="auth.js?v=20261111-gamestv"></script>
+<script src="api.js?v=20261111-gamestv"></script>
+<script src="write-lane.js?v=20261111-gamestv"></script>
+<script src="ui-helpers.js?v=20261111-gamestv"></script>
+<script src="metadata.js?v=20261111-gamestv"></script>
+<script src="backup-restore.js?v=20261111-gamestv"></script>
+<script src="tabs.js?v=20261111-gamestv"></script>
+<script src="render.js?v=20261111-gamestv"></script>
+<script src="row-actions.js?v=20261111-gamestv"></script>
+<script src="tmdb-search.js?v=20261111-gamestv"></script>
+<script src="collections-pull.js?v=20261111-gamestv"></script>
+<script src="universe-pull.js?v=20261111-gamestv"></script>
+<script src="person-pull.js?v=20261111-gamestv"></script>
+<script src="tmdb-match.js?v=20261111-gamestv"></script>
+<script src="derived-views.js?v=20261111-gamestv"></script>
+<script src="tv-shows.js?v=20261111-gamestv"></script>
+<script src="episodes.js?v=20261111-gamestv"></script>
+<script src="show-ratings.js?v=20261111-gamestv"></script>
+<script src="organization.js?v=20261111-gamestv"></script>
+<script src="organization-manage.js?v=20261111-gamestv"></script>
+<script src="collection-members.js?v=20261111-gamestv"></script>
+<script src="collection-updates.js?v=20261111-gamestv"></script>
+<script src="collection-research.js?v=20261111-gamestv"></script>
+<script src="collection-settings.js?v=20261111-gamestv"></script>
+<script src="browse-views.js?v=20261111-gamestv"></script>
+<script src="view-sort.js?v=20261111-gamestv"></script>
+<script src="queues.js?v=20261111-gamestv"></script>
+<script src="games-data.js?v=20261111-gamestv"></script>
+<script src="games.js?v=20261111-gamestv"></script>
+<script src="games-research.js?v=20261111-gamestv"></script>
+<script src="history.js?v=20261111-gamestv"></script>
+<script src="library.js?v=20261111-gamestv"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -258,6 +258,7 @@ let pendingReveal = null; // Q1: { viewId, item, season }: the queued item to fo
 let gamesData = null; // G1: the Games area's read: { loaded, settings, entries, follows, decisions (Map), decisionRows, collections, members, cache (Map igdb id → record) } (games.js); null until read
 let gamesLoadSeq = 0; // G1: lets a late Games read see that it's been superseded
 let gamesFilters = { search: '', genre: '', status: 'notskipped' }; // G1: the Library's filters (page memory)
+let gamesFiltersOpen = false; // the Library's Filters panel (page memory, as TV's)
 let gamesExpanded = new Set(); // G1: followed franchises (follow ids) shown expanded (page memory)
 let gamesFocusIntent = null; // G1: where focus goes after the next Games redraw; null: the list's rule
 let gamesRefreshing = false; // G1: Refresh is reading IGDB or saving what it read
