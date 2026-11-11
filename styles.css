@@ -1229,46 +1229,61 @@ body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; 
   .queue-season-btn { min-height: 44px; }
 }
 
-/* G1: games. Their own screen like Queues: rows wrap to one column on phones; the status select and ⋯ stay together. */
-.games-screen { max-width: 980px; }
-.games-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 10px; }
-.games-title { font-size: 20px; font-weight: 600; margin: 0; }
+/* G1: games, drawn as TV (owner, 2026-11-11): TV's toolbar, a table of aligned rows with TV's type, density, hover and
+   separators, and TV's cards below 1100 px; the title, ratings, pills, status select, priority marks and ⋯ are TV's. */
 .games-title:focus { outline: none; }
-.games-tabs { display: flex; flex-wrap: wrap; gap: 4px; border: 0; padding: 0; position: static; }
-.games-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
-.games-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
-.games-toolbar select, .games-screen select, .game-dialog-box select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; font: inherit; font-size: 13px; max-width: 100%; }
-.games-toolbar .search-input { min-width: 0; flex: 1 1 200px; max-width: 320px; }
-.games-count { font-size: 13px; color: var(--text2); }
+.muted { color: var(--text3); }
+.games-actions { display: contents; } /* + Add game, Refresh, Review: on the toolbar line, as TV's + Add */
 .games-note { font-size: 13px; color: var(--text2); margin: 6px 0; line-height: 1.5; }
 .games-report { font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 12px; margin: 8px 0; }
 .games-empty { background: var(--surface); border: 1px dashed var(--border2); border-radius: var(--radius-lg); padding: 16px; color: var(--text2); font-size: 14px; }
 .games-empty:focus { outline: none; }
-.games-list, .franchise-list, .spot-list, .spot-versions, .games-results, .games-review { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.game-row, .franchise-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 12px; }
-.game-row.game-skipped { opacity: 0.75; }
-.game-main, .franchise-main { flex: 1 1 320px; min-width: 0; }
-.game-title-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
-.game-title { padding: 0; font-size: 14px; font-weight: 600; color: var(--text); text-align: left; overflow-wrap: anywhere; }
-.game-title:hover { color: var(--accent); text-decoration: underline; }
-.game-prio { color: #f5c451; } .game-prio-low { font-size: 12px; color: var(--text3); }
-.game-line, .franchise-up, .franchise-coming, .spot-version-line { font-size: 12px; color: var(--text2); margin-top: 2px; overflow-wrap: anywhere; }
-.game-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; color: var(--text2); }
-.game-scores { white-space: nowrap; }
-.muted { color: var(--text3); }
-.game-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.games-screen select:not(.status-select):not(.priority-select), .game-dialog-box select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; font: inherit; font-size: 13px; max-width: 100%; }
+.games-table th:first-child { width: 38%; }
+.games-table th.col-cats { width: 24%; }
+.games-table th.col-plat { width: 22%; }
+.franchise-table th:first-child { width: 34%; }
+.franchise-table th.col-next { width: 26%; }
+@media (max-width: 1099px) { .games-table { display: none; } }
+/* The title opens Details: TV's title type, no underline. */
+.game-title-btn { background: none; border: 0; padding: 0; margin: 0; font: inherit; font-weight: 500; color: var(--text); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.game-title-btn:hover { color: var(--accent); }
+.game-title-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+.rating-k { font-size: 0.8em; font-weight: 500; opacity: 0.85; }
+.game-ratings { display: contents; }
+.game-ratings .tmdb-rating-note { display: none; }
+.game-ratings:has(.rk-critic:is([data-open="1"], :focus-visible)) .note-critic,
+.game-ratings:has(.rk-player:is([data-open="1"], :focus-visible)) .note-player { display: block; flex-basis: 100%; order: 1; }
+/* The platform and release: the platform, then the date (blue while upcoming, faint when TBA); PS4 on PS5 says so. */
+.game-line { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; white-space: normal; line-height: 1.4; } /* one line, as TV's dates */
+.game-when::before { content: '·'; margin-right: 6px; color: var(--text3); }
+.game-line .upcoming-tag { margin-left: 0; }
+.game-plat { color: var(--text2); }
+.game-compat { color: var(--blue); }
+.game-when { color: var(--text2); }
+.game-when.game-upcoming { color: var(--blue); }
+.game-when.game-tba { color: var(--text3); }
+.game-basis { font-size: 11px; color: var(--text3); }
+.game-basis.game-held { color: var(--amber); }
+.game-status-cell { white-space: nowrap; }
+.game-card .card-actions { margin-left: auto; }
+/* Franchises: TV's show rows; spots and versions as its season sub-rows. */
+.fr-name { display: block; color: var(--text); font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
+.spot-row .spot-title { font-weight: 500; }
+.spot-row.spot-done .spot-title { color: var(--text2); }
+.spot-excluded td { opacity: 0.7; }
+td.spot-actions { white-space: nowrap; text-align: right; }
+td.spot-version-name { padding-left: 46px; font-size: 13px; color: var(--text2); overflow-wrap: anywhere; }
+.spot-version-card { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 13px; }
+.spot-version-card .spot-version-name { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.fr-card-meta .card-season, .fr-card-meta .card-date { display: block; flex-basis: 100%; }
+.fr-label { display: block; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; }
+.games-collection-new { margin: 6px 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.games-collection-manage { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* The Add game dialog and Review */
+.games-results, .games-review, .games-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .game-state { font-size: 12px; color: var(--text2); border: 1px solid var(--border2); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
-.franchise-row { flex-direction: column; align-items: stretch; }
-.franchise-top { display: flex; align-items: flex-start; gap: 8px; }
-.franchise-name { font-weight: 600; }
-.franchise-detail { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; }
-.spot { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; }
-.spot.spot-done { opacity: 0.8; } .spot.spot-excluded { border-style: dashed; }
-.spot-head { font-size: 13px; }
-.spot-title { font-weight: 600; }
-.spot-version { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; }
-.spot-version-name { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
-.spot-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.status-pill.game-state { border: 0; padding: 0; }
 .games-search-row { display: flex; gap: 8px; margin-bottom: 8px; } .games-search-row .search-input { flex: 1 1 auto; min-width: 0; }
 .games-preview h3 { font-size: 15px; margin: 8px 0 4px; }
 .games-follow { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
@@ -1278,10 +1293,6 @@ body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; 
 .settings-fieldset { border: 0; padding: 0; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .settings-fieldset legend { font-size: 13px; font-weight: 600; margin-bottom: 4px; width: 100%; }
 .queue-hidden-note { font-size: 12px; color: var(--text2); margin: 6px 0 0; }
-@media (max-width: 700px) {
-  .games-actions { margin-left: 0; }
-  .game-actions { margin-left: 0; width: 100%; justify-content: space-between; }
-}
 /* G1: five areas (TV · Movies · Collections · Games · Queues) don't fit one line beside Settings below 360 px: the row wraps. */
 @media (max-width: 359px) {
   .media-switch { flex-wrap: wrap; row-gap: 2px; }

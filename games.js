@@ -1,5 +1,5 @@
 // ─── Games (G1, next-gen item 5; db/g1_games.sql, games-data.js) ───────────────
-// The Games area: Library (each saved game version with its platforms, status, priority, genres, scores and length), Franchises
+// The Games area, drawn as TV (TV's tabs, toolbar, rows and cards): Library (each saved game version with its platforms, status, priority, genres and scores), Franchises
 // (followed franchises as collapsed rows: Up next or Caught up, and Coming), and Collections (private, hand-made game
 // collections). Search and details come from IGDB through the igdb function (supabase/functions/igdb); the page never holds
 // IGDB's secret. Saving a game follows nothing; following saves nothing. Everything here writes through the one write lane and
@@ -85,16 +85,9 @@ function renderGamesView() {
   if (!screen) return;
   screen.style.display = '';
   const st = gamesState(), view = GAMES_VIEWS[activeViewId];
-  const tabs = Object.keys(GAMES_VIEWS).map(id => `<button type="button" class="tab${id === activeViewId ? ' active' : ''}"${id === activeViewId ? ' aria-current="page"' : ''} onclick="switchView('${id}')">${GAMES_VIEW_LABELS[id]}</button>`).join('');
-  const review = gamesReviewItems(gamesData).concat(typeof gamesResearchReviewItems === 'function' ? gamesResearchReviewItems(gamesData) : []);
   const noPlatforms = !st.platforms || !st.platforms.length;
-  const head = `<div class="games-head"><h2 class="games-title" id="gamesTitle" tabindex="-1">Games</h2>
-      <div class="games-tabs tabs" role="group" aria-label="Games views">${tabs}</div>
-      <div class="games-actions">
-        <button class="btn btn-accent" data-gaction="add" onclick="openGamesAdd(this)">+ Add game</button>
-        <button class="btn" data-gaction="refresh" onclick="refreshGames()"${gamesRefreshing ? ' disabled' : ''}>${gamesRefreshing ? 'Refreshing…' : 'Refresh'}</button>
-        ${review.length ? `<button class="btn" data-gaction="review" onclick="openGamesReview(this)">Review (${review.length})</button>` : ''}
-      </div></div>
+  // As TV: the views are the secondary tab row (tabs.js); the heading is for screen readers and focus.
+  const head = `<h2 class="visually-hidden games-title" id="gamesTitle" tabindex="-1">Games: ${esc(GAMES_VIEW_LABELS[activeViewId])}</h2>
     ${noPlatforms ? `<p class="games-note" data-games-prompt="1">Choose your platforms in <button class="btn-link" onclick="openSettings(this, 'games')">Settings → Games</button> to see only what you can play, with dates for your systems.</p>` : ''}
     ${gamesReport ? `<div class="games-report" role="status">${gamesReport}</div>` : ''}`;
   let body = '';
@@ -105,8 +98,20 @@ function renderGamesView() {
   if (view === 'library' && typeof renderSortLine === 'function') renderSortLine();
   applyGamesFocus(rec);
 }
+// + Add game, Refresh and Review: after the line's other controls, as TV's + Add.
+function gamesActionsHtml() {
+  const review = gamesReviewItems(gamesData).concat(typeof gamesResearchReviewItems === 'function' ? gamesResearchReviewItems(gamesData) : []);
+  return `<span class="games-actions"><button class="btn add-open-btn" data-gaction="add" onclick="openGamesAdd(this)">+ Add game</button>
+    <button class="btn" data-gaction="refresh" onclick="refreshGames()"${gamesRefreshing ? ' disabled' : ''}>${gamesRefreshing ? 'Refreshing…' : 'Refresh'}</button>
+    ${review.length ? `<button class="btn" data-gaction="review" onclick="openGamesReview(this)">Review (${review.length})</button>` : ''}</span>`;
+}
+// TV's toolbar (render.js filterBarHtml, styles.css .list-toolbar): one line, then the Filters panel, the chips and the sort line; the count at the end.
+function gamesToolbarHtml({ line = '', panel = '', chips = '', sort = false, count = '' }) {
+  return `<div class="list-toolbar games-toolbar"><div class="filters"><div class="filter-line">${line}${gamesActionsHtml()}</div>${panel}${chips}${sort ? '<div id="sortLine" class="sort-line-box"></div>' : ''}</div>
+    ${count ? `<div class="stats-row"><p class="count-line" id="gamesCount">${esc(count)}</p></div>` : ''}</div>`;
+}
 
-// Library: the search, genre and status filters, the sort, and one row per visible game.
+// Library: Search, Filters (genre, status), Sort and the count; then one row per visible game (cards on narrow screens).
 function gamesLibraryHtml(st) {
   const all = gamesData.entries.map(e => gameEntryView(e, st));
   const shown = all.filter(v => !v.hidden), hidden = all.length - shown.length;
@@ -119,27 +124,42 @@ function gamesLibraryHtml(st) {
   const usual = (a, b) => (b.entry.priority === 'high') - (a.entry.priority === 'high') || compareTitles(a.title, b.title) || cmpStr(a.entry.id, b.entry.id);
   const sorted = typeof sortForView === 'function' ? sortForView(list.map(v => ({ kind: 'game', v })), (a, b) => usual(a.v, b.v)).map(x => x.v) : list.sort(usual);
   const statusOpts = [['notskipped', 'All except Skipped'], ['all', 'All'], ...Object.entries(GAME_STATUS_LABELS)];
-  const toolbar = `<div class="games-toolbar">
-      <label class="visually-hidden" for="gSearch">Search your games</label>
+  const applied = [f.genre ? ['genre', 'Genre', f.genre] : null, f.status !== 'notskipped' ? ['status', 'Status', (statusOpts.find(o => o[0] === f.status) || [])[1] || f.status] : null].filter(Boolean);
+  const open = gamesFiltersOpen;
+  const line = `<label class="visually-hidden" for="gSearch">Search your games</label>
       <input id="gSearch" class="search-input" type="search" placeholder="Search your games" value="${esc(f.search)}" oninput="setGamesFilter('search', this.value)">
-      <label class="visually-hidden" for="gGenre">Genre</label>
-      <select id="gGenre" onchange="setGamesFilter('genre', this.value)"><option value="">All genres</option>${genres.map(g => `<option value="${esc(g)}"${f.genre === g ? ' selected' : ''}>${esc(g)}</option>`).join('')}</select>
-      <label class="visually-hidden" for="gStatus">Status</label>
-      <select id="gStatus" onchange="setGamesFilter('status', this.value)">${statusOpts.map(([v, l]) => `<option value="${v}"${f.status === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
-      ${typeof sortButtonHtml === 'function' ? sortButtonHtml() : ''}
-      <span class="games-count" id="gamesCount">${countUnit(list.length, 'game', 'games')}${list.length !== shown.length ? ` of ${shown.length}` : ''}</span>
-    </div><div id="sortLine" class="sort-line-box"></div>`;
+      <button type="button" class="btn filter-more-btn" id="gFiltersBtn" aria-expanded="${open}" aria-controls="gFilters" onclick="toggleGamesFilters()">Filters${applied.length ? `<span class="filter-count" aria-hidden="true">${applied.length}</span><span class="visually-hidden">, ${applied.length} active</span>` : ''} <span aria-hidden="true">${open ? '▴' : '▾'}</span></button>${typeof sortButtonHtml === 'function' ? sortButtonHtml() : ''}`;
+  const field = (label, id, control) => `<div class="filter-field"><label class="filter-field-label" for="${id}">${esc(label)}</label>${control}</div>`;
+  const panel = `<div class="filter-more" id="gFilters" role="group" aria-label="Filters" onkeydown="gamesFiltersKeydown(event)"${open ? '' : ' hidden'}>
+      <div class="filter-group" role="group" aria-label="Categories"><span class="filter-group-title" aria-hidden="true">Categories</span>${field('Genre', 'gGenre', `<select id="gGenre"${f.genre ? ' class="filter-set"' : ''} onchange="setGamesFilter('genre', this.value)"><option value="">Any genre</option>${genres.map(g => `<option value="${esc(g)}"${f.genre === g ? ' selected' : ''}>${esc(g)}</option>`).join('')}</select>`)}</div>
+      <div class="filter-group" role="group" aria-label="Your marks"><span class="filter-group-title" aria-hidden="true">Your marks</span>${field('Status', 'gStatus', `<select id="gStatus"${f.status !== 'notskipped' ? ' class="filter-set"' : ''} onchange="setGamesFilter('status', this.value)">${statusOpts.map(([v, l]) => `<option value="${v}"${f.status === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`)}</div>
+    </div>`;
+  const chip = ([k, l, t]) => `<button type="button" id="gchip-${k}" class="filter-chip" aria-label="${esc(`Remove filter: ${l}, ${t}`)}" title="${esc(`Remove filter: ${l}, ${t}`)}" onclick="removeGamesFilter('${k}')"><span class="chip-k">${esc(l)}:</span> <span class="chip-v">${esc(t)}</span><span class="chip-x" aria-hidden="true">✕</span></button>`;
+  const chips = `<div class="filter-chips" id="gFilterChips">${f.status === 'notskipped' ? '<span class="filter-default">Status: All except Skipped</span>' : ''}${applied.length
+    ? `<div class="chip-group" role="group" aria-label="Active filters"><span class="chips-label" aria-hidden="true">Active:</span>${applied.map(chip).join('')}</div>` : ''}${applied.length || f.search
+    ? '<button type="button" class="btn-link filter-clear" id="gFilterClear" onclick="clearGamesFilters()">Clear filters</button>' : ''}</div>`;
+  const count = gamesData.entries.length ? (list.length !== shown.length ? `${list.length} of ${countUnit(shown.length, 'game', 'games')}` : countUnit(list.length, 'game', 'games')) : '';
+  const toolbar = gamesToolbarHtml({ line, panel, chips, sort: true, count });
   const hiddenNote = hidden ? `<p class="games-note">${countUnit(hidden, 'saved game isn’t', 'saved games aren’t')} on your platforms, so ${hidden === 1 ? 'it is' : 'they are'} hidden here and in your queues (${hidden === 1 ? 'its' : 'their'} status, priority, collections and queue places are kept). ${hidden === 1 ? 'It comes' : 'They come'} back when a platform you choose has ${hidden === 1 ? 'it' : 'them'}.</p>` : '';
   if (!gamesData.entries.length) return toolbar + `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>No games yet. Use <strong>+ Add game</strong> to search IGDB and save one.</p></div>`;
-  return toolbar + hiddenNote + (sorted.length ? `<ul class="games-list" aria-label="Your games">${sorted.map(v => gameRowHtml(v, st)).join('')}</ul>`
+  return toolbar + hiddenNote + (sorted.length ? gamesTableHtml(sorted.map(v => gameRowParts(v)), 'Your games', 'Status')
     : `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>No games match these filters.</p></div>`);
 }
+// The desktop table and the narrow-screen cards (styles.css shows one of them, at TV's breakpoint).
+function gamesTableHtml(parts, label, last) {
+  return `<table class="games-table" aria-label="${esc(label)}"><thead><tr><th>Game</th><th class="col-cats">Genres</th><th class="col-plat">Platform · Release</th><th>${esc(last)}</th></tr></thead>
+    <tbody>${parts.map(p => p.row).join('')}</tbody></table>
+    <div class="card-list games-cards" aria-label="${esc(label)}">${parts.map(p => p.card).join('')}</div>`;
+}
+// A game's status, as quiet as TV's (the status-select colours: Want to play and Skipped plain).
+const GAME_STATUS_LOOK = { want: 'confirmed', playing: 'watching', paused: 'maybe', finished: 'complete', skipped: 'skipped' };
 function gameStatusSelectHtml(e, where = 'library') {
   const idArg = jsArg(e.id);
-  return `<select class="game-status" data-gaction="status" aria-label="${esc(`Status of ${e.title}`)}" onchange="setGameStatus('${idArg}', this.value, '${where}')">${Object.entries(GAME_STATUS_LABELS)
+  return `<select class="status-select game-status s-${GAME_STATUS_LOOK[e.status] || 'confirmed'}" data-gaction="status" aria-label="${esc(`Status of ${e.title}`)}" onchange="setGameStatus('${idArg}', this.value, '${where}')">${Object.entries(GAME_STATUS_LABELS)
     .map(([v, l]) => `<option value="${v}"${e.status === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
 }
 const jsArg = s => esc(String(s)).replace(/'/g, "\\'");
+// Details: the two scores in words, with their source and counts.
 function gameScoresText(rec) {
   if (!rec) return '';
   const parts = [];
@@ -147,18 +167,70 @@ function gameScoresText(rec) {
   if (rec.player) parts.push(`Players ${rec.player.score} · IGDB (${rec.player.count})`);
   return parts.join(' · ');
 }
-function gameRowHtml(v, st) {
+// A row's compact score beside the title, as TV's TMDB score: "C 83" (critics) or "P 81" (players), coloured by the score;
+// its source, scale and count are behind a tap or keyboard focus and in its accessible name (show-ratings.js toggleShowRatingNote).
+function gameRatingParts(s, kind) {
+  if (!s || !Number.isFinite(s.score)) return null;
+  const critic = kind === 'critic', n = Number(s.count) || 0;
+  const note = `${critic ? 'Critic' : 'Player'} score: ${s.score} out of 100 · ${n.toLocaleString('en-US')} ${critic ? (n === 1 ? 'critic review' : 'critic reviews') : (n === 1 ? 'player rating' : 'player ratings')} on IGDB.`;
+  const band = s.score >= 80 ? 'high' : s.score >= 70 ? 'mid' : 'low';
+  return { button: `<button type="button" class="tmdb-rating r-${band} rk-${kind}" data-gaction="rating-${kind}" aria-label="${esc(note)}" onclick="toggleShowRatingNote(this, event)" onblur="this.removeAttribute('data-open')"><span class="rating-k" aria-hidden="true">${critic ? 'C' : 'P'}</span>\u00a0${s.score}</button>`,
+    note: `<span class="tmdb-rating-note note-${kind}" aria-hidden="true">${esc(note)}</span>` };
+}
+// Both scores, then both notes (so an open note goes below the pair, not between them).
+function gameRatingsHtml(rec) {
+  const parts = rec ? [gameRatingParts(rec.critic, 'critic'), gameRatingParts(rec.player, 'player')].filter(Boolean) : [];
+  return parts.length ? `<span class="game-ratings">${parts.map(p => p.button).join(' ')}${parts.map(p => p.note).join('')}</span>` : '';
+}
+// The title as TV draws it (★ before, Low after, the scores between), opening Details.
+function gameTitleHtml(v, opts = {}) {
+  const e = v.entry, ratings = opts.ratings === false ? '' : gameRatingsHtml(v.rec);
+  return `<span class="show-title-main">${priorityMarkHtml(e.priority)}<button type="button" class="show-title game-title-btn" data-gaction="open" onclick="event.stopPropagation(); openGameDetails(${e.igdb_id}, this)">${esc(v.title)}</button>${ratings ? ` ${ratings}` : ''}${priorityMarkHtml(e.priority, true)}</span>`;
+}
+// One release line: the platform ("PS5", or "PS4 · Playable on PS5") and its date or TBA. The repeated "per IGDB" is screen-reader
+// text and a tooltip (Details lists every release with its source); a hold or Store / publisher evidence stays visible.
+function gameLineHtml(c) {
+  if (!c) return '';
+  const from = GAME_PLATFORM_LABEL[c.from] || c.from;
+  const region = c.row.r != null && c.row.r !== 2 && c.row.r !== 8 ? ` (${IGDB_REGIONS[c.row.r] || 'another region'})` : '';
+  const date = gameDateText(c.row), tba = date === 'Date TBA';
+  const plat = c.native ? esc(from) : `${esc(from)} · <span class="game-compat">Playable on PS5</span>`;
+  const basis = c.evidence ? '<span class="game-basis"><span class="visually-hidden"> · </span>Store or publisher</span>'
+    : c.held ? '<span class="game-basis game-held"><span class="visually-hidden"> · </span>not out yet (your hold)</span>'
+    : c.row.prec === 'day' ? '<span class="visually-hidden"> · per IGDB</span>' : '';
+  const upcoming = !c.isReleased && !tba && !c.held;
+  return `<span class="game-line" title="${esc(gameLineText(c))}"><span class="game-plat">${plat}</span><span class="game-when${tba ? ' game-tba' : upcoming ? ' game-upcoming' : ''}"><span class="visually-hidden"> · </span>${esc(date + region)}</span>${upcoming ? '<span class="upcoming-tag">Upcoming</span>' : ''}${basis}</span>`;
+}
+function gamePlatformHtml(v) {
+  if (!v.rec) return '<span class="game-line muted">Details not loaded yet: use Refresh</span>';
+  return v.avail.line ? gameLineHtml(v.avail.line) : '<span class="game-line muted">Not announced on your platforms</span>';
+}
+// Genre pills as TV's category pills: a pill filters (pressed while it is the filter); a desktop row shows what fits, then +N.
+const GAME_GENRE_BUDGET = 26;
+function gameGenrePillsHtml(v, budget = 0, plain = false) {
+  const all = v.genres || [], owner = `game:${v.entry.id}`;
+  const open = expandedCategoryOwners.has(owner);
+  const fit = budget ? categoryFitCount(all.map(g => ['genres', g]), budget) : all.length;
+  const shown = open ? all.length : fit, hidden = all.length - fit;
+  const pill = g => { if (plain) return `<span class="badge meta-chip meta-genres">${esc(g)}</span>`; // (a collection: the Library's filter isn't here)
+    const pressed = gamesFilters.genre === g;
+    return `<button type="button" class="badge meta-chip meta-genres badge-clickable filter-pill" data-gaction="${esc(`genre:${g}`)}" aria-pressed="${pressed}" title="${esc(pressed ? `Remove this filter (${g})` : `Filter by “${g}”`)}" onclick="event.stopPropagation(); toggleGamesGenre('${jsArg(g)}')">${esc(g)}</button>`; };
+  const more = hidden ? `<button type="button" class="meta-more" data-gaction="cats-more" aria-expanded="${open}" aria-label="${open ? 'Show fewer genres' : `Show ${hidden} more genre${hidden === 1 ? '' : 's'}`}" onclick="event.stopPropagation(); toggleGameGenres('${jsArg(owner)}')">${open ? 'Fewer' : `+${hidden}`}</button>` : '';
+  return all.slice(0, shown).map(pill).join('') + more;
+}
+function toggleGameGenres(owner) { if (expandedCategoryOwners.has(owner)) expandedCategoryOwners.delete(owner); else expandedCategoryOwners.add(owner); renderGamesView(); }
+function toggleGamesGenre(g) { setGamesFilter('genre', gamesFilters.genre === g ? '' : g); }
+// A game's ⋯ (TV's menu: Priority first, then Organize).
+function gameMenuHtml(v) {
   const e = v.entry, id = esc(e.id), idArg = jsArg(e.id), line = v.avail.line;
-  const lineText = v.rec ? (line ? gameLineText(line) : 'Not announced on your platforms') : 'Details not loaded yet: use Refresh';
-  const prio = e.priority === 'high' ? '<span class="game-prio" title="High priority" aria-label="High priority">★</span>' : e.priority === 'low' ? '<span class="game-prio-low">Low</span>' : '';
   const hold = line && line.rec && line.row.prec === 'day' && !line.evidence
     ? (line.held ? `<button class="popover-action" data-gaction="out" onclick="closeRowMenu(this); clearNotOutYet(${line.rec.id}, '${line.platform}')">It’s out (end my hold)</button>`
       : line.isReleased ? `<button class="popover-action" data-gaction="notout" onclick="closeRowMenu(this); setNotOutYet(${line.rec.id}, '${line.platform}', '${line.key}', '${line.row.prec}')">Not out yet on ${esc(GAME_PLATFORM_LABEL[line.platform])}</button>` : '') : '';
   const follows = v.rec ? v.rec.collections.filter(c => !gamesData.follows.some(f => f.igdb_collection_id === c.id)) : [];
-  const menu = `<span class="more-cell"><button type="button" class="more-btn" data-gaction="more" aria-expanded="false" onclick="toggleMorePopover('g-${id}', this)" aria-label="${esc(`More for ${v.title}`)}">⋯</button>
+  return `<span class="more-cell" onclick="event.stopPropagation()"><button type="button" class="more-btn" data-gaction="more" aria-expanded="false" onclick="toggleMorePopover('g-${id}', this)" title="Priority and more" aria-label="${esc(`More for ${v.title}`)}">⋯</button>
       <div class="more-popover" id="more-popover-g-${id}" style="display:none">
         <div class="popover-section-label">Priority</div>
-        ${['high', 'normal', 'low'].map(p => `<button class="popover-action" data-gaction="prio-${p}" onclick="closeRowMenu(this); setGamePriority('${idArg}', '${p}')"${e.priority === p ? ' disabled' : ''}>${p === 'high' ? '★ High' : p === 'normal' ? 'Normal' : 'Low'}</button>`).join('')}
+        <span class="state-action"><select class="priority-select p-${e.priority}" data-gaction="priority" aria-label="${esc(`Priority of ${v.title}`)}" title="Priority" onchange="closeRowMenu(this); setGamePriority('${idArg}', this.value)">${PRIORITIES.map(p => `<option value="${p}"${p === e.priority ? ' selected' : ''}>${PRIORITY_LABELS[p]}</option>`).join('')}</select></span>
         <div class="popover-section-label" style="margin-top:8px">Organize</div>
         <button class="popover-action" data-gaction="queue" onclick="openAddToQueueFromMenu(this, 'game', '${idArg}')">Add to queue…</button>
         <button class="popover-action" data-gaction="collect" onclick="closeRowMenu(this); openGameCollectionAdd('${idArg}', this)">Add to collection…</button>
@@ -167,70 +239,119 @@ function gameRowHtml(v, st) {
         <button class="popover-action" data-gaction="details" onclick="closeRowMenu(this); openGameDetails(${e.igdb_id}, this)">Details…</button>
         <button class="popover-action" data-gaction="delete" onclick="closeRowMenu(this); confirmDeleteGame('${idArg}')">Delete from library…</button>
       </div></span>`;
-  return `<li class="game-row${e.status === 'skipped' ? ' game-skipped' : ''}" data-game="${id}">
-      <div class="game-main">
-        <div class="game-title-line"><button type="button" class="btn-link game-title" data-gaction="open" onclick="openGameDetails(${e.igdb_id}, this)">${esc(v.title)}</button>${prio}</div>
-        <div class="game-line">${esc(lineText)}</div>
-        <div class="game-meta">${v.genres.map(g => `<button type="button" class="badge meta-chip meta-genres badge-clickable" data-gaction="genre" onclick="setGamesFilter('genre', '${jsArg(g)}')">${esc(g)}</button>`).join('')}
-          ${v.rec && gameScoresText(v.rec) ? `<span class="game-scores">${esc(gameScoresText(v.rec))}</span>` : ''}</div>
-      </div>
-      <div class="game-actions">${gameStatusSelectHtml(e)}${menu}</div>
-    </li>`;
+}
+// A game's desktop row and its card. opts.member (a collection's row): its status as a label and Remove, no ⋯.
+function gameRowParts(v, opts = {}) {
+  const e = v.entry, id = esc(e.id), dim = e.status === 'skipped' ? ' row-skipped' : '';
+  const member = opts.member;
+  const menu = member ? '' : gameMenuHtml(v);
+  const title = gameTitleHtml(v);
+  const status = member
+    ? `<span class="status-pill s-${GAME_STATUS_LOOK[e.status] || 'confirmed'} game-state">${esc(GAME_STATUS_LABELS[e.status])}</span> <button class="btn" data-gaction="cremove" onclick="removeFromGameCollection('${jsArg(member.id)}')">Remove</button>`
+    : `<span class="state-action">${gameStatusSelectHtml(e)}</span>`;
+  const row = `<tr class="game-row${dim}" data-game="${id}">
+      <td><div class="show-title-row"><div class="show-title-left">${title}</div>${menu}</div></td>
+      <td>${gameGenrePillsHtml(v, GAME_GENRE_BUDGET, !!member)}</td>
+      <td class="date-cell game-plat-cell">${gamePlatformHtml(v)}</td>
+      <td class="game-status-cell">${status}</td>
+    </tr>`;
+  const card = `<div class="item-card game-card${dim}" data-game="${id}">
+      <div class="card-top"><div class="card-title-block"><span class="card-title">${title}</span></div>${menu}</div>
+      <div class="card-meta"><span class="card-season">${gamePlatformHtml(v)}</span>${v.genres.length ? `<span class="card-labels">${gameGenrePillsHtml(v, 0, !!member)}</span>` : ''}
+        <span class="card-actions card-complete">${status}</span></div>
+    </div>`;
+  return { row, card };
 }
 function setGamesFilter(key, value) {
   gamesFilters[key] = value;
   renderGamesView();
   const id = { search: 'gSearch', genre: 'gGenre', status: 'gStatus' }[key];
-  if (key === 'genre' && document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-gaction') === 'genre') focusFilterTarget('gGenre');
-  else if (id) { const el = document.getElementById(id); if (el && document.activeElement !== el && key === 'search') { el.focus(); el.setSelectionRange && el.setSelectionRange(el.value.length, el.value.length); } }
+  if (id) { const el = document.getElementById(id); if (el && document.activeElement !== el && key === 'search') { el.focus(); el.setSelectionRange && el.setSelectionRange(el.value.length, el.value.length); } }
+}
+function removeGamesFilter(key) {
+  gamesFilters[key] = key === 'status' ? 'notskipped' : '';
+  renderGamesView();
+  // Focus: the other chip, else Search (as TV's chips).
+  const other = key === 'genre' ? 'gchip-status' : 'gchip-genre';
+  focusFilterTarget(document.getElementById(other) ? other : 'gSearch');
+}
+function clearGamesFilters() {
+  gamesFilters = { search: '', genre: '', status: 'notskipped' };
+  renderGamesView();
+  focusFilterTarget('gSearch');
+}
+function toggleGamesFilters(open = !gamesFiltersOpen) {
+  gamesFiltersOpen = !!open;
+  renderGamesView();
+}
+function gamesFiltersKeydown(e) {
+  if (!e || e.key !== 'Escape' || !gamesFiltersOpen) return;
+  if (typeof e.preventDefault === 'function') e.preventDefault();
+  gamesFiltersOpen = false;
+  renderGamesView();
+  focusFilterTarget('gFiltersBtn');
 }
 
-// Franchises: one collapsed row per followed franchise.
-function gamesFranchisesHtml(st) {
-  if (!gamesData.follows.length) return `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>You follow no franchises. Follow one from a game’s ⋯ menu or from <strong>+ Add game</strong>: its Up next and Coming appear here. Saving a game doesn’t follow its franchise.</p></div>`;
-  const rows = gamesData.follows.slice().sort((a, b) => compareTitles(a.name, b.name)).map(f => {
-    const sum = franchiseSummary(f, st), open = gamesExpanded.has(f.id), id = esc(f.id), idArg = jsArg(f.id);
-    const known = sum.spots.length > 0;
-    const up = !known ? 'Not read from IGDB yet: use Refresh'
-      : sum.upNext ? `Up next: ${sum.upNext.version.rec.name} · ${gameLineText(sum.upNext.version.avail.released[0])}` : 'Caught up';
-    const upNoy = sum.upNext && sum.upNext.version.avail.released[0] && !sum.upNext.version.avail.released[0].evidence
-      ? `<button class="btn btn-link" data-gaction="notout" onclick="setNotOutYet(${sum.upNext.version.avail.released[0].rec.id}, '${sum.upNext.version.avail.released[0].platform}', '${sum.upNext.version.avail.released[0].key}', '${sum.upNext.version.avail.released[0].row.prec}')">Not out yet</button>` : '';
-    const coming = sum.coming.length ? `<div class="franchise-coming">Coming: ${esc(sum.coming[0].version.rec.name)} · ${esc(gameLineText(sum.coming[0].c))}${sum.coming.length > 1 ? ` <span class="muted">(+${sum.coming.length - 1} more)</span>` : ''}</div>` : '';
-    return `<li class="franchise-row" data-follow="${id}">
-        <div class="franchise-top">
-          <button type="button" class="expand-btn" data-gaction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Collapse' : 'Expand'} ${f.name}`)}" onclick="toggleFranchise('${idArg}')">${open ? '▾' : '▸'}</button>
-          <div class="franchise-main"><div class="franchise-name">${esc(f.name)}</div>
-            <div class="franchise-up${sum.caughtUp && known ? ' muted' : ''}">${esc(up)} ${upNoy}</div>${coming}</div>
-        </div>
-        ${open ? franchiseSpotsHtml(f, sum, st) : ''}
-      </li>`;
-  }).join('');
-  return `<ul class="franchise-list" aria-label="Followed franchises">${rows}</ul>`;
+// Franchises: one row per followed franchise, as TV's shows: expand, then aligned Up next and Coming; expanded, its spots in
+// release order with their versions beneath (TV's seasons under a show).
+function gameNextHtml(label, name, c, extra = '') {
+  return `<span class="visually-hidden">${esc(label)}: </span><span class="fr-name">${esc(name)}</span>${c ? `<span class="visually-hidden"> · </span>${gameLineHtml(c)}` : ''}${extra}`;
 }
-function franchiseSpotsHtml(f, sum, st) {
-  const spots = sum.spots.map(s => {
-    const versions = s.versions.map(v => {
-      const status = v.entry ? GAME_STATUS_LABELS[v.entry.status] : '';
-      const line = v.avail.line ? gameLineText(v.avail.line) : 'Not on your platforms';
-      const save = v.entry ? `<span class="game-state">${esc(status)}</span>` : `<button class="btn btn-link" data-gaction="save-${v.rec.id}" onclick="saveGameRecord(${v.rec.id})">Save</button>`;
-      return `<li class="spot-version"><span class="spot-version-name">${esc(v.rec.name)}${v.rec.type !== 'main' ? ` <span class="muted">(${esc(v.rec.type === 'standalone' ? 'standalone' : v.rec.type)})</span>` : ''}</span>
-        <span class="spot-version-line">${esc(line)}</span>${save}</li>`;
-    }).join('');
-    const label = s.skipped ? 'Spot skipped' : s.finished ? 'Finished' : s.spinoff && !s.included ? 'Spin-off (not counted)' : s.spinoff ? 'Spin-off (counted)' : '';
-    const actions = [
-      `<button class="btn btn-link" data-gaction="skipspot-${s.id}" onclick="toggleSkipSpot(${s.id}, ${s.skipped})">${s.skipped ? 'Unskip this spot' : 'Skip this spot'}</button>`,
-      s.spinoff ? `<button class="btn btn-link" data-gaction="include-${s.id}" onclick="toggleIncludeSpinoff(${s.id}, ${s.included})">${s.included ? 'Don’t count it' : 'Count it toward Caught up'}</button>` : ''].join('');
-    return `<li class="spot${s.done ? ' spot-done' : ''}${s.included ? '' : ' spot-excluded'}" data-spot="${s.id}">
-        <div class="spot-head"><span class="spot-title">${esc(s.title)}</span> <span class="muted">${esc(s.first ? s.first.slice(0, 4) : 'TBA')}</span>${label ? ` <span class="game-state">${esc(label)}</span>` : ''}</div>
-        <ul class="spot-versions">${versions}</ul><div class="spot-actions">${actions}</div></li>`;
-  }).join('');
-  return `<div class="franchise-detail"><ol class="spot-list" aria-label="${esc(`${f.name} in release order`)}">${spots || '<li class="muted">Nothing read from IGDB yet: use Refresh.</li>'}</ol>
-    <p class="games-note">Main-series games count toward Caught up; spin-offs only when you count them. An original, a remaster and a remake share one spot: finishing any of them completes it.</p>
-    <button class="btn" data-gaction="unfollow" onclick="unfollowFranchise('${jsArg(f.id)}')">Stop following ${esc(f.name)}</button></div>`;
+function franchiseParts(f, st) {
+  const sum = franchiseSummary(f, st), open = gamesExpanded.has(f.id), id = esc(f.id), idArg = jsArg(f.id);
+  const known = sum.spots.length > 0;
+  const rel = sum.upNext && sum.upNext.version.avail.released[0];
+  const upNoy = rel && !rel.evidence
+    ? ` <button class="btn btn-link" data-gaction="notout" onclick="event.stopPropagation(); setNotOutYet(${rel.rec.id}, '${rel.platform}', '${rel.key}', '${rel.row.prec}')">Not out yet</button>` : '';
+  const up = !known ? '<span class="muted">Not read from IGDB yet: use Refresh</span>'
+    : sum.upNext ? gameNextHtml('Up next', sum.upNext.version.rec.name, rel, upNoy) : '<span class="visually-hidden">Up next: </span><span class="status-pill s-caughtup">Caught up</span>';
+  const coming = sum.coming.length ? gameNextHtml('Coming', sum.coming[0].version.rec.name, sum.coming[0].c, sum.coming.length > 1 ? ` <span class="muted">(+${sum.coming.length - 1} more)</span>` : '') : '<span class="muted">—</span>';
+  const expand = `<button type="button" class="expand-btn" data-gaction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Hide' : 'Show'} the games of ${f.name}`)}" onclick="event.stopPropagation(); toggleFranchise('${idArg}')"><span class="expand-chevron">${open ? '▾' : '▸'}</span></button>`;
+  const name = `<span class="show-title-main"><span class="show-title">${esc(f.name)}</span></span>`;
+  const spots = open ? sum.spots : [];
+  const versionStatus = v => (v.entry ? `<span class="status-pill s-${GAME_STATUS_LOOK[v.entry.status] || 'confirmed'}">${esc(GAME_STATUS_LABELS[v.entry.status])}</span>`
+    : `<button class="btn btn-link" data-gaction="save-${v.rec.id}" onclick="saveGameRecord(${v.rec.id})">Save</button>`);
+  const versionName = v => `${esc(v.rec.name)}${v.rec.type !== 'main' ? ` <span class="muted">(${esc(v.rec.type === 'standalone' ? 'standalone' : v.rec.type)})</span>` : ''}`;
+  const versionLine = v => (v.avail.line ? gameLineHtml(v.avail.line) : '<span class="game-line muted">Not on your platforms</span>');
+  const spotLabel = s => (s.skipped ? 'Spot skipped' : s.finished ? 'Finished' : s.spinoff && !s.included ? 'Spin-off (not counted)' : s.spinoff ? 'Spin-off (counted)' : '');
+  const spotActions = s => `<button class="btn btn-link" data-gaction="skipspot-${s.id}" onclick="toggleSkipSpot(${s.id}, ${s.skipped})">${s.skipped ? 'Unskip this spot' : 'Skip this spot'}</button>${s.spinoff
+    ? ` <button class="btn btn-link" data-gaction="include-${s.id}" onclick="toggleIncludeSpinoff(${s.id}, ${s.included})">${s.included ? 'Don’t count it' : 'Count it toward Caught up'}</button>` : ''}`;
+  const spotHead = s => `<span class="season-lbl spot-title">${esc(s.title)}</span> <span class="muted">${esc(s.first ? s.first.slice(0, 4) : 'TBA')}</span>${spotLabel(s) ? ` <span class="state-tag">${esc(spotLabel(s))}</span>` : ''}`;
+  const note = '<p class="games-note">Main-series games count toward Caught up; spin-offs only when you count them. An original, a remaster and a remake share one spot: finishing any of them completes it.</p>';
+  const unfollow = `<button class="btn" data-gaction="unfollow" onclick="unfollowFranchise('${idArg}')">Stop following ${esc(f.name)}</button>`;
+  const of = `data-follow-of="${id}"`;
+  let row = `<tr class="show-group-row franchise-row" data-follow="${id}" onclick="toggleFranchise('${idArg}')">
+      <td><div class="show-title-row">${expand}<div class="show-title-left">${name}</div></div></td>
+      <td class="date-cell fr-next">${up}</td><td class="date-cell fr-coming">${coming}</td><td></td></tr>`;
+  if (open) {
+    row += spots.map(s => `<tr class="sub-row spot-row${s.done ? ' spot-done' : ''}${s.included ? '' : ' spot-excluded'}" ${of} data-spot="${s.id}">
+        <td style="padding-left:28px">${spotHead(s)}</td><td colspan="2"></td><td class="spot-actions">${spotActions(s)}</td></tr>`
+      + s.versions.map(v => `<tr class="sub-row spot-version" ${of} data-spot-of="${s.id}"><td class="spot-version-name">${versionName(v)}</td>
+        <td colspan="2" class="date-cell">${versionLine(v)}</td><td>${versionStatus(v)}</td></tr>`).join('')).join('')
+      + (known ? '' : `<tr class="sub-row" ${of}><td style="padding-left:28px" colspan="4" class="muted">Nothing read from IGDB yet: use Refresh.</td></tr>`)
+      + `<tr class="sub-row show-actions-row" ${of}><td style="padding-left:28px" colspan="4">${note}${unfollow}</td></tr>`;
+  }
+  const card = `<div class="item-card show-group-card franchise-card" data-follow="${id}">
+      <div class="card-top" onclick="toggleFranchise('${idArg}')" style="cursor:pointer">${expand}<div class="card-title-block"><span class="card-title">${name}</span></div></div>
+      <div class="card-meta fr-card-meta"><span class="card-season fr-next"><span class="fr-label" aria-hidden="true">Up next</span>${up}</span>${sum.coming.length ? `<span class="card-date fr-coming"><span class="fr-label" aria-hidden="true">Coming</span>${coming}</span>` : ''}</div>
+      ${open ? `<div class="card-subseasons">${spots.map(s => `<div class="card-subseason-row spot-card" data-spot="${s.id}"><div>${spotHead(s)}</div>
+          ${s.versions.map(v => `<div class="spot-version-card"><span class="spot-version-name">${versionName(v)}</span><span class="card-date">${versionLine(v)}</span><span class="card-actions">${versionStatus(v)}</span></div>`).join('')}
+          <div class="card-actions spot-actions">${spotActions(s)}</div></div>`).join('')}${known ? '' : '<p class="muted">Nothing read from IGDB yet: use Refresh.</p>'}
+        <div class="card-subseason-row show-actions">${note}${unfollow}</div></div>` : ''}
+    </div>`;
+  return { row, card };
+}
+function gamesFranchisesHtml(st) {
+  const toolbar = gamesToolbarHtml({ count: gamesData.follows.length ? countUnit(gamesData.follows.length, 'franchise followed', 'franchises followed') : '' });
+  if (!gamesData.follows.length) return toolbar + `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>You follow no franchises. Follow one from a game’s ⋯ menu or from <strong>+ Add game</strong>: its Up next and Coming appear here. Saving a game doesn’t follow its franchise.</p></div>`;
+  const parts = gamesData.follows.slice().sort((a, b) => compareTitles(a.name, b.name)).map(f => franchiseParts(f, st));
+  return toolbar + `<table class="games-table franchise-table" aria-label="Followed franchises"><thead><tr><th>Franchise</th><th class="col-next">Up next</th><th class="col-next">Coming</th><th></th></tr></thead>
+    <tbody>${parts.map(p => p.row).join('')}</tbody></table>
+    <div class="card-list games-cards" aria-label="Followed franchises">${parts.map(p => p.card).join('')}</div>`;
 }
 function toggleFranchise(id) { if (gamesExpanded.has(id)) gamesExpanded.delete(id); else gamesExpanded.add(id); renderGamesView(); }
 
-// Collections: the member's game collections, one open at a time.
+// Collections: the member's game collections, one open at a time; its games as the Library draws them.
 function gamesCollectionsHtml(st) {
   const cs = gamesData.collections;
   if (!cs.some(c => c.id === gamesCollectionId)) {
@@ -238,30 +359,27 @@ function gamesCollectionsHtml(st) {
     gamesCollectionId = (cs.find(c => c.id === last) || cs[0] || {}).id || null;
   }
   const c = cs.find(x => x.id === gamesCollectionId) || null;
-  const select = cs.length ? `<label for="gCollection">Collection</label> <select id="gCollection" data-gaction="cselect" onchange="selectGameCollection(this.value)">${cs.map(x => `<option value="${esc(x.id)}"${c && x.id === c.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : '';
+  const select = cs.length ? `<label class="visually-hidden" for="gCollection">Collection</label><select id="gCollection" class="games-collection-select" data-gaction="cselect" onchange="selectGameCollection(this.value)">${cs.map(x => `<option value="${esc(x.id)}"${c && x.id === c.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : '';
   const edit = gamesCollectionEdit;
   const manage = c ? (edit && edit.id === c.id && edit.mode === 'rename'
     ? `<label class="visually-hidden" for="gCollectionRename">New name</label><input id="gCollectionRename" class="search-input" maxlength="100" value="${esc(edit.value)}" oninput="gamesCollectionEdit.value = this.value"> <button class="btn btn-accent" data-gaction="crename-save" onclick="renameGameCollection()">Save</button> <button class="btn" data-gaction="crename-cancel" onclick="gamesCollectionEdit = null; renderGamesView()">Cancel</button>`
     : edit && edit.id === c.id && edit.mode === 'delete'
       ? `<span>Delete “${esc(c.name)}”? Its games stay in your library.</span> <button class="btn-danger" data-gaction="cdelete-confirm" onclick="deleteGameCollection()">Delete collection</button> <button class="btn" data-gaction="cdelete-cancel" onclick="gamesCollectionEdit = null; renderGamesView()">Cancel</button>`
       : `<button class="btn" data-gaction="crename" onclick="gamesCollectionEdit = { id: '${jsArg(c.id)}', mode: 'rename', value: '${jsArg(c.name)}' }; renderGamesView(); focusFilterTarget('gCollectionRename')">Rename</button> <button class="btn" data-gaction="cdelete" onclick="gamesCollectionEdit = { id: '${jsArg(c.id)}', mode: 'delete' }; renderGamesView()">Delete…</button>`) : '';
-  const create = `<div class="queue-new"><label for="gCollectionNew">New collection</label> <input id="gCollectionNew" class="search-input" maxlength="100" placeholder="Name" value="${esc(gamesCollectionNew)}" oninput="gamesCollectionNew = this.value" onkeydown="if (event.key === 'Enter') { event.preventDefault(); createGameCollection(); }"> <button class="btn" data-gaction="ccreate" onclick="createGameCollection()">Create</button></div>`;
-  let body;
+  const create = `<div class="queue-new games-collection-new"><label for="gCollectionNew">New collection</label> <input id="gCollectionNew" class="search-input" maxlength="100" placeholder="Name" value="${esc(gamesCollectionNew)}" oninput="gamesCollectionNew = this.value" onkeydown="if (event.key === 'Enter') { event.preventDefault(); createGameCollection(); }"> <button class="btn" data-gaction="ccreate" onclick="createGameCollection()">Create</button></div>`;
+  let body, count = '';
   if (!c) body = '<div class="games-empty" data-games-empty="1" tabindex="-1"><p>No game collections yet. Make one here, then add games with <strong>Add to collection…</strong> in a game’s ⋯ menu.</p></div>';
   else {
     const ms = gamesData.members.filter(m => m.collection_id === c.id);
     const views = ms.map(m => ({ m, e: gamesData.entries.find(e => e.id === m.entry_id) })).filter(x => x.e).map(x => ({ ...x, v: gameEntryView(x.e, st) }))
       .sort((a, b) => compareTitles(a.v.title, b.v.title));
     const shown = views.filter(x => !x.v.hidden);
-    body = shown.length ? `<ul class="games-list" aria-label="${esc(c.name)}">${shown.map(x => `<li class="game-row" data-game="${esc(x.e.id)}">
-        <div class="game-main"><div class="game-title-line"><button type="button" class="btn-link game-title" data-gaction="open" onclick="openGameDetails(${x.e.igdb_id}, this)">${esc(x.v.title)}</button></div>
-          <div class="game-line">${esc(x.v.avail.line ? gameLineText(x.v.avail.line) : '')}</div></div>
-        <div class="game-actions"><span class="game-state">${esc(GAME_STATUS_LABELS[x.e.status])}</span>
-          <button class="btn" data-gaction="cremove" onclick="removeFromGameCollection('${jsArg(x.m.id)}')">Remove</button></div></li>`).join('')}</ul>`
+    count = countUnit(shown.length, 'game', 'games');
+    body = shown.length ? gamesTableHtml(shown.map(x => gameRowParts(x.v, { member: x.m })), c.name, 'Status')
       : `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>“${esc(c.name)}” has no games${views.length ? ' on your platforms' : ''} yet.</p></div>`;
     if (views.length > shown.length) body += `<p class="games-note">${countUnit(views.length - shown.length, 'game in this collection isn’t', 'games in this collection aren’t')} on your platforms and ${views.length - shown.length === 1 ? 'is' : 'are'} hidden; ${views.length - shown.length === 1 ? 'it stays' : 'they stay'} in the collection.</p>`;
   }
-  return `<div class="games-toolbar">${select} ${manage}</div>${create}${body}`;
+  return gamesToolbarHtml({ line: `${select}${manage ? ` <span class="games-collection-manage">${manage}</span>` : ''}`, count }) + create + body;
 }
 function selectGameCollection(id) {
   gamesCollectionId = id; gamesCollectionEdit = null;
@@ -279,7 +397,7 @@ function captureGamesFocus() {
   const hookEl = a.closest('[data-gaction]');
   const attr = rowEl ? (rowEl.getAttribute('data-game') != null ? 'data-game' : 'data-follow') : null;
   const screen = document.getElementById('gamesScreen');
-  const ids = attr ? [...screen.querySelectorAll(`[${attr}]`)].map(x => x.getAttribute(attr)) : [];
+  const ids = attr ? [...new Set([...screen.querySelectorAll(`[${attr}]`)].map(x => x.getAttribute(attr)))] : []; // (a game's row and its card)
   const row = rowEl ? rowEl.getAttribute(attr) : null, at = ids.indexOf(row);
   // (a text box being typed in, such as Search your games, keeps its caret and selection)
   const sel = a.id && typeof a.selectionStart === 'number' ? [a.selectionStart, a.selectionEnd, a.selectionDirection || 'none'] : null;
@@ -292,14 +410,16 @@ function applyGamesFocus(rec) {
   if (!screen || typeof screen.querySelector !== 'function') return;
   const q = JSON.stringify.bind(JSON);
   const usable = el => !!el && !el.disabled && typeof el.focus === 'function';
+  // The desktop row or the narrow-screen card, whichever is shown (styles.css): the first copy that has a box.
+  const shownOf = sel => { const all = [...screen.querySelectorAll(sel)]; return all.find(x => typeof x.getClientRects !== 'function' || x.getClientRects().length > 0) || all[0] || null; };
   let el = null;
   if (rec.row) {
-    const inRow = (r, sel) => screen.querySelector(`[${rec.attr}=${q(String(r))}] ${sel}`);
+    const inRow = (r, sel) => shownOf(`[${rec.attr}=${q(String(r))}] ${sel}`);
     if (rec.hook) el = inRow(rec.row, `[data-gaction=${q(rec.hook)}]`);
     if (!usable(el)) el = inRow(rec.row, '[data-gaction="more"], [data-gaction="expand"]');
     for (const r of rec.next.concat(rec.prev)) { if (usable(el)) break; el = inRow(r, '[data-gaction="more"], [data-gaction="expand"]'); }
   } else if (rec.id) el = document.getElementById(rec.id);
-  else if (rec.hook) el = screen.querySelector(`[data-gaction=${q(rec.hook)}]`);
+  else if (rec.hook) el = shownOf(`[data-gaction=${q(rec.hook)}]`);
   if (!usable(el)) el = screen.querySelector('[data-games-empty], #gSearch, #gamesTitle');
   if (!usable(el)) return;
   el.focus();

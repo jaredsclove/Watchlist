@@ -70,10 +70,16 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   film it became), a duplicate merged into the entry already there at its place; Match reports any such queue change.
   Deleting a film, season or show removes its entries. A change made from the queue reads it again once it ends.
 - **Games (G1, item 5; `games.js`, `games-data.js`, `db/g1_games.sql`):** the app bar's Games (`#/games`, `#/games/franchises`,
-  `#/games/collections`) has three views. **Library:** each saved game version (an IGDB record) with its platform line, status
-  (Want to play, Playing, Paused, Finished, Skipped; a select), priority (⋯; ★ High, Low), genres (chips that filter), separate
-  source-labelled scores ("Critics 87 · IGDB (9)", "Players 78 · IGDB (258)"); search, Genre and Status filters (default All
-  except Skipped); Sort with Title, Release date, Status, Priority, Critic score and Player score (item 13's sort line and
+  `#/games/collections`) has three views, drawn as TV's (owner, 2026-11-11): the views are the tab row; TV's toolbar (Search,
+  Filters with its count, chips and Clear filters, Sort, + Add game, Refresh, Review, the count); a table of aligned rows on wide
+  screens and TV's cards below 1100 px. **Library:** each saved game version (an IGDB record) as a row: the title (opens Details)
+  with TV's priority marks (★ before, Low after) and compact scores beside it, "C 83" (critics) and "P 81" (players), coloured as
+  TV's, whose source, scale and count ("Critic score: 83 out of 100 · 7 critic reviews on IGDB.") are their accessible names and
+  shown on tap or focus; a missing score shows nothing; then TV's ⋯ (Priority, Organize); genres as TV's pills (a pill filters;
+  +N shows the rest); the platform and release on one line ("PS4 · Playable on PS5 · Oct 10, 2021"; upcoming dates blue with
+  TV's Upcoming tag; Date TBA faint; "per IGDB" is screen-reader text and a tooltip, Details lists every release; a hold or Store
+  / publisher evidence stays visible); status as TV's quiet select (Want to play, Playing, Paused, Finished, Skipped). Filters:
+  Genre and Status (default All except Skipped); Sort with Title, Release date, Status, Priority, Critic score and Player score (item 13's sort line and
   remembering). **Game length was removed by the owner's decision (2026-11-10):** no estimates, play style, Length sort,
   HowLongToBeat link or time-to-beat reads; a remembered sort that included Length keeps its other fields (the usual order when
   none remain), and `game_settings.play_style` stays as a legacy value, never shown, sent back unchanged on each save and kept in
@@ -89,7 +95,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   publisher"). **Not out yet** (⋯, and beside a franchise's Up next; every member) holds that one platform release out of the
   member's Up next while IGDB's row keeps that date and precision; a changed row ends it by itself; "It's out" ends it.
   **Franchises:** following is explicit (a game's ⋯ or + Add game) and saving follows nothing. A followed franchise (an IGDB
-  series) is a collapsed row: "Up next: <version> · <platform line>" or Caught up, and "Coming: …" (+N more). Up next is the earliest
+  series) is a collapsed row as TV's shows (an expand button; Up next and Coming in aligned columns, labelled on cards): the Up next
+  version and its platform line, or Caught up, and the earliest Coming (+N more); expanded, its spots in release order as TV's
+  season rows, each version beneath with its platform line and status (or Save), then Stop following. Up next is the earliest
   counted spot, by its original's release date, that isn't Finished or skipped and has a playable version: the member's saved
   version first (Playing, Paused, Want to play), else a native release, else one playable through compatibility. A spot is an
   original with its remasters and remakes (separate games, saved and queued on their own; finishing any completes the spot) and
@@ -101,7 +109,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   (new platform rows, dates, ports), saves the cache, joins new plain ports to saved games (guarded by what was read) and reports
   new titles under Coming and Up next changes; it adds nothing to Want to play or a queue. **Review** lists saved games whose IGDB
   spot changed, or that sit on an ambiguous chain (a remaster of a port); nothing changes until the member picks "Use IGDB's"
-  (a guarded relink) or "Keep mine" (kept until IGDB changes again). **Collections:** private, hand-made game collections
+  (a guarded relink) or "Keep mine" (kept until IGDB changes again). **Collections:** (their games drawn as Library rows, with the status as a label, Remove, and genres that don't filter) private, hand-made game collections
   (create, rename, delete, add from a game's ⋯, Remove); membership is independent of queues, following and status. **Details:**
   IGDB's release rows (with the ones that don't count named) and the PlayStation Store page when IGDB lists one. **IGDB** is reached only through the `igdb` function
   (`supabase/functions/igdb`): it holds the client secret, answers only members (it asks PostgREST's `stage5_capabilities` with

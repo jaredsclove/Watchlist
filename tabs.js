@@ -7,7 +7,9 @@ function buildTabs() {
   // content heading names the view (B9).
   // Settings (S1) has no view tabs, and nor has the Collections area (S2): its chooser is drawn
   // by buildBrowseBar.
-  const views = isSettingsView() || activeArea === 'collections' || activeArea === 'queues' || activeArea === 'games' ? [] : tabViewsFor(activeMediaType); // (Games draws its own tabs)
+  const views = isSettingsView() || activeArea === 'collections' || activeArea === 'queues' ? []
+    : activeArea === 'games' ? Object.keys(GAMES_VIEWS).map(id => ({ id, label: GAMES_VIEW_LABELS[id] })) // (as TV's views)
+    : tabViewsFor(activeMediaType);
   // A redraw keeps keyboard focus on the view tabs (the open view's tab takes it).
   const active = document.activeElement;
   const hadFocus = !!active && typeof active.closest === 'function' && !!active.closest('#tabBar');

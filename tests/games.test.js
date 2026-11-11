@@ -36,6 +36,8 @@ const RAW = {
   160: { id: 160, name: 'Shadwen', game_type: 0, first_release_date: unix('2016-05-01'), release_dates: [rd(PS4, '2016-05-01')] },
   170: { id: 170, name: 'ZZ Saga One', game_type: 0, first_release_date: unix('2018-02-02'), collections: [{ id: 7002, name: 'ZZ Saga' }], release_dates: [rd(PS4, '2018-02-02'), { platform: PS5, date: unix('2027-01-01'), date_format: 2, y: 2027, status: FULL, release_region: WW }] },
   180: { id: 180, name: 'ZZ Astro', game_type: 0, first_release_date: unix('2024-09-06'), release_dates: [rd(PS5, '2024-09-06')], genres: [{ name: 'Platform' }] },
+  200: { id: 200, name: 'ZZ The Extremely Long Chronicle of the Northern Lighthouse Keepers: Definitive Director’s Cut', game_type: 0, release_dates: [rd(PS5, day(40))],
+    genres: ['Adventure', 'Role-playing (RPG)', 'Strategy', 'Simulator', 'Indie'].map(name => ({ name })) },
   190: { id: 190, name: 'ZZ Month Past', game_type: 0, release_dates: [{ platform: PS5, date: unix('2026-01-01'), date_format: 1, y: 2026, m: 1, status: FULL, release_region: WW }] }
 };
 const TTB = { 110: { game_id: 110, hastily: 11.9 * 3600, normally: 7.2 * 3600, completely: 15 * 3600, count: 12 }, 140: { game_id: 140, hastily: 3468 * 3600, normally: 1758 * 3600, completely: 205 * 3600, count: 9 },
@@ -80,9 +82,12 @@ const follow = (k, cid, name) => ({ id: ID('62000000', k), igdb_collection_id: c
 const screen = app => app.el('gamesScreen').innerHTML;
 const dialog = app => app.el('gameDialogBox').innerHTML;
 const text = s => s.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
-const rowOf = (app, id) => (screen(app).split('<li class="game-row').find(x => x.includes(`data-game="${id}"`)) || '');
-const franchiseOf = (app, id) => text(screen(app).split('<li class="franchise-row').find(x => x.includes(`data-follow="${id}"`)) || '');
-const libraryOrder = app => [...screen(app).matchAll(/<li class="game-row[^"]*" data-game="([^"]+)"/g)].map(m => m[1]);
+// A game's desktop row, a franchise's row with its expanded rows (the table; the narrow-screen cards repeat them), the table's order.
+const tableOf = app => screen(app).split('</tbody>')[0];
+const rowOf = (app, id) => (tableOf(app).split('<tr class="game-row').find(x => x.includes(`data-game="${id}"`)) || '');
+const franchiseOf = (app, id) => text(tableOf(app).split('<tr class="show-group-row franchise-row').find(x => x.includes(`data-follow="${id}"`)) || '');
+const libraryOrder = app => [...tableOf(app).matchAll(/<tr class="game-row[^"]*" data-game="([^"]+)"/g)].map(m => m[1]);
+const cardOf = (app, id) => (screen(app).split('</tbody>')[1] || '').split('<div class="item-card game-card').find(x => x.includes(`data-game="${id}"`)) || '';
 const rpcs = (app, fn) => app.requests.filter(r => r.url.endsWith(`/rpc/${fn}`));
 const reads = (app, table) => app.requests.filter(r => r.method === 'GET' && new RegExp(`/rest/v1/${table}\\?`).test(r.url));
 async function openGames(app, view = 'games') { app.ctx.switchView(view); await settle(); }
@@ -95,9 +100,10 @@ test('the Games area: an app-bar button, its routes and three views; no list too
   assert.match(app.el('mediaSwitch').innerHTML, /id="areaBtn-games" aria-current="page"/);
   assert.deepStrictEqual(['games', 'gamesfranchises', 'gamescollections'].map(v => app.get(`routeOfView("${v}")`)), ['#/games', '#/games/franchises', '#/games/collections']);
   assert.strictEqual(app.get('viewOfRoute("#/games/franchises")'), 'gamesfranchises');
-  assert.strictEqual(app.el('tabBar').innerHTML, '');
-  assert.match(screen(app), /<h2 class="games-title" id="gamesTitle"[^>]*>Games<\/h2>/);
-  assert.match(text(screen(app)), /Library Franchises Collections/);
+  // As TV: the views are the tab row; the heading is for screen readers and focus.
+  assert.strictEqual(text(app.el('tabBar').innerHTML), 'Library Franchises Collections');
+  assert.match(app.el('tabBar').innerHTML, /class="tab active" aria-current="page" onclick="switchView\('games'\)">Library</);
+  assert.match(screen(app), /<h2 class="visually-hidden games-title" id="gamesTitle"[^>]*>Games: Library<\/h2>/);
   assert.match(text(screen(app)), /No games yet\. Use \+ Add game to search IGDB and save one\./);
   assert.deepStrictEqual(app.writes().filter(r => !/functions\/v1\/igdb/.test(r.url)).map(r => r.url), [], 'no database write (the IGDB function is a read)');
 });
@@ -134,7 +140,12 @@ test('platform lines: native PS5 per IGDB, PS4 · Playable on PS5 with the PS4 d
   assert.strictEqual(rowOf(app, ID('61000000', 4)), '', 'a Switch-only game is hidden with PS5 only');
   assert.strictEqual(rowOf(app, ID('61000000', 5)), '', 'a PS4 game on Sony’s PS4-only list is hidden');
   assert.match(text(screen(app)), /2 saved games aren’t on your platforms, so they are hidden here and in your queues \(their status, priority, collections and queue places are kept\)/);
-  assert.match(text(rowOf(app, ID('61000000', 1))), /Critics 87 · IGDB \(9\) · Players 78 · IGDB \(258\)/, 'separate, source-labelled scores');
+  // Compact C and P beside the title; the source, scale and counts in each one's name and its tap / focus note.
+  const r1 = rowOf(app, ID('61000000', 1));
+  assert.match(r1, /data-gaction="rating-critic" aria-label="Critic score: 87 out of 100 · 9 critic reviews on IGDB\."[^>]*><span class="rating-k" aria-hidden="true">C<\/span>\u00a087<\/button>/, 'the critic score');
+  assert.match(r1, /<span class="tmdb-rating-note note-critic" aria-hidden="true">Critic score: 87 out of 100 · 9 critic reviews on IGDB\.<\/span><span class="tmdb-rating-note note-player" aria-hidden="true">Player score: 78/, 'the notes after both scores');
+  assert.match(r1, /data-gaction="rating-player" aria-label="Player score: 78 out of 100 · 258 player ratings on IGDB\."[^>]*><span class="rating-k" aria-hidden="true">P<\/span>\u00a078</, 'the player score, separate');
+  assert.ok(r1.indexOf('rating-critic') < r1.indexOf('rating-player') && r1.indexOf('data-gaction="open"') < r1.indexOf('rating-critic'), 'beside the title: critics, then players');
   assert.doesNotMatch(text(screen(app)), /Estimate unreliable|Length unknown| h · IGDB|HowLongToBeat/, 'no game length anywhere (a legacy cache’s hours are ignored)');
   app.store.game_settings[0].platforms = ['ps5', 'switch'];
   await openGames(app);
@@ -180,6 +191,88 @@ test('a member without research access can hold a release; recording Store evide
   await r.ctx.setGameDecision('available', 190, 'ps5', { precision: 'month', year: 2026, month: 1, evidence: [{ url: 'https://zz.example.com/store' }] }, 'evidence'); await settle();
   assert.match(text(rowOf(r, ID('61000000', 1))), /PS5 · Jan 2026 · Store or publisher/, 'available, at the precision the source gives');
   assert.strictEqual(r.run(`gameAvailability([gamesData.cache.get(190)], gamesState()).playable`), true);
+});
+
+test('TV’s presentation: rows and cards, C / P beside the title, TV’s genre pills with +N, a quiet status select, aligned platform and release', async () => {
+  const all = [101, 102, 103, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200];
+  const app = await bootWith({ cache: all, entries: [entry(1, 102, { priority: 'high' }), entry(2, 200, { priority: 'low' }), entry(3, 120, { status: 'playing' })] });
+  await openGames(app);
+  const html = screen(app);
+  assert.match(html, /<table class="games-table" aria-label="Your games"><thead><tr><th>Game<\/th><th class="col-cats">Genres<\/th><th class="col-plat">Platform · Release<\/th><th>Status<\/th><\/tr><\/thead>/);
+  assert.match(html, /<div class="card-list games-cards" aria-label="Your games">/, 'the cards for narrow screens');
+  for (const k of [1, 2, 3]) assert.ok(rowOf(app, ID('61000000', k)) && cardOf(app, ID('61000000', k)), 'each game has a row and a card');
+  // TV's priority marks: ★ before the title, Low after.
+  assert.match(rowOf(app, ID('61000000', 1)), /<span class="priority-high" role="img" aria-label="High priority" title="High priority">★<\/span> <button type="button" class="show-title game-title-btn"/);
+  assert.match(rowOf(app, ID('61000000', 2)), /Director’s Cut<\/button> <span class="priority-low" title="Low priority">Low<\/span>/, 'no scores: nothing between the title and Low');
+  assert.doesNotMatch(rowOf(app, ID('61000000', 2)), /rating-critic|rating-player/, 'a missing score shows nothing');
+  // Genres: what fits the row (then +N, which shows the rest); the card lists every pill.
+  const r2 = rowOf(app, ID('61000000', 2));
+  assert.match(r2, /data-gaction="genre:Adventure" aria-pressed="false"/);
+  assert.match(r2, /class="meta-more" data-gaction="cats-more" aria-expanded="false" aria-label="Show 4 more genres"[^>]*>\+4</);
+  assert.strictEqual((cardOf(app, ID('61000000', 2)).match(/data-gaction="genre:/g) || []).length, 5);
+  app.ctx.toggleGameGenres(`game:${ID('61000000', 2)}`);
+  assert.strictEqual((rowOf(app, ID('61000000', 2)).match(/data-gaction="genre:/g) || []).length, 5, '+4 shows them');
+  assert.match(rowOf(app, ID('61000000', 2)), />Fewer</);
+  // The status: TV's quiet select (Want to play and Skipped plain; Playing blue).
+  assert.match(rowOf(app, ID('61000000', 1)), /<select class="status-select game-status s-confirmed" data-gaction="status"/);
+  assert.match(rowOf(app, ID('61000000', 3)), /<select class="status-select game-status s-watching" data-gaction="status"/);
+  // Platform and release: PS4 on PS5 says so; upcoming and TBA are told apart; "per IGDB" is screen-reader text and a tooltip.
+  assert.match(rowOf(app, ID('61000000', 1)), /<span class="game-plat">PS4 · <span class="game-compat">Playable on PS5<\/span><\/span><span class="game-when">/);
+  assert.match(rowOf(app, ID('61000000', 1)), /<span class="visually-hidden"> · per IGDB<\/span>/);
+  assert.match(rowOf(app, ID('61000000', 2)), /<span class="game-plat">PS5<\/span><span class="game-when game-upcoming">/, 'a date to come');
+  assert.match(rowOf(app, ID('61000000', 3)), /<span class="game-when game-tba"><span class="visually-hidden"> · <\/span>Date TBA<\/span>/);
+  assert.doesNotMatch(text(html), /Critics \d+ · IGDB/, 'no repeated source text in the list');
+  // TV's ⋯: Priority as a select first.
+  assert.match(rowOf(app, ID('61000000', 1)), /<div class="popover-section-label">Priority<\/div>\s*<span class="state-action"><select class="priority-select p-high" data-gaction="priority"/);
+});
+
+test('the Library toolbar is TV’s: Search, Filters (Genre, Status) with its count and chips, Sort, + Add game; a pill filters and keeps focus', async () => {
+  const app = await bootWith({ entries: [entry(1, 102), entry(2, 140), entry(3, 180, { status: 'skipped' })] });
+  await openGames(app);
+  const bar = () => screen(app).split('<table')[0];
+  assert.match(bar(), /<div class="list-toolbar games-toolbar"><div class="filters"><div class="filter-line">/);
+  assert.match(bar(), /id="gFiltersBtn" aria-expanded="false" aria-controls="gFilters"[^>]*>Filters <span aria-hidden="true">▾<\/span>/);
+  assert.match(bar(), /id="gFilters" role="group" aria-label="Filters"[^>]*hidden>/, 'the panel starts closed');
+  assert.match(bar(), /<span class="filter-default">Status: All except Skipped<\/span>/);
+  assert.match(bar(), /<p class="count-line" id="gamesCount">2 of 3 games<\/p>/, 'as TV: shown of listed');
+  app.ctx.toggleGamesFilters();
+  assert.match(bar(), /id="gFiltersBtn" aria-expanded="true"/);
+  assert.doesNotMatch(bar(), /id="gFilters"[^>]*hidden>/);
+  app.ctx.gamesFiltersKeydown({ key: 'Escape', preventDefault() {} });
+  assert.match(bar(), /id="gFilters"[^>]*hidden>/, 'Escape closes it');
+  // A pill sets the genre filter: pressed, a chip and a count on Filters; focus stays on the pill.
+  app.dom.focus('gamesScreen', `[data-game="${ID('61000000', 1)}"] [data-gaction="genre:Shooter"]`);
+  app.ctx.toggleGamesGenre('Shooter');
+  const a = app.dom.active();
+  assert.deepStrictEqual([a.closest('[data-game]').getAttribute('data-game'), a.getAttribute('data-gaction'), a.getAttribute('aria-pressed')], [ID('61000000', 1), 'genre:Shooter', 'true']);
+  assert.match(bar(), /Filters<span class="filter-count" aria-hidden="true">1<\/span><span class="visually-hidden">, 1 active<\/span>/);
+  assert.match(bar(), /id="gchip-genre" class="filter-chip" aria-label="Remove filter: Genre, Shooter"/);
+  assert.match(bar(), /<p class="count-line" id="gamesCount">2 of 3 games<\/p>/);
+  app.ctx.setGamesFilter('status', 'all');
+  assert.match(bar(), /id="gchip-status"[^>]*aria-label="Remove filter: Status, All"/);
+  app.ctx.removeGamesFilter('genre');
+  assert.doesNotMatch(bar(), /gchip-genre/);
+  assert.strictEqual(libraryOrder(app).length, 3, 'Status All lists the skipped game too');
+  app.ctx.clearGamesFilters();
+  assert.strictEqual(libraryOrder(app).length, 2);
+  assert.match(bar(), /data-gaction="add" onclick="openGamesAdd\(this\)">\+ Add game<\/button>/);
+});
+
+test('franchises as TV’s shows: expand, aligned Up next and Coming; expanded, spots in release order with their versions beneath, then Stop following', async () => {
+  const app = await bootWith({ follows: [follow(1, 7001, 'ZZ War')], entries: [entry(1, 102, { status: 'playing' })] });
+  await openGames(app, 'gamesfranchises');
+  const t = () => tableOf(app);
+  assert.match(t(), /<thead><tr><th>Franchise<\/th><th class="col-next">Up next<\/th><th class="col-next">Coming<\/th><th><\/th><\/tr><\/thead>/);
+  assert.match(t(), /<button type="button" class="expand-btn" data-gaction="expand" aria-expanded="false" aria-label="Show the games of ZZ War"[^>]*><span class="expand-chevron">▸<\/span><\/button>/);
+  assert.match(screen(app), /<p class="count-line" id="gamesCount">1 franchise followed<\/p>/);
+  app.ctx.toggleFranchise(ID('62000000', 1));
+  assert.match(t(), /aria-expanded="true" aria-label="Hide the games of ZZ War"/);
+  const spots = [...t().matchAll(/<tr class="sub-row spot-row[^"]*" data-follow-of="[^"]+" data-spot="(\d+)">/g)].map(m => Number(m[1]));
+  assert.ok(spots.length >= 3 && spots[0] === 101, 'the spots, oldest first');
+  assert.match(t(), /<tr class="sub-row spot-version" data-follow-of="[^"]+" data-spot-of="\d+"><td class="spot-version-name">ZZ War 4 Remastered <span class="muted">\(remaster\)<\/span><\/td>[\s\S]*?<span class="status-pill s-watching">Playing<\/span>/, 'a saved version shows its status');
+  assert.match(t(), /data-gaction="save-110"[^>]*>Save<\/button>/, 'an unsaved one offers Save');
+  assert.match(t(), /data-gaction="unfollow"[^>]*>Stop following ZZ War<\/button>/);
+  assert.match(screen(app).split('</tbody>')[1], /<div class="item-card show-group-card franchise-card" data-follow="[^"]+">[\s\S]*class="card-subseasons"/, 'the card expands too');
 });
 
 test('followed franchise: Up next through a remaster that became playable later keeps its original’s place; Coming shows a TBA main-series title; spin-offs don’t count unless chosen', async () => {
@@ -513,7 +606,7 @@ test('Refresh: a new main-series announcement appears under Coming, nothing is a
   assert.deepStrictEqual(app.store.game_entries[0].port_ids, [104], 'the new port joined the saved remaster');
   const [relink] = rpcs(app, 'library_game_relink');
   assert.deepStrictEqual(JSON.parse(JSON.stringify(relink.body.p_expected)), { spot_igdb_id: 101, port_ids: [] }, 'guarded by what was read');
-  assert.match(franchiseOf(app, ID('62000000', 1)), /Coming: ZZ War Next Two · PS5 · Q3 2027 \(\+1 more\)/, 'the earliest coming first; TBA last');
+  assert.match(franchiseOf(app, ID('62000000', 1)), /Coming: ZZ War Next Two · PS5 · Q3 2027 Upcoming \(\+1 more\)/, 'the earliest coming first; TBA last');
 });
 
 test('review: IGDB moving a saved version to another spot changes nothing until the member chooses; Keep mine stays decided; Use IGDB’s relinks with what was shown', async () => {
@@ -536,7 +629,7 @@ test('review: IGDB moving a saved version to another spot changes nothing until 
 test('a restore with IGDB unavailable: saved games come back and show, with their status, even before IGDB is read again', async () => {
   const app = await bootWith({ entries: [entry(1, 102, { status: 'playing' })], igdb: null, noCache: true });
   await openGames(app);
-  assert.match(text(rowOf(app, ID('61000000', 1))), /ZZ War 4 Remastered Details not loaded yet: use Refresh/);
+  assert.match(text(rowOf(app, ID('61000000', 1))), /ZZ War 4 Remastered [\s\S]*Details not loaded yet: use Refresh/);
   assert.match(rowOf(app, ID('61000000', 1)), /<option value="playing" selected>/);
   await app.ctx.refreshGames(); await settle();
   assert.match(app.el('errorBanner').innerHTML, /Refresh couldn’t read IGDB \(IGDB couldn’t be reached\. Try again later\.\), so nothing was changed\./);
@@ -686,7 +779,7 @@ test('backup → restore with IGDB unavailable: a member’s whole games data co
   // Without IGDB details every saved game is still there, by its saved title and status; the queue shows every entry in order.
   await openGames(dst);
   assert.deepStrictEqual(libraryOrder(dst).length, 4, 'all four games listed (nothing hidden without details)');
-  assert.match(text(rowOf(dst, entries[2].id)), /ZZ War 4 ★ Details not loaded yet: use Refresh/);
+  assert.match(text(rowOf(dst, entries[2].id)), /★ ZZ War 4 [\s\S]*Details not loaded yet: use Refresh/);
   assert.match(rowOf(dst, entries[2].id), /<option value="finished" selected>/);
   dst.ctx.openQueues(); await settle();
   assert.deepStrictEqual(queueOrder(dst), [x.E(1), x.E(2), x.E(3), x.E(4)], 'the full order, the Switch game included, at its place');
