@@ -86,8 +86,10 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   franchise a series the same way; with neither, or without details after a restore, the game stands alone under its title; the
   rest of the library never decides). Franchises and standalone games are A to Z by name; within a franchise, whole spots by their
   original's release date (unknown last), title and id, each spot's original first, then its remasters and remakes by their own
-  date, title and id. A franchise with two or more visible games has a small heading (rows and cards); one alone is an ordinary
-  row placed by its franchise name (007 First Light under James Bond). Release order, not story chronology; priority and status
+  date, title and id. A franchise with two or more visible games (counted after filters and platforms) has a small heading
+  (rows and cards) and is placed by its name; one alone is an ordinary row placed by its own title, as a standalone game
+  (owner, 2026-11-11: 007 First Light before Grand Theft Auto VI), so a group can move when a filter leaves one game or a
+  second joins it (focus stays on the game's control). Release order, not story chronology; priority and status
   play no part (a status change moves no row). Grouping follows the cache: after a save, Refresh or a reread, never fetched to
   draw. Sort with Title, Release date, Status, Priority, Critic score and Player score (item 13's sort line and
   remembering). **Game length was removed by the owner's decision (2026-11-10):** no estimates, play style, Length sort,

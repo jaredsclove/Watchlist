@@ -145,16 +145,24 @@ function gamesLibraryHtml(st) {
 }
 // The visible games in the view's order: an explicit sort (view-sort.js) across the whole list, its ties in Franchise / release
 // order; else Franchise / release order itself, with a small heading over each franchise that has two or more visible games.
+// Counted after filters and platforms: a franchise with one visible game is placed by that game's shown title, as a standalone
+// game (owner, 2026-11-11), so filtering a group down to one, or a second game joining it, can move it (focus follows the game).
 function gamesOrderedParts(views, partsOf) {
-  const usual = (a, b) => gameDefaultCompare(a.v.group, b.v.group);
-  const sorted = typeof sortForView === 'function' ? sortForView(views.map(v => ({ kind: 'game', v })), usual).map(x => x.v) : views.slice().sort((a, b) => gameDefaultCompare(a.group, b.group));
+  const visible = new Map();
+  views.forEach(v => { if (v.group.grouped) visible.set(v.group.key, (visible.get(v.group.key) || 0) + 1); });
+  const placed = new Map(views.map(v => [v, v.group.grouped && visible.get(v.group.key) < 2
+    ? { ...v.group, key: `t:${v.entry.id}`, name: v.title, grouped: false } : v.group]));
+  const usual = (a, b) => gameDefaultCompare(placed.get(a.v), placed.get(b.v));
+  const sorted = typeof sortForView === 'function' ? sortForView(views.map(v => ({ kind: 'game', v })), usual).map(x => x.v)
+    : views.slice().sort((a, b) => gameDefaultCompare(placed.get(a), placed.get(b)));
   const grouped = !(typeof viewSortActive === 'function' && viewSortActive());
   const out = [];
   sorted.forEach((v, i) => {
-    const g = v.group, prev = sorted[i - 1], next = sorted[i + 1];
-    const starts = grouped && g.grouped && !(prev && prev.group.key === g.key) && !!next && next.group.key === g.key;
-    if (starts) out.push({ row: `<tr class="game-group-head" data-group="${esc(g.key)}"><td colspan="4"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></td></tr>`,
-      card: `<div class="game-group-head" data-group="${esc(g.key)}"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></div>` });
+    const g = placed.get(v), prev = sorted[i - 1] && placed.get(sorted[i - 1]);
+    if (grouped && g.grouped && !(prev && prev.key === g.key)) {
+      out.push({ row: `<tr class="game-group-head" data-group="${esc(g.key)}"><td colspan="4"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></td></tr>`,
+        card: `<div class="game-group-head" data-group="${esc(g.key)}"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></div>` });
+    }
     out.push(partsOf(v));
   });
   return out;
