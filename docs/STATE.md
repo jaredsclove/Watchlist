@@ -27,13 +27,16 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Skip / Unskip all versions named with
-  the release year (owner's request; PR #81, `c223b7a`), 2026-11-11 UTC, presentation tier: their accessible names and tooltips
-  read "Skip all versions of God of War (2005)" ("release year unknown" without one); the visible label is unchanged. Cache
-  token `20261111-skipyear`. Verified: 58 offline suites (1400; a new test of shared titles and a missing year); Pages built;
-  the changed files byte-identical to `main`. Live on the owner's account, read-only: all 12 Skip names in God of War and
-  Uncharted distinct, God of War (2005) and (2018) included.
-- Previous release: "Skip all versions" wording (PR #79, `95daceb`), 2026-11-11 UTC: franchise views say Skip all versions and
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: franchise boundaries (owner's request;
+  PR #83, `63af41e`), 2026-11-11 UTC, presentation tier: in Franchise / release order, a headed franchise followed by games
+  without a heading ends with a heading-sized gap and a firmer line, in rows and cards (decorative; a heading marks the other
+  boundaries). Cache token `20261111-groupend`. Verified: 58 offline suites (1401; a new boundary test); a local synthetic
+  check of the three transitions in both themes at desktop and phone widths, the Library and a collection, filtering and an
+  explicit sort; Pages built; the changed files byte-identical to `main`. Live on the owner's account, read-only: one divider,
+  between God of War Laufey and Grand Theft Auto VI, in rows and cards.
+- Previous release: Skip / Unskip all versions named with the release year (PR #81, `c223b7a`), 2026-11-11 UTC: their accessible
+  names and tooltips read "Skip all versions of God of War (2005)".
+- Earlier: "Skip all versions" wording (PR #79, `95daceb`), 2026-11-11 UTC: franchise views say Skip all versions and
   "game" and "versions" instead of "spot".
 - Earlier: single games placed by title (PR #77, `de9ca11`), 2026-11-11 UTC: in Franchise / release order, a
   franchise with one visible game is placed by that game's title.
