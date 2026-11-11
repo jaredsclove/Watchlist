@@ -39,7 +39,7 @@ const GAME_STATUS_LABELS = { want: 'Want to play', playing: 'Playing', paused: '
 // ── IGDB records → the cache's shape ──
 // What games.js asks IGDB for, per record (every reference as an id, to keep the answer small).
 const IGDB_GAME_FIELDS = 'id,name,slug,game_type,game_status,first_release_date,parent_game,version_parent,ports,remasters,remakes,' +
-  'collections.name,franchises.name,genres.name,aggregated_rating,aggregated_rating_count,rating,rating_count,' +
+  'collections.name,franchise.name,franchises.name,genres.name,aggregated_rating,aggregated_rating_count,rating,rating_count,' +
   'external_games.external_game_source,external_games.url,release_dates.platform,release_dates.date,release_dates.y,release_dates.m,' +
   'release_dates.date_format,release_dates.status,release_dates.release_region';
 const isoDay = t => new Date(t * 1000).toISOString().slice(0, 10);
@@ -72,6 +72,8 @@ function igdbRecord(g, extra = {}) {
     parent: idsOf([g.parent_game])[0] || null, versionParent: idsOf([g.version_parent])[0] || null,
     ports: idsOf(g.ports), remasters: idsOf(g.remasters), remakes: idsOf(g.remakes),
     collections: (g.collections || []).filter(c => c && c.id).map(c => ({ id: c.id, name: String(c.name || '') })),
+    // IGDB's main franchise, when it names one (records cached before 2026-11-11 have none until Refresh or a save reads them again).
+    franchise: g.franchise && typeof g.franchise === 'object' && g.franchise.id ? { id: g.franchise.id, name: String(g.franchise.name || '') } : null,
     franchises: (g.franchises || []).filter(c => c && c.id).map(c => ({ id: c.id, name: String(c.name || '') })),
     genres: (g.genres || []).map(x => String(x && x.name || '')).filter(Boolean),
     critic: Number.isFinite(g.aggregated_rating) ? { score: Math.round(g.aggregated_rating), count: g.aggregated_rating_count || 0 } : null,
@@ -274,4 +276,48 @@ function franchiseSummary(follow, state) {
   }
   coming.sort((a, b) => cmpStrGame(a.c.key, b.c.key));
   return { spots, upNext, caughtUp: !upNext, coming };
+}
+
+// ── Franchise / release order: the default order of the Games Library and of game collections (owner, 2026-11-11) ──
+// Each saved entry belongs to one broad franchise, read from the cache only (never stored, never fetched while drawing; filters
+// don't change it). The records looked at, in two tiers: the stored spot's record and its parents (the spot is authoritative: a
+// relink from Review or research decided it), then the entry's own record and its parents (remasters often list no franchise of
+// their own). In the first tier that has one: IGDB's main franchise; else, of all its franchises, the first by name A to Z, then by
+// IGDB id. With no franchise in either tier, a series (IGDB collection) is chosen the same way; with neither, or without the
+// details (as after a restore), the game stands alone under its title. Nothing about the rest of the library is consulted, so adding
+// or removing another game never moves this one between groups.
+function gameRecordChain(rec, cache) {
+  const out = [], seen = new Set();
+  for (let r = rec; r && !seen.has(r.id); r = r.parent ? cache.get(r.parent) : null) { seen.add(r.id); out.push(r); }
+  return out;
+}
+function gameStablePick(list) {
+  return list.filter(x => x && x.id).slice().sort((a, b) => compareTitles(a.name, b.name) || a.id - b.id)[0] || null;
+}
+function gameGroupOf(entry, cache) {
+  const own = cache.get(entry.igdb_id) || null, spot = cache.get(entry.spot_igdb_id) || null;
+  const tiers = [gameRecordChain(spot, cache), gameRecordChain(own, cache)].filter(t => t.length);
+  let pick = null, kind = null;
+  for (const t of tiers) {
+    const main = t.map(r => r.franchise).find(f => f && f.id);
+    pick = main || gameStablePick(t.flatMap(r => r.franchises || []));
+    if (pick) { kind = 'franchise'; break; }
+  }
+  if (!pick) for (const t of tiers) { pick = gameStablePick(t.flatMap(r => r.collections || [])); if (pick) { kind = 'series'; break; } }
+  const title = own ? own.name : entry.title;
+  const base = spot || own;
+  return {
+    key: pick ? `${kind[0]}:${pick.id}` : `t:${entry.id}`, name: pick ? pick.name : title, grouped: !!pick,
+    // The spot (an original with its remasters and remakes): its original's date, title and IGDB id; then this version.
+    spotId: entry.spot_igdb_id, spotDate: base && base.first ? base.first : null, spotTitle: base ? base.name : title,
+    original: entry.igdb_id === entry.spot_igdb_id, ownDate: own && own.first ? own.first : null, title, entryId: entry.id
+  };
+}
+// Groups (and standalone games) A to Z by name; within a group, whole spots by their original's release date (unknown last),
+// title and IGDB id; within a spot, the original, then its remasters and remakes by their own date (unknown last), title and id.
+const gameDateCmp = (a, b) => (a === b ? 0 : a == null ? 1 : b == null ? -1 : cmpStrGame(a, b));
+function gameDefaultCompare(a, b) {
+  return compareTitles(a.name, b.name) || cmpStrGame(a.key, b.key)
+    || gameDateCmp(a.spotDate, b.spotDate) || compareTitles(a.spotTitle, b.spotTitle) || (a.spotId - b.spotId)
+    || (b.original - a.original) || gameDateCmp(a.ownDate, b.ownDate) || compareTitles(a.title, b.title) || cmpStrGame(a.entryId, b.entryId);
 }

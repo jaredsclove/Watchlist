@@ -79,8 +79,17 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   +N shows the rest); the platform and release on one line ("PS4 · Playable on PS5 · Oct 10, 2021"; upcoming dates blue with
   TV's Upcoming tag; Date TBA faint; "per IGDB" is screen-reader text and a tooltip, Details lists every release; a hold or Store
   / publisher evidence stays visible); status as TV's quiet select (Want to play, Playing, Paused, Finished, Skipped). Filters:
-  Genre and Status (default All except Skipped); the usual order is High priority first, then A to Z (status plays no part, so a
-  status change moves no row; owner, 2026-11-11); Sort with Title, Release date, Status, Priority, Critic score and Player score (item 13's sort line and
+  Genre and Status (default All except Skipped). **Franchise / release order** (the default of the Library and of each game
+  collection; owner, 2026-11-11): after filters and platforms, each saved game sits in one broad franchise (IGDB's
+  `franchises`, read from the cache only: the stored spot's record and its parents first, so a relink decides, then the game's own
+  record and its parents, since remasters often list none; IGDB's main `franchise` when read, else A to Z then IGDB id; with no
+  franchise a series the same way; with neither, or without details after a restore, the game stands alone under its title; the
+  rest of the library never decides). Franchises and standalone games are A to Z by name; within a franchise, whole spots by their
+  original's release date (unknown last), title and id, each spot's original first, then its remasters and remakes by their own
+  date, title and id. A franchise with two or more visible games has a small heading (rows and cards); one alone is an ordinary
+  row placed by its franchise name (007 First Light under James Bond). Release order, not story chronology; priority and status
+  play no part (a status change moves no row). Grouping follows the cache: after a save, Refresh or a reread, never fetched to
+  draw. Sort with Title, Release date, Status, Priority, Critic score and Player score (item 13's sort line and
   remembering). **Game length was removed by the owner's decision (2026-11-10):** no estimates, play style, Length sort,
   HowLongToBeat link or time-to-beat reads; a remembered sort that included Length keeps its other fields (the usual order when
   none remain), and `game_settings.play_style` stays as a legacy value, never shown, sent back unchanged on each save and kept in
@@ -115,7 +124,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   (new platform rows, dates, ports), saves the cache, joins new plain ports to saved games (guarded by what was read) and reports
   new titles under Coming and Up next changes; it adds nothing to Want to play or a queue. **Review** lists saved games whose IGDB
   spot changed, or that sit on an ambiguous chain (a remaster of a port); nothing changes until the member picks "Use IGDB's"
-  (a guarded relink) or "Keep mine" (kept until IGDB changes again). **Collections:** (their games drawn as Library rows, with the status as a label, Remove, and genres that don't filter) private, hand-made game collections
+  (a guarded relink) or "Keep mine" (kept until IGDB changes again). **Collections:** (their games drawn as Library rows, in Franchise / release order with their own Sort, with the status as a label, Remove, and genres that don't filter) private, hand-made game collections
   (create, rename, delete, add from a game's ⋯, Remove); membership is independent of queues, following and status. **Details:**
   IGDB's release rows (with the ones that don't count named) and the PlayStation Store page when IGDB lists one. **IGDB** is reached only through the `igdb` function
   (`supabase/functions/igdb`): it holds the client secret, answers only members (it asks PostgREST's `stage5_capabilities` with
@@ -168,7 +177,10 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   field makes it first; fields already chosen keep their order behind it and break ties (a field chosen again keeps its
   direction). The sort line, shown only while the view has its own sort, lists the fields in order, each with its ↑ or ↓
   (reverses it in place) and ✕ (takes it out), then Reset to default, which clears the whole sort of that view (that
-  layout of a collection). The view's usual order is always the last tie-breaker. Sorting happens within each section
+  layout of a collection). The view's usual order is always the last tie-breaker. Games (the Library and each game collection,
+  each with its own sort): the usual order is Franchise / release order, named on the sort line while no sort is chosen ("Order:
+  Franchise / release order"; Reset to Franchise / release order); a chosen sort lists the whole list without franchise headings;
+  deleting a game collection forgets its sort. Sorting happens within each section
   (Currently Watching's In progress and Caught up; Coming Soon within each month, months in date order and TBA last; a
   collection's TV and Movies, or All media); filters still decide what is listed and counts are unchanged. Unknown
   values go last in either direction: no date, TBA, no rating shown, or a field the item doesn't have (a film has no

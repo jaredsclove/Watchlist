@@ -55,8 +55,13 @@ function viewSortContext(viewId = activeViewId) {
     return { key: 'comingsoon', fields: [fd('title', 'Title'), fd('season', 'Season premiere'), fd('rating', 'Show rating'), fd('status', 'Status'), fd('priority', 'Priority')],
       statusOrder: ['Watching', 'To Watch'] };
   }
-  if (viewId === 'games') return { key: 'games', fields: [fd('title', 'Title'), fd('release', 'Release date'), fd('status', 'Status'), fd('priority', 'Priority'),
-    fd('critic', 'Critic score'), fd('player', 'Player score')], statusOrder: ['Playing', 'Paused', 'Want to play', 'Finished', 'Skipped'] };
+  // Games (G1): the Library and each game collection (its own key), with Franchise / release order as the default (games.js).
+  const gameFields = () => [fd('title', 'Title'), fd('release', 'Release date'), fd('status', 'Status'), fd('priority', 'Priority'),
+    fd('critic', 'Critic score'), fd('player', 'Player score')];
+  const gameStatus = ['Playing', 'Paused', 'Want to play', 'Finished', 'Skipped'];
+  if (viewId === 'games') return { key: 'games', fields: gameFields(), statusOrder: gameStatus, defaultLabel: 'Franchise / release order' };
+  if (viewId === 'gamescollections') return typeof gamesCollectionId !== 'undefined' && gamesCollectionId
+    ? { key: `gamescollections:${gamesCollectionId}`, fields: gameFields(), statusOrder: gameStatus, defaultLabel: 'Franchise / release order' } : null;
   if (typeof ALL_MOVIES_VIEW !== 'undefined' && viewId === ALL_MOVIES_VIEW.id) return { key: 'allmovies', fields: filmFields, statusOrder: ['To Watch', 'Watched', 'Skipped'] };
   if (typeof isBrowseCollectionView === 'function' && isBrowseCollectionView(viewId)) {
     if (browseMedia === 'movie') return { key: `${viewId}:movie`, fields: filmFields, statusOrder: ['To Watch', 'Watched', 'Skipped'] };
@@ -68,6 +73,11 @@ function viewSortContext(viewId = activeViewId) {
   return null;
 }
 
+// Whether the open view has an explicit sort (Games draws its default order's headings only without one).
+function viewSortActive() {
+  const ctx = viewSortContext();
+  return !!ctx && viewSortSpec(ctx).length > 0;
+}
 function sortFieldOf(ctx, f) {
   return ctx ? ctx.fields.find(x => x.id === f) || null : null;
 }
@@ -303,7 +313,8 @@ function resetViewSort() {
 // has its usual order.
 function sortLineHtml(ctx, unrated) {
   const spec = ctx ? viewSortSpec(ctx) : [];
-  if (!spec.length) return '';
+  // A view with a named default order says which one it is (Games: Franchise / release order).
+  if (!spec.length) return ctx && ctx.defaultLabel ? `<p class="sort-line sort-default" id="sortDefault"><span class="sort-line-label">Order:</span> <span class="sort-default-name">${esc(ctx.defaultLabel)}</span></p>` : '';
   const chips = spec.map(e => {
     const fd = sortFieldOf(ctx, e.f), words = sortDirWords(ctx, e.f, e.d), other = sortDirWords(ctx, e.f, flipSortDir(e.d));
     const name = `${fd.label}, ${words}. Reverse to ${other}`;
@@ -312,7 +323,7 @@ function sortLineHtml(ctx, unrated) {
       + `<button type="button" class="sort-x" id="sortX-${e.f}" aria-label="${esc(`Remove ${fd.label} from the sort`)}" title="Remove from the sort" onclick="removeSortField('${e.f}')"><span aria-hidden="true">✕</span></button></span>`;
   }).join('<span class="sort-then" aria-hidden="true">then</span>');
   const note = unrated ? '<span class="sort-note" id="sortRatingNote">Some shows have no rating on this device.</span>' : '';
-  return `<div class="sort-line" role="group" aria-label="Sort order"><span class="sort-line-label" aria-hidden="true">Sorted:</span>${chips}<button type="button" class="btn-link sort-reset" id="sortReset" onclick="resetViewSort()">Reset to default</button>${note}</div>`;
+  return `<div class="sort-line" role="group" aria-label="Sort order"><span class="sort-line-label" aria-hidden="true">Sorted:</span>${chips}<button type="button" class="btn-link sort-reset" id="sortReset" onclick="resetViewSort()">${esc(ctx.defaultLabel ? `Reset to ${ctx.defaultLabel}` : 'Reset to default')}</button>${note}</div>`;
 }
 // After every list redraw (render.js renderFilterBarState): redrawn only when it changed, so focus on
 // one of its controls stays.

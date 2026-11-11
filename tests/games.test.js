@@ -936,11 +936,11 @@ test('a saved version’s status in its franchise row is the Library’s control
   assert.deepStrictEqual(app.store.game_entries.map(e => e.status), ['finished', 'finished', 'finished']);
 });
 
-test('the Library’s usual order (High first, then A to Z) doesn’t use status: a status change moves nothing, the same on redraw, reread and Refresh; an explicit sort with its directions applies at once, focus following the moved row', async () => {
+test('the Library’s default order (Franchise / release order) doesn’t use status: a status change moves nothing, the same on redraw, reread and Refresh; an explicit sort with its directions applies at once, focus following the moved row', async () => {
   const app = await bootWith({ entries: [entry(1, 102), entry(2, 140), entry(3, 180), entry(4, 110, { priority: 'high' })] });
   await openGames(app);
   const usual = libraryOrder(app);
-  assert.deepStrictEqual(usual, [4, 3, 2, 1].map(k => ID('61000000', k)), 'High first, then A to Z');
+  assert.deepStrictEqual(usual, [3, 2, 1, 4].map(k => ID('61000000', k)), 'ZZ Astro, ZZ Shooter, then the ZZ War series in release order (priority plays no part)');
   app.dom.focus('gamesScreen', `[data-game="${ID('61000000', 3)}"] [data-gaction="status"]`);
   await app.ctx.setGameStatus(ID('61000000', 3), 'finished'); await settle();
   assert.deepStrictEqual(libraryOrder(app), usual, 'redrawn after the save: unchanged');
@@ -963,6 +963,182 @@ test('the Library’s usual order (High first, then A to Z) doesn’t use status
   assert.deepStrictEqual(libraryOrder(app), moved, 'read again: the same order');
   app.ctx.reverseSortField('status');
   assert.deepStrictEqual(libraryOrder(app), [1, 3, 4, 2].map(k => ID('61000000', k)), 'reversed: Finished before Want to play, each still Z to A');
+});
+
+// ── Franchise / release order (owner, 2026-11-11): the Library's and game collections' default ──
+const FR = (id, name) => ({ id, name });
+const ORDER_RAW = (() => {
+  const g = (id, name, first, o = {}) => ({ id, name, game_type: 0, first_release_date: first ? unix(first) : undefined, release_dates: [rd(PS5, first || null)], genres: [{ name: o.genre || 'Shooter' }], ...o });
+  const cod = [FR(900, 'ZZ Call of Duty')], ch = [FR(901, 'ZZ Charted')], tw = [FR(905, 'ZZ Twin')];
+  return {
+    501: g(501, 'ZZ CoD 4: Modern Warfare', '2007-11-05', { franchises: cod, collections: [{ id: 7100, name: 'ZZ Modern Warfare' }], remasters: [502] }),
+    502: g(502, 'ZZ Modern Warfare Remastered', '2016-11-04', { game_type: 9, parent_game: 501 }), // (no franchise of its own)
+    503: g(503, 'ZZ Modern Warfare (2019)', '2019-10-25', { franchises: cod, collections: [{ id: 7100, name: 'ZZ Modern Warfare' }] }),
+    504: g(504, 'ZZ Black Ops 6', '2024-10-25', { franchises: cod, genre: 'Racing' }),
+    511: g(511, 'ZZ Charted: Luck', '2007-11-16', { franchises: ch, remasters: [512] }),
+    512: g(512, 'ZZ Charted: Luck Remastered', '2015-10-07', { game_type: 9, parent_game: 511 }),
+    513: g(513, 'ZZ Charted 4', '2016-05-10', { franchises: ch, remasters: [514] }),
+    514: g(514, 'ZZ Charted 4 Remastered', '2022-01-28', { game_type: 9, parent_game: 513 }),
+    516: g(516, 'ZZ Charted: Legacy', '2017-08-22', { franchises: ch, remasters: [515] }),
+    515: g(515, 'ZZ Charted: Legacy Remastered', '2022-01-28', { game_type: 9, parent_game: 516 }),
+    520: g(520, 'ZZ Stray Cat', '2022-07-19'),
+    521: g(521, 'ZZ 007 Light', '2026-03-27', { franchises: [FR(902, 'ZZ James Bond')] }),
+    530: g(530, 'ZZ Lego Wars', '2022-04-05', { franchises: [FR(904, 'ZZ Wars'), FR(903, 'ZZ Brick')] }),
+    531: g(531, 'ZZ Odd Version', '2025-01-01', { franchises: ch }), // its stored spot is a Call of Duty game (a relink)
+    532: g(532, 'ZZ Wars Saga', '2020-01-01', { franchises: [FR(904, 'ZZ Wars')] }),
+    535: g(535, 'ZZ Saga Pick', '2020-01-01', { collections: [{ id: 7202, name: 'ZZ Saga B' }, { id: 7201, name: 'ZZ Saga A' }] }),
+    551: g(551, 'ZZ Twin Alpha', '2010-03-01', { franchises: tw }), 552: g(552, 'ZZ Twin Alpha HD', '2014-01-01', { game_type: 9, parent_game: 551 }),
+    553: g(553, 'ZZ Twin Alpha Remake', '2020-01-01', { game_type: 8, parent_game: 551 }),
+    556: g(556, 'ZZ Twin Beta', '2010-03-01', { franchises: tw }), 557: g(557, 'ZZ Twin Beta HD', '2012-01-01', { game_type: 9, parent_game: 556 }),
+    561: g(561, 'ZZ Twin Gamma', null, { franchises: tw }), 562: g(562, 'ZZ Twin Gamma HD', '2021-01-01', { game_type: 9, parent_game: 561 }),
+    566: g(566, 'ZZ Twin Delta', null, { franchises: tw }), 567: g(567, 'ZZ Twin Delta HD', null, { game_type: 9, parent_game: 566 })
+  };
+})();
+// The worked example: [entry number, IGDB id, stored spot].
+const ORDER_ENTRIES = [[1, 520], [2, 503], [3, 502, 501], [4, 514, 513], [5, 512, 511], [6, 521], [7, 504], [8, 515, 516], [9, 501], [10, 513], [11, 530],
+  [12, 531, 504], [13, 553, 551], [14, 557, 556], [15, 552, 551], [16, 551], [17, 556], [18, 562, 561], [19, 567, 566], [20, 566], [21, 561]];
+const ORDER_EXPECTED = [11, /* ZZ Brick (A to Z of Lego Wars' two franchises) */ 9, 3, 2, 7, 12, /* ZZ Call of Duty */ 5, 10, 4, 8, /* ZZ Charted */
+  6, /* ZZ James Bond */ 40, /* ZZ Restored (no details) */ 1, /* ZZ Stray Cat */ 16, 15, 13, 17, 14, 20, 19, 21, 18 /* ZZ Twin */];
+async function orderApp(o = {}) {
+  Object.assign(RAW, ORDER_RAW);
+  const entries = (o.list || ORDER_ENTRIES).map(([k, igdb, spot]) => entry(k, igdb, { spot: spot ?? igdb, ...(o.status && o.status[k] ? { status: o.status[k] } : {}), ...(o.priority && o.priority[k] ? { priority: o.priority[k] } : {}) }))
+    .concat(o.noRestored ? [] : [{ ...entry(40, 540), title: 'ZZ Restored' }]);
+  const app = await bootWith({ entries, settings: null, cache: o.cache || Object.keys(ORDER_RAW).map(Number), storage: o.storage, collections: o.collections, members: o.members, noCache: o.noCache });
+  return app;
+}
+const cleanOrderRaw = () => Object.keys(ORDER_RAW).forEach(k => { delete RAW[k]; });
+const E = k => ID('61000000', k);
+const heads = app => [...tableOf(app).matchAll(/<tr class="game-group-head" data-group="[^"]+"><td colspan="4"><span class="game-group-name" role="heading" aria-level="3">([^<]+)</g)].map(m => m[1]);
+
+test('Franchise / release order: franchises and standalone games A to Z; whole spots by their original’s date, title and id (unknown last), the original then its remasters and remakes; headings over two or more', async () => {
+  try {
+    const app = await orderApp();
+    await openGames(app);
+    assert.deepStrictEqual(libraryOrder(app), ORDER_EXPECTED.map(E));
+    assert.deepStrictEqual(heads(app), ['ZZ Call of Duty', 'ZZ Charted', 'ZZ Twin'], 'one heading per franchise with two or more; Brick and James Bond are single rows');
+    assert.match(screen(app).split('</tbody>')[1], /<div class="game-group-head" data-group="f:900"><span class="game-group-name" role="heading" aria-level="3">ZZ Call of Duty<\/span><\/div>/, 'the cards have the headings too');
+    assert.match(app.el('sortLine').innerHTML, /Order:<\/span> <span class="sort-default-name">Franchise \/ release order<\/span>/);
+    // Equal original dates (Alpha and Beta, 2010-03-01) and unknown ones (Gamma, Delta): each spot's versions stay together.
+    const twin = libraryOrder(app).slice(-9).map(id => app.store.game_entries.find(e => e.id === id).igdb_id);
+    assert.deepStrictEqual(twin, [551, 552, 553, 556, 557, 566, 567, 561, 562], 'Alpha (title before Beta), Beta; then the unknown-date spots by title, Delta before Gamma; within each, the original first, then by own date, unknown last');
+  } finally { cleanOrderRaw(); }
+});
+
+test('the franchise a game belongs to: the stored spot first (a relink is authoritative), a remaster through its original, IGDB’s main franchise, else A to Z then id; a series the same way; never the rest of the library', async () => {
+  try {
+    const app = await orderApp();
+    const group = (igdb, spot = igdb, extra = {}) => app.ctx.gameGroupOf({ id: 'x', igdb_id: igdb, spot_igdb_id: spot, title: 'x', ...extra }, app.run('gamesData.cache'));
+    await openGames(app);
+    assert.strictEqual(group(502, 501).name, 'ZZ Call of Duty', 'a remaster without a franchise: its original’s');
+    assert.strictEqual(group(531, 504).name, 'ZZ Call of Duty', 'the stored spot (a relink) decides over the record’s own franchise');
+    assert.strictEqual(group(531).name, 'ZZ Charted');
+    assert.strictEqual(group(530).name, 'ZZ Brick', 'two franchises: A to Z');
+    assert.strictEqual(group(535).name, 'ZZ Saga A', 'no franchise: a series, A to Z');
+    assert.deepStrictEqual([group(520).grouped, group(520).name], [false, 'ZZ Stray Cat'], 'neither: the game alone, under its title');
+    assert.deepStrictEqual([group(540, 540, { title: 'ZZ Restored' }).grouped, group(540, 540, { title: 'ZZ Restored' }).name], [false, 'ZZ Restored'], 'no details: the saved title');
+    // Another saved game in "ZZ Wars" changes nothing for Lego Wars.
+    const more = await orderApp({ list: ORDER_ENTRIES.concat([[30, 532]]) });
+    await openGames(more);
+    assert.strictEqual(more.ctx.gameGroupOf(more.store.game_entries.find(e => e.igdb_id === 530), more.run('gamesData.cache')).name, 'ZZ Brick', 'stable: no library counts');
+    // IGDB's main franchise, once read, wins.
+    const rec = app.ctx.igdbRecord({ ...ORDER_RAW[530], franchise: { id: 904, name: 'ZZ Wars' } });
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(rec.franchise)), { id: 904, name: 'ZZ Wars' });
+    assert.strictEqual(app.ctx.igdbRecord(ORDER_RAW[520]).franchise, null, 'none named');
+    app.run('gamesData.cache').set(530, rec);
+    assert.strictEqual(group(530).name, 'ZZ Wars');
+    assert.match(app.get('IGDB_GAME_FIELDS'), /franchise\.name,franchises\.name/, 'read with each record');
+  } finally { cleanOrderRaw(); }
+});
+
+test('filters first: a franchise left with one visible game is an ordinary row; status changes move nothing in the default; drawing asks IGDB nothing', async () => {
+  try {
+    const app = await orderApp({ status: { 2: 'skipped', 9: 'finished' } });
+    const calls = () => app.writes().filter(r => /functions\/v1\/igdb/.test(r.url)).length;
+    await openGames(app);
+    const before = calls();
+    assert.ok(!libraryOrder(app).includes(E(2)), 'Skipped is filtered out first');
+    app.ctx.setGamesFilter('genre', 'Racing');
+    assert.deepStrictEqual(libraryOrder(app), [E(7)]);
+    assert.deepStrictEqual(heads(app), [], 'one Call of Duty game left: no heading');
+    app.ctx.setGamesFilter('genre', '');
+    const order = libraryOrder(app);
+    await app.ctx.setGameStatus(E(3), 'finished'); await settle();
+    assert.deepStrictEqual(libraryOrder(app), order, 'a status change moves nothing');
+    app.ctx.renderGamesView(); app.ctx.toggleGamesFilters(); app.ctx.toggleGamesFilters();
+    assert.strictEqual(calls(), before, 'no IGDB request from drawing or sorting');
+  } finally { cleanOrderRaw(); }
+});
+
+test('an explicit sort orders the whole list with no headings, its ties in Franchise / release order; Reset restores the groups; a remembered sort from before still applies', async () => {
+  try {
+    const app = await orderApp({ priority: { 14: 'high', 4: 'high' } });
+    await openGames(app);
+    app.ctx.chooseSortField('priority');
+    const ids = libraryOrder(app);
+    assert.deepStrictEqual(ids.slice(0, 2), [E(4), E(14)], 'High first, the two in Franchise / release order (Charted before Twin)');
+    assert.deepStrictEqual(ids.slice(2), ORDER_EXPECTED.filter(k => k !== 4 && k !== 14).map(E), 'the rest tie: Franchise / release order');
+    assert.deepStrictEqual(heads(app), [], 'no headings under an explicit sort');
+    assert.match(app.el('sortLine').innerHTML, /id="sortReset"[^>]*>Reset to Franchise \/ release order<\/button>/);
+    app.ctx.resetViewSort();
+    assert.deepStrictEqual(libraryOrder(app), ORDER_EXPECTED.map(E));
+    assert.deepStrictEqual(heads(app), ['ZZ Call of Duty', 'ZZ Charted', 'ZZ Twin']);
+    // A sort saved before this release (Title Z to A) still loads and applies.
+    const HU = app.run('userKey("")').replace(/^::/, '');
+    const stored = memoryStorage(); stored.setItem(`watchlist_view_sorts::${HU}`, JSON.stringify({ v: 1, views: { games: [{ f: 'title', d: 'desc' }] } }));
+    const old = await orderApp({ storage: stored });
+    await openGames(old);
+    const titles = libraryOrder(old).map(id => old.store.game_entries.find(e => e.id === id).title);
+    assert.deepStrictEqual(titles, titles.slice().sort((a, b) => b.localeCompare(a, undefined, { sensitivity: 'base' })), 'Title Z to A');
+    assert.deepStrictEqual(heads(old), []);
+  } finally { cleanOrderRaw(); }
+});
+
+test('a game collection: grouped the same way, with its own Sort, remembered per collection; deleting it forgets its sort', async () => {
+  try {
+    const C1 = ID('63000000', 1), C2 = ID('63000000', 2);
+    const collections = [{ id: C1, name: 'ZZ One', created_at: TS }, { id: C2, name: 'ZZ Two', created_at: TS }];
+    const members = [[1, C1, 1], [2, C1, 9], [3, C1, 3], [4, C1, 7], [5, C2, 9], [6, C2, 1]].map(([k, c, e]) => ({ id: ID('64000000', k), collection_id: c, entry_id: E(e), created_at: TS }));
+    const storage = memoryStorage();
+    const app = await orderApp({ collections, members, storage });
+    await openGames(app, 'gamescollections');
+    app.ctx.selectGameCollection(C1);
+    assert.deepStrictEqual(libraryOrder(app), [9, 3, 7, 1].map(E), 'Call of Duty in release order, then Stray Cat');
+    assert.deepStrictEqual(heads(app), ['ZZ Call of Duty']);
+    assert.match(screen(app), /id="sortBtn"/, 'a Sort button');
+    app.ctx.chooseSortField('title');
+    assert.deepStrictEqual(libraryOrder(app), [7, 9, 3, 1].map(E), 'Title A to Z, no groups');
+    assert.deepStrictEqual(heads(app), []);
+    app.ctx.selectGameCollection(C2);
+    assert.deepStrictEqual(libraryOrder(app), [9, 1].map(E), 'the other collection keeps its default');
+    app.ctx.switchView('games'); await settle();
+    assert.deepStrictEqual(heads(app), ['ZZ Call of Duty', 'ZZ Charted', 'ZZ Twin'], 'the Library keeps its own');
+    const HU = app.run('userKey("")').replace(/^::/, '');
+    const saved = () => Object.keys(JSON.parse(storage.getItem(`watchlist_view_sorts::${HU}`) || '{"views":{}}').views);
+    assert.deepStrictEqual(saved(), [`gamescollections:${C1}`]);
+    await openGames(app, 'gamescollections'); app.ctx.selectGameCollection(C1);
+    assert.deepStrictEqual(libraryOrder(app), [7, 9, 3, 1].map(E), 'remembered');
+    app.run(`gamesCollectionEdit = { id: '${C1}', mode: 'delete' }`);
+    await app.ctx.deleteGameCollection(); await settle();
+    assert.deepStrictEqual(saved(), [], 'its sort is forgotten with it');
+  } finally { cleanOrderRaw(); }
+});
+
+test('after a restore (no IGDB details): saved games by title, no headings, nothing asked of IGDB; Refresh groups them and focus follows the game that moved', async () => {
+  try {
+    const app = await orderApp({ noCache: true, noRestored: true, list: [[2, 503], [7, 504], [1, 520], [9, 501]] });
+    await openGames(app);
+    const titles = libraryOrder(app).map(id => app.store.game_entries.find(e => e.id === id).title);
+    assert.deepStrictEqual(titles, ['ZZ Black Ops 6', 'ZZ CoD 4: Modern Warfare', 'ZZ Modern Warfare (2019)', 'ZZ Stray Cat'], 'by title');
+    assert.deepStrictEqual(heads(app), []);
+    assert.strictEqual(app.writes().filter(r => /functions\/v1\/igdb/.test(r.url)).length, 0, 'drawing asked IGDB nothing');
+    app.dom.focus('gamesScreen', `[data-game="${E(7)}"] [data-gaction="status"]`);
+    await app.ctx.refreshGames(); await settle();
+    assert.ok(app.writes().filter(r => /functions\/v1\/igdb/.test(r.url)).length > 0, 'Refresh read IGDB (so the count above is a real check)');
+    assert.deepStrictEqual(libraryOrder(app), [9, 2, 7, 1].map(E), 'grouped once the details are read');
+    assert.deepStrictEqual(heads(app), ['ZZ Call of Duty']);
+    const a = app.dom.active();
+    assert.deepStrictEqual([a.closest('[data-game]').getAttribute('data-game'), a.getAttribute('data-gaction')], [E(7), 'status'], 'focus stays on the moved game’s control');
+  } finally { cleanOrderRaw(); }
 });
 
 T.run();
