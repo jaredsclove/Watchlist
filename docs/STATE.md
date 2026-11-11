@@ -27,21 +27,18 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Franchise / release order (owner's
-  plan with two amendments; PR #75, `63dd87a`), 2026-11-11 UTC, presentation tier: the default order of the Games Library and
-  each game collection groups saved games by broad franchise (IGDB `franchises` from the cache: the stored spot's records first,
-  then the game's own; main `franchise` when read, else A to Z then id; a series the same way; else alone under its title; never
-  by library counts), franchises and standalone games A to Z, whole spots by original date (unknown last), title and id, each
-  original before its remasters and remakes; a small heading over two or more visible games. An explicit sort lists the whole
-  list without headings, ties in this order; game collections have their own remembered Sort. IGDB's main franchise is read with
-  each record from now on (no function deploy: fields aren't allow-listed). Cache token `20261111-franchiseorder`. No schema,
-  backup or saved-data change. Verified: a read-only look at the owner's production cache first (every saved record lists its
-  franchise); 58 offline suites (1397; six new tests); a local synthetic Chrome check (keyboard Sort and Reset, filters, Refresh
-  moving a game with focus kept, 390 and 820 px, a sort saved before the release, a collection's own sort). Pages built; the
-  changed files byte-identical to `main`. Live on the owner's account, read-only: Uncharted under one heading in release order,
-  Grand Theft Auto VI and 007 First Light as single rows by franchise name. Not verified live: game collections (the owner has
-  none); headings in dark mode.
-- Previous release: Games walkthrough fixes (PR #73, `215a409`), 2026-11-11 UTC: franchises list only versions on the chosen
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: single games placed by title (owner's
+  adjustment; PR #77, `de9ca11`), 2026-11-11 UTC, presentation tier: in Franchise / release order (Games Library and game
+  collections), counted after filters and platforms, a franchise with one visible game is an ordinary row placed by that
+  game's title; two or more keep the heading and the franchise name. Cache token `20261111-singletitle`. Verified: 58 offline
+  suites (1398; a new test of one-to-many transitions by filter, status and Remove in the Library and a collection, with focus
+  kept, and Reset); a local synthetic Chrome check (Status All and back, Refresh filling missing details, a collection's Remove,
+  keyboard Sort and Reset, 390 px). Pages built; the changed files byte-identical to `main`. Live on the owner's account,
+  read-only: 007 First Light, Grand Theft Auto VI, then Uncharted under its heading.
+- Previous release: Franchise / release order (PR #75, `63dd87a`), 2026-11-11 UTC: the Games Library's and game collections'
+  default groups saved games by broad franchise, spots in original release order, with headings; collections have their own
+  sort. Not verified live: game collections (the owner has none); headings in dark mode.
+- Earlier: Games walkthrough fixes (PR #73, `215a409`), 2026-11-11 UTC: franchises list only versions on the chosen
   platforms; a saved version's status is editable in its franchise row.
 - Earlier: genre colour families (PR #71, `78cb7fd`), 2026-11-11 UTC: genre pills in six muted families on TV, films
   and games.
