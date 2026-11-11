@@ -120,7 +120,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   original with its remasters and remakes (separate games, saved and queued on their own; finishing any completes the spot) and
   its plain ports (IGDB records typed Port of that version, joined to its saved entry, their dates kept per platform). A Skipped
   version is passed over alone; "Skip all versions" (undone with "Unskip all versions"; labelled "All versions skipped";
-  the `skip_spot` decision) leaves the whole game, every version, out of Up next and Caught up until undone. The page says
+  the `skip_spot` decision) leaves the whole game, every version, out of Up next and Caught up until undone. Their
+  accessible names and tooltips name the game with its original's release year, so games sharing a title differ ("Skip all
+  versions of God of War (2005)"; "release year unknown" when IGDB has none); the visible label stays "Skip all versions". The page says
   "game" and "versions" rather than "spot" (owner, 2026-11-11): finishing any version counts the game as done. Main-series games count (IGDB's series membership
   Member); spin-offs count once "Count it toward Caught up" is chosen. Coming lists announced releases on a chosen platform for
   counted spots not done, and a native edition coming for any version (a native PS5 release after a finished PS4 version) without
