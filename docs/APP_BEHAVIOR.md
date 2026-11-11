@@ -72,10 +72,12 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
 - **Games (G1, item 5; `games.js`, `games-data.js`, `db/g1_games.sql`):** the app bar's Games (`#/games`, `#/games/franchises`,
   `#/games/collections`) has three views. **Library:** each saved game version (an IGDB record) with its platform line, status
   (Want to play, Playing, Paused, Finished, Skipped; a select), priority (⋯; ★ High, Low), genres (chips that filter), separate
-  source-labelled scores ("Critics 87 · IGDB (9)", "Players 78 · IGDB (258)") and length for the member's play style ("6 h ·
-  IGDB", "Estimate unreliable", "Length unknown"); search, Genre and Status filters (default All except Skipped); Sort with
-  Title, Release date, Status, Priority, Critic score, Player score and Length (item 13's sort line and remembering). **Platforms**
-  (Settings → Games, with the play style; one row in the database, so they follow the member and are in backups; read once at
+  source-labelled scores ("Critics 87 · IGDB (9)", "Players 78 · IGDB (258)"); search, Genre and Status filters (default All
+  except Skipped); Sort with Title, Release date, Status, Priority, Critic score and Player score (item 13's sort line and
+  remembering). **Game length was removed by the owner's decision (2026-11-10):** no estimates, play style, Length sort,
+  HowLongToBeat link or time-to-beat reads; a remembered sort that included Length keeps its other fields (the usual order when
+  none remain), and `game_settings.play_style` stays as a legacy value, never shown, sent back unchanged on each save and kept in
+  backups. **Platforms** (Settings → Games; one row in the database, so they follow the member and are in backups; read once at
   sign-in, so opening Settings reads nothing): a game shows only when a qualifying release on a chosen platform exists; with PS5
   chosen, a released PS4 game counts as "PS4 · Playable on PS5" with its PS4 date unless it is on Sony's PS4-only list
   (`games-data.js`, with the date checked). Hidden games keep their status, priority, collections and queue places and come back
@@ -101,8 +103,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   spot changed, or that sit on an ambiguous chain (a remaster of a port); nothing changes until the member picks "Use IGDB's"
   (a guarded relink) or "Keep mine" (kept until IGDB changes again). **Collections:** private, hand-made game collections
   (create, rename, delete, add from a game's ⋯, Remove); membership is independent of queues, following and status. **Details:**
-  IGDB's release rows (with the ones that don't count named), the three lengths with their submission count, a "Search
-  HowLongToBeat" link and the PlayStation Store page when IGDB lists one. **IGDB** is reached only through the `igdb` function
+  IGDB's release rows (with the ones that don't count named) and the PlayStation Store page when IGDB lists one. **IGDB** is reached only through the `igdb` function
   (`supabase/functions/igdb`): it holds the client secret, answers only members (it asks PostgREST's `stage5_capabilities` with
   the caller's token), and passes an allow-list of read-only queries; the page caches what it reads per member (`game_titles`,
   replaceable, never in backups; `library_game_titles_purge` empties it). **Games research** (members with research access;
@@ -118,11 +119,11 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   spot", or Dismiss), and an unsaved version already follows a relationship finding in its franchise. A decision that carries
   evidence is research: the database refuses it without research access. Evidence content is Claude's assessment, shown as
   such; the page checks its shape only. **Backups (format 9)** carry the member's own game records: `game_settings`
-  (platforms, play style), `game_entries` (IGDB id, spot and joined port ids, the title as saved from IGDB, status, priority,
+  (platforms, and the legacy `play_style`), `game_entries` (IGDB id, spot and joined port ids, the title as saved from IGDB, status, priority,
   timestamps), `game_follows` (the IGDB series id and its name as saved), `game_decisions` (kind, IGDB id, platform, basis
   and value: a hold's IGDB date and precision, evidence links and research dates, kept link choices), `game_collections`,
   `game_collection_members`, and each queue entry's `game_entry_id`. IGDB's details stay out: release rows, genres, scores,
-  time to beat, store links and relationships are in the cache only and come back with Refresh. The basis (an
+  store links and relationships are in the cache only and come back with Refresh. The basis (an
   implementation choice, documented here): the Twitch Developer Services Agreement (12/04/2024), under which IGDB is offered,
   allows Twitch data to be used to benefit the end user, bars sharing it with third parties, and requires deleting it on
   request; a backup is the member's own file of their own choices, and the database copy (cache and records) can be deleted.

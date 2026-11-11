@@ -1,5 +1,5 @@
 // Offline tests for games (G1, next-gen item 5; games-data.js, games.js, queues.js) in the whole-page harness: the Games area
-// and its routes, Settings → Games (platforms and play style, read at sign-in, saved with expected values), platform lines
+// and its routes, Settings → Games (platforms, read at sign-in, saved with expected values; game length removed 2026-11-10), platform lines
 // (native, "PS4 · Playable on PS5", Sony's PS4-only list, betas and patches left out), the release rule (a full date passing
 // on a selected platform, partial dates and TBA staying under Coming, Not out yet held only while IGDB's row is unchanged),
 // hiding games outside the selection, followed franchises (Up next, Caught up, Coming; versions sharing a spot; Skipped
@@ -49,7 +49,7 @@ function igdbStub(raw = RAW, members = MEMBERS) {
     const list = ids ? ids.split(',').map(Number) : [];
     if (q.endpoint === 'games' && /^search/.test(q.body)) { const term = q.body.match(/search "([^"]*)"/)[1].toLowerCase(); return { name: q.name, data: Object.values(raw).filter(g => g.name.toLowerCase().includes(term)) }; }
     if (q.endpoint === 'games') return { name: q.name, data: list.map(id => raw[id]).filter(Boolean) };
-    if (q.endpoint === 'game_time_to_beats') return { name: q.name, data: list.map(id => TTB[id]).filter(Boolean) };
+    if (q.endpoint === 'game_time_to_beats') throw new Error('harness: time to beat is no longer read');
     if (q.endpoint === 'collection_memberships') { const c = Number(q.body.match(/collection = (\d+)/)[1]); return { name: q.name, data: (members[c] || []).map(([game, type]) => ({ game, type })) }; }
     return { name: q.name, data: [] };
   }); };
@@ -60,7 +60,8 @@ function igdbStub(raw = RAW, members = MEMBERS) {
 // ── The member's saved data ──
 async function bootWith(opts = {}) {
   const app0 = await createApp({ storage: memoryStorage() }); // (only to reach the page's own igdbRecord)
-  const rec = (id, m = {}) => ({ ...JSON.parse(JSON.stringify(app0.ctx.igdbRecord(RAW[id], { hours: TTB[id] ? app0.ctx.igdbHours(TTB[id]) : null }))), m });
+  // (a cache written before game length was removed still carries `hours`: kept here for some records, to show it is ignored)
+  const rec = (id, m = {}) => ({ ...JSON.parse(JSON.stringify(app0.ctx.igdbRecord(RAW[id]))), ...(TTB[id] ? { hours: { main: 9, main_extra: 12, completionist: 20, count: 3 } } : {}), m });
   const titles = (opts.cache || [101, 102, 103, 110, 120, 130, 140, 150, 160, 170, 180, 190]).map(id => {
     const m = {}; Object.entries(MEMBERS).forEach(([c, l]) => l.forEach(([g, t]) => { if (g === id) m[c] = t === 2 ? 'spinoff' : 'member'; }));
     return { id: ID('6f000000', id), igdb_id: id, data: rec(id, m), fetched_at: TS };
@@ -68,7 +69,7 @@ async function bootWith(opts = {}) {
   const games = { game_settings: opts.settings === null ? [] : [{ id: ID('60000000', 1), platforms: opts.platforms || ['ps5'], play_style: opts.style || 'main', updated_at: TS }],
     game_entries: opts.entries || [], game_follows: opts.follows || [], game_decisions: opts.decisions || [], game_collections: opts.collections || [], game_collection_members: opts.members || [],
     game_titles: opts.noCache ? [] : titles };
-  const app = await createApp({ rows: opts.rows || [], tvShows: opts.shows || [], games, queues: opts.queues, igdb: opts.igdb === undefined ? igdbStub() : opts.igdb, storage: memoryStorage(), research: opts.research ?? true });
+  const app = await createApp({ rows: opts.rows || [], tvShows: opts.shows || [], games, queues: opts.queues, igdb: opts.igdb === undefined ? igdbStub() : opts.igdb, storage: opts.storage || memoryStorage(), research: opts.research ?? true });
   app.dom = makeMiniDom(app, ['gamesScreen', 'queuesScreen', 'gameDialogBox', 'settingsScreen']);
   app.dom.hide('cardList');
   return app;
@@ -111,12 +112,12 @@ test('Settings → Games: read once at sign-in, so opening Settings reads nothin
   const card = app.el('settingsScreen').innerHTML;
   assert.match(text(card), /My platforms PS5 PS4 Switch 2 Switch Xbox Series X\|S Xbox One PC/);
   assert.match(text(card), /PS4 · Playable on PS5/);
-  assert.match(text(card), /My play style \(for game length\) Main story Main story \+ side content Completionist/);
-  app.ctx.document.querySelectorAll = sel => (sel === '.games-platform' ? [{ value: 'ps5', checked: true }, { value: 'switch', checked: false }] : sel === '.games-style' ? [{ value: 'main_extra', checked: true }] : []);
+  assert.doesNotMatch(text(card), /play style|Main story|Completionist|length/i, 'no play style any more');
+  app.ctx.document.querySelectorAll = sel => (sel === '.games-platform' ? [{ value: 'ps5', checked: true }, { value: 'switch', checked: false }] : []);
   await app.ctx.saveGamesSettings(); await settle();
   const [call] = rpcs(app, 'library_game_settings_save');
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body)), { p_expected: null, p_platforms: ['ps5'], p_play_style: 'main_extra' });
-  assert.deepStrictEqual(app.store.game_settings.map(s => [s.platforms, s.play_style]), [[['ps5'], 'main_extra']]);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(call.body)), { p_expected: null, p_platforms: ['ps5'], p_play_style: 'main' }, 'a first save sends the legacy default');
+  assert.deepStrictEqual(app.store.game_settings.map(s => [s.platforms, s.play_style]), [[['ps5'], 'main']]);
   app.store.game_settings[0].platforms = ['ps5', 'switch']; // another device changed them
   await app.ctx.saveGamesSettings(); await settle();
   assert.match(app.el('errorBanner').innerHTML, /changed since the page showed it/);
@@ -134,9 +135,7 @@ test('platform lines: native PS5 per IGDB, PS4 · Playable on PS5 with the PS4 d
   assert.strictEqual(rowOf(app, ID('61000000', 5)), '', 'a PS4 game on Sony’s PS4-only list is hidden');
   assert.match(text(screen(app)), /2 saved games aren’t on your platforms, so they are hidden here and in your queues \(their status, priority, collections and queue places are kept\)/);
   assert.match(text(rowOf(app, ID('61000000', 1))), /Critics 87 · IGDB \(9\) · Players 78 · IGDB \(258\)/, 'separate, source-labelled scores');
-  assert.match(text(rowOf(app, ID('61000000', 3))), /Estimate unreliable/, 'a 3,468-hour main story is unreliable');
-  assert.match(text(rowOf(app, ID('61000000', 2))), /Estimate unreliable/, 'a main story longer than main + side content is unreliable');
-  assert.match(text(rowOf(app, ID('61000000', 1))), /6 h · IGDB/);
+  assert.doesNotMatch(text(screen(app)), /Estimate unreliable|Length unknown| h · IGDB|HowLongToBeat/, 'no game length anywhere (a legacy cache’s hours are ignored)');
   app.store.game_settings[0].platforms = ['ps5', 'switch'];
   await openGames(app);
   assert.match(text(rowOf(app, ID('61000000', 4))), /Switch · Mar 1, 2020 · per IGDB/, 'Switch chosen: it comes back, status kept');
@@ -376,16 +375,65 @@ test('collections: create, add and remove; membership is independent of queues, 
   assert.strictEqual(libraryOrder(app).length, 3);
 });
 
-test('sorting the library: critic and player scores are separate fields; length uses the play style and an unreliable estimate sorts with the unknown', async () => {
+test('sorting the library: critic and player scores are separate fields; there is no Length field', async () => {
   const app = await bootWith({ entries: [entry(1, 102), entry(2, 110), entry(3, 140), entry(4, 180)], style: 'completionist' });
   await openGames(app);
   app.ctx.chooseSortField('critic'); await settle();
   assert.deepStrictEqual(libraryOrder(app), [ID('61000000', 1), ID('61000000', 2), ID('61000000', 3), ID('61000000', 4)], 'critics, highest first; no score last');
   app.ctx.chooseSortField('player'); await settle();
   assert.deepStrictEqual(libraryOrder(app).slice(0, 3), [ID('61000000', 2), ID('61000000', 1), ID('61000000', 3)], 'players, highest first');
+  assert.doesNotMatch(app.run('sortMenuHtml(viewSortContext())'), /Length/);
+  const before = libraryOrder(app);
   app.ctx.chooseSortField('length'); await settle();
-  assert.deepStrictEqual(libraryOrder(app), [ID('61000000', 2), ID('61000000', 1), ID('61000000', 4), ID('61000000', 3)], 'completionist hours, shortest first; the 205 h that is out of order counts as unknown');
-  assert.match(app.run('sortMenuHtml(viewSortContext())'), /Length \(your play style\)/);
+  assert.deepStrictEqual(libraryOrder(app), before, 'a Length field no longer exists: nothing changes');
+});
+
+test('a remembered sort that includes Length: Length is dropped, the other fields keep their order and directions; Length alone gives the usual order', async () => {
+  const HU = '0a000000-0000-4000-8000-0000000000aa';
+  const stored = views => { const st = memoryStorage(); st.setItem(`watchlist_view_sorts::${HU}`, JSON.stringify({ v: 1, views })); return st; };
+  const entries = [entry(1, 102), entry(2, 110), entry(3, 140), entry(4, 180)];
+  const app = await bootWith({ entries, storage: stored({ games: [{ f: 'length', d: 'asc' }, { f: 'player', d: 'asc' }, { f: 'title', d: 'desc' }] }) });
+  await openGames(app);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(app.run("viewSortSpec(viewSortContext())"))), [{ f: 'player', d: 'asc' }, { f: 'title', d: 'desc' }]);
+  assert.deepStrictEqual(libraryOrder(app).slice(0, 3), [ID('61000000', 3), ID('61000000', 1), ID('61000000', 2)], 'players lowest first, as remembered');
+  assert.doesNotMatch(app.el('sortLine') ? app.el('sortLine').innerHTML : screen(app), /Length/);
+  const only = await bootWith({ entries, storage: stored({ games: [{ f: 'length', d: 'desc' }] }) });
+  await openGames(only);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(only.run("viewSortSpec(viewSortContext())"))), []);
+  const usual = await bootWith({ entries });
+  await openGames(usual);
+  assert.deepStrictEqual(libraryOrder(only), libraryOrder(usual), 'Length alone: the usual order');
+});
+
+test('game length is gone from Details, the add preview and the queue; adding a game and Refresh read no time to beat', async () => {
+  const app = await bootWith({ entries: [entry(1, 140)], follows: [follow(1, 7001, 'ZZ War')], queues: { watch_queues: [{ id: ID('66000000', 9), name: 'ZZ Q', sort_order: 1, created_at: TS }],
+    queue_entries: [{ id: ID('67000000', 9), queue_id: ID('66000000', 9), show_id: null, item_id: null, game_entry_id: ID('61000000', 1), position: 1, created_at: TS }] } });
+  await openGames(app);
+  app.ctx.openGameDetails(140, null);
+  assert.doesNotMatch(text(dialog(app)), /Length|time to beat|HowLongToBeat|play style/i);
+  app.ctx.closeGameDialog();
+  app.ctx.openGamesAdd(null);
+  app.run(`gamesAdd.query = 'zz war'`);
+  await app.ctx.searchGamesAdd(); await settle();
+  await app.ctx.pickGameResult(110); await settle();
+  assert.doesNotMatch(text(dialog(app)), /Length| h · IGDB|HowLongToBeat/);
+  await app.ctx.saveGameRecord(110); await settle();
+  assert.ok(app.store.game_entries.some(e => e.igdb_id === 110), 'saved');
+  app.ctx.closeGameDialog();
+  await app.ctx.refreshGames(); await settle();
+  assert.doesNotMatch(app.el('errorBanner').innerHTML, /couldn’t/);
+  assert.ok(app.igdb.calls.length > 0 && !app.igdb.calls.flat().some(q => q.endpoint === 'game_time_to_beats'), 'no time-to-beat request');
+  app.ctx.openQueues(); await settle();
+  assert.doesNotMatch(text(app.el('queuesScreen').innerHTML), /Length| h · IGDB|Estimate/);
+});
+
+test('settings: a saved legacy play style is kept as it is when the platforms change', async () => {
+  const app = await bootWith({ style: 'completionist' });
+  app.ctx.openSettings(null); await settle();
+  app.ctx.document.querySelectorAll = sel => (sel === '.games-platform' ? [{ value: 'ps5', checked: true }, { value: 'switch', checked: true }] : []);
+  await app.ctx.saveGamesSettings(); await settle();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rpcs(app, 'library_game_settings_save')[0].body)), { p_expected: { platforms: ['ps5'], play_style: 'completionist' }, p_platforms: ['ps5', 'switch'], p_play_style: 'completionist' });
+  assert.deepStrictEqual(app.store.game_settings.map(s => [s.platforms, s.play_style]), [[['ps5', 'switch'], 'completionist']]);
 });
 
 test('Refresh: a new main-series announcement appears under Coming, nothing is added to Want to play or a queue; a new plain port joins its saved game; the report says so', async () => {

@@ -28,11 +28,11 @@ const SORT_FIELD_DEFS = {
   rating: { dir: 'desc', words: { asc: 'lowest first', desc: 'highest first' } },
   status: { dir: 'asc', words: null },
   priority: { dir: 'desc', words: { asc: 'Low first', desc: 'High first' } },
-  // G1 (games): critic and player scores are separate fields; length uses the member's play style.
+  // G1 (games): critic and player scores are separate fields. (Length was removed, 2026-11-10: a remembered Length field is
+  // dropped by cleanSortSpec, which keeps only defined fields; the rest of that sort stays.)
   release: { dir: 'desc', words: { asc: 'oldest first', desc: 'newest first' } },
   critic: { dir: 'desc', words: { asc: 'lowest first', desc: 'highest first' } },
-  player: { dir: 'desc', words: { asc: 'lowest first', desc: 'highest first' } },
-  length: { dir: 'asc', words: { asc: 'shortest first', desc: 'longest first' } }
+  player: { dir: 'desc', words: { asc: 'lowest first', desc: 'highest first' } }
 };
 const SORT_GAME_STATUS_RANK = { playing: 0, paused: 1, want: 2, finished: 3, skipped: 4 };
 // Status groups in their default order (ascending); a Skipped film marked watched is Skipped.
@@ -56,7 +56,7 @@ function viewSortContext(viewId = activeViewId) {
       statusOrder: ['Watching', 'To Watch'] };
   }
   if (viewId === 'games') return { key: 'games', fields: [fd('title', 'Title'), fd('release', 'Release date'), fd('status', 'Status'), fd('priority', 'Priority'),
-    fd('critic', 'Critic score'), fd('player', 'Player score'), fd('length', 'Length (your play style)')], statusOrder: ['Playing', 'Paused', 'Want to play', 'Finished', 'Skipped'] };
+    fd('critic', 'Critic score'), fd('player', 'Player score')], statusOrder: ['Playing', 'Paused', 'Want to play', 'Finished', 'Skipped'] };
   if (typeof ALL_MOVIES_VIEW !== 'undefined' && viewId === ALL_MOVIES_VIEW.id) return { key: 'allmovies', fields: filmFields, statusOrder: ['To Watch', 'Watched', 'Skipped'] };
   if (typeof isBrowseCollectionView === 'function' && isBrowseCollectionView(viewId)) {
     if (browseMedia === 'movie') return { key: `${viewId}:movie`, fields: filmFields, statusOrder: ['To Watch', 'Watched', 'Skipped'] };
@@ -99,12 +99,10 @@ function sortDateOf(r) {
 }
 const SORT_VALUE = {
   title: s => s.title || '',
-  // Games (G1): the date the row shows (its platform line), the scores IGDB gives, the length for the play style (an unreliable
-  // estimate counts as unknown).
+  // Games (G1): the date the row shows (its platform line) and the scores IGDB gives.
   release: s => (s.game && s.game.dateKey && s.game.dateKey !== '9999-12-31' ? s.game.dateKey : null),
   critic: s => (s.game && s.game.rec && s.game.rec.critic ? s.game.rec.critic.score : null),
   player: s => (s.game && s.game.rec && s.game.rec.player ? s.game.rec.player.score : null),
-  length: s => (s.game && s.game.length.reliable ? s.game.length.value : null),
   // Series premiere: TMDB's first-air date (this device's cache); a film's own release date.
   premiere: s => (s.film ? sortDateOf(s.film) : showFirstAirDate(s.show)),
   // The season the row's Up next / Next names (an active earlier-seasons range first; skipped seasons passed over).

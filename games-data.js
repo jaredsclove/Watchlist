@@ -34,9 +34,7 @@ const IGDB_GAME_STATUS = { 0: 'released', 2: 'alpha', 3: 'beta', 4: 'early', 5: 
 const GAME_SKIP_TYPES = ['dlc', 'expansion', 'bundle', 'mod', 'episode', 'season', 'fork', 'pack', 'update'];
 const GAME_VERSION_TYPES = ['remake', 'remaster', 'port'];
 const GAME_STATUS_LABELS = { want: 'Want to play', playing: 'Playing', paused: 'Paused', finished: 'Finished', skipped: 'Skipped' };
-const GAME_STYLE_LABELS = { main: 'Main story', main_extra: 'Main story + side content', completionist: 'Completionist' };
-// The length rule: a value above its style's cap, or out of order with a neighbouring style (by more than 10%), is unreliable.
-const GAME_LENGTH_CAPS = { main: 200, main_extra: 400, completionist: 1000 };
+// (Game length was removed by the owner's decision, 2026-11-10: no time-to-beat reads, estimates, play style or length sort.)
 
 // ── IGDB records → the cache's shape ──
 // What games.js asks IGDB for, per record (every reference as an id, to keep the answer small).
@@ -62,7 +60,7 @@ function igdbReleaseRow(rd) {
   if ((prec === 'month' || prec === 'year' || prec === 'quarter') && !row.y) row.prec = 'tbd';
   return row;
 }
-// One IGDB game as the cache keeps it (time to beat and memberships are merged in by games.js).
+// One IGDB game as the cache keeps it (memberships are merged in by games.js).
 function igdbRecord(g, extra = {}) {
   const ext = Array.isArray(g.external_games) ? g.external_games : [];
   const ps = ext.find(e => (e.external_game_source === 36 || (e.external_game_source && e.external_game_source.id === 36)) && typeof e.url === 'string');
@@ -79,12 +77,8 @@ function igdbRecord(g, extra = {}) {
     critic: Number.isFinite(g.aggregated_rating) ? { score: Math.round(g.aggregated_rating), count: g.aggregated_rating_count || 0 } : null,
     player: Number.isFinite(g.rating) ? { score: Math.round(g.rating), count: g.rating_count || 0 } : null,
     releases: (g.release_dates || []).map(igdbReleaseRow).filter(Boolean),
-    store: ps ? ps.url : null, m: {}, hours: null, ...extra
+    store: ps ? ps.url : null, m: {}, ...extra
   };
-}
-function igdbHours(t) {
-  const h = s => (Number.isFinite(s) && s > 0 ? Math.round(s / 360) / 10 : null);
-  return t ? { main: h(t.hastily), main_extra: h(t.normally), completionist: h(t.completely), count: t.count || 0 } : null;
 }
 
 // ── Dates ──
@@ -281,22 +275,3 @@ function franchiseSummary(follow, state) {
   coming.sort((a, b) => cmpStrGame(a.c.key, b.c.key));
   return { spots, upNext, caughtUp: !upNext, coming };
 }
-
-// ── Scores and length ──
-function gameLengthOf(rec, style) {
-  const h = rec && rec.hours;
-  if (!h || h[style] == null) return { value: null, reliable: false, reason: 'unknown', hours: h };
-  const order = ['main', 'main_extra', 'completionist'];
-  const bad = new Set();
-  order.forEach(s => { if (h[s] != null && h[s] > GAME_LENGTH_CAPS[s]) bad.add(s); });
-  const known = order.filter(s => h[s] != null);
-  for (let i = 0; i + 1 < known.length; i++) if (h[known[i]] > h[known[i + 1]] * 1.1) { bad.add(known[i]); bad.add(known[i + 1]); }
-  const reliable = !bad.has(style);
-  return { value: h[style], reliable, reason: reliable ? '' : 'unreliable', hours: h };
-}
-function gameLengthText(len) {
-  if (!len || len.value == null) return 'Length unknown';
-  if (!len.reliable) return 'Estimate unreliable';
-  return `${len.value % 1 ? len.value.toFixed(1) : len.value} h · IGDB`;
-}
-const gameSearchHltbUrl = title => `https://howlongtobeat.com/?q=${encodeURIComponent(title)}`;
