@@ -997,8 +997,9 @@ const ORDER_RAW = (() => {
 // The worked example: [entry number, IGDB id, stored spot].
 const ORDER_ENTRIES = [[1, 520], [2, 503], [3, 502, 501], [4, 514, 513], [5, 512, 511], [6, 521], [7, 504], [8, 515, 516], [9, 501], [10, 513], [11, 530],
   [12, 531, 504], [13, 553, 551], [14, 557, 556], [15, 552, 551], [16, 551], [17, 556], [18, 562, 561], [19, 567, 566], [20, 566], [21, 561]];
-const ORDER_EXPECTED = [11, /* ZZ Brick (A to Z of Lego Wars' two franchises) */ 9, 3, 2, 7, 12, /* ZZ Call of Duty */ 5, 10, 4, 8, /* ZZ Charted */
-  6, /* ZZ James Bond */ 40, /* ZZ Restored (no details) */ 1, /* ZZ Stray Cat */ 16, 15, 13, 17, 14, 20, 19, 21, 18 /* ZZ Twin */];
+// (a franchise with one visible game is placed by that game's title: 007 Light, and Lego Wars, alone in ZZ Brick)
+const ORDER_EXPECTED = [6, /* ZZ 007 Light */ 9, 3, 2, 7, 12, /* ZZ Call of Duty */ 5, 10, 4, 8, /* ZZ Charted */
+  11, /* ZZ Lego Wars */ 40, /* ZZ Restored (no details) */ 1, /* ZZ Stray Cat */ 16, 15, 13, 17, 14, 20, 19, 21, 18 /* ZZ Twin */];
 async function orderApp(o = {}) {
   Object.assign(RAW, ORDER_RAW);
   const entries = (o.list || ORDER_ENTRIES).map(([k, igdb, spot]) => entry(k, igdb, { spot: spot ?? igdb, ...(o.status && o.status[k] ? { status: o.status[k] } : {}), ...(o.priority && o.priority[k] ? { priority: o.priority[k] } : {}) }))
@@ -1015,7 +1016,7 @@ test('Franchise / release order: franchises and standalone games A to Z; whole s
     const app = await orderApp();
     await openGames(app);
     assert.deepStrictEqual(libraryOrder(app), ORDER_EXPECTED.map(E));
-    assert.deepStrictEqual(heads(app), ['ZZ Call of Duty', 'ZZ Charted', 'ZZ Twin'], 'one heading per franchise with two or more; Brick and James Bond are single rows');
+    assert.deepStrictEqual(heads(app), ['ZZ Call of Duty', 'ZZ Charted', 'ZZ Twin'], 'one heading per franchise with two or more; Brick and James Bond are single rows, placed by their titles');
     assert.match(screen(app).split('</tbody>')[1], /<div class="game-group-head" data-group="f:900"><span class="game-group-name" role="heading" aria-level="3">ZZ Call of Duty<\/span><\/div>/, 'the cards have the headings too');
     assert.match(app.el('sortLine').innerHTML, /Order:<\/span> <span class="sort-default-name">Franchise \/ release order<\/span>/);
     // Equal original dates (Alpha and Beta, 2010-03-01) and unknown ones (Gamma, Delta): each spot's versions stay together.
@@ -1138,6 +1139,49 @@ test('after a restore (no IGDB details): saved games by title, no headings, noth
     assert.deepStrictEqual(heads(app), ['ZZ Call of Duty']);
     const a = app.dom.active();
     assert.deepStrictEqual([a.closest('[data-game]').getAttribute('data-game'), a.getAttribute('data-gaction')], [E(7), 'status'], 'focus stays on the moved game’s control');
+  } finally { cleanOrderRaw(); }
+});
+
+test('one visible game of a franchise is placed by its own title; a second makes the group again, under its heading; focus stays on the game that moved, in the Library and a collection; Reset restores it', async () => {
+  try {
+    const list = [[1, 503], [2, 504], [3, 513], [4, 514, 513], [5, 520]];
+    const C1 = ID('63000000', 1);
+    const app = await orderApp({ list, noRestored: true, collections: [{ id: C1, name: 'ZZ Mix', created_at: TS }],
+      members: [1, 2, 3, 4].map(k => ({ id: ID('64000000', k), collection_id: C1, entry_id: E(k), created_at: TS })) });
+    await openGames(app);
+    const both = [1, 2, 3, 4, 5].map(E);
+    assert.deepStrictEqual(libraryOrder(app), both, 'ZZ Call of Duty (Modern Warfare 2019, Black Ops 6), ZZ Charted (4, 4 Remastered), ZZ Stray Cat');
+    assert.deepStrictEqual(heads(app), ['ZZ Call of Duty', 'ZZ Charted']);
+    // Black Ops 6 skipped elsewhere (the default filter hides it): Modern Warfare (2019) is alone, placed under M.
+    app.dom.focus('gamesScreen', `[data-game="${E(1)}"] [data-gaction="status"]`);
+    await app.ctx.setGameStatus(E(2), 'skipped'); await settle();
+    assert.deepStrictEqual(libraryOrder(app), [3, 4, 1, 5].map(E), 'Charted, then “ZZ Modern Warfare (2019)” by its title, then Stray Cat');
+    assert.deepStrictEqual(heads(app), ['ZZ Charted']);
+    const at = () => { const a = app.dom.active(); return [a.closest('[data-game]').getAttribute('data-game'), a.getAttribute('data-gaction')]; };
+    assert.deepStrictEqual(at(), [E(1), 'status'], 'focus stays on the moved game’s control');
+    app.ctx.setGamesFilter('status', 'all');
+    assert.deepStrictEqual(libraryOrder(app), both, 'the skipped game listed again: the group and its heading are back');
+    app.ctx.setGamesFilter('status', 'notskipped');
+    await app.ctx.setGameStatus(E(2), 'want'); await settle();
+    assert.deepStrictEqual(libraryOrder(app), both, 'back to two: the group returns');
+    assert.deepStrictEqual(at(), [E(1), 'status']);
+    // A search leaving one of each: both placed by title.
+    app.run("gamesFilters.search = 'Remastered'; renderGamesView()"); // (the harness's search box can't take focus)
+    assert.deepStrictEqual([libraryOrder(app), heads(app)], [[E(4)], []]);
+    app.run("gamesFilters.search = ''; renderGamesView()");
+    // An explicit sort, then Reset to Franchise / release order.
+    app.ctx.chooseSortField('title');
+    assert.deepStrictEqual(heads(app), []);
+    app.ctx.resetViewSort();
+    assert.deepStrictEqual([libraryOrder(app), heads(app)], [both, ['ZZ Call of Duty', 'ZZ Charted']]);
+    // The collection: removing Black Ops 6 leaves Modern Warfare alone, and it moves; focus stays on it.
+    await openGames(app, 'gamescollections'); app.ctx.selectGameCollection(C1);
+    assert.deepStrictEqual([libraryOrder(app), heads(app)], [[1, 2, 3, 4].map(E), ['ZZ Call of Duty', 'ZZ Charted']]);
+    app.dom.focus('gamesScreen', `[data-game="${E(1)}"] [data-gaction="cremove"]`);
+    await app.ctx.removeFromGameCollection(ID('64000000', 2)); await settle();
+    assert.deepStrictEqual([libraryOrder(app), heads(app)], [[3, 4, 1].map(E), ['ZZ Charted']]);
+    assert.deepStrictEqual(at(), [E(1), 'cremove']);
+    assert.deepStrictEqual(app.store.game_entries.map(e => e.status), ['want', 'want', 'want', 'want', 'want'], 'statuses as set: nothing else changed');
   } finally { cleanOrderRaw(); }
 });
 
