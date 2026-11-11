@@ -1190,17 +1190,39 @@ test('franchise wording: Skip all versions and Unskip all versions (named for th
   const app = await bootWith({ follows: [f], entries: [entry(1, 102, { spot: 101 }), entry(2, 110, { status: 'skipped' })] });
   await openGames(app, 'gamesfranchises'); app.ctx.toggleFranchise(f.id);
   const t = () => tableOf(app);
-  assert.match(t(), /data-gaction="skipspot-101" aria-label="Skip all versions of ZZ War 4" title="Leave this game and all its versions out of Up next and Caught up until you unskip it"[^>]*>Skip all versions<\/button>/);
+  assert.match(t(), /data-gaction="skipspot-101" aria-label="Skip all versions of ZZ War 4 \(2007\)" title="Leave ZZ War 4 \(2007\) and all its versions out of Up next and Caught up until you unskip it"[^>]*>Skip all versions<\/button>/);
   assert.doesNotMatch(screen(app), /this spot|Spot skipped|share one spot/);
   assert.match(text(screen(app)), /A game’s original, remasters and remakes are versions of that one game: finishing any version counts the game as done\. Skip all versions leaves the game out of Up next and Caught up until you unskip it; a single version set to Skipped is passed over on its own\./);
   assert.match(t(), /data-gaction="status-v110"[\s\S]*?<option value="skipped" selected>Skipped<\/option>/, 'a version’s own Skipped is its status');
   assert.doesNotMatch(text(screen(app)), /ZZ War \(2019\) 2019 All versions skipped/, 'one skipped version doesn’t skip the game');
   await app.ctx.toggleSkipSpot(101, false); await settle();
-  assert.match(t(), /data-gaction="skipspot-101" aria-label="Unskip all versions of ZZ War 4" title="Count this game in Up next and Caught up again"[^>]*>Unskip all versions<\/button>/);
+  assert.match(t(), /data-gaction="skipspot-101" aria-label="Unskip all versions of ZZ War 4 \(2007\)" title="Count ZZ War 4 \(2007\) in Up next and Caught up again"[^>]*>Unskip all versions<\/button>/);
   assert.match(text(screen(app)), /ZZ War 4 2007 All versions skipped/);
   assert.deepStrictEqual(app.store.game_decisions.map(d => [d.kind, d.igdb_id]), [['skip_spot', 101]], 'the same saved decision as before');
   await app.ctx.toggleSkipSpot(101, true); await settle();
   assert.deepStrictEqual(app.store.game_decisions, [], 'Unskip all versions clears it');
+});
+
+test('Skip and Unskip all versions: games sharing a title are told apart by their original’s release year, in the accessible name and the tooltip; an unknown year says so; the visible label stays short', async () => {
+  // Two games titled "ZZ War" (2005 and 2018) in one franchise, and one with no release date.
+  Object.assign(RAW, {
+    171: { id: 171, name: 'ZZ War', game_type: 0, first_release_date: unix('2005-03-22'), collections: [{ id: 7003, name: 'ZZ Twins' }], release_dates: [rd(PS4, '2005-03-22')] },
+    172: { id: 172, name: 'ZZ War', game_type: 0, first_release_date: unix('2018-04-20'), collections: [{ id: 7003, name: 'ZZ Twins' }], release_dates: [rd(PS4, '2018-04-20')] },
+    173: { id: 173, name: 'ZZ War Untold', game_type: 0, collections: [{ id: 7003, name: 'ZZ Twins' }], release_dates: [rd(PS5, null)] } });
+  MEMBERS[7003] = [[171, 1], [172, 1], [173, 1]];
+  try {
+    const f = follow(3, 7003, 'ZZ Twins');
+    const app = await bootWith({ follows: [f], cache: [171, 172, 173], decisions: [{ id: ID('65000000', 1), kind: 'skip_spot', igdb_id: 172, platform: '', value: {}, created_at: TS, updated_at: TS }] });
+    await openGames(app, 'gamesfranchises'); app.ctx.toggleFranchise(f.id);
+    const btns = [...screen(app).matchAll(/<button class="btn btn-link" data-gaction="skipspot-(\d+)" aria-label="([^"]+)" title="([^"]+)"[^>]*>([^<]+)<\/button>/g)].map(m => [Number(m[1]), m[2], m[3], m[4]]);
+    const table = btns.slice(0, 3); // (the cards repeat them)
+    assert.deepStrictEqual(table, [
+      [171, 'Skip all versions of ZZ War (2005)', 'Leave ZZ War (2005) and all its versions out of Up next and Caught up until you unskip it', 'Skip all versions'],
+      [172, 'Unskip all versions of ZZ War (2018)', 'Count ZZ War (2018) in Up next and Caught up again', 'Unskip all versions'],
+      [173, 'Skip all versions of ZZ War Untold (release year unknown)', 'Leave ZZ War Untold (release year unknown) and all its versions out of Up next and Caught up until you unskip it', 'Skip all versions']]);
+    assert.deepStrictEqual(btns.slice(3), table, 'the cards carry the same names');
+    assert.strictEqual(new Set(table.map(b => b[1])).size, 3, 'every name is distinct');
+  } finally { [171, 172, 173].forEach(k => { delete RAW[k]; }); delete MEMBERS[7003]; }
 });
 
 T.run();
