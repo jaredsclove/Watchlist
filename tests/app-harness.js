@@ -10,6 +10,7 @@ const B45 = require('./b45-harness');
 const CU1 = require('./cu1-harness');
 const Q1 = require('./q1-harness');
 const G1 = require('./g1-harness');
+const TC1 = require('./tc1-harness');
 // The database phases the harness models (createApp({ stage5 })): B4/B5 (the default,
 // tests/b45-harness.js); 'contracted', a database rolled back from B4/B5 (Stage 5c: reads
 // without the B4/B5 columns, no _b45 function); null, a database without Stage 5 (no
@@ -694,6 +695,7 @@ function tvFunctions(app, store, newId, org = NO_ORG) {
   Object.assign(handlers, CU1.cu1Handlers({ app, store, DbError, isFilmRow }));
   if (isCu1(app)) Object.assign(handlers, Q1.q1Handlers({ store, DbError, isFilmRow, handlers: { ...handlers }, newId }));
   if (isCu1(app)) Object.assign(handlers, G1.g1Handlers({ app, store, DbError, newId }));
+  if (isCu1(app) && store.tmdb_tv_cache) Object.assign(handlers, TC1.tc1Handlers({ store, DbError }));
   return Object.fromEntries(Object.entries(handlers).map(([name, fn]) => [name, body => {
     try {
       // B4/B5 installed: the old names refuse (an old page still open), before anything is read.
@@ -872,7 +874,7 @@ const isFilmRow = r => r.media_type === 'movie' || (r.media_type == null && r.se
 //            (their calls answer 404 PGRST202, and an UPDATE may newly add an archived choice)
 async function createApp({ rows = [], othertvShows = [], tvShows = [], customCollections = [], tmdb, width = 1200, countOverride = null,
   format1 = false, org = true, personalCollections = null, memberships = null, watchWithChoices = null, storage = null,
-  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null, access = 'members', session, episodeMarks = [], pageRoot = null, cu1 = null, queues = null, games = null, igdb = null, research = true } = {}) {
+  orgWrite = true, configText = null, stage5, recoveryArchive = 'active', routes = null, access = 'members', session, episodeMarks = [], pageRoot = null, cu1 = null, queues = null, games = null, igdb = null, research = true, tmdbCache = [], tmdbQueue = false } = {}) {
   // pageRoot: the page from another directory (a release exported from git), for old-page tests.
   const page = pageRoot ? pageOf(pageRoot) : PAGE;
   // The default phase is B4/B5 (production's schema once B4/B5 is installed); a database
@@ -898,6 +900,8 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   if (stage5 === CU1.CU1_PHASE) CU1.CU1_TABLES.forEach(t => { store[t] = clone((cu1 || {})[t] || []); });
   if (stage5 === CU1.CU1_PHASE) Q1.Q1_TABLES.forEach(t => { store[t] = clone((queues || {})[t] || []); });
   if (stage5 === CU1.CU1_PHASE) G1.G1_TABLES.forEach(t => { store[t] = clone((games || {})[t] || []); }); // G1: the game tables (games: { table: rows } seeds them)
+  // TC1: the member's TMDB cache (tmdbCache: its rows, tests/tc1-harness.js; false: a database without it).
+  if (stage5 === CU1.CU1_PHASE && tmdbCache !== false) store.tmdb_tv_cache = clone(tmdbCache || []);
 
   // ── personal organization (db/phase3b_org.sql) ──
   const orgOn = !format1 && org !== false;
@@ -1149,7 +1153,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       const p = url.slice(TMDB_BASE.length);
       const answer = app.tmdbOverride || tmdb; // app.setTmdb(fn) replaces TMDB's answers from then on
       const out = answer ? answer(p) : undefined; // (a thrown error is a network failure)
-      if (out && out.__status) return response(out.__status, { status_message: 'simulated' }); // { __status: 500 }: an HTTP error
+      if (out && out.__status) return response(out.__status, { status_message: 'simulated' }, out.__headers || {}); // { __status: 500 }: an HTTP error; __headers: e.g. { 'retry-after': '5' }
       return out === undefined ? response(404, { status_message: 'not found' }) : response(200, out);
     }
     // G1: the IGDB function (supabase/functions/igdb): members only, through the caller's own token.
@@ -1191,7 +1195,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     if (u.pathname.includes('/rpc/') && table === 'stage5_capabilities') {
       if (!app.stage5) return response(404, { code: 'PGRST202', details: null, hint: null, message: 'Could not find the function public.stage5_capabilities in the schema cache' });
       return response(200, { stage5: 1, phase: app.stage5, backup_format: isCu1(app) ? 9 : ep1 ? 6 : b45 ? 5 : contracted ? 4 : 3, recovery_archive: contracted ? app.recoveryArchive : 'none',
-        ...(b45 ? { b45: 1 } : {}), ...(ep1 ? { ep1: 1 } : {}), ...(isCu1(app) ? { cu1: 1, q1: 1, g1: 1 } : {}), ...(isCu1(app) && app.research !== null ? { research: app.research !== false } : {}), ...(app.access ? { access: app.access, member: app.member !== false } : {}) });
+        ...(b45 ? { b45: 1 } : {}), ...(ep1 ? { ep1: 1 } : {}), ...(isCu1(app) ? { cu1: 1, q1: 1, g1: 1 } : {}), ...(isCu1(app) && store.tmdb_tv_cache ? { tc1: 1 } : {}), ...(isCu1(app) && app.research !== null ? { research: app.research !== false } : {}), ...(app.access ? { access: app.access, member: app.member !== false } : {}) });
     }
     // EP1: library_set_episode_marks exists only once EP1 is installed.
     if (u.pathname.includes('/rpc/') && table === 'library_set_episode_marks' && !ep1) {
@@ -1203,7 +1207,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
       return pgError(400, 'P0001', 'library_write_required: This change is made only through the app\'s library functions. Reload the page. Nothing was changed.');
     }
     // CU1: collection updates' tables change only through the library_cu_* functions or a restore.
-    if (isCu1(app) && !u.pathname.includes('/rpc/') && method !== 'GET' && (CU1.CU1_TABLES.includes(table) || Q1.Q1_TABLES.includes(table) || G1.G1_TABLES.includes(table))) {
+    if (isCu1(app) && !u.pathname.includes('/rpc/') && method !== 'GET' && (CU1.CU1_TABLES.includes(table) || Q1.Q1_TABLES.includes(table) || G1.G1_TABLES.includes(table) || table === 'tmdb_tv_cache')) {
       return pgError(400, 'P0001', 'library_write_required: This change is made only through the app\'s library functions. Reload the page. Nothing was changed.');
     }
     // A B4/B5 function on a database without B4/B5 doesn't exist.
@@ -1451,6 +1455,15 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   app.setTmdb = fn => { app.tmdbOverride = fn; };
   app.run = code => vm.runInContext(code, ctx);
   vm.runInContext(page.inline, ctx, { filename: 'watchlist.html' }); // state + boot
+  // TC1: the background queue is off unless a test asks for it (tmdbQueue: true from the start; 'manual': off until the test
+  // sets tmdbQueueEnabled = true). Waiting is a turn of the event loop, recorded in app.delays; the clock is app.clock (ms;
+  // default the real time), moved on by each wait.
+  app.delays = [];
+  if (vm.runInContext("typeof tmdbQueueEnabled !== 'undefined'", ctx)) {
+    ctx.__harnessDelay = ms => { app.delays.push(ms); if (app.clock != null) app.clock += ms; return new Promise(r => setImmediate(r)); };
+    ctx.__harnessNow = () => (app.clock != null ? app.clock : Date.now());
+    vm.runInContext(`tmdbDelay = __harnessDelay; tmdbNow = __harnessNow; tmdbQueueEnabled = ${tmdbQueue === true};`, ctx);
+  }
   await settle();
 
   app.writes = () => requests.filter(r => r.method !== 'GET');

@@ -6,7 +6,7 @@
 // routes and reports.
 // Refresh shows is library-wide and TMDB only: every TMDB-matched show (catalog and collection
 // shows included; Skipped shows only when followed), new seasons reconciled with the stored rows,
-// TBA and future dates, full episode lists (this device's cache), and unmatched shows matched when
+// TBA and future dates, full episode lists (the member's TMDB cache), and unmatched shows matched when
 // the match is unambiguous. Announcements come from research briefs (collection-research.js).
 // Page state: cuShowSettings, cuModal (watchlist.html).
 
@@ -225,7 +225,7 @@ function cuResultsHtml(r) {
     ? `${researchEnabled ? 'TMDB only: announcements weren’t checked. ' : ''}Checked ${r.checked} show${r.checked === 1 ? '' : 's'} (${r.matched} matched to TMDB, ${r.unmatched} not yet matched)${r.skipped ? `; ${r.skipped} Skipped show${r.skipped === 1 ? '' : 's'} not checked` : ''}.`
     : `From the imported research file: ${r.checked} finding${r.checked === 1 ? '' : 's'}${r.unchanged ? ` (${r.unchanged} already applied or decided earlier, left as they are)` : ''}. Evidence was assessed in Claude research; links are kept with each finding.`
       + (r.coverage ? ` Coverage: ${r.coverage.checked} of ${r.coverage.reported} reported check${r.coverage.reported === 1 ? '' : 's'} completed${r.coverage.missing.length ? `; ${r.coverage.missing.length} the brief asked for ${r.coverage.missing.length === 1 ? 'isn’t' : 'aren’t'} reported` : ''}.` : '');
-  const episodes = r.episodes.map(e => `${e.title} · ${e.season}: ${e.added} new episode${e.added === 1 ? '' : 's'} listed (this device)`);
+  const episodes = r.episodes.map(e => `${e.title} · ${e.season}: ${e.added} new episode${e.added === 1 ? '' : 's'} listed`);
   const auto = r.applied.concat(r.networkConfirmed, episodes);
   const notChecked = r.failed.concat(r.setAside);
   return `<div class="cu-results">
@@ -373,12 +373,12 @@ async function cuCheckMatchedShow(show, lib, plan, results) {
   const rows = lib.rows.filter(r => r.show_id === show.id);
   // Full episode lists from TMDB's season details (one documented request per season) for every stored season of
   // the show: read on each Refresh while the season isn't finished (cuSeasonFinished); a finished season is read
-  // only when this device has no full list for it or TMDB's count no longer matches it. Marks are never touched.
-  const today = cuToday(), lists = new Map(), cache = readEpisodeListCache();
+  // only when the member's cache (TC1) has no full list for it or TMDB's count no longer matches it. Marks are never touched.
+  const today = cuToday(), lists = new Map();
   for (const s of seasons) {
     const stored = rows.find(r => r.media_type === 'tv' && r.tmdb_id === show.tmdb_id && r.season_number === s.season_number);
     if (!stored) continue;
-    const raw = cache[episodeCacheKey(show.tmdb_id, s.season_number)];
+    const raw = episodeListEntry(show.tmdb_id, s.season_number);
     const full = !!(raw && Array.isArray(raw.ids));
     const stale = full && Number.isInteger(s.episode_count) && raw.ids.length !== s.episode_count;
     if (full && !stale && cuSeasonFinished(details, s.season_number, raw, today)) continue;
@@ -394,7 +394,7 @@ async function cuCheckMatchedShow(show, lib, plan, results) {
     if (sd) {
       const episodes = cuEpisodes(sd.episodes);
       const before = got.before;
-      noteEpisodeList(show.tmdb_id, s.season_number, episodes);
+      noteEpisodeList(show.tmdb_id, s.season_number, episodes, sd);
       if (stored && Array.isArray(before.ids)) {
         const added = episodes.filter(e => !before.ids.includes(e.id)).length;
         if (added) results.episodes.push({ title: show.title, season: stored.season, added });

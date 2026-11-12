@@ -70,14 +70,15 @@ async function sbFetch(method, path, body, opts = {}) {
   if (write && !writeLane) throw new Error('This change was not started through the write lane, so nothing was sent.');
   if (method !== 'GET') await requireWritablePhase();
   const headers = await authHeaders({ 'Content-Type': 'application/json', 'Prefer': method === 'POST' ? 'return=representation' : 'return=minimal' });
-  const note = write ? savePendingNote(opts.what || writeLane.label, opts.note) : null;
+  // opts.cache: a save of the TMDB cache (tmdb-cache.js), the provider's data: an unknown outcome there leaves nothing to warn about.
+  const note = write && !opts.cache ? savePendingNote(opts.what || writeLane.label, opts.note) : null;
   if (write) writeSent();
   let answered = false;
   try {
     const out = await sbRequest(method, path, body, headers, () => { answered = true; });
     return out;
   } finally {
-    if (write) { if (answered) clearPendingNote(note); else keepPendingNote(note); writeSettled(); }
+    if (write) { if (note) { if (answered) clearPendingNote(note); else keepPendingNote(note); } writeSettled(); }
   }
 }
 
@@ -238,10 +239,13 @@ async function fetchAllRowsStrict(table, filter, pageSize = BACKUP_PAGE_SIZE) {
 // transaction (library.js, tmdb-match.js, catalog-apply.js). Where a record was
 // once stored is not part of any request since Stage 5.
 
-function sbRpc(fn, args) {
-  return sbFetch('POST', `rpc/${fn}`, args);
+function sbRpc(fn, args, opts) {
+  return sbFetch('POST', `rpc/${fn}`, args, opts);
 }
+// TC1: a show's or season's request notes, before it starts, the cache revision this page holds for it (tmdb-cache.js), and its
+// answer carries it. A 429's Retry-After is kept on the error (the background queue waits for all of it).
 async function tmdbFetch(path) {
+  const base = typeof tmdbRequestBase === 'function' ? tmdbRequestBase(path) : null;
   const res = await fetch(`${TMDB_BASE}${path}`, {
     headers: {
       'Authorization': `Bearer ${TMDB_TOKEN}`,
@@ -251,7 +255,10 @@ async function tmdbFetch(path) {
   if (!res.ok) {
     const err = new Error(`TMDB error ${res.status}`);
     err.status = res.status; // lets callers tell a genuine 404 "not found" from a failed request
+    if (res.status === 429 && res.headers && typeof res.headers.get === 'function') err.retryAfter = res.headers.get('Retry-After');
     throw err;
   }
-  return res.json();
+  const out = await res.json();
+  if (base && out && typeof out === 'object') tmdbResponseBases.set(out, base);
+  return out;
 }

@@ -387,6 +387,7 @@ async function bootAuth(start) {
 async function startSignedIn(user) {
   pageUser = { id: user.id, email: user.email || '' };
   discardLegacyStorage();
+  if (typeof discardSupersededCaches === 'function') discardSupersededCaches(); // TC1: this member's old per-device TMDB caches (tmdb-cache.js)
   const screen = document.getElementById('authScreen');
   if (screen) screen.innerHTML = '';
   setSignedOutMark(false);

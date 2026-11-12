@@ -26,6 +26,8 @@ const TABLES = Array.from(P('backupSpec')(9).tables);
 const COLUMNS = P('backupSpec')(9).columns;
 const Q1_STEP = `select set_config('watchlist.q1_run', 'local-q1', false);\n` + file('db/q1_queues.sql');
 const G1_STEP = `select set_config('watchlist.g1_run', 'local-g1', false);\n` + file('db/g1_games.sql');
+// TC1 (the TMDB cache; its own suite is tools/tc1-test.mjs), with the local stand-in for pg_cron.
+const TC1_STEP = file('db/test/pg_cron_shim.sql') + `\nselect set_config('watchlist.tc1_run', 'local-tc1', false);\n` + file('db/tc1_tmdb_cache.sql');
 const old = d => as7(as8(d)); // a format-9 fixture as format 7
 
 // ── PGlite ──
@@ -87,9 +89,11 @@ if (FINAL) {
   const gone = await val(`select count(*)::int from pg_class c where c.relnamespace = 'private'::regnamespace and c.relname ~ '^(stage5_recovery_|b45_)'`);
   ok(gone === 0, 'the archive and rollback tables are gone');
 }
-// Q1 and G1 on top (their own suites are tools/q1-test.mjs and tools/g1-test.mjs): the rest of this suite is format 9.
+// Q1, G1 and TC1 on top (their own suites are tools/q1-test.mjs, tools/g1-test.mjs and tools/tc1-test.mjs): the rest of this
+// suite is format 9 on the current database.
 await db.exec(Q1_STEP);
 await db.exec(G1_STEP);
+await db.exec(TC1_STEP);
 section('the fixture');
 ok(!Array.from(P('validateBackupObject')(L1)).length && !Array.from(P('validateBackupObject')(L2)).length, 'the library passes the page’s validation', Array.from(P('validateBackupObject')(L1)).join('; '));
 ok(TABLES.length === 27 && TABLES.every(t => L1.tables[t].length > 0), 'it has rows in all twenty-seven tables', TABLES.filter(t => !L1.tables[t].length).join());
@@ -131,6 +135,22 @@ section('Earlier seasons and retired flags');
   ok(!r2.ok && same(before, await fp()), 'half a range is refused, nothing changed', r2.message);
   const flags = (await as(A, `select count(*) filter (where catalog_new)::int n, count(*) filter (where status_review)::int r, count(legacy_status)::int l from public.tv_shows`))[0];
   ok(flags.n > 0 && flags.r > 0 && flags.l > 0, 'retired flags in a file are stored as they are', JSON.stringify(flags));
+}
+
+section('the TMDB cache (TC1) across restores');
+{
+  // The cache is the provider's data, keyed by TMDB ids: never in a backup, untouched by a restore of any format.
+  const put = (who, rows) => as(who, `select public.library_tmdb_cache_put($1::jsonb) r`, [JSON.stringify(rows)]).then(r => ({ ok: true, r: r[0].r }), e => ({ ok: false, message: e.message }));
+  const cacheOf = who => as(who, `select kind, tmdb_id, season_number, rev::text, data from public.tmdb_tv_cache order by kind, tmdb_id, season_number`);
+  const w = await put(A, [{ kind: 'show', tmdb_id: 510001, season_number: -1, data: { a: 8, c: 50, f: null }, base_rev: 0 },
+    { kind: 'season', tmdb_id: 510001, season_number: 1, data: { ids: [1, 2], numbers: [1, 2], names: ['', ''], last: null }, base_rev: 0 }]);
+  ok(w.ok && w.r.rows.every(x => x.written), 'A’s cache holds a show and a season', w.message);
+  const cacheA = await cacheOf(A);
+  ok(!TABLES.includes('tmdb_tv_cache') && !JSON.stringify(L1).includes('tmdb_tv_cache'), 'the backup format has no cache table');
+  const r9 = await restore(A, L3), r7 = await restore(A, clone(P('restoreDocument')(as7(as8(L1)))));
+  ok(r9.ok && r7.ok && same(cacheA, await cacheOf(A)), 'restores of format 9 and of format 7 (converted by the page) leave the cache exactly as it was', [r9.message, r7.message].join(' / '));
+  ok((await as(B, `select count(*)::int n from public.tmdb_tv_cache`))[0].n === 0, 'another member sees none of it');
+  await restore(A, L1);
 }
 
 section('older formats, through the page');
@@ -465,6 +485,7 @@ else {
   if (FINAL) psql(`select set_config('watchlist.simplify_run', 'local-simplify', false);\n` + file(finalStep));
   psql(Q1_STEP);
   psql(G1_STEP);
+  psql(TC1_STEP);
   const fA = docFile('a.json', L1), fB = docFile('b.json', L2), fA2 = docFile('a2.json', rekey(L1, '71', '74'));
   const season = L1.tables.watchlist_items.find(w => w.show_id && !w.watched).id;
   ok(/^t$/m.test(psql(setAs(A) + '\n' + rest(fA))) && /^t$/m.test(psql(setAs(B) + '\n' + rest(fB))), 'both libraries restore on a real server');

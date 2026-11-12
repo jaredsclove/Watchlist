@@ -134,6 +134,22 @@ test('dates: a TBA season gets TMDB’s date; an exact future date TMDB disagree
 const EPT = (base, n, o = {}) => Array.from({ length: n }, (_, i) => ({ id: base + i, episode_number: i + 1, name: o.name ? o.name(i) : `Ep ${i + 1}`,
   air_date: o.air || '2020-01-0' + (i + 1), episode_type: i === n - 1 && o.last ? o.last : 'standard' }));
 const seasonReads = (app, id) => app.requests.filter(r => new RegExp(`/tv/${id}/season/`).test(r.url)).map(r => +/season\/(\d+)/.exec(r.url)[1]).sort();
+// TC1: episode lists as the member's TMDB cache holds them (tmdb-cache.js), seeded as if read from the database, and read back
+// in the old shape ({ "<tmdb id>:<season>": { ids, numbers, names, last } }). Seeded rows go to the harness's database and
+// to page memory, as a read would leave them.
+function seedLists(app, o) {
+  const TC1 = require('./tc1-harness');
+  Object.entries(o).forEach(([k, v]) => {
+    const [id, n] = k.split(':').map(Number);
+    if (v.ids) app.store.tmdb_tv_cache.push(TC1.cacheRow('season', id, n, { last: null, ...v }));
+    else app.run(`tmdbSeasonCounts.set(tmdbSeasonKey(${id}, ${n}), ${v.count})`);
+  });
+  app.run(`publishTmdbCache({ rows: ${JSON.stringify(app.store.tmdb_tv_cache)} })`);
+}
+const LIST_HELPERS = `function __seedLists(o) { Object.entries(o).forEach(([k, v]) => { const [id, n] = k.split(':').map(Number);
+  if (v.ids) tmdbCacheRows.set(tmdbSeasonKey(id, n), { rev: '1', data: { last: null, ...v }, at: Date.now() }); else tmdbSeasonCounts.set(tmdbSeasonKey(id, n), v.count); }); }
+function __lists() { const o = {}; [...tmdbCacheRows.keys(), ...tmdbCacheFresh.keys()].forEach(k => { const p = tmdbKeyParts(k);
+  if (p.kind === 'season' && tmdbEntry(k)) o[p.tmdb_id + ':' + p.season_number] = tmdbEntry(k).data; }); return o; }\n`;
 test('episode lists: an airing season is read even when its count is unchanged, and changed episode details replace the cache; marks untouched', async () => {
   const sh = showOf({ title: 'Airing', show_key: 'airing', tmdb_id: 60 });
   const s2 = seasonOf(sh, 2, { display_date: 'Oct 1, 2026', date_sort: '2026-10-01' });
@@ -141,21 +157,21 @@ test('episode lists: an airing season is read even when its count is unchanged, 
   const app = await createApp({ rows: [s2], tvShows: [sh], storage, episodeMarks: [{ id: uuid('0e100000'), season_id: s2.id, tmdb_episode_id: 601, episode_number: 1 }],
     tmdb: tmdbOf({ shows: { 60: { status: 'Returning Series', next_episode_to_air: { season_number: 2, episode_number: 3, air_date: '2099-01-01' },
       seasons: [{ season_number: 2, episode_count: 3 }] } }, lists: { '60/2': EPT(601, 3, { name: i => `Renamed ${i + 1}` }) } }) });
-  app.run(`writeEpisodeListCache({ '60:2': { ids: [601, 602, 603], numbers: [1, 2, 3], names: ['Ep 1', 'Ep 2', 'Ep 3'] } })`);
+  seedLists(app, { '60:2': { ids: [601, 602, 603], numbers: [1, 2, 3], names: ['Ep 1', 'Ep 2', 'Ep 3'] } });
   await refresh(app);
   assert.deepStrictEqual(seasonReads(app, 60), [2], 'read although the count is unchanged');
-  assert.deepStrictEqual(out(app.get('readEpisodeListCache()'))['60:2'].names, ['Renamed 1', 'Renamed 2', 'Renamed 3'], 'the new titles are cached');
+  assert.deepStrictEqual(out(app.run(LIST_HELPERS + '__lists()'))['60:2'].names, ['Renamed 1', 'Renamed 2', 'Renamed 3'], 'the new titles are cached');
   assert.strictEqual(app.store.episode_marks.length, 1, 'marks untouched');
 });
 
-test('episode lists: a finished season (TMDB says Ended, nothing scheduled) is read only when this device has no full list; a stale count reads it again', async () => {
+test('episode lists: a finished season (TMDB says Ended, nothing scheduled) is read only when the cache has no full list; a stale count reads it again', async () => {
   const sh = showOf({ title: 'Done', show_key: 'done', tmdb_id: 61, ended: true });
   const s1 = seasonOf(sh, 1), s2 = seasonOf(sh, 2), s3 = seasonOf(sh, 3);
   const app = await createApp({ rows: [s1, s2, s3], tvShows: [sh], storage: memoryStorage(),
     tmdb: tmdbOf({ shows: { 61: { status: 'Ended', next_episode_to_air: null, seasons: [1, 2, 3].map(n => ({ season_number: n, episode_count: 2 })) } },
       lists: { '61/1': EPT(611, 2), '61/2': EPT(621, 2), '61/3': EPT(631, 2) } }) });
   // Season 1: a full list cached. Season 2: only a count. Season 3: a full list that no longer matches TMDB's count.
-  app.run(`writeEpisodeListCache({ '61:1': { ids: [611, 612], numbers: [1, 2], names: ['', ''] }, '61:2': { count: 2 }, '61:3': { ids: [631], numbers: [1], names: [''] } })`);
+  seedLists(app, { '61:1': { ids: [611, 612], numbers: [1, 2], names: ['', ''] }, '61:2': { count: 2 }, '61:3': { ids: [631], numbers: [1], names: [''] } });
   await refresh(app);
   assert.deepStrictEqual(seasonReads(app, 61), [2, 3], 'season 1 reuses its cached list');
   app.requests.length = 0;
@@ -171,7 +187,7 @@ test('episode lists: an aired finale finishes a season; without TMDB evidence (n
       lists: { '62/1': EPT(641, 2, { last: 'finale' }), '62/2': EPT(651, 2), '62/3': [] } }) });
   await refresh(app);
   assert.deepStrictEqual(seasonReads(app, 62), [1, 2, 3], 'nothing cached: every season is read once');
-  assert.deepStrictEqual(out(app.get('readEpisodeListCache()'))['62:1'].last, { type: 'finale', air: '2020-01-02' });
+  assert.deepStrictEqual(out(app.run(LIST_HELPERS + '__lists()'))['62:1'].last, { type: 'finale', air: '2020-01-02' });
   app.requests.length = 0;
   await refresh(app);
   assert.deepStrictEqual(seasonReads(app, 62), [2, 3], 'season 1 (aired finale) is finished; season 2 (no finale, all aired) is uncertain; season 3 (upcoming) is read');
@@ -186,7 +202,7 @@ test('episode lists: once a later regular season has started airing, an earlier 
       seasons: [1, 2, 3].map(n => ({ season_number: n, episode_count: 2, air_date: `202${n}-01-01` })).concat([{ season_number: 4, episode_count: 3, air_date: '2026-10-01' }]) } },
       lists: { '65/1': EPT(691, 2), '65/2': EPT(701, 2), '65/3': EPT(711, 2), '65/4': EPT(721, 3) } }) });
   // Season 1: cached, count unchanged (no finale tag). Season 2: nothing cached. Season 3: cached, but TMDB's count changed.
-  app.run(`writeEpisodeListCache({ '65:1': { ids: [691, 692], numbers: [1, 2], names: ['', ''] }, '65:3': { ids: [711], numbers: [1], names: [''] } })`);
+  seedLists(app, { '65:1': { ids: [691, 692], numbers: [1, 2], names: ['', ''] }, '65:3': { ids: [711], numbers: [1], names: [''] } });
   await refresh(app);
   assert.deepStrictEqual(seasonReads(app, 65), [2, 3, 4], 'season 1 reused; season 2 (no list) and 3 (count changed) read; season 4 (airing) read');
   app.requests.length = 0;
@@ -214,7 +230,7 @@ test('episode lists: Watched or Skipped on a season doesn’t change whether its
     const app = await createApp({ rows: [s1, s2], tvShows: [sh], storage: memoryStorage(),
       tmdb: tmdbOf({ shows: { 63: { status: 'Returning Series', next_episode_to_air: null, seasons: [1, 2].map(n => ({ season_number: n, episode_count: 2 })) } },
         lists: { '63/1': EPT(661, 2, { last: 'finale' }), '63/2': EPT(671, 2) } }) });
-    app.run(`writeEpisodeListCache({ '63:1': { ids: [661, 662], numbers: [1, 2], names: ['', ''], last: { type: 'finale', air: '2020-01-02' } }, '63:2': { ids: [671, 672], numbers: [1, 2], names: ['', ''], last: { type: 'standard', air: '2020-01-02' } } })`);
+    seedLists(app, { '63:1': { ids: [661, 662], numbers: [1, 2], names: ['', ''], last: { type: 'finale', air: '2020-01-02' } }, '63:2': { ids: [671, 672], numbers: [1, 2], names: ['', ''], last: { type: 'standard', air: '2020-01-02' } } });
     await refresh(app);
     return seasonReads(app, 63);
   };
@@ -229,11 +245,11 @@ test('episode lists: opening a finished season’s list still reads TMDB fresh a
   const s1 = seasonOf(sh, 1);
   const app = await createApp({ rows: [s1], tvShows: [sh], storage: memoryStorage(), episodeMarks: [{ id: uuid('0e100000'), season_id: s1.id, tmdb_episode_id: 681, episode_number: 1 }],
     tmdb: tmdbOf({ shows: { 64: { status: 'Ended', seasons: [{ season_number: 1, episode_count: 2 }] } }, lists: { '64/1': EPT(681, 2, { last: 'finale', name: i => `Fixed ${i + 1}` }) } }) });
-  app.run(`writeEpisodeListCache({ '64:1': { ids: [681, 682], numbers: [1, 2], names: ['Old 1', 'Old 2'], last: { type: 'finale', air: '2020-01-02' } } })`);
+  seedLists(app, { '64:1': { ids: [681, 682], numbers: [1, 2], names: ['Old 1', 'Old 2'], last: { type: 'finale', air: '2020-01-02' } } });
   app.ctx.switchView('alltv'); await settle();
   await app.ctx.loadEpisodeList(app.ctx.actionRows().find(r => r.id === s1.id)); await settle();
   assert.deepStrictEqual(seasonReads(app, 64), [1], 'opened: read fresh');
-  assert.deepStrictEqual(out(app.get('readEpisodeListCache()'))['64:1'].names, ['Fixed 1', 'Fixed 2']);
+  assert.deepStrictEqual(out(app.run(LIST_HELPERS + '__lists()'))['64:1'].names, ['Fixed 1', 'Fixed 2']);
   assert.deepStrictEqual(app.store.episode_marks.map(m => m.tmdb_episode_id), [681], 'marks unchanged');
   assert.ok(!app.writes().length, 'nothing written');
 });

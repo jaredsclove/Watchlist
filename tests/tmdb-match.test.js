@@ -10,7 +10,7 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-const FILES = ['config.js', 'identity.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'tmdb-search.js', 'tmdb-match.js', 'tv-shows.js', 'show-ratings.js', 'library.js', 'organization-manage.js'];
+const FILES = ['config.js', 'identity.js', 'write-lane.js', 'ui-helpers.js', 'metadata.js', 'tmdb-search.js', 'tmdb-match.js', 'tv-shows.js', 'show-ratings.js', 'tmdb-cache.js', 'library.js', 'organization-manage.js'];
 const CATALOGS = ['disney', 'sheridan', '90day'];
 // Governance as the read views give it (coexistence: derived from where a row is stored).
 function governanceOf(rows) {
@@ -48,6 +48,8 @@ function makeEnv({ rows = [], tmdb = () => ({}), db = {} } = {}) {
     document: { getElementById: el, querySelectorAll: () => [] },
     tabData: {},
     tvShowsById: new Map(),
+    // TC1: the member's TMDB cache state (watchlist.html; tmdb-cache.js), no background queue here
+    tmdbCacheRows: new Map(), tmdbCacheFresh: new Map(), tmdbCacheAvailable: null, tmdbQueue: null, tmdbQueueEnabled: false, tmdbLastInput: 0, pageUser: null, showRatingRequests: new Set(),
     // a view is open (All TV / All Movies: the rows its Match controls came from)
     activeViewId: 'alltv', libraryPanel: null, libraryPanelSeq: 0, actionRows: () => rows, libraryGovernance: governanceOf(rows),
     isBrowseView: () => false, loadBrowseView() {},

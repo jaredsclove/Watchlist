@@ -736,8 +736,8 @@ async function loadBrowseView() {
   const showsRead = startShowsRead();
   try {
     const orgRead = orgReadStart();
-    const [rows, shows, gov, marks, cuSettings, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
-      readGovernance(), readEpisodeMarks(true), readShowUpdateSettings(true), ...(isCollection ? [readPersonalCollections(), fetchAllRowsStrict('collection_memberships')] : [])]);
+    const [rows, shows, gov, marks, cuSettings, tmdbCache, collections, memberships] = await Promise.all([fetchAllRowsStrict(TABLE), fetchAllRowsStrict('tv_shows'),
+      readGovernance(), readEpisodeMarks(true), readShowUpdateSettings(true), readTmdbCache(), ...(isCollection ? [readPersonalCollections(), fetchAllRowsStrict('collection_memberships')] : [])]);
     requireB45Shape(shows, 'priority');
     requireB45Shape(rows, 'priority');
     publishAllTvShows(showsRead, shows);
@@ -745,6 +745,7 @@ async function loadBrowseView() {
     if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === browseLoadSeq && activeViewId === viewId) loadBrowseView(); }); return null; }
     publishGovernance(governanceCovers(gov, rows, shows));
     publishEpisodeMarks(marks); // EP1 (episodes.js)
+    publishTmdbCache(tmdbCache); // TC1 (tmdb-cache.js)
     cuPublishShowSettings(cuSettings); // item 4 (collection-updates.js)
     let dest = null, members = null, memberRows = null;
     if (isCollection) {
@@ -771,6 +772,7 @@ async function loadBrowseView() {
     browseData = { rows, dest, members, memberRows, loaded: true };
     renderFilters();
     renderTable();
+    scheduleTmdbWork(rows); // TC1: missing or old TMDB details, in the background
     return true;
   } catch(e) {
     console.error(e);

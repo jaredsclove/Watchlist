@@ -31,17 +31,19 @@ async function loadQueuesView() {
   else { showError(''); paintQueuesMessage('Loading…', false); }
   const showsRead = startShowsRead();
   try {
-    const [rows, shows, queues, entries, marks, games] = await Promise.all([fetchAllRows(TABLE), fetchAllRows('tv_shows'),
-      fetchAllRows('watch_queues'), fetchAllRows('queue_entries'), readEpisodeMarks(false), readGamesData()]);
+    const [rows, shows, queues, entries, marks, games, tmdbCache] = await Promise.all([fetchAllRows(TABLE), fetchAllRows('tv_shows'),
+      fetchAllRows('watch_queues'), fetchAllRows('queue_entries'), readEpisodeMarks(false), readGamesData(), readTmdbCache()]);
     requireB45Shape(shows, 'priority');
     publishAllTvShows(showsRead, shows);
     if (seq !== queuesLoadSeq || !isQueuesView()) return null;
     if (!readFresh(stamp)) { readAgainWhenFree(() => { if (seq === queuesLoadSeq && isQueuesView()) loadQueuesView(); }); return null; }
     publishEpisodeMarks(marks);
+    publishTmdbCache(tmdbCache); // TC1 (tmdb-cache.js)
     queuesData = { loaded: true, queues: sortQueues(queues), entries, rows, games };
     if (inPlace) endListReread(true);
     pickActiveQueue();
     renderQueuesView();
+    scheduleTmdbWork(rows); // TC1
     return true;
   } catch (e) {
     console.error(e);

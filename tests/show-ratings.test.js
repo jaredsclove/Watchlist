@@ -1,6 +1,6 @@
 // Offline tests for TMDB show ratings (next-gen item 2, first part; show-ratings.js) in the whole-page
 // harness: the display rules (vote thresholds, missing and zero scores, rounding and colour bands),
-// the per-device cache (per account), the one on-demand request when a show is expanded (none when the
+// the member's TMDB cache (TC1, tmdb-cache.js; the database's rows as the harness holds them), the one on-demand request when a show is expanded (none when the
 // cached score is fresh, never repeated after a failure on the same page), the scores the page's own
 // TMDB show reads leave, the tap / keyboard vote-count note, phone sizes and contrast (calculated, not
 // rendered), and Settings' Credits. Ratings never write, and a missing or failed one leaves the
@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 const { createApp, runner, settle, userKeyOf } = require('./app-harness');
+const TC1 = require('./tc1-harness');
 
 const T = runner('show-ratings');
 const test = T.test;
@@ -34,12 +35,15 @@ function memoryStorage(init = {}, { failWrites = false } = {}) {
   const m = new Map(Object.entries(init));
   return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { if (failWrites) throw new Error('quota'); m.set(k, String(v)); }, removeItem: k => m.delete(k), map: m };
 }
-const cached = entries => ({ [userKeyOf(KEY)]: JSON.stringify(entries) });
+// TC1: entries { "<tmdb id>": { a, c, f, t } } as rows of the member's cache in the database (t: when it was read).
+const cached = entries => Object.entries(entries).map(([id, e]) => TC1.cacheRow('show', Number(id), -1, Object.fromEntries(Object.entries(e).filter(([k]) => k !== 't')), new Date(e.t).toISOString()));
+// What the page holds for a show (its saved row, or what it read on this page).
+const entryOf = (app, id) => JSON.parse(app.run(`JSON.stringify(showRatingEntry(${id}))`));
 // TMDB show details for the synthetic ids (path → body); anything else is a 404.
 const details = map => p => { const m = /^\/tv\/(\d+)$/.exec(p); return m && map[m[1]] !== undefined ? map[m[1]] : undefined; };
 async function boot(o = {}) {
   const lib = library();
-  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: o.tmdb || details({}), storage: o.storage || memoryStorage(), width: o.width || 1200 });
+  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: o.tmdb || details({}), storage: o.storage || memoryStorage(), width: o.width || 1200, tmdbCache: o.cache || [] });
   app.ctx.switchView(o.view || 'alltv'); await settle();
   return { app, lib };
 }
@@ -92,7 +96,7 @@ test('rounding to one decimal, and the colour band follows the rounded score (8.
 // ── In the views ──
 test('a cached score shows directly after the show\'s title, in rows and phone cards; an uncached show has an empty slot; a show not matched to TMDB has none', async () => {
   const now = Date.now();
-  const { app, lib } = await boot({ storage: memoryStorage(cached({ 900001: { a: 8.153, c: 1987, t: now }, 900002: { a: 6.7, c: 50, t: now } })) });
+  const { app, lib } = await boot({ cache: (cached({ 900001: { a: 8.153, c: 1987, t: now }, 900002: { a: 6.7, c: 50, t: now } })) });
   for (const s of [html(app), card(app)]) {
     assert.match(s, /<button type="button" class="tmdb-rating r-high" data-action="rating" aria-label="TMDB: 8\.2 out of 10 · 1,987 votes\." onclick="toggleShowRatingNote\(this, event\)" onblur="this\.removeAttribute\('data-open'\)">8\.2<\/button><span class="tmdb-rating-note" aria-hidden="true">TMDB: 8\.2 out of 10 · 1,987 votes\.<\/span>/);
     assert.match(s, /class="tmdb-rating r-low"[^>]*>6\.7\*<\/button><span class="tmdb-rating-note" aria-hidden="true">TMDB: 6\.7 out of 10 · 50 votes · Limited votes\.<\/span>/);
@@ -119,7 +123,7 @@ test('a cached score shows directly after the show\'s title, in rows and phone c
 
 test('fewer than 10 votes, a zero score or a missing count in the cache: the slot stays empty', async () => {
   const now = Date.now();
-  const { app } = await boot({ storage: memoryStorage(cached({ 900001: { a: 8.2, c: 9, t: now }, 900002: { a: 0, c: 0, t: now } })) });
+  const { app } = await boot({ cache: (cached({ 900001: { a: 8.2, c: 9, t: now }, 900002: { a: 0, c: 0, t: now } })) });
   for (const s of [html(app), card(app)]) {
     assert.ok(s.includes('<span class="tmdb-rating-slot" data-rating-of="900001"></span>'));
     assert.ok(s.includes('<span class="tmdb-rating-slot" data-rating-of="900002"></span>'));
@@ -127,17 +131,17 @@ test('fewer than 10 votes, a zero score or a missing count in the cache: the slo
 });
 
 // ── On demand ──
-test('expanding an uncached show reads its TMDB show details once; the score is cached for this account and shown; expanding again reads nothing', async () => {
-  const storage = memoryStorage();
-  const { app, lib } = await boot({ storage, tmdb: details({ 900001: { id: 900001, vote_average: 7.91, vote_count: 603, seasons: [] } }) });
+test('expanding an uncached show reads its TMDB show details once; the score is kept for this account and shown; expanding again reads nothing', async () => {
+  const { app, lib } = await boot({ tmdb: details({ 900001: { id: 900001, vote_average: 7.91, vote_count: 603, seasons: [] } }) });
   assert.deepStrictEqual(ratingReads(app), [], 'nothing is read just to show a view');
   app.ctx.toggleDerivedShow(lib.a.id); await settle();
   assert.deepStrictEqual(ratingReads(app), ['GET /tv/900001']);
   app.ctx.renderTable();
   assert.match(html(app), /class="tmdb-rating r-mid"[^>]*>7\.9</);
-  const stored = JSON.parse(storage.map.get(userKeyOf(KEY)));
-  assert.deepStrictEqual(Object.keys(stored), ['900001']);
-  assert.strictEqual(stored[900001].a, 7.91); assert.strictEqual(stored[900001].c, 603); assert.ok(Math.abs(stored[900001].t - Date.now()) < 5000);
+  const stored = entryOf(app, 900001);
+  assert.strictEqual(stored.a, 7.91); assert.strictEqual(stored.c, 603); assert.ok(Math.abs(stored.t - Date.now()) < 5000);
+  assert.strictEqual(entryOf(app, 900002), null);
+  assert.strictEqual(app.run(`tmdbCacheFresh.get('show:900001').base`), '0', 'kept for the background queue to save, based on no saved row');
   app.ctx.toggleDerivedShow(lib.a.id); await settle(); // collapse
   app.ctx.toggleDerivedShow(lib.a.id); await settle(); // expand again
   assert.deepStrictEqual(ratingReads(app), ['GET /tv/900001'], 'not read again');
@@ -149,8 +153,8 @@ test('expanding an uncached show reads its TMDB show details once; the score is 
 test('a fresh cached score (under 7 days) is not read again; an older one is read again on expansion and replaced', async () => {
   const now = Date.now();
   // (Item 13: a fresh entry with its first-air date, f; one without it is read once more: tests/view-sort.test.js.)
-  const storage = memoryStorage(cached({ 900001: { a: 8.2, c: 500, f: '2015-01-01', t: now - 6 * DAY }, 900002: { a: 7.2, c: 500, f: null, t: now - 8 * DAY } }));
-  const { app, lib } = await boot({ storage, tmdb: details({ 900002: { vote_average: 7.6, vote_count: 520 } }) });
+  const cache = cached({ 900001: { a: 8.2, c: 500, f: '2015-01-01', t: now - 6 * DAY }, 900002: { a: 7.2, c: 500, f: null, t: now - 8 * DAY } });
+  const { app, lib } = await boot({ cache, tmdb: details({ 900002: { vote_average: 7.6, vote_count: 520 } }) });
   app.ctx.toggleDerivedShow(lib.a.id); await settle();
   assert.deepStrictEqual(ratingReads(app), []);
   assert.match(html(app), /data-action="rating"[^>]*>7\.2<\/button>/, 'the older score shows until a newer one arrives');
@@ -159,12 +163,12 @@ test('a fresh cached score (under 7 days) is not read again; an older one is rea
   app.ctx.renderTable();
   assert.match(html(app), /data-action="rating"[^>]*>7\.6<\/button>/);
   assert.ok(!html(app).includes('>7.2<'));
+  assert.strictEqual(app.run(`tmdbCacheFresh.get('show:900002').base`), String(cache[1].rev), 'to be saved over the revision the page held when it asked');
 });
 
 test('request failures (an HTTP error, a network failure): nothing shown or cached, controls unchanged, no write, and not requested again on this page', async () => {
   for (const fail of [() => ({ __status: 500 }), () => { throw new Error('offline'); }]) {
-    const storage = memoryStorage();
-    const { app, lib } = await boot({ storage, tmdb: p => (p === '/tv/900001' ? fail() : undefined) });
+    const { app, lib } = await boot({ tmdb: p => (p === '/tv/900001' ? fail() : undefined) });
     const before = html(app).replace(/ data-rating-of="\d+"/g, '');
     app.ctx.toggleDerivedShow(lib.a.id); await settle();
     app.ctx.toggleDerivedShow(lib.a.id); await settle();
@@ -172,7 +176,7 @@ test('request failures (an HTTP error, a network failure): nothing shown or cach
     app.ctx.toggleDerivedShow(lib.a.id); await settle();
     assert.deepStrictEqual(ratingReads(app), ['GET /tv/900001'], 'one attempt per page');
     assert.ok(html(app).includes('<span class="tmdb-rating-slot" data-rating-of="900001"></span>'));
-    assert.ok(!storage.map.has(userKeyOf(KEY)), 'nothing cached');
+    assert.strictEqual(entryOf(app, 900001), null, 'nothing kept');
     assert.match(html(app), /data-action="details"/, 'the expanded show\'s actions are there');
     assert.match(html(app), /data-action="status"/);
     assert.strictEqual(writes(app).length, 0);
@@ -181,18 +185,17 @@ test('request failures (an HTTP error, a network failure): nothing shown or cach
 });
 
 test('an answer without scores is kept as "no score" (blank) so the show isn\'t read again until the entry is old', async () => {
-  const storage = memoryStorage();
-  const { app, lib } = await boot({ storage, tmdb: details({ 900002: { id: 900002, name: 'x' } }) });
+  const { app, lib } = await boot({ tmdb: details({ 900002: { id: 900002, name: 'x' } }) });
   app.ctx.toggleDerivedShow(lib.b.id); await settle();
-  const stored = JSON.parse(storage.map.get(userKeyOf(KEY)));
-  assert.deepStrictEqual([stored[900002].a, stored[900002].c], [null, null]);
+  const stored = entryOf(app, 900002);
+  assert.deepStrictEqual([stored.a, stored.c], [null, null]);
   app.ctx.renderTable();
   assert.ok(html(app).includes('<span class="tmdb-rating-slot" data-rating-of="900002"></span>'));
 });
 
-test('storage that refuses writes: the score still shows on this page (page memory); a broken stored value reads as empty', async () => {
-  const storage = memoryStorage({ [userKeyOf(KEY)]: '{not json' }, { failWrites: true });
-  const { app, lib } = await boot({ storage, tmdb: details({ 900001: { vote_average: 8.04, vote_count: 120 } }) });
+test('storage that refuses writes changes nothing (the cache isn’t in this browser); a broken saved row reads as empty; the score read here shows', async () => {
+  const storage = memoryStorage({}, { failWrites: true });
+  const { app, lib } = await boot({ storage, cache: [TC1.cacheRow('show', 900001, -1, { a: 'x', c: null })], tmdb: details({ 900001: { vote_average: 8.04, vote_count: 120 } }) });
   assert.ok(html(app).includes('<span class="tmdb-rating-slot" data-rating-of="900001"></span>'));
   app.ctx.toggleDerivedShow(lib.a.id); await settle();
   app.ctx.renderTable();
@@ -200,16 +203,18 @@ test('storage that refuses writes: the score still shows on this page (page memo
   assert.deepStrictEqual(app.consoleErrors, []);
 });
 
-test('the cache belongs to the signed-in account: another account\'s entry isn\'t used', async () => {
+test('TC1: the old per-device cache is never read; the signed-in account\'s copy is removed when the page opens, another account\'s left for its own sign-in', async () => {
   const other = '0a000000-0000-4000-8000-0000000000bb';
-  const storage = memoryStorage({ [`${KEY}::${other}`]: JSON.stringify({ 900001: { a: 9.1, c: 900, t: Date.now() } }) });
+  const old = JSON.stringify({ 900001: { a: 9.1, c: 900, t: Date.now() } });
+  const storage = memoryStorage({ [`${KEY}::${other}`]: old, [userKeyOf(KEY)]: old, [userKeyOf('watchlist-episode-lists')]: '{}' });
   const { app } = await boot({ storage });
   assert.ok(!html(app).includes('9.1'));
+  assert.ok(!storage.map.has(userKeyOf(KEY)) && !storage.map.has(userKeyOf('watchlist-episode-lists')), 'this account\'s superseded keys are gone');
+  assert.strictEqual(storage.map.get(`${KEY}::${other}`), old, 'another account\'s key stays until that account signs in here');
 });
 
 test('show details the page already reads (Refresh shows) leave scores in the cache without extra requests', async () => {
-  const storage = memoryStorage();
-  const { app } = await boot({ storage, tmdb: details({ 900001: { id: 900001, vote_average: 8.5, vote_count: 2000, seasons: [] }, 900002: { id: 900002, vote_average: 6.2, vote_count: 40, seasons: [] } }) });
+  const { app } = await boot({ tmdb: details({ 900001: { id: 900001, vote_average: 8.5, vote_count: 2000, seasons: [] }, 900002: { id: 900002, vote_average: 6.2, vote_count: 40, seasons: [] } }) });
   // The Refresh shows path's per-show hook, as library.js calls it with each show's details.
   app.ctx.noteShowRating(900001, { vote_average: 8.5, vote_count: 2000 });
   app.ctx.noteShowRating(900002, { vote_average: 6.2, vote_count: 40 });
@@ -222,17 +227,6 @@ test('show details the page already reads (Refresh shows) leave scores in the ca
   assert.strictEqual((cu.match(/noteShowRating\(show\.tmdb_id, details\)/g) || []).length, 1, 'Refresh shows (item 4: collection-updates.js) records the score');
   assert.match(fs.readFileSync(path.join(ROOT, 'tmdb-search.js'), 'utf8'), /if \(tmdbSelectedShow\.mediaType === 'tv'\) noteShowRating\(tmdbId, details\)/);
   assert.match(fs.readFileSync(path.join(ROOT, 'tmdb-match.js'), 'utf8'), /if \(picked\.mediaType === 'tv'\) noteShowRating\(picked\.id, details\)/);
-});
-
-test('the cache keeps at most 1000 entries, dropping the oldest', async () => {
-  const entries = {};
-  for (let i = 0; i < 1000; i++) entries[100000 + i] = { a: 7, c: 100, t: 1000 + i };
-  const storage = memoryStorage(cached(entries));
-  const { app } = await boot({ storage });
-  app.ctx.noteShowRating(900001, { vote_average: 8, vote_count: 200 });
-  const stored = JSON.parse(storage.map.get(userKeyOf(KEY)));
-  assert.strictEqual(Object.keys(stored).length, 1000);
-  assert.ok(!('100000' in stored) && '100001' in stored && '900001' in stored);
 });
 
 // ── The vote-count note: tap, click, keyboard ──
@@ -259,7 +253,7 @@ test('tap or click (Enter / Space activate a button) toggles the note without ex
 
 test('focus: the rating is a list control found by identity (data-action="rating"), so a redraw returns focus to it', async () => {
   const now = Date.now();
-  const { app, lib } = await boot({ storage: memoryStorage(cached({ 900001: { a: 8.2, c: 500, t: now } })) });
+  const { app, lib } = await boot({ cache: (cached({ 900001: { a: 8.2, c: 500, t: now } })) });
   const hook = app.ctx.focusHookOf({ closest: sel => {
     if (sel === '[data-item], [data-show-of]') return { getAttribute: a => (a === 'data-item' ? lib.a.id : null) };
     if (sel === '[data-action]') return { getAttribute: () => 'rating' };
@@ -270,7 +264,7 @@ test('focus: the rating is a list control found by identity (data-action="rating
 
 test('phones: the rating is a 44 px target; desktop and phone cards both carry it', async () => {
   const now = Date.now();
-  const { app } = await boot({ width: 375, storage: memoryStorage(cached({ 900001: { a: 8.2, c: 500, t: now } })) });
+  const { app } = await boot({ width: 375, cache: (cached({ 900001: { a: 8.2, c: 500, t: now } })) });
   assert.match(card(app), /card-title"><span class="show-title-main"><span class="show-title">[^<]*<\/span> <span class="tmdb-rating-slot"[^>]*><button type="button" class="tmdb-rating r-high"/);
   const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
   assert.match(css, /@media \(max-width: 1099px\) \{[^}]*\.tmdb-rating \{[^}]*min-height: 44px; min-width: 44px;/);
