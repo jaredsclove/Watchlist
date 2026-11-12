@@ -5,53 +5,37 @@
 // 10 · 1,987 votes."). Practical display rules, not a measure of reliability: fewer than 10 votes, a
 // missing or zero score, or no vote count shows nothing; 10–99 votes adds an asterisk ("8.2*") and
 // "· Limited votes" to the explanation.
-// Scores come from TMDB's show details (vote_average, vote_count) and are kept in a per-device cache
-// (per account): replaceable reference data, never library data, never in backups, never sent to the
-// database. It fills from show details the page already reads (Refresh shows, Add season, a TMDB
-// preview, Match) and from one request when a show is expanded whose score isn't cached or is older
-// than SHOW_RATING_MAX_AGE_MS. A failed request changes nothing and isn't repeated on this page.
+// Scores come from TMDB's show details (vote_average, vote_count) and are kept in the member's TMDB cache (TC1,
+// tmdb-cache.js: shared by the member's devices; replaceable reference data, never library data, never in backups). It fills
+// from show details the page already reads (Refresh shows, Add season, a TMDB preview, Match), from one request when a show
+// is expanded whose score isn't known or is older than SHOW_RATING_MAX_AGE_MS, and from the background queue, which reads
+// every TMDB-matched show missing or a week old. A failed request changes nothing and isn't repeated on this page.
 // Season and episode scores aren't shown (TMDB gives a season no vote count).
 // Sorting (view-sort.js) reads the same entries: the rounded score, and the show's first-air date
-// (TMDB's first_air_date, kept as "f"), which sorts Series premiere. An entry saved before the date was
-// kept has no "f", so the show's next expansion reads its details again; a read with no date keeps
-// f: null, under the same age rule as the score. Sorting never requests anything.
+// (TMDB's first_air_date, kept as "f"), which sorts Series premiere. A read with no date keeps f: null. Sorting never
+// requests anything.
 
-const SHOW_RATINGS_KEY = 'watchlist-tmdb-show-ratings';
 const SHOW_RATING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const SHOW_RATINGS_LIMIT = 1000; // entries kept; the oldest go first
 
-// ── The per-device cache: { "<tmdb show id>": { a: vote_average, c: vote_count, f: first_air_date or null, t: fetched at (ms) } } ──
-function readStoredShowRatings() {
-  try {
-    const v = JSON.parse(userStorage.getItem(SHOW_RATINGS_KEY) || '{}');
-    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
-  } catch (e) { return {}; }
+// ── A show's entry: { a: vote_average, c: vote_count, f: first_air_date or null, t: when it was read (ms) }, or null ──
+function showRatingEntry(tmdbId) {
+  if (tmdbId == null) return null;
+  const e = tmdbEntry(tmdbShowKey(tmdbId));
+  return e && e.data && typeof e.data === 'object' ? { ...e.data, t: e.at } : null;
 }
-function showRatings() {
-  if (showRatingCache) return showRatingCache;
-  const cache = readStoredShowRatings();
-  if (userKey('')) showRatingCache = cache; // only once signed in: the cache is the account's
-  return cache;
-}
-// TMDB's show details for one show: kept even when they hold no usable score, so the show isn't
-// requested again until the entry is old. Another tab's entries are kept (the cache is read afresh).
+// TMDB's show details for one show: kept even when they hold no usable score, so the show isn't requested again until the
+// entry is old. Saved to the member's cache for a show in the library (a preview of another show stays in this page's memory).
 function noteShowRating(tmdbId, details) {
   if (tmdbId == null || !details || typeof details !== 'object') return;
   const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-  const cache = readStoredShowRatings();
-  const prev = cache[String(tmdbId)];
-  const entry = { a: num(details.vote_average), c: num(details.vote_count), t: Date.now() };
+  const prev = showRatingEntry(tmdbId);
+  const entry = { a: num(details.vote_average), c: num(details.vote_count) };
   // The first-air date: a real date, else null (TMDB has none); details without the field keep what was known.
   if ('first_air_date' in details) entry.f = isValidDateSort(details.first_air_date) ? details.first_air_date : null;
-  else if (prev && typeof prev === 'object' && 'f' in prev) entry.f = prev.f;
-  cache[String(tmdbId)] = entry;
-  const keys = Object.keys(cache);
-  if (keys.length > SHOW_RATINGS_LIMIT) {
-    keys.sort((x, y) => (Number(cache[x] && cache[x].t) || 0) - (Number(cache[y] && cache[y].t) || 0))
-      .slice(0, keys.length - SHOW_RATINGS_LIMIT).forEach(k => { delete cache[k]; });
-  }
-  try { userStorage.setItem(SHOW_RATINGS_KEY, JSON.stringify(cache)); } catch (e) { /* storage unavailable: this page only */ }
-  showRatingCache = cache;
+  else entry.f = prev && 'f' in prev ? prev.f : null;
+  const key = tmdbShowKey(Number(tmdbId));
+  const inLibrary = [...tvShowsById.values()].some(s => s && String(s.tmdb_id) === String(tmdbId));
+  noteTmdbData(key, entry, tmdbAnswerBase(details, key), inLibrary);
   paintShowRating(tmdbId);
 }
 
@@ -83,12 +67,12 @@ function showRatingInnerHtml(m) {
 // A show's rating slot (empty until a usable score is cached); a show not matched to TMDB has none.
 function showRatingHtml(show) {
   if (!show || show.tmdb_id == null) return '';
-  return `<span class="tmdb-rating-slot" data-rating-of="${esc(String(show.tmdb_id))}">${showRatingInnerHtml(showRatingModel(showRatings()[String(show.tmdb_id)]))}</span>`;
+  return `<span class="tmdb-rating-slot" data-rating-of="${esc(String(show.tmdb_id))}">${showRatingInnerHtml(showRatingModel(showRatingEntry(show.tmdb_id)))}</span>`;
 }
 // A score that arrives fills the show's slots where they are, so nothing else is redrawn.
 function paintShowRating(tmdbId) {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
-  const html = showRatingInnerHtml(showRatingModel(showRatings()[String(tmdbId)]));
+  const html = showRatingInnerHtml(showRatingModel(showRatingEntry(tmdbId)));
   document.querySelectorAll(`[data-rating-of="${String(tmdbId).replace(/"/g, '')}"]`).forEach(el => { el.innerHTML = html; });
 }
 // Tap, click, Enter or Space shows or hides the vote count; keyboard focus shows it too (styles.css).
@@ -103,24 +87,27 @@ function toggleShowRatingNote(btn, ev) {
 function requestShowRating(show) {
   if (!show || show.tmdb_id == null) return;
   const id = String(show.tmdb_id);
-  const had = showRatings()[id];
+  const had = showRatingEntry(show.tmdb_id);
   // Fresh, and with the first-air date known (or known to be missing): nothing to read.
-  if (had && Date.now() - (Number(had.t) || 0) < SHOW_RATING_MAX_AGE_MS && 'f' in had) return;
+  if (had && tmdbNow() - (Number(had.t) || 0) < SHOW_RATING_MAX_AGE_MS && 'f' in had) return;
   if (showRatingRequests.has(id)) return;
+  // TMDB asked to wait, or the background queue is reading it or has already tried it on this page (tmdb-cache.js).
+  const key = tmdbShowKey(show.tmdb_id), q = tmdbQueue;
+  if (q && (q.blockedUntil > tmdbNow() || q.inFlight.has(key) || q.tries.has(key) || q.unavailable.has(key))) return;
   showRatingRequests.add(id);
   tmdbFetch(`/tv/${encodeURIComponent(id)}`).then(d => noteShowRating(id, d), () => { /* no score: nothing changes */ });
 }
 
-// The show's first-air date from this device's cache (view-sort.js Series premiere), or null when it
-// isn't known here: not matched to TMDB, not read yet, or TMDB has no date.
+// The show's first-air date from the member's cache (view-sort.js Series premiere), or null when it
+// isn't known: not matched to TMDB, not read yet, or TMDB has no date.
 function showFirstAirDate(show) {
   if (!show || show.tmdb_id == null) return null;
-  const e = showRatings()[String(show.tmdb_id)];
+  const e = showRatingEntry(show.tmdb_id);
   return e && typeof e === 'object' && isValidDateSort(e.f) ? e.f : null;
 }
 // The rounded score a show's row shows, or null when it shows none (view-sort.js Rating).
 function showRatingScore(show) {
   if (!show || show.tmdb_id == null) return null;
-  const m = showRatingModel(showRatings()[String(show.tmdb_id)]);
+  const m = showRatingModel(showRatingEntry(show.tmdb_id));
   return m ? m.score : null;
 }

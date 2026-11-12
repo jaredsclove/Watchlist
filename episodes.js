@@ -6,15 +6,16 @@
 // is derived (a season not watched or skipped with at least one mark), and a watched or skipped
 // season's episodes are locked (changing those flags keeps every mark). Nothing here completes a
 // season: when every listed episode is checked, the open list offers Mark season watched.
-// One season's episode list is open at a time (episodePanel), fetched from TMDB when it opens and
-// kept only in page memory. Each list's episode ids are cached on this device (per account) so a
-// collapsed season can say "N/T watched"; Refresh shows and Add season leave a count only. The
-// cache is replaceable reference data: it never changes saved marks or a season's state.
+// One season's episode list is open at a time (episodePanel), fetched from TMDB when it opens. Each list
+// is kept in the member's TMDB cache (TC1, tmdb-cache.js: shared by the member's devices, filled and
+// refreshed in the background) so a collapsed season can say "N/T watched"; Refresh shows and Add season
+// also leave counts in page memory. The cache is replaceable reference data: it never changes saved
+// marks or a season's state.
 // EP2: titles are shown by default only when the owner chose so in Settings (per account, on this
 // device); otherwise each listed title has its own Show title button. One "Mark watched through"
 // control above the list marks every listed episode up to the chosen one (never clearing a mark).
 // Next unwatched: beside an in-progress season's progress, the first listed episode without a mark
-// (from the open list, else this device's cached list with its numbers); its title only when titles
+// (from the open list, else the cached list with its numbers); its title only when titles
 // are shown by default. Hidden whenever that list isn't known: never inferred from the marks.
 // CU1d: a Watched season shows its list either way; without marks it's read-only reference, not progress, and
 // "Mark all episodes watched" is the one exception to the lock: an add of the listed episodes through its own
@@ -22,7 +23,6 @@
 // The completion suggestion (checkSeasonFinished) reads TMDB afresh and only strengthens the offer; Watched
 // changes only when the owner presses Mark season watched. Not now is per account, on this device.
 
-const EPISODE_LIST_CACHE_KEY = 'watchlist-episode-lists';
 const EPISODE_TITLES_KEY = 'watchlist_episode_titles';
 const SEASON_FINISH_LATER_KEY = 'watchlist-season-finish-later';
 
@@ -91,57 +91,47 @@ function replaceSeasonMarks(seasonId, marks) {
   if (m.size) episodeMarks.set(seasonId, m); else episodeMarks.delete(seasonId);
 }
 
-// ── The per-device list cache: { "<tmdb show id>:<season number>": { ids, numbers, names } | { count } } ──
-// numbers and names (since the next-unwatched line) run alongside ids; a list cached before them has ids only.
-function readEpisodeListCache() {
-  try {
-    const v = JSON.parse(userStorage.getItem(EPISODE_LIST_CACHE_KEY) || '{}');
-    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
-  } catch (e) { return {}; }
-}
-function writeEpisodeListCache(cache) {
-  try { userStorage.setItem(EPISODE_LIST_CACHE_KEY, JSON.stringify(cache)); } catch (e) { /* storage unavailable: totals stay unknown */ }
-}
+// ── Episode lists, from the member's TMDB cache (tmdb-cache.js) ──
+// A season's list as TMDB gave it: { ids, numbers, names, last }, with each episode's number and title for the next-unwatched
+// line, and the last episode's TMDB type and air date (Refresh shows' airing-lifecycle check: a finale that has aired). Shared
+// by the member's devices through the database; a count from show details stays in this page's memory.
 const episodeCacheKey = (tmdbId, seasonNumber) => `${tmdbId}:${seasonNumber}`;
-// A loaded list: its episode ids (the exact list the collapsed count is measured against), with each
-// episode's number and title for the next-unwatched line, and the last episode's TMDB type and air date
-// (Refresh shows' airing-lifecycle check: a finale that has aired).
-function noteEpisodeList(tmdbId, seasonNumber, episodes) {
-  const cache = readEpisodeListCache(), last = episodes[episodes.length - 1];
-  cache[episodeCacheKey(tmdbId, seasonNumber)] = { ids: episodes.map(e => e.id), numbers: episodes.map(e => e.number),
-    names: episodes.map(e => e.name.trim().slice(0, 200)),
-    ...(last ? { last: { type: typeof last.type === 'string' ? last.type.slice(0, 40) : null, air: last.air_date || null } } : {}) };
-  writeEpisodeListCache(cache);
+// A loaded list. source: the TMDB answer it came from (its request noted the cache revision it was based on); without one the
+// list is kept in this page's memory only.
+function noteEpisodeList(tmdbId, seasonNumber, episodes, source) {
+  const key = tmdbSeasonKey(tmdbId, seasonNumber), last = episodes[episodes.length - 1];
+  const data = { ids: episodes.map(e => e.id), numbers: episodes.map(e => e.number), names: episodes.map(e => e.name.trim().slice(0, 200)),
+    last: last ? { type: typeof last.type === 'string' ? last.type.slice(0, 40) : null, air: last.air_date || null } : null };
+  noteTmdbData(key, data, tmdbAnswerBase(source, key));
 }
-// A show's seasons from TMDB's show details (Refresh shows, Add season): a count only, kept unless
-// the cached list already has that many episodes (its ids are more precise).
+// A show's seasons from TMDB's show details (Refresh shows, Add season, the queue): their episode counts, in this page's memory,
+// used while a season's list isn't known.
 function noteSeasonEpisodeCounts(tmdbId, seasons) {
   if (tmdbId == null || !Array.isArray(seasons)) return;
-  const cache = readEpisodeListCache();
-  let changed = false;
   seasons.forEach(s => {
     if (!s || !Number.isInteger(s.season_number) || !Number.isInteger(s.episode_count) || s.episode_count < 0) return;
-    const key = episodeCacheKey(tmdbId, s.season_number), had = cache[key];
-    if (had && Array.isArray(had.ids) && had.ids.length === s.episode_count) return;
-    if (had && had.count === s.episode_count) return;
-    cache[key] = { count: s.episode_count };
-    changed = true;
+    tmdbSeasonCounts.set(tmdbSeasonKey(tmdbId, s.season_number), s.episode_count);
   });
-  if (changed) writeEpisodeListCache(cache);
+}
+// The season's list as known (the cache's data, with ids), else { count } from show details; null when neither is known.
+function episodeListEntry(tmdbId, seasonNumber) {
+  const key = tmdbSeasonKey(tmdbId, seasonNumber), e = tmdbEntry(key);
+  if (e && e.data && Array.isArray(e.data.ids) && e.data.ids.every(Number.isInteger)) return e.data;
+  const count = tmdbSeasonCounts.get(key);
+  return Number.isInteger(count) && count >= 0 ? { count } : null;
 }
 function cachedEpisodeList(r) {
-  const v = readEpisodeListCache()[episodeCacheKey(r.tmdb_id, r.season_number)];
-  if (v && Array.isArray(v.ids) && v.ids.every(Number.isInteger)) return { ids: v.ids };
-  if (v && Number.isInteger(v.count) && v.count >= 0) return { count: v.count };
-  return null;
+  const v = episodeListEntry(r.tmdb_id, r.season_number);
+  if (v && Array.isArray(v.ids)) return { ids: v.ids };
+  return v;
 }
-// The season's episode list with numbers, in order: the open list once loaded, else the cached one
-// when it has a number for every id (a title is '' when unknown); null when neither is known.
+// The season's episode list with numbers, in order: the open list once loaded, else the known one when it has a number for
+// every id (a title is '' when unknown); null when neither is known.
 function knownEpisodeList(r) {
   if (episodePanel && episodePanel.seasonId === r.id && episodePanel.status === 'ready') return episodePanel.episodes;
-  const v = readEpisodeListCache()[episodeCacheKey(r.tmdb_id, r.season_number)];
+  const v = episodeListEntry(r.tmdb_id, r.season_number);
   if (!v || !Array.isArray(v.ids) || !Array.isArray(v.numbers) || v.numbers.length !== v.ids.length) return null;
-  if (!v.ids.every(Number.isInteger) || !v.numbers.every(x => Number.isInteger(x) && x >= 0)) return null;
+  if (!v.numbers.every(x => Number.isInteger(x) && x >= 0)) return null;
   const names = Array.isArray(v.names) && v.names.length === v.ids.length ? v.names : [];
   return v.ids.map((id, i) => ({ id, number: v.numbers[i], name: typeof names[i] === 'string' ? names[i] : '' }));
 }
@@ -170,7 +160,10 @@ function episodeProgress(r) {
     return { text: `${p.inList}/${p.total} episodes watched${p.unlisted ? ` · ${p.unlisted} not listed` : ''}`, pct: Math.round(p.inList / p.total * 100) };
   }
   if (cached && cached.count > 0 && n < cached.count) return { text: `${n}/${cached.count} episodes watched`, pct: Math.round(n / cached.count * 100) };
-  return { text: `${n} episode${n === 1 ? '' : 's'} marked`, pct: null };
+  // TC1: while the background queue is still reading the season's list, or has given up on it for now (marks are kept either way).
+  const waiting = typeof tmdbSeasonWaiting === 'function' ? tmdbSeasonWaiting(r) : null;
+  const note = waiting === 'loading' ? ' · loading the episode list' : waiting === 'unavailable' ? ' · episode list unavailable for now' : '';
+  return { text: `${n} episode${n === 1 ? '' : 's'} marked${note}`, pct: null };
 }
 function episodeProgressText(r) {
   const p = episodeProgress(r);
@@ -247,7 +240,7 @@ async function markSeasonFromRow(seasonId) {
 // What a show row is about: its up-next season, as chosen before (Earlier seasons included; marks never
 // choose it). For a row that offers an action (Watching, not up to date, the season aired) on a season with
 // marks, its episodes too. kind: 'episode' (the next unwatched is known), 'listed' (every listed episode is
-// marked; no row action), 'marked' (marks, but no numbered list on this device: the season with honest
+// marked; no row action), 'marked' (marks, but no numbered list known yet: the season with honest
 // progress), else 'season' (the row as before). The row's Up next, action and progress, and the expanded row
 // of the season it represents, all read this.
 function showTarget(item) {
@@ -305,7 +298,7 @@ async function loadEpisodeList(row) {
   // Mark watched through: the first episode not marked yet, else the last; kept until changed.
   const marks = marksOf(row.id), first = episodes.find(e => !marks.has(e.id)) || episodes[episodes.length - 1];
   episodePanel.throughId = first ? first.id : null;
-  noteEpisodeList(row.tmdb_id, row.season_number, episodes);
+  noteEpisodeList(row.tmdb_id, row.season_number, episodes, d);
   renderTable();
   checkSeasonFinished(row.id, d);
 }
@@ -370,7 +363,7 @@ async function checkSeasonFinished(seasonId, season) {
   if (details) noteShowRating(row.tmdb_id, details); // item 2 (show-ratings.js)
   if (episodes.length) {
     live.episodes = episodes;
-    noteEpisodeList(row.tmdb_id, row.season_number, episodes);
+    noteEpisodeList(row.tmdb_id, row.season_number, episodes, season);
   }
   live.finish = seasonLooksFinished(details, row.season_number, episodes, marksOf(seasonId), localTodayStr()) ? 'finished' : 'plain';
   renderTable();

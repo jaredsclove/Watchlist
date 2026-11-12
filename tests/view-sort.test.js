@@ -60,13 +60,24 @@ function memoryStorage(init = {}, { failWrites = false } = {}) {
   return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { if (failWrites) throw new Error('quota'); m.set(k, String(v)); }, removeItem: k => m.delete(k), map: m };
 }
 const withRatings = (extra = {}, user) => ({ [userKeyOf(RATINGS, user)]: JSON.stringify(RATING_CACHE), ...extra });
+// TC1: ratings live in the member's TMDB cache in the database, not in this browser. The tests still describe them as the old
+// per-device entries ({ "<tmdb id>": { a, c, f, t } }); each boot turns a member's entries into that member's cache rows
+// (kept on the storage object, since the page removes the old key when it opens).
+const TC1 = require('./tc1-harness');
+function ratingRows(storage, user) {
+  const stash = storage.__ratings = storage.__ratings || {}, who = user || 'me', raw = storage.getItem(userKeyOf(RATINGS, user));
+  if (raw != null) { try { stash[who] = JSON.parse(raw); } catch (e) { stash[who] = {}; } }
+  return Object.entries(stash[who] || {}).map(([id, e]) => TC1.cacheRow('show', Number(id), -1,
+    Object.fromEntries(Object.entries(e).filter(([k]) => k !== 't')), new Date(e.t || Date.now()).toISOString()));
+}
+const ratingOf = (app, id) => JSON.parse(app.run(`JSON.stringify(showRatingEntry(${id}))`));
 const otherSession = { access_token: 'harness-token', user: { id: OTHER_USER, email: 'member@test.invalid' } };
 const details = map => p => { const m = /^\/tv\/(\d+)$/.exec(p); return m && map[m[1]] !== undefined ? map[m[1]] : undefined; };
 
 async function boot(o = {}) {
   const lib = o.lib || tvLibrary();
   const storage = o.storage || memoryStorage(withRatings({}, o.session ? OTHER_USER : undefined));
-  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: o.tmdb || details({}), storage, session: o.session, width: o.width || 1200 });
+  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: o.tmdb || details({}), storage, session: o.session, width: o.width || 1200, tmdbCache: ratingRows(storage, o.session ? OTHER_USER : undefined) });
   if (o.view !== null) { app.ctx.switchView(o.view || 'alltv'); await settle(); }
   if (o.allStatuses) setFilter(app, 'fStatus', 'all');
   trackFocus(app);
@@ -238,7 +249,7 @@ const DISNEY = 'browse:0c000000-0000-4000-8000-000000000001';
 async function bootCollection(o = {}) {
   const { lib, cache } = collectionLibrary();
   const storage = o.storage || memoryStorage({ [userKeyOf(RATINGS)]: JSON.stringify(cache) });
-  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: details({}), storage, width: 1200 });
+  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: details({}), storage, width: 1200, tmdbCache: ratingRows(storage) });
   app.ctx.openBrowseCollection(DISNEY); await settle();
   return { app, storage };
 }
@@ -253,7 +264,7 @@ test('a collection: Separate sorts within TV and within Movies; Combined mixes t
   assert.deepStrictEqual(ids(app), [S('p'), 'film-r', S('q'), 'film-s', 'film-t'], 'Pine 8.2; Quince (8 votes) and the films unrated, by premiere');
   app.ctx.chooseSortField('status');
   assert.deepStrictEqual(ids(app), [S('p'), S('q'), 'film-s', 'film-t', 'film-r'], 'Watching, To Watch (shows and films), Watched');
-  assert.match(line(app), /Some shows have no rating on this device\./, 'Quince has too few votes to show a rating');
+  assert.match(line(app), /Some shows have no TMDB rating yet\./, 'Quince has too few votes to show a rating');
 });
 
 test('each collection layout has its own menu and keeps its own sort: Movies only offers Title, Release date, Status, Priority; switching back restores each order; Seasons has none', async () => {
@@ -340,7 +351,7 @@ test('a row whose value changes moves at the next redraw; the rating note shows 
   app.ctx.chooseSortField('premiere');
   assert.ok(!line(app).includes('sortRatingNote'));
   app.ctx.chooseSortField('rating');
-  assert.match(line(app), /<span class="sort-note" id="sortRatingNote">Some shows have no rating on this device\.<\/span>/, 'Elm has too few votes');
+  assert.match(line(app), /<span class="sort-note" id="sortRatingNote">Some shows have no TMDB rating yet\.<\/span>/, 'Elm has too few votes');
   setFilter(app, 'fStatus', '');
   assert.ok(!line(app).includes('sortRatingNote'), 'Elm not listed: no note');
   app.get('tvShowsById').get('show-c').priority = 'high';
@@ -421,8 +432,7 @@ test('a show with a fresh rating cached before this release (no first-air date) 
   assert.deepStrictEqual(tmdbReads(app), [], 'sorting reads nothing');
   app.ctx.toggleDerivedShow('show-d'); await settle();
   assert.deepStrictEqual(tmdbReads(app), ['/tv/104'], 'its first expansion reads the missing date');
-  const entry = JSON.parse(storage.getItem(userKeyOf(RATINGS)))[104];
-  assert.strictEqual(entry.f, '2009-09-09');
+  assert.strictEqual(ratingOf(app, 104).f, '2009-09-09');
   app.ctx.toggleDerivedShow('show-d'); app.ctx.toggleDerivedShow('show-d'); await settle();
   assert.deepStrictEqual(tmdbReads(app), ['/tv/104'], 'once');
   app.ctx.renderTable();
@@ -438,27 +448,26 @@ test('TMDB has no first-air date: kept as unknown (f: null) under the usual cach
   const { app } = await boot({ storage, tmdb: details({ 104: { vote_average: 9.0, vote_count: 510, first_air_date: '' } }) });
   app.ctx.toggleDerivedShow('show-d'); await settle();
   assert.deepStrictEqual(tmdbReads(app), ['/tv/104']);
-  assert.strictEqual(JSON.parse(storage.getItem(userKeyOf(RATINGS)))[104].f, null);
+  assert.strictEqual(ratingOf(app, 104).f, null);
+  storage.__ratings.me[104] = ratingOf(app, 104); // (saved by the background queue, as the database would then hold it)
   const { app: again } = await boot({ storage, tmdb: details({ 104: { vote_average: 9.0, vote_count: 510, first_air_date: '2009-09-09' } }) });
   again.ctx.toggleDerivedShow('show-d'); await settle();
   assert.deepStrictEqual(tmdbReads(again), [], 'a fresh entry known to have no date isn’t read again on a new page');
-  const old = JSON.parse(storage.getItem(userKeyOf(RATINGS)));
-  old[104].t = Date.now() - 8 * DAY;
-  storage.setItem(userKeyOf(RATINGS), JSON.stringify(old));
+  storage.__ratings.me[104].t = Date.now() - 8 * DAY;
   const { app: later } = await boot({ storage, tmdb: details({ 104: { vote_average: 9.0, vote_count: 510, first_air_date: '2009-09-09' } }) });
   later.ctx.toggleDerivedShow('show-d'); await settle();
   assert.deepStrictEqual(tmdbReads(later), ['/tv/104'], 'an old entry is read again, as for scores');
-  assert.strictEqual(JSON.parse(storage.getItem(userKeyOf(RATINGS)))[104].f, '2009-09-09');
+  assert.strictEqual(ratingOf(later, 104).f, '2009-09-09');
 });
 
 test('Refresh shows’ show details fill first-air dates; details without the field keep the date already known', async () => {
   const { app, storage } = await boot();
   app.ctx.noteShowRating(103, { vote_average: 7.1, vote_count: 600 });
-  assert.strictEqual(JSON.parse(storage.getItem(userKeyOf(RATINGS)))[103].f, '2015-01-01', 'no first_air_date field: kept');
+  assert.strictEqual(ratingOf(app, 103).f, '2015-01-01', 'no first_air_date field: kept');
   app.ctx.noteShowRating(104, { vote_average: 9.0, vote_count: 600, first_air_date: '2009-09-09' });
   assert.strictEqual(app.ctx.showFirstAirDate(app.get('tvShowsById').get('show-d')), '2009-09-09');
   app.ctx.noteShowRating(106, { vote_average: 8, vote_count: 600, first_air_date: 'soon' });
-  assert.strictEqual(JSON.parse(storage.getItem(userKeyOf(RATINGS)))[106].f, null, 'not a real date: unknown');
+  assert.strictEqual(ratingOf(app, 106).f, null, 'not a real date: unknown');
 });
 
 T.run();

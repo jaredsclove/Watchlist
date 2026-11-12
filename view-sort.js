@@ -5,7 +5,7 @@
 // field in place; ✕ takes one field out; Reset to default clears the whole sort. The view's usual
 // order is always the final tie-breaker, so an empty sort is the usual order.
 // Sorting is display only: it reads what the page already has (stored dates, the up-next season,
-// this device's TMDB show cache, show-ratings.js) and never fetches, writes or touches the write lane.
+// the member's TMDB cache, show-ratings.js) and never fetches, writes or touches the write lane.
 // Unknown values (no date, TBA, no rating shown, a field an item doesn't have) go last in either
 // direction. Sorted: Currently Watching (within In progress and Caught up), All TV in Shows, Coming
 // Soon (within each month and within TBA; months stay in date order), All Movies, and a collection
@@ -113,7 +113,7 @@ const SORT_VALUE = {
   release: s => (s.game && s.game.dateKey && s.game.dateKey !== '9999-12-31' ? s.game.dateKey : null),
   critic: s => (s.game && s.game.rec && s.game.rec.critic ? s.game.rec.critic.score : null),
   player: s => (s.game && s.game.rec && s.game.rec.player ? s.game.rec.player.score : null),
-  // Series premiere: TMDB's first-air date (this device's cache); a film's own release date.
+  // Series premiere: TMDB's first-air date (the member's TMDB cache); a film's own release date.
   premiere: s => (s.film ? sortDateOf(s.film) : showFirstAirDate(s.show)),
   // The season the row's Up next / Next names (an active earlier-seasons range first; skipped seasons passed over).
   next: s => (s.item ? sortDateOf(s.item.upNext) : null),
@@ -141,7 +141,7 @@ function viewSortComparator(spec, usual) {
 
 // One listed section of the open view, sorted by its sort (a new list; the usual order when it has
 // none, or when the view isn't sorted). Notes, for the sort line, whether a rating field is active
-// and a listed show has no rating on this device.
+// and a listed show has no rating known yet.
 function sortForView(list, usual) {
   const ctx = viewSortContext();
   const spec = ctx ? viewSortSpec(ctx) : [];
@@ -322,7 +322,7 @@ function sortLineHtml(ctx, unrated) {
       + `<button type="button" class="sort-dir" id="sortDir-${e.f}" aria-label="${esc(name)}" title="${esc(name)}" onclick="reverseSortField('${e.f}')">${sortArrow(e.d)}</button>`
       + `<button type="button" class="sort-x" id="sortX-${e.f}" aria-label="${esc(`Remove ${fd.label} from the sort`)}" title="Remove from the sort" onclick="removeSortField('${e.f}')"><span aria-hidden="true">✕</span></button></span>`;
   }).join('<span class="sort-then" aria-hidden="true">then</span>');
-  const note = unrated ? '<span class="sort-note" id="sortRatingNote">Some shows have no rating on this device.</span>' : '';
+  const note = unrated ? '<span class="sort-note" id="sortRatingNote">Some shows have no TMDB rating yet.</span>' : '';
   return `<div class="sort-line" role="group" aria-label="Sort order"><span class="sort-line-label" aria-hidden="true">Sorted:</span>${chips}<button type="button" class="btn-link sort-reset" id="sortReset" onclick="resetViewSort()">${esc(ctx.defaultLabel ? `Reset to ${ctx.defaultLabel}` : 'Reset to default')}</button>${note}</div>`;
 }
 // After every list redraw (render.js renderFilterBarState): redrawn only when it changed, so focus on

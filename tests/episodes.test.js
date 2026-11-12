@@ -16,6 +16,7 @@ const assert = require('assert');
 const { execSync } = require('child_process');
 const { createApp, runner, settle, userKeyOf } = require('./app-harness');
 const { makeMiniDom } = require('./mini-dom');
+const TC1 = require('./tc1-harness');
 
 const T = runner('episodes');
 const test = T.test;
@@ -47,9 +48,20 @@ function memoryStorage() {
   return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), map: m };
 }
 const mark = (season, id, num, o = {}) => ({ id: uuid('0f000000'), season_id: season.id, tmdb_episode_id: id, episode_number: num, ...o });
+// TC1: episode lists as the member's TMDB cache holds them, given as { "<tmdb id>:<season>": { ids, numbers, names } | { count } }:
+// a list is a row of the database's cache; a count (from show details) is page memory.
+const listRows = lists => Object.entries(lists || {}).filter(([, v]) => v && v.ids).map(([k, v]) => { const [id, n] = k.split(':').map(Number); return TC1.cacheRow('season', id, n, { last: null, ...v }); });
+const listCounts = lists => Object.entries(lists || {}).filter(([, v]) => v && Number.isInteger(v.count)).map(([k, v]) => `tmdbSeasonCounts.set(tmdbSeasonKey(${k.split(':').join(', ')}), ${v.count});`).join(' ');
+// The page's cache replaced, as a fresh read would leave it (then drawn again by the caller).
+function setLists(app, lists) {
+  app.run(`tmdbCacheRows = new Map(); tmdbCacheFresh = new Map(); tmdbSeasonCounts = new Map(); publishTmdbCache({ rows: ${JSON.stringify(listRows(lists))} }); ${listCounts(lists)}`);
+}
+const listedIn = (app, key) => JSON.parse(app.run(`JSON.stringify((tmdbEntry(tmdbSeasonKey(${key.split(':').join(', ')})) || {}).data || null)`));
 async function boot(o = {}) {
   const lib = library();
-  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: tmdb(o.episodes), storage: o.storage || memoryStorage(), episodeMarks: (o.marks || (() => []))(lib), width: o.width || 1200 });
+  const storage = o.storage || memoryStorage();
+  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: tmdb(o.episodes), storage, episodeMarks: (o.marks || (() => []))(lib), width: o.width || 1200, tmdbCache: o.tmdbCache || listRows(storage.__lists) });
+  app.run(listCounts(storage.__lists));
   app.ctx.switchView('alltv'); await settle();
   app.ctx.toggleDerivedShow(lib.sev.id); await settle();
   return { app, lib };
@@ -82,16 +94,15 @@ test('collapsed: against the cached list "N/T watched" counts only listed marks,
   await open(app, lib.s2); // the list is cached on this device (its ids)
   app.ctx.toggleEpisodes(lib.s2.id); await settle(); // closed again
   assert.match(text(seasonRow(app, lib.s2)), /· 1\/4 episodes watched · 1 not listed/);
-  const cacheKey = userKeyOf('watchlist-episode-lists');
-  assert.deepStrictEqual(JSON.parse(storage.getItem(cacheKey))['95396:2'], { ids: [9001, 9002, 9003, 9004], numbers: [1, 2, 3, 4],
+  assert.deepStrictEqual(listedIn(app, '95396:2'), { ids: [9001, 9002, 9003, 9004], numbers: [1, 2, 3, 4],
     names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'], last: { type: null, air: null } }, 'with each episode’s number and title (the next-unwatched line), and the last episode’s type and air date');
   // A count only (Refresh shows / Add season): N/T while the marks are fewer; never a complete-looking T/T.
-  storage.setItem(cacheKey, JSON.stringify({ '95396:2': { count: 4 }, '95396:1': { count: 1 } }));
+  setLists(app, { '95396:2': { count: 4 }, '95396:1': { count: 1 } });
   app.ctx.renderTable();
   assert.match(text(seasonRow(app, lib.s2)), /· 2\/4 episodes watched/);
   assert.match(text(seasonRow(app, lib.s1)), /1 episode marked/, 'marks not fewer than the count: no total');
   assert.doesNotMatch(text(seasonRow(app, lib.s1)), /In progress|1\/1/, 'a watched season isn’t in progress');
-  storage.setItem(cacheKey, '{"95396:2":{"ids":[9001,9002]}}');
+  setLists(app, { '95396:2': { ids: [9001, 9002] } });
   app.ctx.renderTable();
   assert.match(text(seasonRow(app, lib.s2)), /1\/2 episodes watched · 1 not listed/, 'a stale list is shown as it is (accepted)');
   await app.ctx.setSeasonSkipped(lib.s2.id, true); await settle();
@@ -99,14 +110,13 @@ test('collapsed: against the cached list "N/T watched" counts only listed marks,
   assert.deepStrictEqual(marksIn(app, lib.s2), [7777, 9001], 'skipping kept the marks');
 });
 
-test('collapsed: unreadable storage leaves "N marked"; a corrupt cache is ignored', async () => {
+test('collapsed: unreadable storage leaves "N marked"; a corrupt cache row is ignored', async () => {
   const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() {} };
   const { app, lib } = await boot({ storage: broken, marks: l => [mark(l.s2, 9001, 1)] });
   assert.match(text(seasonRow(app, lib.s2)), /1 episode marked/);
   await open(app, lib.s2);
   assert.match(panel(app), /1\/4 watched/, 'the open list still counts');
-  const s = memoryStorage(); s.setItem(userKeyOf('watchlist-episode-lists'), 'not json');
-  const b = await boot({ storage: s, marks: l => [mark(l.s2, 9001, 1)] });
+  const b = await boot({ tmdbCache: [TC1.cacheRow('season', 95396, 2, { ids: 'not a list' })], marks: l => [mark(l.s2, 9001, 1)] });
   assert.match(text(seasonRow(b.app, b.lib.s2)), /1 episode marked/);
 });
 
@@ -506,9 +516,9 @@ test('next unwatched: follows "Show episode titles by default" on return from Se
 });
 
 test('next unwatched: hidden for a list cached before it (ids only), a count only, an unreadable or malformed cache, an empty or fully marked list, a watched or skipped season', async () => {
-  const storage = memoryStorage(), cacheKey = userKeyOf('watchlist-episode-lists');
+  const storage = memoryStorage();
   const { app, lib } = await boot({ storage, episodes: { 2: [E(9001, 1), E(9002, 2)], 1: [] }, marks: l => [mark(l.s2, 9001, 1), mark(l.s1, 8001, 1), mark(l.s3, 5, 1)] });
-  const hidden = (cache, why) => { storage.setItem(cacheKey, JSON.stringify(cache)); app.ctx.renderTable(); assert.strictEqual(nextIn(html(app) + card(app)), '', why); };
+  const hidden = (cache, why) => { setLists(app, cache); app.ctx.renderTable(); assert.strictEqual(nextIn(html(app) + card(app)), '', why); };
   hidden({ '95396:2': { ids: [9001, 9002] } }, 'a list cached before the line: no numbers, nothing shown');
   hidden({ '95396:2': { count: 2 } }, 'a count only');
   hidden({ '95396:2': { ids: [9001, 9002], numbers: [1] } }, 'numbers that don’t line up');
@@ -516,7 +526,7 @@ test('next unwatched: hidden for a list cached before it (ids only), a count onl
   hidden({ '95396:2': { ids: [9001], numbers: [1], names: ['Title 1'] } }, 'every listed episode marked (a kept, unlisted mark doesn’t count)');
   hidden({ '95396:3': { ids: [], numbers: [], names: [] } }, 'an empty list');
   hidden({ '95396:1': { ids: [8001, 8002], numbers: [1, 2], names: ['A', 'B'] } }, 'a watched season');
-  storage.setItem(cacheKey, JSON.stringify({ '95396:2': { ids: [9001, 9002], numbers: [1, 2] } })); app.ctx.renderTable();
+  setLists(app, { '95396:2': { ids: [9001, 9002], numbers: [1, 2] } }); app.ctx.renderTable();
   assert.strictEqual(nextIn(seasonRow(app, lib.s2)), 'Next unwatched: E2', 'names missing: the number only');
   await app.ctx.setSeasonSkipped(lib.s2.id, true); await settle();
   assert.strictEqual(nextIn(html(app) + card(app)), '', 'a skipped season');
@@ -532,14 +542,16 @@ test('next unwatched: hidden for a list cached before it (ids only), a count onl
 async function bootRow(o = {}) {
   const lib = library('watching');
   if (o.edit) o.edit(lib);
-  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: tmdb(o.episodes), storage: o.storage || memoryStorage(), episodeMarks: (o.marks || (() => []))(lib), width: o.width || 1200, ...(o.extra || {}) });
+  const storage = o.storage || memoryStorage();
+  const app = await createApp({ rows: lib.rows, tvShows: lib.shows, tmdb: tmdb(o.episodes), storage, episodeMarks: (o.marks || (() => []))(lib), width: o.width || 1200, tmdbCache: listRows(storage.__lists), ...(o.extra || {}) });
+  app.run(listCounts(storage.__lists));
   app.ctx.switchView(o.view || 'alltv'); await settle();
   return { app, lib };
 }
 const showRowOf = (app, sh) => (html(app).match(new RegExp(`<tr[^>]*data-show-row="${sh.id}"[\\s\\S]*?</tr>`)) || [''])[0];
 const showCardOf = (app, sh) => card(app).split('<div class="item-card').find(c => c.includes(`data-show-row="${sh.id}"`)) || '';
 const cellsOf = row => [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m => text(m[1]).trim());
-const listCache = (storage, lists) => { storage.setItem(userKeyOf('watchlist-episode-lists'), JSON.stringify(lists)); return storage; };
+const listCache = (storage, lists) => { storage.__lists = lists; return storage; }; // (TC1: seeded into the member's cache by bootRow)
 const S2_LIST = { '95396:2': { ids: [9001, 9002, 9003, 9004], numbers: [1, 2, 3, 4], names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'] } };
 
 test('EP5 show row: Up next, action and progress describe the up-next season’s next episode, in All TV, Currently Watching and a collection, rows and cards', async () => {
@@ -683,7 +695,7 @@ test('EP5 expanded show: the season progress line leaves the skipped count to it
 const quickIn = s => (s.match(/<span class="season-action" data-action="ep-next-mark">[\s\S]*?<\/span>/) || [''])[0];
 const quickLabel = s => text(quickIn(s)).trim();
 function cachedList(storage, n = 4) {
-  storage.setItem(userKeyOf('watchlist-episode-lists'), JSON.stringify({ '95396:2': { ids: [9001, 9002, 9003, 9004].slice(0, n), numbers: [1, 2, 3, 4].slice(0, n), names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'].slice(0, n) } }));
+  storage.__lists = { '95396:2': { ids: [9001, 9002, 9003, 9004].slice(0, n), numbers: [1, 2, 3, 4].slice(0, n), names: ['Title 1', 'Title 2', 'Title 3', 'Title 4'].slice(0, n) } }; // (TC1: seeded into the member's cache by boot)
   return storage;
 }
 const rpcEpisodes = app => rpcs(app, 'library_set_episode_marks').map(r => r.body.p_episodes);
