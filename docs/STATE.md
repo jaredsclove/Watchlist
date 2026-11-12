@@ -27,15 +27,19 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: the Games Library's default
-  status filter (owner's request; PR #89, `e9aa5af`), 2026-11-12 UTC, presentation tier (page only): All except Finished and
-  Skipped (Want to play, Playing, Paused) is the new default; All except Skipped, All and each status remain; Clear filters and
-  the chip return to it; queues, collections and Franchises unchanged. When the list empties, focus goes to the "No games
-  match" note (the fallback had always picked the heading). Cache token `20261112-gamesdefault`. Verified: 59 offline suites
-  (1425); a local synthetic check on desktop (real click, one guarded save, focus to the next ⋯) and at 375 px, light and
-  dark; Pages built, changed files byte-identical to `main`. Live, read-only (filters only, no status changed): 3 of 13 by
-  default, the Finished games under the other filters. Not verified live: Paused and Skipped (the owner has none).
-- Previous release: first episode of a season not started (PR #87, `63089a3`), 2026-11-12 UTC: a Watching show's
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: the Games Library layout cleanup
+  (owner's request; PR #91, `59a08ec`), 2026-11-12 UTC, presentation tier (page only): Platform and Release as separate aligned
+  columns (Upcoming beside the date; stacked on cards); as many genre pills as fit one line, measured after each draw and on
+  resize, +N only for real overflow; rebalanced widths, long titles wrapping beside their scores; one width for every status
+  control; the filter and order summaries on one line. Game collections share the row layout; Franchises, queues, TV and the
+  main Collections unchanged. Cache token `20261112-gameslayout`. Verified: 59 offline suites (1427); a local synthetic check in
+  Chrome at 1400–1110 px tables, 900 and 375 px cards, light and dark, with resizing; Pages built, changed files byte-identical
+  to `main`. Live, read-only (filters only, no status changed): the new columns, one genre overflow (a long label) and aligned
+  statuses at 1500 px, no wrap or horizontal scroll at 1130 and 375 px (same-origin frames). Not verified live: dark mode,
+  real phones.
+- Previous release: the Games Library's default status filter (PR #89, `e9aa5af`), 2026-11-12 UTC: All except Finished and
+  Skipped is the default; when the list empties, focus goes to the "No games match" note.
+- Earlier: first episode of a season not started (PR #87, `63089a3`), 2026-11-12 UTC: a Watching show's
   actionable up-next season with a known episode list shows its first unwatched episode and Mark E1 watched.
 - Earlier: TC1, the member's TMDB cache across devices (PR #85, `91fd862`), 2026-11-12 UTC, schema tier: episode
   lists, show scores and first-air dates in `public.tmdb_tv_cache` (owner-only, revision-checked writes, never in backups,
