@@ -316,4 +316,54 @@ test('a preview of a show not in the library is shown but not saved; an answer w
   assert.ok(!putKeys(app).slice(before).some(k => /424242|434343/.test(k)));
 });
 
+test('a very long season (several hundred episodes) is saved without its titles, or kept on the page if still too long; the other rows are saved', async () => {
+  const many = n => Array.from({ length: n }, (_, i) => E(500000 + i, i + 1, `A fairly ordinary episode title number ${i + 1}`));
+  const { app, lib } = await boot({ seasons: { '95396:2': many(900), '95396:1': S1 } });
+  const r = rowOf(app, 'season', 95396, 2);
+  assert.ok(r && r.data.ids.length === 900 && r.data.names.length === 0, 'saved, without titles');
+  assert.match(text(seasonRow(app, lib.s2)), /0\/900 episodes watched · 1 not listed/);
+  assert.ok(rowOf(app, 'show', 95396) && rowOf(app, 'season', 95396, 1), 'the rest of the batch is saved');
+  const huge = await boot({ seasons: { '95396:2': many(4000), '95396:1': S1 } });
+  assert.ok(!rowOf(huge.app, 'season', 95396, 2), 'too long even without titles: not sent');
+  assert.ok(rowOf(huge.app, 'show', 95396) && rowOf(huge.app, 'season', 95396, 1), 'and nothing else is held up');
+  assert.match(text(seasonRow(huge.app, huge.lib.s2)), /0\/4000 episodes watched · 1 not listed/, 'shown from this page');
+  assert.ok(!huge.app.get('tmdbQueue.savingStopped'));
+});
+
+test('a batch the database refuses isn’t sent again, so later saves still run', async () => {
+  const { app } = await boot({ before: a => a.refuseNext(r => r.url.endsWith('/rpc/library_tmdb_cache_put'), '22023', 'invalid_input: cache rows') });
+  assert.strictEqual(puts(app).length, 1);
+  app.run(`noteShowRating(95396, Object.assign({ vote_average: 9, vote_count: 3000 }, {}))`);
+  app.run(`tmdbCacheFresh.get('show:95396').base = '0'; tmdbQueue.unsaved.add('show:95396'); kickTmdbQueue()`); await drain();
+  assert.strictEqual(puts(app).length, 2, 'a later save is sent');
+  assert.ok(rowOf(app, 'show', 95396));
+});
+
+test('Add to queue, a queue drag, Match, a restore preview, a games dialog or the Games view count as the page in use', async () => {
+  const { app } = await boot();
+  assert.strictEqual(app.run('tmdbPageIdle()'), true, 'idle to begin with');
+  for (const [set, clear] of [['queueAdd = {}', 'queueAdd = null'], ['queueDrag = {}', 'queueDrag = null'], ['window.__tmdbMatch = {}', 'window.__tmdbMatch = null'],
+    ['pendingRestoreData = {}', 'pendingRestoreData = null'], ['gamesCollectionAdd = {}', 'gamesCollectionAdd = null'], ['gamesAdd = {}', 'gamesAdd = null'],
+    ["activeViewId = 'games'", "activeViewId = 'alltv'"]]) {
+    app.run(set);
+    assert.strictEqual(app.run('tmdbPageIdle()'), false, set);
+    app.run(clear);
+  }
+  assert.strictEqual(app.run('tmdbPageIdle()'), true);
+});
+
+test('a 429 without a readable Retry-After counts as a long wait: deferred to a later read, never retried sooner', async () => {
+  const t0 = Date.now(), at = [], box = {};
+  let hit = 0;
+  const { app } = await boot({ clock: t0, before: a => { box.a = a; }, hook: p => {
+    if (p !== '/tv/95396/season/2') return undefined;
+    at.push(box.a.clock - t0);
+    return hit++ === 0 ? { __status: 429 } : undefined;
+  } });
+  app.clock = t0 + 50000; app.run('loadDerivedView()'); await drain();
+  assert.strictEqual(at.length, 1, 'not asked again 50 seconds later');
+  app.clock = t0 + 125000; app.run('loadDerivedView()'); await drain();
+  assert.ok(at.length === 2 && at[1] >= 120000);
+});
+
 T.run();

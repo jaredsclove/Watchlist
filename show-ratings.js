@@ -95,7 +95,9 @@ function requestShowRating(show) {
   const key = tmdbShowKey(show.tmdb_id), q = tmdbQueue;
   if (q && (q.blockedUntil > tmdbNow() || q.inFlight.has(key) || q.tries.has(key) || q.unavailable.has(key))) return;
   showRatingRequests.add(id);
-  tmdbFetch(`/tv/${encodeURIComponent(id)}`).then(d => noteShowRating(id, d), () => { /* no score: nothing changes */ });
+  if (q) q.inFlight.add(key); // (the background queue leaves it alone while it is out, and may read it again later)
+  tmdbFetch(`/tv/${encodeURIComponent(id)}`).then(d => noteShowRating(id, d), () => { /* no score: nothing changes */ })
+    .finally(() => { if (q) q.inFlight.delete(key); });
 }
 
 // The show's first-air date from the member's cache (view-sort.js Series premiere), or null when it

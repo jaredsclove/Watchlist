@@ -26,7 +26,9 @@ const TMDB_DAY_MS = 24 * 60 * 60 * 1000;
 const TMDB_CACHE_LIMIT_MS = 150 * TMDB_DAY_MS;
 const TMDB_REFRESH_MS = { inProgress: TMDB_DAY_MS, season: 30 * TMDB_DAY_MS, show: 7 * TMDB_DAY_MS };
 const TMDB_QUEUE_LIMITS = { batch: 20, concurrency: 4, saveRows: 40, pauseMs: 1000, idleMs: 3000, retryMs: 30000, waitLimitMs: 60000,
-  maxPauses: 3, maxFailuresInRow: 5, maxSaveFailures: 2, triesPerKey: 2, defaultRetryAfterMs: 10000 };
+  maxPauses: 3, maxFailuresInRow: 5, maxSaveFailures: 2, triesPerKey: 2, defaultRetryAfterMs: 120000, maxDataChars: 28000 };
+// (maxDataChars: a row's data as JSON, kept well under the database's 40,000-byte limit on its jsonb text, which adds spaces and
+// counts UTF-8 bytes. defaultRetryAfterMs: a 429 whose Retry-After can't be read is treated as a long wait, never retried early.)
 const TMDB_SAVE_LABEL = 'The TMDB update';
 // The per-device caches this replaces (removed for the signed-in member when the page opens; another member's when they sign in).
 const SUPERSEDED_CACHE_KEYS = ['watchlist-episode-lists', 'watchlist-tmdb-show-ratings'];
@@ -103,6 +105,10 @@ function tmdbAnswerBase(answer, key) {
 // A reading for a key: shown at once (page memory); saved by the queue when it came from a TMDB answer (base known) and save is
 // true. Called by episodes.js (lists) and show-ratings.js (show details).
 function noteTmdbData(key, data, base, save = true) {
+  // A list too long for a row (a season of several hundred episodes) is saved without its titles; if still too long, kept on
+  // this page only, so one such season never blocks the other saves.
+  if (save && tmdbDataSize(data) > TMDB_QUEUE_LIMITS.maxDataChars && Array.isArray(data.names)) data = { ...data, names: [] };
+  if (save && tmdbDataSize(data) > TMDB_QUEUE_LIMITS.maxDataChars) save = false;
   tmdbCacheFresh.set(key, { data, base: base == null ? null : String(base), at: tmdbNow() });
   const q = tmdbQueueFor();
   if (!q) return;
@@ -119,6 +125,11 @@ function tmdbQueueFor() {
       pauses: 0, blockedUntil: 0, saveFailures: 0, stopped: false, savingStopped: false, running: false, timer: null };
   }
   return tmdbQueue;
+}
+// A row's data size as the database counts it, roughly: UTF-8 bytes of its JSON.
+function tmdbDataSize(data) {
+  const text = JSON.stringify(data);
+  return typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length * 3;
 }
 const tmdbQueueLive = q => !!q && tmdbQueue === q && !q.stopped && tmdbQueueEnabled && typeof pageUser !== 'undefined' && !!pageUser && pageUser.id === q.owner;
 
@@ -141,7 +152,6 @@ function scheduleTmdbWork(rows) {
 function tmdbKeyDue(q, key, w, now) {
   if (q.unavailable.has(key) || q.inFlight.has(key)) return false;
   const p = tmdbKeyParts(key);
-  if (p.kind === 'show' && showRatingRequests.has(String(p.tmdb_id))) return false; // an expanded show's own request
   const e = tmdbEntry(key);
   if (e && now - e.at < w.maxAge) return false;
   const t = q.tries.get(key);
@@ -239,7 +249,10 @@ async function tmdbFetchBatch(q, keys) {
 // ── Saving, while the page isn't being used ──
 function tmdbPageIdle() {
   if (writeLane || listRereading) return false;
-  if (manage || cuModal || addPicker || libraryPanel || detailsDialog || resumePickerFor || (typeof gamesAdd !== 'undefined' && gamesAdd)) return false;
+  if (manage || cuModal || addPicker || libraryPanel || detailsDialog || resumePickerFor || queueAdd || queueDrag || pendingRestoreData
+    || gamesAdd || gamesCollectionAdd || gamesCollectionEdit || gamesDetailsOpener || gamesReviewOpener || gamesDialogOpener
+    || (typeof window !== 'undefined' && window.__tmdbMatch)) return false;
+  if (typeof isGamesView === 'function' && isGamesView()) return false; // (nothing of the cache is shown there; saved after leaving)
   const a = typeof document !== 'undefined' ? document.activeElement : null;
   if (a && (/^(INPUT|TEXTAREA|SELECT)$/.test(String(a.tagName || '').toUpperCase()) || a.isContentEditable === true)) return false;
   return tmdbNow() - tmdbLastInput >= TMDB_QUEUE_LIMITS.idleMs;
@@ -263,7 +276,13 @@ async function tmdbSaveWhenIdle(q) {
   await runWrite(TMDB_SAVE_LABEL, async () => {
     let answer;
     try { answer = await sbRpc('library_tmdb_cache_put', { p_rows: rows }, { cache: true }); }
-    catch (e) { console.error(e); failed = true; return; }
+    catch (e) {
+      console.error(e); failed = true;
+      // Refused by the database (a confirmed answer): these rows aren't sent again on this load, so they can't block later
+      // saves; they stay shown from this page's memory. No answer: they stay queued for one more save.
+      if (writeOutcomeOf(e) === 'refused') keys.forEach(k => q.unsaved.delete(k));
+      return;
+    }
     if (!tmdbQueueLive(q)) return;
     tmdbAdoptAnswer(q, answer, sent);
     await reloadOpenView();
@@ -301,5 +320,5 @@ function tmdbSeasonWaiting(r) {
 
 // Clicks, taps, keys and scrolling postpone a save for a moment.
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-  ['pointerdown', 'keydown', 'input', 'wheel', 'touchmove'].forEach(t => document.addEventListener(t, () => { tmdbLastInput = tmdbNow(); }, { capture: true, passive: true }));
+  ['pointerdown', 'pointermove', 'keydown', 'input', 'wheel', 'touchmove'].forEach(t => document.addEventListener(t, () => { tmdbLastInput = tmdbNow(); }, { capture: true, passive: true }));
 }

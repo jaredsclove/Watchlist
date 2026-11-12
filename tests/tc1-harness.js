@@ -20,7 +20,7 @@ function tc1Handlers({ store, DbError }) {
         if (!r || typeof r !== 'object' || !['show', 'season'].includes(r.kind) || !Number.isInteger(r.tmdb_id) || r.tmdb_id <= 0
           || !Number.isInteger(r.season_number) || !Number.isInteger(r.base_rev) || r.base_rev < 0 || !r.data || typeof r.data !== 'object' || Array.isArray(r.data)
           || (r.kind === 'show' ? r.season_number !== -1 : (r.season_number < 0 || !Array.isArray(r.data.ids)))
-          || JSON.stringify(r.data).length > 40000) invalid();
+          || Buffer.byteLength(JSON.stringify(r.data).replace(/([,:])/g, '$1 '), 'utf8') > 40000) invalid(); // (jsonb's text: a space after each , and :)
       }
       if (new Set(rows.map(keyOf)).size !== rows.length) invalid();
       const out = rows.map(r => {
