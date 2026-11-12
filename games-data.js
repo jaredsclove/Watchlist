@@ -30,6 +30,11 @@ const IGDB_RELEASE_STATUS = { 6: 'full', 1: 'alpha', 2: 'beta', 3: 'early', 4: '
 const IGDB_DATE_FORMAT = { 0: 'day', 1: 'month', 2: 'year', 3: 'quarter', 4: 'quarter', 5: 'quarter', 6: 'quarter', 7: 'tbd' };
 const IGDB_REGIONS = { 1: 'Europe', 2: 'North America', 3: 'Australia', 4: 'New Zealand', 5: 'Japan', 6: 'China', 7: 'Asia', 8: 'Worldwide', 9: 'Korea', 10: 'Brazil' };
 const IGDB_MEMBERSHIP = { 1: 'member', 2: 'spinoff' };
+// Shorter labels for IGDB genre names too long for a pill (display only: records keep IGDB's name; the genre filter and
+// colours use the label).
+const GAME_GENRE_LABELS = { "Hack and slash/Beat 'em up": 'Hack and slash', 'Turn-based strategy (TBS)': 'Turn-based strategy',
+  'Real Time Strategy (RTS)': 'Real-time strategy', 'Role-playing (RPG)': 'RPG', 'Card & Board Game': 'Card & board' };
+const gameGenreLabel = name => GAME_GENRE_LABELS[name] || name;
 const IGDB_GAME_STATUS = { 0: 'released', 2: 'alpha', 3: 'beta', 4: 'early', 5: 'offline', 6: 'cancelled', 7: 'rumored', 8: 'delisted' };
 const GAME_SKIP_TYPES = ['dlc', 'expansion', 'bundle', 'mod', 'episode', 'season', 'fork', 'pack', 'update'];
 const GAME_VERSION_TYPES = ['remake', 'remaster', 'port'];

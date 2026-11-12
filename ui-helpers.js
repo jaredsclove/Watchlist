@@ -12,7 +12,7 @@ const GENRE_FAMILIES = {
   rose: ['Comedy', 'Romance', 'Family', 'Kids'],
   slate: ['Drama', 'Crime', 'Mystery', 'Thriller', 'Horror', 'Point-and-click', 'Visual Novel'],
   sage: ['Puzzle', 'Strategy', 'Real Time Strategy (RTS)', 'Real-time strategy', 'RTS', 'Turn-based strategy (TBS)', 'Turn-based strategy', 'TBS',
-    'Tactical', 'Simulator', 'Simulation', 'Card & Board Game', 'Card and board game', 'Quiz/Trivia', 'MOBA'],
+    'Tactical', 'Simulator', 'Simulation', 'Card & Board Game', 'Card and board game', 'Card & board', 'Quiz/Trivia', 'MOBA'],
   sky: ['Sport', 'Sports', 'Racing', 'Music', 'Musical', 'Pinball']
 };
 function genreKey(label) {

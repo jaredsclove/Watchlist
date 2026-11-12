@@ -92,6 +92,28 @@ const rpcs = (app, fn) => app.requests.filter(r => r.url.endsWith(`/rpc/${fn}`))
 const reads = (app, table) => app.requests.filter(r => r.method === 'GET' && new RegExp(`/rest/v1/${table}\\?`).test(r.url));
 async function openGames(app, view = 'games') { app.ctx.switchView(view); await settle(); }
 
+test('long IGDB genre names show short labels ("Hack and slash" and the others), in pills, the Genre filter and Details; filtering by it works; the record keeps IGDB’s name', async () => {
+  const saved = RAW[150].genres;
+  RAW[150].genres = [{ name: "Hack and slash/Beat 'em up" }, { name: 'Puzzle' }];
+  try {
+    const app = await bootWith({ platforms: ['ps5', 'switch'], entries: [entry(1, 150), entry(2, 180)] });
+    await openGames(app);
+    const row = rowOf(app, ID('61000000', 1));
+    assert.ok(row.includes('>Hack and slash<') && !/Beat/.test(row), 'the pill');
+    assert.ok(/meta-genres g-rust[^"]*"[^>]*>Hack and slash</.test(row), 'its colour family as before');
+    assert.match(screen(app), /<option value="Hack and slash"[^>]*>Hack and slash<\/option>/, 'the Genre filter lists the label');
+    assert.ok(!/Beat &#39;em up|Beat 'em up/.test(screen(app)));
+    app.run(`gamesFilters.genre = 'Hack and slash'; renderGamesView()`);
+    assert.deepStrictEqual(libraryOrder(app), [ID('61000000', 1)], 'filtering by it shows that game only');
+    assert.strictEqual(app.run(`JSON.stringify(gamesData.cache.get(150).genres)`), JSON.stringify(["Hack and slash/Beat 'em up", 'Puzzle']), 'the cached record keeps IGDB’s name');
+    assert.strictEqual(app.run("gameGenreLabel('Shooter')"), 'Shooter', 'other names unchanged');
+    const labels = ["Turn-based strategy (TBS)", "Real Time Strategy (RTS)", "Role-playing (RPG)", "Card & Board Game", "Point-and-click"]
+      .map(g => [app.run(`gameGenreLabel(${JSON.stringify(g)})`), app.run(`genreFamily(gameGenreLabel(${JSON.stringify(g)}))`) === app.run(`genreFamily(${JSON.stringify(g)})`)]);
+    assert.deepStrictEqual(labels, [['Turn-based strategy', true], ['Real-time strategy', true], ['RPG', true], ['Card & board', true], ['Point-and-click', true]],
+      'the other long names, each keeping its colour family; Point-and-click unchanged');
+  } finally { RAW[150].genres = saved; }
+});
+
 test('the Games area: an app-bar button, its routes and three views; no list toolbar, tabs bar or Browse row', async () => {
   const app = await bootWith();
   assert.match(app.el('mediaSwitch').innerHTML, /id="areaBtn-games"[^>]*onclick="openGames\(\)">Games<\/button>/);
