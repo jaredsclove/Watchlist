@@ -27,14 +27,20 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: franchise boundaries (owner's request;
-  PR #83, `63af41e`), 2026-11-11 UTC, presentation tier: in Franchise / release order, a headed franchise followed by games
-  without a heading ends with a heading-sized gap and a firmer line, in rows and cards (decorative; a heading marks the other
-  boundaries). Cache token `20261111-groupend`. Verified: 58 offline suites (1401; a new boundary test); a local synthetic
-  check of the three transitions in both themes at desktop and phone widths, the Library and a collection, filtering and an
-  explicit sort; Pages built; the changed files byte-identical to `main`. Live on the owner's account, read-only: one divider,
-  between God of War Laufey and Grand Theft Auto VI, in rows and cards.
-- Previous release: Skip / Unskip all versions named with the release year (PR #81, `c223b7a`), 2026-11-11 UTC: their accessible
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: TC1, the member's TMDB cache across
+  devices (owner's request; PR #85, `91fd862`), 2026-11-12 UTC, schema tier: episode lists, show scores and first-air dates
+  moved from per-device storage into `public.tmdb_tv_cache` (owner-only, function-only writes; a write lands only on the
+  revision the page held before its TMDB request; never in backups, untouched by restore; phase and backup format unchanged,
+  capability `tc1`). A bounded background queue saves through the write lane while the page is idle; a daily Cron job
+  deletes rows past 150 days (pg_cron enabled in the Dashboard for it). Fable review once: no blocking findings, two fixed,
+  closure checked. Verified: 59 offline suites (1419); `tools/tc1-test.mjs` (53, PostgreSQL 17 included); the restore suite
+  (200); a local two-device check; migration run record `tc1-prod-20261112a` confirmed by a separate read; Pages built, the
+  changed files byte-identical to `main`. Live on the owner's account: 205 rows filled (10 lists, 195 shows; about 57 KB a
+  read), then a fresh load with 0 TMDB requests and every in-progress season's episode action shown; backups before and
+  after identical in all 27 tables. Cache token `20261112-tmdbcache`.
+- Previous release: franchise boundaries (PR #83, `63af41e`), 2026-11-11 UTC: in Franchise / release order, a headed
+  franchise followed by games without a heading ends with a heading-sized gap and a firmer line.
+- Earlier: Skip / Unskip all versions named with the release year (PR #81, `c223b7a`), 2026-11-11 UTC: their accessible
   names and tooltips read "Skip all versions of God of War (2005)".
 - Earlier: "Skip all versions" wording (PR #79, `95daceb`), 2026-11-11 UTC: franchise views say Skip all versions and
   "game" and "versions" instead of "spot".
@@ -66,7 +72,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
 - Earlier: games (G1, item 5; PR #60, `5ada6c4`), 2026-11-10 UTC, schema tier (backup format 9; Fable review once, five fixed).
   Sorting library views (item 13; PR #58, `2dc1256`), 2026-11-10 UTC, presentation tier; Q1 (item 7; PR #56)
   2026-11-05 UTC.
-- Database phase `contracted-g1`, backup format 9 (twenty-seven tables, no `user_id`, never the IGDB cache), `access = members`, research per member. One flat
+- Database phase `contracted-g1` with TC1 (capability `tc1`), backup format 9 (twenty-seven tables, no `user_id`, never the IGDB or TMDB cache), `access = members`, research per member. One flat
   `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one
   retained test account has no membership and reaches nothing (`docs/MEMBER_RECOVERY.md`).
 - **Standing decisions:** W1 is removed; item 11 is abandoned; item 10 (CU1e) stays. `pg_graphql` stays disabled: enabling it needs a new explicit
@@ -81,7 +87,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
 | Boot, config, API | `watchlist.html`, `config.js`, `auth.js`, `api.js` (the writable phase, the stop switch), `write-lane.js`, `ui-helpers.js`, `identity.js`, `history.js` (routes) |
 | Rendering and views | `render.js`, `tabs.js`, `derived-views.js` (TV views, list focus), `browse-views.js` (collections, All Movies) |
 | Writes | `row-actions.js`, `tv-shows.js`, `library.js` (+ Add, writes from views, the movie tools' film row), `metadata.js` (Details) |
-| Episodes, ratings | `episodes.js`, `show-ratings.js` |
+| Episodes, ratings | `episodes.js`, `show-ratings.js`, `tmdb-cache.js` (the member’s TMDB cache, TC1) |
 | Organization | `organization.js`, `organization-manage.js`, `collection-members.js`; planning queues `queues.js`; sorting `view-sort.js` |
 | Games (G1) | `games.js` (the area, Settings → Games), `games-data.js` (IGDB records and the rules), `games-research.js` (the games research brief and findings); the IGDB proxy `supabase/functions/igdb` |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
@@ -149,8 +155,11 @@ migration, merge after the migration's run record is confirmed.
 - Optional: on an unknown database phase, a refused season toggle shows the raw refusal text.
 - Q1 not verified: real phones (touch dragging was checked with emulated pointer events only), completion through a real
   watched mark on the live site (left unchanged; covered locally and through a local API stack).
-- Item 13 not verified: real phones; Series premiere on production (the owner's device cache has no first-air dates until
-  Refresh shows or a show's expansion reads its details, so the field is unknown for every show there for now).
+- Item 13 not verified: real phones.
+- TC1 not verified: real phones; whether TMDB exposes Retry-After to the page (if not, a 429 counts as a two-minute wait);
+  another member's first fill. Accepted limits: the expiry job can't run while a Free project is paused, so during a long
+  pause rows can outlive TMDB's six-month limit until the first run after resuming; a page opened before TC1 keeps its own
+  per-device copy until reloaded.
 - G1 not verified: real phones (the TV-style Games rows and cards were checked at 390 and 820 px in desktop Chrome only; queue dragging on touch included; the browser check finished one drop with a dispatched
   pointerup); a status change from a franchise row on production (checked locally with synthetic data only); live games research (no games brief researched or findings imported on production); a member's Not out yet and
   franchise Up next on production data. (Game length, whose IGDB figures were unreliable, was removed by the owner's decision on
