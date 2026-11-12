@@ -27,7 +27,12 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: the Games Library layout cleanup
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: shorter game genre labels (owner's
+  request; PR #93, `6051c2f`), 2026-11-12 UTC, presentation tier: IGDB's long genre names show as Hack and slash, Turn-based
+  strategy, Real-time strategy, RPG and Card & board in Games pills, the Genre filter and Details (display only; records keep
+  IGDB's names; colours unchanged). Cache token `20261112-genrelabel`. Verified: 59 offline suites (1428); Pages built, the
+  changed files byte-identical to `main`; live, read-only: the filter and pills show the short labels, no writes.
+- Previous release: the Games Library layout cleanup
   (owner's request; PR #91, `59a08ec`), 2026-11-12 UTC, presentation tier (page only): Platform and Release as separate aligned
   columns (Upcoming beside the date; stacked on cards); as many genre pills as fit one line, measured after each draw and on
   resize, +N only for real overflow; rebalanced widths, long titles wrapping beside their scores; one width for every status
@@ -37,7 +42,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
   to `main`. Live, read-only (filters only, no status changed): the new columns, one genre overflow (a long label) and aligned
   statuses at 1500 px, no wrap or horizontal scroll at 1130 and 375 px (same-origin frames). Not verified live: dark mode,
   real phones.
-- Previous release: the Games Library's default status filter (PR #89, `e9aa5af`), 2026-11-12 UTC: All except Finished and
+- Earlier: the Games Library's default status filter (PR #89, `e9aa5af`), 2026-11-12 UTC: All except Finished and
   Skipped is the default; when the list empties, focus goes to the "No games match" note.
 - Earlier: first episode of a season not started (PR #87, `63089a3`), 2026-11-12 UTC: a Watching show's
   actionable up-next season with a known episode list shows its first unwatched episode and Mark E1 watched.
