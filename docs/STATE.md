@@ -27,19 +27,21 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: TC1, the member's TMDB cache across
-  devices (owner's request; PR #85, `91fd862`), 2026-11-12 UTC, schema tier: episode lists, show scores and first-air dates
-  moved from per-device storage into `public.tmdb_tv_cache` (owner-only, function-only writes; a write lands only on the
-  revision the page held before its TMDB request; never in backups, untouched by restore; phase and backup format unchanged,
-  capability `tc1`). A bounded background queue saves through the write lane while the page is idle; a daily Cron job
-  deletes rows past 150 days (pg_cron enabled in the Dashboard for it). Fable review once: no blocking findings, two fixed,
-  closure checked. Verified: 59 offline suites (1419); `tools/tc1-test.mjs` (53, PostgreSQL 17 included); the restore suite
-  (200); a local two-device check; migration run record `tc1-prod-20261112a` confirmed by a separate read; Pages built, the
-  changed files byte-identical to `main`. Live on the owner's account: 205 rows filled (10 lists, 195 shows; about 57 KB a
-  read), then a fresh load with 0 TMDB requests and every in-progress season's episode action shown; backups before and
-  after identical in all 27 tables. Cache token `20261112-tmdbcache`.
-- Previous release: franchise boundaries (PR #83, `63af41e`), 2026-11-11 UTC: in Franchise / release order, a headed
-  franchise followed by games without a heading ends with a heading-sized gap and a firmer line.
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: first episode of a season not
+  started (owner's request; PR #87, `63089a3`), 2026-11-12 UTC, presentation tier (page only; normal TMDB cache activity): a
+  Watching show's actionable up-next season with a known episode list shows its first unwatched episode, Mark E1 watched (TMDB's
+  own number) and "S1 · 0/10 episodes watched" with no marks, in rows and cards wherever the show row is used; the TC1 queue
+  also reads that season's list. The expanded season keeps Mark season watched; other rules unchanged. Cache token
+  `20261112-firstep`. Verified: 59 offline suites (1423); a local synthetic check on desktop and at 375 px, light and dark
+  (E1 then E2 with focus kept); Pages built, changed files byte-identical to `main`. Live, read-only for progress: The Secret
+  Lives of Mormon Wives: Orange County shows Season 1 · Episode 1, Mark E1 watched, 0/10; the only write was a cache save.
+- Previous release: TC1, the member's TMDB cache across devices (PR #85, `91fd862`), 2026-11-12 UTC, schema tier: episode
+  lists, show scores and first-air dates in `public.tmdb_tv_cache` (owner-only, revision-checked writes, never in backups,
+  untouched by restore, capability `tc1`), a bounded background queue saving through the write lane, a daily Cron expiry at
+  150 days. Fable reviewed once (two findings fixed). Live: 205 rows filled, a fresh load with 0 TMDB requests, backups
+  before and after identical in all 27 tables.
+- Earlier: franchise boundaries (PR #83, `63af41e`), 2026-11-11 UTC: in Franchise / release order, a headed franchise
+  followed by games without a heading ends with a heading-sized gap and a firmer line.
 - Earlier: Skip / Unskip all versions named with the release year (PR #81, `c223b7a`), 2026-11-11 UTC: their accessible
   names and tooltips read "Skip all versions of God of War (2005)".
 - Earlier: "Skip all versions" wording (PR #79, `95daceb`), 2026-11-11 UTC: franchise views say Skip all versions and
