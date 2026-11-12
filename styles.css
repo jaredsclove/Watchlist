@@ -1250,9 +1250,39 @@ body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; 
 .games-empty { background: var(--surface); border: 1px dashed var(--border2); border-radius: var(--radius-lg); padding: 16px; color: var(--text2); font-size: 14px; }
 .games-empty:focus { outline: none; }
 .games-screen select:not(.status-select):not(.priority-select), .game-dialog-box select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; font: inherit; font-size: 13px; max-width: 100%; }
-.games-table th:first-child { width: 38%; }
-.games-table th.col-cats { width: 24%; }
-.games-table th.col-plat { width: 22%; }
+/* Five columns (owner, 2026-11-12): the title no wider than it needs, room for a line of genres, Platform and Release apart
+   so each lines up across rows; long titles wrap with their scores beside them. */
+.games-table { table-layout: fixed; }
+.games-table th.col-game { width: 30%; }
+.games-table th.col-cats { width: 28%; }
+.games-table th.col-plat { width: 13%; }
+.games-table th.col-rel { width: 17%; }
+.games-table th.col-status { width: 12%; }
+.games-table td { vertical-align: middle; }
+/* A long title wraps within the room its scores leave, so C / P stay beside its first line (an opened score note goes below). */
+.games-table .show-title-main { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; --room: 0px; --star: 0px; }
+.games-table .show-title-main:has(.rk-critic, .rk-player) { --room: 52px; }
+.games-table .show-title-main:has(.rk-critic):has(.rk-player) { --room: 100px; }
+.games-table .show-title-main:has(.priority-high) { --star: 22px; }
+.games-table .show-title-main > .game-title-btn { flex: 0 1 auto; min-width: 0; max-width: calc(100% - var(--room) - var(--star)); }
+.games-table .show-title-main .tmdb-rating, .games-table .show-title-main > [class^="priority-"] { flex: none; }
+.game-genres { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.game-genres > :is(.meta-chip, .meta-more) { flex: none; }
+.game-genres > .meta-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.game-genres > .fit-hidden { display: none; }
+.game-plat-cell, .game-rel-cell { font-size: 12px; color: var(--text2); line-height: 1.4; overflow-wrap: anywhere; }
+.game-plat-cell .game-compat { white-space: nowrap; }
+.game-rel { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.game-rel .upcoming-tag { margin-left: 0; }
+/* The status: one width and one inset for every status, filled or plain, so the controls line up. */
+.games-screen .game-status-cell .status-select.game-status, .game-card .card-actions .status-select.game-status { field-sizing: fixed; width: 104px; padding-left: 9px; border-left-width: 1px; }
+.game-card .card-actions .status-select.game-status { width: 116px; padding-left: 10px; }
+/* The Library's filter and order summaries: one line, wrapping on narrow screens. */
+.games-summary { order: 4; flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 20px; min-width: 0; }
+.games-summary > .filter-chips, .games-summary > .sort-line-box { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+/* A card: the platform above its release, on its own line above the genres and the status. */
+.game-card .card-meta > .card-season { flex: 1 0 100%; }
+.game-stack { display: inline-flex; flex-direction: column; gap: 1px; line-height: 1.4; min-width: 0; overflow-wrap: anywhere; }
 .franchise-table th:first-child { width: 34%; }
 .franchise-table th.col-next { width: 26%; }
 @media (max-width: 1099px) { .games-table { display: none; } }
@@ -1267,7 +1297,7 @@ body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; 
 .game-ratings:has(.rk-player:is([data-open="1"], :focus-visible)) .note-player { display: block; flex-basis: 100%; order: 1; }
 /* The platform and release: the platform, then the date (blue while upcoming, faint when TBA); PS4 on PS5 says so. */
 .game-line { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; white-space: normal; line-height: 1.4; } /* one line, as TV's dates */
-.game-when::before { content: '·'; margin-right: 6px; color: var(--text3); }
+.game-line .game-when::before { content: '·'; margin-right: 6px; color: var(--text3); }
 .game-line .upcoming-tag { margin-left: 0; }
 .game-plat { color: var(--text2); }
 .game-compat { color: var(--blue); }

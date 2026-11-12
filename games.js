@@ -96,6 +96,7 @@ function renderGamesView() {
   else body = gamesCollectionsHtml(st);
   screen.innerHTML = head + body;
   if ((view === 'library' || view === 'collections') && typeof renderSortLine === 'function') renderSortLine();
+  fitGameGenres();
   applyGamesFocus(rec);
 }
 // + Add game, Refresh and Review: after the line's other controls, as TV's + Add.
@@ -106,8 +107,10 @@ function gamesActionsHtml() {
     ${review.length ? `<button class="btn" data-gaction="review" onclick="openGamesReview(this)">Review (${review.length})</button>` : ''}</span>`;
 }
 // TV's toolbar (render.js filterBarHtml, styles.css .list-toolbar): one line, then the Filters panel, the chips and the sort line; the count at the end.
-function gamesToolbarHtml({ line = '', panel = '', chips = '', sort = false, count = '' }) {
-  return `<div class="list-toolbar games-toolbar"><div class="filters"><div class="filter-line">${line}${gamesActionsHtml()}</div>${panel}${chips}${sort ? '<div id="sortLine" class="sort-line-box"></div>' : ''}</div>
+// summary (the Library): the filter chips and the sort line share one line that wraps on narrow screens.
+function gamesToolbarHtml({ line = '', panel = '', chips = '', sort = false, count = '', summary = false }) {
+  const sortBox = sort ? '<div id="sortLine" class="sort-line-box"></div>' : '';
+  return `<div class="list-toolbar games-toolbar"><div class="filters"><div class="filter-line">${line}${gamesActionsHtml()}</div>${panel}${summary ? `<div class="games-summary">${chips}${sortBox}</div>` : chips + sortBox}</div>
     ${count ? `<div class="stats-row"><p class="count-line" id="gamesCount">${esc(count)}</p></div>` : ''}</div>`;
 }
 
@@ -148,7 +151,7 @@ function gamesLibraryHtml(st) {
     ? `<div class="chip-group" role="group" aria-label="Active filters"><span class="chips-label" aria-hidden="true">Active:</span>${applied.map(chip).join('')}</div>` : ''}${applied.length || f.search
     ? '<button type="button" class="btn-link filter-clear" id="gFilterClear" onclick="clearGamesFilters()">Clear filters</button>' : ''}</div>`;
   const count = gamesData.entries.length ? (list.length !== shown.length ? `${list.length} of ${countUnit(shown.length, 'game', 'games')}` : countUnit(list.length, 'game', 'games')) : '';
-  const toolbar = gamesToolbarHtml({ line, panel, chips, sort: true, count });
+  const toolbar = gamesToolbarHtml({ line, panel, chips, sort: true, count, summary: true });
   const hiddenNote = hidden ? `<p class="games-note">${countUnit(hidden, 'saved game isn’t', 'saved games aren’t')} on your platforms, so ${hidden === 1 ? 'it is' : 'they are'} hidden here and in your queues (${hidden === 1 ? 'its' : 'their'} status, priority, collections and queue places are kept). ${hidden === 1 ? 'It comes' : 'They come'} back when a platform you choose has ${hidden === 1 ? 'it' : 'them'}.</p>` : '';
   if (!gamesData.entries.length) return toolbar + `<div class="games-empty" data-games-empty="1" tabindex="-1"><p>No games yet. Use <strong>+ Add game</strong> to search IGDB and save one.</p></div>`;
   return toolbar + hiddenNote + (list.length ? gamesTableHtml(gamesOrderedParts(list, v => gameRowParts(v)), 'Your games', 'Status')
@@ -174,11 +177,11 @@ function gamesOrderedParts(views, partsOf) {
     // A headed franchise followed by a game without a heading: a gap and a divider close the franchise (a heading already
     // marks the other boundaries, so they get no second gap). Decorative: hidden from assistive technology.
     if (grouped && !g.grouped && prev && prev.grouped) {
-      out.push({ row: '<tr class="game-group-end" aria-hidden="true"><td colspan="4"></td></tr>',
+      out.push({ row: '<tr class="game-group-end" aria-hidden="true"><td colspan="5"></td></tr>',
         card: '<div class="game-group-end" aria-hidden="true"></div>' });
     }
     if (grouped && g.grouped && !(prev && prev.key === g.key)) {
-      out.push({ row: `<tr class="game-group-head" data-group="${esc(g.key)}"><td colspan="4"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></td></tr>`,
+      out.push({ row: `<tr class="game-group-head" data-group="${esc(g.key)}"><td colspan="5"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></td></tr>`,
         card: `<div class="game-group-head" data-group="${esc(g.key)}"><span class="game-group-name" role="heading" aria-level="3">${esc(g.name)}</span></div>` });
     }
     out.push(partsOf(v));
@@ -187,7 +190,7 @@ function gamesOrderedParts(views, partsOf) {
 }
 // The desktop table and the narrow-screen cards (styles.css shows one of them, at TV's breakpoint).
 function gamesTableHtml(parts, label, last) {
-  return `<table class="games-table" aria-label="${esc(label)}"><thead><tr><th>Game</th><th class="col-cats">Genres</th><th class="col-plat">Platform · Release</th><th>${esc(last)}</th></tr></thead>
+  return `<table class="games-table" aria-label="${esc(label)}"><thead><tr><th class="col-game">Game</th><th class="col-cats">Genres</th><th class="col-plat">Platform</th><th class="col-rel">Release</th><th class="col-status">${esc(last)}</th></tr></thead>
     <tbody>${parts.map(p => p.row).join('')}</tbody></table>
     <div class="card-list games-cards" aria-label="${esc(label)}">${parts.map(p => p.card).join('')}</div>`;
 }
@@ -229,8 +232,7 @@ function gameTitleHtml(v, opts = {}) {
 }
 // One release line: the platform ("PS5", or "PS4 · Playable on PS5") and its date or TBA. The repeated "per IGDB" is screen-reader
 // text and a tooltip (Details lists every release with its source); a hold or Store / publisher evidence stays visible.
-function gameLineHtml(c) {
-  if (!c) return '';
+function gameLineParts(c) {
   const from = GAME_PLATFORM_LABEL[c.from] || c.from;
   const region = c.row.r != null && c.row.r !== 2 && c.row.r !== 8 ? ` (${IGDB_REGIONS[c.row.r] || 'another region'})` : '';
   const date = gameDateText(c.row), tba = date === 'Date TBA';
@@ -239,24 +241,74 @@ function gameLineHtml(c) {
     : c.held ? '<span class="game-basis game-held"><span class="visually-hidden"> · </span>not out yet (your hold)</span>'
     : c.row.prec === 'day' ? '<span class="visually-hidden"> · per IGDB</span>' : '';
   const upcoming = !c.isReleased && !tba && !c.held;
-  return `<span class="game-line" title="${esc(gameLineText(c))}"><span class="game-plat">${plat}</span><span class="game-when${tba ? ' game-tba' : upcoming ? ' game-upcoming' : ''}"><span class="visually-hidden"> · </span>${esc(date + region)}</span>${upcoming ? '<span class="upcoming-tag">Upcoming</span>' : ''}${basis}</span>`;
+  return { title: esc(gameLineText(c)), plat: `<span class="game-plat">${plat}</span>`,
+    when: `<span class="game-when${tba ? ' game-tba' : upcoming ? ' game-upcoming' : ''}"><span class="visually-hidden"> · </span>${esc(date + region)}</span>${upcoming ? '<span class="upcoming-tag">Upcoming</span>' : ''}${basis}` };
 }
-function gamePlatformHtml(v) {
-  if (!v.rec) return '<span class="game-line muted">Details not loaded yet: use Refresh</span>';
-  return v.avail.line ? gameLineHtml(v.avail.line) : '<span class="game-line muted">Not announced on your platforms</span>';
+function gameLineHtml(c) {
+  if (!c) return '';
+  const p = gameLineParts(c);
+  return `<span class="game-line" title="${p.title}">${p.plat}${p.when}</span>`;
 }
-// Genre pills as TV's category pills: a pill filters (pressed while it is the filter); a desktop row shows what fits, then +N.
-const GAME_GENRE_BUDGET = 26;
-function gameGenrePillsHtml(v, budget = 0, plain = false) {
+// A row's platform and release (the Library and game collections): two aligned columns; a game with no line says why across both.
+function gamePlatformNote(v) {
+  if (!v.rec) return 'Details not loaded yet: use Refresh';
+  return v.avail.line ? '' : 'Not announced on your platforms';
+}
+function gamePlatformCellsHtml(v) {
+  const note = gamePlatformNote(v);
+  if (note) return `<td class="game-plat-cell" colspan="2"><span class="muted">${esc(note)}</span></td>`;
+  const p = gameLineParts(v.avail.line);
+  return `<td class="game-plat-cell" title="${p.title}">${p.plat}</td><td class="game-rel-cell" title="${p.title}"><span class="game-rel">${p.when}</span></td>`;
+}
+// A card's platform above its release (phones: stacked, never side by side).
+function gamePlatformStackHtml(v) {
+  const note = gamePlatformNote(v);
+  if (note) return `<span class="game-stack muted">${esc(note)}</span>`;
+  const p = gameLineParts(v.avail.line);
+  return `<span class="game-stack" title="${p.title}">${p.plat}<span class="game-rel">${p.when}</span></span>`;
+}
+// Genre pills as TV's category pills: a pill filters (pressed while it is the filter). A desktop row (fit) draws every pill and
+// a +N that starts hidden; fitGameGenres then shows as many as fit on one line, and +N only when some don't (+N shows the
+// rest, wrapped; Fewer folds them again). Without layout (a hidden table, the offline tests) every pill shows.
+function gameGenrePillsHtml(v, fit = false, plain = false) {
   const all = v.genres || [], owner = `game:${v.entry.id}`;
   const open = expandedCategoryOwners.has(owner);
-  const fit = budget ? categoryFitCount(all.map(g => ['genres', g]), budget) : all.length;
-  const shown = open ? all.length : fit, hidden = all.length - fit;
   const pill = g => { if (plain) return `<span class="badge meta-chip meta-genres g-${genreFamily(g)}">${esc(g)}</span>`; // (a collection: the Library's filter isn't here)
     const pressed = gamesFilters.genre === g;
     return `<button type="button" class="badge meta-chip meta-genres g-${genreFamily(g)} badge-clickable filter-pill" data-gaction="${esc(`genre:${g}`)}" aria-pressed="${pressed}" title="${esc(pressed ? `Remove this filter (${g})` : `Filter by “${g}”`)}" onclick="event.stopPropagation(); toggleGamesGenre('${jsArg(g)}')">${esc(g)}</button>`; };
-  const more = hidden ? `<button type="button" class="meta-more" data-gaction="cats-more" aria-expanded="${open}" aria-label="${open ? 'Show fewer genres' : `Show ${hidden} more genre${hidden === 1 ? '' : 's'}`}" onclick="event.stopPropagation(); toggleGameGenres('${jsArg(owner)}')">${open ? 'Fewer' : `+${hidden}`}</button>` : '';
-  return all.slice(0, shown).map(pill).join('') + more;
+  const more = fit && all.length > 1 ? `<button type="button" class="meta-more fit-hidden" data-gaction="cats-more" aria-expanded="${open}" aria-label="${open ? 'Show fewer genres' : 'Show more genres'}" onclick="event.stopPropagation(); toggleGameGenres('${jsArg(owner)}')">${open ? 'Fewer' : '+'}</button>` : '';
+  return all.map(pill).join('') + more;
+}
+// Measured after each draw and on resize: pills on the cell's first line stay; the rest are hidden (out of the Tab order) behind
+// +N, giving up one more pill when +N itself wouldn't fit. A focused pill that gets hidden hands focus to +N.
+function fitGameGenres() {
+  const screen = typeof document !== 'undefined' && document.getElementById('gamesScreen');
+  if (!screen || typeof screen.querySelectorAll !== 'function') return;
+  screen.querySelectorAll('.games-table .game-genres').forEach(fitGameGenreCell);
+}
+function fitGameGenreCell(cell) {
+  const more = cell.querySelector('.meta-more'), pills = [...cell.querySelectorAll('.meta-genres')];
+  if (!more || !pills.length || !more.classList || !cell.offsetHeight) return; // (no layout: as drawn, every pill)
+  const show = n => pills.forEach((p, i) => p.classList.toggle('fit-hidden', i >= n));
+  const box = el => el.getBoundingClientRect(); // (offsetTop differs between pills and +N: their offset parents differ)
+  const onFirst = el => { const a = box(pills[0]); return box(el).top < a.top + a.height / 2; };
+  const label = n => { const k = pills.length - n; more.textContent = `+${k}`; more.setAttribute('aria-label', `Show ${k} more genre${k === 1 ? '' : 's'}`); };
+  const focused = document.activeElement;
+  show(pills.length); more.classList.add('fit-hidden');
+  if (pills.every(onFirst)) return; // all on one line: no +N (nor Fewer)
+  more.classList.remove('fit-hidden');
+  if (more.getAttribute('aria-expanded') === 'true') return; // opened: every pill, wrapped, then Fewer
+  let n = pills.filter(onFirst).length;
+  show(n); label(n);
+  while (n > 1 && !onFirst(more)) { n--; show(n); label(n); }
+  if (focused && pills.indexOf(focused) >= n) more.focus();
+}
+let gamesFitFrame = 0;
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function' && typeof requestAnimationFrame === 'function') {
+  window.addEventListener('resize', () => {
+    if (gamesFitFrame) return;
+    gamesFitFrame = requestAnimationFrame(() => { gamesFitFrame = 0; if (typeof isGamesView === 'function' && isGamesView()) fitGameGenres(); });
+  });
 }
 function toggleGameGenres(owner) { if (expandedCategoryOwners.has(owner)) expandedCategoryOwners.delete(owner); else expandedCategoryOwners.add(owner); renderGamesView(); }
 function toggleGamesGenre(g) { setGamesFilter('genre', gamesFilters.genre === g ? '' : g); }
@@ -291,13 +343,13 @@ function gameRowParts(v, opts = {}) {
     : `<span class="state-action">${gameStatusSelectHtml(e)}</span>`;
   const row = `<tr class="game-row${dim}" data-game="${id}">
       <td><div class="show-title-row"><div class="show-title-left">${title}</div>${menu}</div></td>
-      <td>${gameGenrePillsHtml(v, GAME_GENRE_BUDGET, !!member)}</td>
-      <td class="date-cell game-plat-cell">${gamePlatformHtml(v)}</td>
+      <td class="game-genres-cell"><div class="game-genres">${gameGenrePillsHtml(v, true, !!member)}</div></td>
+      ${gamePlatformCellsHtml(v)}
       <td class="game-status-cell">${status}</td>
     </tr>`;
   const card = `<div class="item-card game-card${dim}" data-game="${id}">
       <div class="card-top"><div class="card-title-block"><span class="card-title">${title}</span></div>${menu}</div>
-      <div class="card-meta"><span class="card-season">${gamePlatformHtml(v)}</span>${v.genres.length ? `<span class="card-labels">${gameGenrePillsHtml(v, 0, !!member)}</span>` : ''}
+      <div class="card-meta"><span class="card-season">${gamePlatformStackHtml(v)}</span>${v.genres.length ? `<span class="card-labels">${gameGenrePillsHtml(v, false, !!member)}</span>` : ''}
         <span class="card-actions card-complete">${status}</span></div>
     </div>`;
   return { row, card };

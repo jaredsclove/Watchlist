@@ -75,10 +75,16 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   screens and TV's cards below 1100 px. **Library:** each saved game version (an IGDB record) as a row: the title (opens Details)
   with TV's priority marks (★ before, Low after) and compact scores beside it, "C 83" (critics) and "P 81" (players), coloured as
   TV's, whose source, scale and count ("Critic score: 83 out of 100 · 7 critic reviews on IGDB.") are their accessible names and
-  shown on tap or focus; a missing score shows nothing; then TV's ⋯ (Priority, Organize); genres as TV's pills (a pill filters;
-  +N shows the rest); the platform and release on one line ("PS4 · Playable on PS5 · Oct 10, 2021"; upcoming dates blue with
-  TV's Upcoming tag; Date TBA faint; "per IGDB" is screen-reader text and a tooltip, Details lists every release; a hold or Store
-  / publisher evidence stays visible); status as TV's quiet select (Want to play, Playing, Paused, Finished, Skipped). Filters:
+  shown on tap or focus; a missing score shows nothing; then TV's ⋯ (Priority, Organize); genres as TV's pills (a pill filters);
+  then Platform ("PS5", "PS4 · Playable on PS5") and Release (the date, with TV's Upcoming tag beside it; upcoming dates blue;
+  Date TBA faint; "per IGDB" is screen-reader text and a tooltip, Details lists every release; a hold or Store / publisher
+  evidence stays visible) as separate columns; status as TV's quiet select (Want to play, Playing, Paused, Finished, Skipped),
+  one width for every status so the controls line up. **Layout (owner, 2026-11-12; game collections draw their rows the same
+  way):** a long title wraps with its scores beside it; a desktop row shows as many genre pills as fit on one line, measured after
+  each draw and on resize, with +N only when some don't fit (+N shows the rest, wrapped, and Fewer folds them; hidden pills are
+  out of the Tab order, and a focused pill that gets hidden hands focus to +N); a cell without layout shows every pill. Cards
+  stack the platform above the release and list every pill. A game with no release line on the member's platforms says so
+  across both columns. The Library's filter summary and order summary share one line, wrapping on narrow screens. Filters:
   Genre and Status: the default is All except Finished and Skipped (Want to play, Playing, Paused; owner, 2026-11-12), then
   All except Skipped, All and each status; Clear filters and the status chip return to the default, and opening a game from a
   queue still uses All. Visibility only. A game set to Finished or Skipped under the default leaves the list (as a hidden status

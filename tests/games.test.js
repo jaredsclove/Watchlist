@@ -193,37 +193,89 @@ test('a member without research access can hold a release; recording Store evide
   assert.strictEqual(r.run(`gameAvailability([gamesData.cache.get(190)], gamesState()).playable`), true);
 });
 
-test('TV’s presentation: rows and cards, C / P beside the title, TV’s genre pills with +N, a quiet status select, aligned platform and release', async () => {
+test('TV’s presentation: rows and cards, C / P beside the title, genre pills measured to one line with +N, a quiet status select, Platform and Release in their own columns', async () => {
   const all = [101, 102, 103, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200];
   const app = await bootWith({ cache: all, entries: [entry(1, 102, { priority: 'high' }), entry(2, 200, { priority: 'low' }), entry(3, 120, { status: 'playing' })] });
   await openGames(app);
   const html = screen(app);
-  assert.match(html, /<table class="games-table" aria-label="Your games"><thead><tr><th>Game<\/th><th class="col-cats">Genres<\/th><th class="col-plat">Platform · Release<\/th><th>Status<\/th><\/tr><\/thead>/);
+  assert.match(html, /<table class="games-table" aria-label="Your games"><thead><tr><th class="col-game">Game<\/th><th class="col-cats">Genres<\/th><th class="col-plat">Platform<\/th><th class="col-rel">Release<\/th><th class="col-status">Status<\/th><\/tr><\/thead>/);
   assert.match(html, /<div class="card-list games-cards" aria-label="Your games">/, 'the cards for narrow screens');
   for (const k of [1, 2, 3]) assert.ok(rowOf(app, ID('61000000', k)) && cardOf(app, ID('61000000', k)), 'each game has a row and a card');
   // TV's priority marks: ★ before the title, Low after.
   assert.match(rowOf(app, ID('61000000', 1)), /<span class="priority-high" role="img" aria-label="High priority" title="High priority">★<\/span> <button type="button" class="show-title game-title-btn"/);
   assert.match(rowOf(app, ID('61000000', 2)), /Director’s Cut<\/button> <span class="priority-low" title="Low priority">Low<\/span>/, 'no scores: nothing between the title and Low');
   assert.doesNotMatch(rowOf(app, ID('61000000', 2)), /rating-critic|rating-player/, 'a missing score shows nothing');
-  // Genres: what fits the row (then +N, which shows the rest); the card lists every pill.
+  // Genres: the row draws every pill and a +N that starts hidden (the page measures what fits one line; see the next test);
+  // the card lists every pill, with no +N.
   const r2 = rowOf(app, ID('61000000', 2));
   assert.match(r2, /data-gaction="genre:Adventure" aria-pressed="false"/);
-  assert.match(r2, /class="meta-more" data-gaction="cats-more" aria-expanded="false" aria-label="Show 4 more genres"[^>]*>\+4</);
+  assert.strictEqual((r2.match(/data-gaction="genre:/g) || []).length, 5);
+  assert.match(r2, /<div class="game-genres">[\s\S]*class="meta-more fit-hidden" data-gaction="cats-more" aria-expanded="false" aria-label="Show more genres"/);
   assert.strictEqual((cardOf(app, ID('61000000', 2)).match(/data-gaction="genre:/g) || []).length, 5);
+  assert.doesNotMatch(cardOf(app, ID('61000000', 2)), /cats-more/);
+  assert.doesNotMatch(rowOf(app, ID('61000000', 3)), /cats-more/, 'one genre: no +N to draw');
   app.ctx.toggleGameGenres(`game:${ID('61000000', 2)}`);
-  assert.strictEqual((rowOf(app, ID('61000000', 2)).match(/data-gaction="genre:/g) || []).length, 5, '+4 shows them');
-  assert.match(rowOf(app, ID('61000000', 2)), />Fewer</);
+  assert.match(rowOf(app, ID('61000000', 2)), /aria-expanded="true" aria-label="Show fewer genres"[^>]*>Fewer</);
   // The status: TV's quiet select (Want to play and Skipped plain; Playing blue).
   assert.match(rowOf(app, ID('61000000', 1)), /<select class="status-select game-status s-confirmed" data-gaction="status"/);
   assert.match(rowOf(app, ID('61000000', 3)), /<select class="status-select game-status s-watching" data-gaction="status"/);
   // Platform and release: PS4 on PS5 says so; upcoming and TBA are told apart; "per IGDB" is screen-reader text and a tooltip.
-  assert.match(rowOf(app, ID('61000000', 1)), /<span class="game-plat">PS4 · <span class="game-compat">Playable on PS5<\/span><\/span><span class="game-when">/);
+  assert.match(rowOf(app, ID('61000000', 1)), /<td class="game-plat-cell" title="[^"]*"><span class="game-plat">PS4 · <span class="game-compat">Playable on PS5<\/span><\/span><\/td><td class="game-rel-cell" title="[^"]*"><span class="game-rel"><span class="game-when">/);
+  assert.match(cardOf(app, ID('61000000', 1)), /<span class="game-stack" title="[^"]*"><span class="game-plat">PS4 · <span class="game-compat">Playable on PS5<\/span><\/span><span class="game-rel"><span class="game-when">/, 'a card stacks the platform over the release');
   assert.match(rowOf(app, ID('61000000', 1)), /<span class="visually-hidden"> · per IGDB<\/span>/);
-  assert.match(rowOf(app, ID('61000000', 2)), /<span class="game-plat">PS5<\/span><span class="game-when game-upcoming">/, 'a date to come');
+  assert.match(rowOf(app, ID('61000000', 2)), /<span class="game-plat">PS5<\/span><\/td><td class="game-rel-cell"[^>]*><span class="game-rel"><span class="game-when game-upcoming">[^]*?<\/span><span class="upcoming-tag">Upcoming<\/span>/, 'a date to come, Upcoming beside it');
   assert.match(rowOf(app, ID('61000000', 3)), /<span class="game-when game-tba"><span class="visually-hidden"> · <\/span>Date TBA<\/span>/);
   assert.doesNotMatch(text(html), /Critics \d+ · IGDB/, 'no repeated source text in the list');
   // TV's ⋯: Priority as a select first.
   assert.match(rowOf(app, ID('61000000', 1)), /<div class="popover-section-label">Priority<\/div>\s*<span class="state-action"><select class="priority-select p-high" data-gaction="priority"/);
+});
+
+// A genre cell laid out as a flex line that wraps (fake boxes: each pill's width; hidden ones take no room).
+function fakeGenreCell(widths, width, { open = false } = {}) {
+  const els = [];
+  const layout = () => { let x = 0, y = 0; els.forEach(e => { if (e.cls.has('fit-hidden')) { e.top = 0; return; } if (x && x + e.w > width) { x = 0; y += 24; } e.top = y; x += e.w + 4; }); };
+  const el = (w, cls, text = '') => { const e = { w, text, cls: new Set(cls), attrs: {}, top: 0,
+    classList: { toggle: (c, on) => (on ? e.cls.add(c) : e.cls.delete(c)), add: c => e.cls.add(c), remove: c => e.cls.delete(c) },
+    getBoundingClientRect: () => { layout(); return { top: e.top, height: 20 }; },
+    setAttribute: (k, v) => { e.attrs[k] = v; }, getAttribute: k => (k in e.attrs ? e.attrs[k] : null), focus() { focused.el = e; },
+    set textContent(v) { e.text = v; }, get textContent() { return e.text; } }; els.push(e); return e; };
+  const focused = { el: null };
+  const pills = widths.map(w => el(w, ['meta-chip', 'meta-genres']));
+  const more = el(30, ['meta-more', 'fit-hidden'], open ? 'Fewer' : '+'); more.attrs['aria-expanded'] = String(open);
+  const cell = { offsetHeight: 24, querySelector: () => more, querySelectorAll: () => pills };
+  const shown = () => pills.filter(p => !p.cls.has('fit-hidden')).length;
+  return { cell, pills, more, shown, focused, lines: () => { layout(); return new Set(els.filter(e => !e.cls.has('fit-hidden')).map(e => e.top)).size; } };
+}
+test('genre pills fit one line: as many as fit, +N only when some don’t (giving up a pill when +N wouldn’t fit), every pill when opened; a cell without layout is left as drawn; a hidden focused pill hands focus to +N', async () => {
+  const app = await bootWith({ entries: [entry(1, 140)] });
+  await openGames(app);
+  const fit = c => app.ctx.fitGameGenreCell(c.cell);
+  const a = fakeGenreCell([60, 60, 60], 300); fit(a);
+  assert.deepStrictEqual([a.shown(), a.more.cls.has('fit-hidden')], [3, true], 'all fit: no +N');
+  const b = fakeGenreCell([80, 80, 80, 80, 80], 300); fit(b);
+  assert.deepStrictEqual([b.shown(), b.more.text, b.more.attrs['aria-label'], b.lines()], [3, '+2', 'Show 2 more genres', 1], 'three fit with +2 on the line');
+  const c = fakeGenreCell([90, 90, 90, 90], 300); fit(c);
+  assert.deepStrictEqual([c.shown(), c.more.text, c.lines()], [2, '+2', 1], 'three would fit, but not with +N: two and +2');
+  const d = fakeGenreCell([400, 50], 300); fit(d);
+  assert.deepStrictEqual([d.shown(), d.more.text], [1, '+1'], 'the first pill always shows');
+  const e = fakeGenreCell([80, 80, 80, 80, 80], 300, { open: true }); fit(e);
+  assert.deepStrictEqual([e.shown(), e.more.cls.has('fit-hidden')], [5, false], 'opened: every pill, then Fewer');
+  const wide = fakeGenreCell([80, 80, 80, 80, 80], 300); fit(wide); wide.cell.querySelectorAll = () => wide.pills; // a resize: wider
+  const before = wide.shown(); wide.pills.forEach(p => { p.w = 40; }); fit(wide);
+  assert.deepStrictEqual([before, wide.shown(), wide.more.cls.has('fit-hidden')], [3, 5, true], 'refitted wider: nothing left hidden');
+  const f = fakeGenreCell([80, 80, 80, 80, 80], 300); f.cell.offsetHeight = 0; fit(f);
+  assert.deepStrictEqual([f.shown(), f.more.cls.has('fit-hidden')], [5, true], 'no layout (a hidden table): as drawn');
+  const g = fakeGenreCell([80, 80, 80, 80, 80], 300); app.ctx.document.activeElement = g.pills[4]; fit(g);
+  assert.strictEqual(g.focused.el, g.more, 'focus moves from a hidden pill to +N');
+});
+
+test('a game with no release line says why across Platform and Release; the Library’s filter and order summaries share one line', async () => {
+  const app = await bootWith({ entries: [entry(1, 150), entry(2, 140)] }); // (a Switch game on a PS5-only member: hidden; 140 shows)
+  await openGames(app);
+  assert.match(screen(app), /<div class="games-summary"><div class="filter-chips" id="gFilterChips"><span class="filter-default">Status: All except Finished and Skipped<\/span><\/div><div id="sortLine" class="sort-line-box">/);
+  const app2 = await bootWith({ entries: [entry(1, 999)] }); // (no IGDB details)
+  await openGames(app2);
+  assert.match(rowOf(app2, ID('61000000', 1)), /<td class="game-plat-cell" colspan="2"><span class="muted">Details not loaded yet: use Refresh<\/span><\/td>\s*<td class="game-status-cell">/);
 });
 
 test('the Library toolbar is TV’s: Search, Filters (Genre, Status) with its count and chips, Sort, + Add game; a pill filters and keeps focus', async () => {
@@ -1070,7 +1122,7 @@ async function orderApp(o = {}) {
 }
 const cleanOrderRaw = () => Object.keys(ORDER_RAW).forEach(k => { delete RAW[k]; });
 const E = k => ID('61000000', k);
-const heads = app => [...tableOf(app).matchAll(/<tr class="game-group-head" data-group="[^"]+"><td colspan="4"><span class="game-group-name" role="heading" aria-level="3">([^<]+)</g)].map(m => m[1]);
+const heads = app => [...tableOf(app).matchAll(/<tr class="game-group-head" data-group="[^"]+"><td colspan="5"><span class="game-group-name" role="heading" aria-level="3">([^<]+)</g)].map(m => m[1]);
 
 test('Franchise / release order: franchises and standalone games A to Z; whole spots by their original’s date, title and id (unknown last), the original then its remasters and remakes; headings over two or more', async () => {
   try {
@@ -1087,9 +1139,9 @@ test('Franchise / release order: franchises and standalone games A to Z; whole s
 });
 
 // The table and the cards as a sequence: H:<heading>, | (a franchise's end) or a game's entry number.
-const boundsOf = (html, row, end) => [...html.matchAll(new RegExp(`<${row} class="game-group-head"[^>]*><(?:td colspan="4"><)?span class="game-group-name"[^>]*>([^<]+)<|<${row} class="game-group-end" aria-hidden="true">${end}|<${row} class="(?:game-row|item-card game-card)[^"]*" data-game="([^"]+)"`, 'g'))]
+const boundsOf = (html, row, end) => [...html.matchAll(new RegExp(`<${row} class="game-group-head"[^>]*><(?:td colspan="5"><)?span class="game-group-name"[^>]*>([^<]+)<|<${row} class="game-group-end" aria-hidden="true">${end}|<${row} class="(?:game-row|item-card game-card)[^"]*" data-game="([^"]+)"`, 'g'))]
   .map(m => m[1] ? `H:${m[1]}` : m[2] ? Number(m[2].slice(-12)) : '|');
-const rowBounds = app => boundsOf(tableOf(app), 'tr', '<td colspan="4"></td></tr>');
+const rowBounds = app => boundsOf(tableOf(app), 'tr', '<td colspan="5"></td></tr>');
 const cardBounds = app => boundsOf(screen(app).split('</tbody>')[1], 'div', '</div>');
 
 test('franchise boundaries: a divider where a headed franchise ends and games without a heading follow, nowhere else (a heading marks the rest); the same in the cards; redrawn as filters change; none under an explicit sort', async () => {
