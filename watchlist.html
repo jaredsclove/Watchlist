@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261112-firstep">
+<link rel="stylesheet" href="styles.css?v=20261112-gamesdefault">
 </head>
 <body>
 
@@ -107,39 +107,39 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261112-firstep"></script>
-<script src="api.js?v=20261112-firstep"></script>
-<script src="write-lane.js?v=20261112-firstep"></script>
-<script src="ui-helpers.js?v=20261112-firstep"></script>
-<script src="metadata.js?v=20261112-firstep"></script>
-<script src="backup-restore.js?v=20261112-firstep"></script>
-<script src="tabs.js?v=20261112-firstep"></script>
-<script src="render.js?v=20261112-firstep"></script>
-<script src="row-actions.js?v=20261112-firstep"></script>
-<script src="tmdb-search.js?v=20261112-firstep"></script>
-<script src="collections-pull.js?v=20261112-firstep"></script>
-<script src="universe-pull.js?v=20261112-firstep"></script>
-<script src="person-pull.js?v=20261112-firstep"></script>
-<script src="tmdb-match.js?v=20261112-firstep"></script>
-<script src="derived-views.js?v=20261112-firstep"></script>
-<script src="tv-shows.js?v=20261112-firstep"></script>
-<script src="episodes.js?v=20261112-firstep"></script>
-<script src="show-ratings.js?v=20261112-firstep"></script>
-<script src="tmdb-cache.js?v=20261112-firstep"></script>
-<script src="organization.js?v=20261112-firstep"></script>
-<script src="organization-manage.js?v=20261112-firstep"></script>
-<script src="collection-members.js?v=20261112-firstep"></script>
-<script src="collection-updates.js?v=20261112-firstep"></script>
-<script src="collection-research.js?v=20261112-firstep"></script>
-<script src="collection-settings.js?v=20261112-firstep"></script>
-<script src="browse-views.js?v=20261112-firstep"></script>
-<script src="view-sort.js?v=20261112-firstep"></script>
-<script src="queues.js?v=20261112-firstep"></script>
-<script src="games-data.js?v=20261112-firstep"></script>
-<script src="games.js?v=20261112-firstep"></script>
-<script src="games-research.js?v=20261112-firstep"></script>
-<script src="history.js?v=20261112-firstep"></script>
-<script src="library.js?v=20261112-firstep"></script>
+<script src="auth.js?v=20261112-gamesdefault"></script>
+<script src="api.js?v=20261112-gamesdefault"></script>
+<script src="write-lane.js?v=20261112-gamesdefault"></script>
+<script src="ui-helpers.js?v=20261112-gamesdefault"></script>
+<script src="metadata.js?v=20261112-gamesdefault"></script>
+<script src="backup-restore.js?v=20261112-gamesdefault"></script>
+<script src="tabs.js?v=20261112-gamesdefault"></script>
+<script src="render.js?v=20261112-gamesdefault"></script>
+<script src="row-actions.js?v=20261112-gamesdefault"></script>
+<script src="tmdb-search.js?v=20261112-gamesdefault"></script>
+<script src="collections-pull.js?v=20261112-gamesdefault"></script>
+<script src="universe-pull.js?v=20261112-gamesdefault"></script>
+<script src="person-pull.js?v=20261112-gamesdefault"></script>
+<script src="tmdb-match.js?v=20261112-gamesdefault"></script>
+<script src="derived-views.js?v=20261112-gamesdefault"></script>
+<script src="tv-shows.js?v=20261112-gamesdefault"></script>
+<script src="episodes.js?v=20261112-gamesdefault"></script>
+<script src="show-ratings.js?v=20261112-gamesdefault"></script>
+<script src="tmdb-cache.js?v=20261112-gamesdefault"></script>
+<script src="organization.js?v=20261112-gamesdefault"></script>
+<script src="organization-manage.js?v=20261112-gamesdefault"></script>
+<script src="collection-members.js?v=20261112-gamesdefault"></script>
+<script src="collection-updates.js?v=20261112-gamesdefault"></script>
+<script src="collection-research.js?v=20261112-gamesdefault"></script>
+<script src="collection-settings.js?v=20261112-gamesdefault"></script>
+<script src="browse-views.js?v=20261112-gamesdefault"></script>
+<script src="view-sort.js?v=20261112-gamesdefault"></script>
+<script src="queues.js?v=20261112-gamesdefault"></script>
+<script src="games-data.js?v=20261112-gamesdefault"></script>
+<script src="games.js?v=20261112-gamesdefault"></script>
+<script src="games-research.js?v=20261112-gamesdefault"></script>
+<script src="history.js?v=20261112-gamesdefault"></script>
+<script src="library.js?v=20261112-gamesdefault"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -264,7 +264,7 @@ let queueAddSeq = 0; // Q1: bumped each time the Add to queue dialog opens
 let pendingReveal = null; // Q1: { viewId, item, season }: the queued item to focus once that view is drawn (queues.js openQueueEntry)
 let gamesData = null; // G1: the Games area's read: { loaded, settings, entries, follows, decisions (Map), decisionRows, collections, members, cache (Map igdb id → record) } (games.js); null until read
 let gamesLoadSeq = 0; // G1: lets a late Games read see that it's been superseded
-let gamesFilters = { search: '', genre: '', status: 'notskipped' }; // G1: the Library's filters (page memory)
+let gamesFilters = { search: '', genre: '', status: 'unfinished' }; // G1: the Library's filters (page memory); status default GAMES_STATUS_DEFAULT (games.js)
 let gamesFiltersOpen = false; // the Library's Filters panel (page memory, as TV's)
 let gamesExpanded = new Set(); // G1: followed franchises (follow ids) shown expanded (page memory)
 let gamesFocusIntent = null; // G1: where focus goes after the next Games redraw; null: the list's rule
