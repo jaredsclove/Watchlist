@@ -350,6 +350,9 @@ test('Add to queue, a queue drag, Match, a restore preview, a games dialog or th
     app.run(clear);
   }
   assert.strictEqual(app.run('tmdbPageIdle()'), true);
+  // A games Details or Review dialog opened once (its opener is kept after it closes) doesn't hold saves back afterwards.
+  app.run('gamesDetailsOpener = {}; gamesReviewOpener = {}');
+  assert.strictEqual(app.run('tmdbPageIdle()'), true, 'outside Games, a closed games dialog doesn’t count');
 });
 
 test('a 429 without a readable Retry-After counts as a long wait: deferred to a later read, never retried sooner', async () => {

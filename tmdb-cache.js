@@ -250,7 +250,7 @@ async function tmdbFetchBatch(q, keys) {
 function tmdbPageIdle() {
   if (writeLane || listRereading) return false;
   if (manage || cuModal || addPicker || libraryPanel || detailsDialog || resumePickerFor || queueAdd || queueDrag || pendingRestoreData
-    || gamesAdd || gamesCollectionAdd || gamesCollectionEdit || gamesDetailsOpener || gamesReviewOpener || gamesDialogOpener
+    || gamesAdd || gamesCollectionAdd || gamesCollectionEdit || gamesDialogOpener // (Details and Review are open only in Games, below)
     || (typeof window !== 'undefined' && window.__tmdbMatch)) return false;
   if (typeof isGamesView === 'function' && isGamesView()) return false; // (nothing of the cache is shown there; saved after leaving)
   const a = typeof document !== 'undefined' ? document.activeElement : null;
