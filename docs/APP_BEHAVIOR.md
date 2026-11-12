@@ -192,13 +192,13 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   (Currently Watching's In progress and Caught up; Coming Soon within each month, months in date order and TBA last; a
   collection's TV and Movies, or All media); filters still decide what is listed and counts are unchanged. Unknown
   values go last in either direction: no date, TBA, no rating shown, or a field the item doesn't have (a film has no
-  rating or up-next season). Series premiere is TMDB's first-air date from the per-device show cache (`show-ratings.js`,
-  "f"), never a stored season's date: it fills from the show details the page already reads, so Refresh shows can fill
-  dates for the shows it checks, and expanding a show reads its details when its entry is missing, old or has no date
-  (a read without a date keeps it unknown until the entry is old). Sorting itself never fetches or writes. Next
+  rating or up-next season). Series premiere is TMDB's first-air date from the member's TMDB cache (TC1, below; `show-ratings.js`,
+  "f"), never a stored season's date: it fills from the show details the page reads (the background queue reads every
+  TMDB-matched show missing or a week old; Refresh shows and expanding a show fill it too; a read without a date keeps it
+  unknown until the entry is old). Sorting itself never fetches or writes. Next
   unwatched season premiere is the date of the season the row's Up next / Next names (an active earlier-seasons range
   first; skipped seasons passed over; TBA or nothing left is unknown). Rating is the rounded score the row shows; with a
-  rating field active and a listed show unrated, the line says "Some shows have no rating on this device." Status
+  rating field active and a listed show unrated, the line says "Some shows have no TMDB rating yet." Status
   groups: Watching → To Watch → Watched → Skipped (a Skipped film marked watched is Skipped); Priority High first. Rows
   are sorted at every redraw, so a row can move after a change (focus follows the item). Each view's sort is page memory
   while Watchlist is open; with Settings' "Remember each view’s sort when I reopen Watchlist" on (the default) it is also
@@ -261,13 +261,12 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   it (marks only the unmarked episodes up to N; starts on the first unmarked, keeps the choice). Titles are hidden
   behind a Show title button per episode unless Settings' "Show episode titles by default" is on (per account,
   this browser only; a choice that can't be saved holds for the open page). A season with
-  marks reads "N/T episodes watched" (T from a per-device cache of the list; "N episodes marked" when unknown). An expanded
+  marks reads "N/T episodes watched" (T from the member's TMDB cache of the list, TC1 below; "N episodes marked" when unknown, with
+  "· loading the episode list" while the background queue is still reading it, or "· episode list unavailable for now"). An expanded
   season shows the season, that progress and Episodes on one line, with the next-unwatched text on a smaller line below.
   After that progress (EP3), "Next unwatched: E6" names the first listed episode without a mark, with " — Title" only
-  while titles are shown by default; it comes from the open list or the per-device cache and is hidden when the list is
-  unknown, empty or fully marked, or the season is watched or skipped. That cache (replaceable device storage, not
-  library data or backups) holds each list's episode ids and, since EP3, numbers and titles; a list cached before EP3
-  has ids only, so its line appears after the list is opened once. On an expanded season's row and phone card (not the
+  while titles are shown by default; it comes from the open list or the cached list and is hidden when the list is
+  unknown, empty or fully marked, or the season is watched or skipped. On an expanded season's row and phone card (not the
   flat Seasons lists or Coming Soon), the line ends with a "Mark E6 watched" button (EP4): the same one-episode change as
   that episode's checkbox, without opening the list; it marks only the episode it names (sends nothing if another is
   next by then), ignores a held key's repeats and, for a second after a mark settles, further clicks on that season's
@@ -279,14 +278,37 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   its explanation on a line below, PR #21) in show rows and cards (Currently Watching, All TV, collections) as the
   number alone, slightly smaller than the title, "8.2" ("8.2*" under 100 votes), coloured by
   the rounded score (8.0+, 7.0–7.9, below 7.0); blank under 10 votes or without a score or count. Tap or keyboard
-  focus shows "TMDB: 8.2 out of 10 · N votes" (also the accessible label). Scores are a per-device, per-account cache
-  (`show-ratings.js`; not library data or backups), filled from show details other paths read (Refresh shows, Add
-  season, a TMDB preview, Match) and by one read when a show is expanded whose score is missing or over 7 days old;
-  views never fetch to display. Settings ends with Credits (TMDB's logo and notice). Season and episode scores aren't
+  focus shows "TMDB: 8.2 out of 10 · N votes" (also the accessible label). Scores are in the member's TMDB cache (TC1,
+  below), filled by the background queue, from show details other paths read (Refresh shows, Add season, Match; a
+  preview of a show not in the library stays on that page) and by one read when a show is expanded whose score is
+  missing or over 7 days old; drawing a view never fetches.
+- **The member's TMDB cache across devices (TC1, `tmdb-cache.js`, `db/tc1_tmdb_cache.sql`):** episode lists, show scores
+  and first-air dates are kept in one private table per member (`public.tmdb_tv_cache`, the member's rows only), so
+  every device of the member shows the same progress, next episode, Mark E6 watched, ratings and Series premiere sorting
+  without reading TMDB itself. It is the provider's data: replaceable, never in a backup, untouched by a restore (rows
+  are keyed by TMDB show id and season number, not by library rows, so they stay right for restored seasons), never
+  changing a mark, Watched or Skipped. Each view's read brings the cache with the rows and marks; a failed cache read
+  leaves what the page holds. While the page is open a background queue reads what is missing or old: lists of seasons
+  with marks (in progress: a day; Watched: 30 days) and every TMDB-matched show (a week), 20 TMDB requests a batch, four
+  at a time; two tries per item per page load (the second at least 30 seconds later), no retry after a 404, TMDB's
+  Retry-After waited for in full (over a minute, or unreadable, which counts as two minutes: the queue stops until a later
+  read after that time), and it stops for the load after three such pauses, five failures in a row or two failed saves; a
+  batch the database refuses isn't sent again. A list too long for a row (several hundred episodes) is saved without its
+  titles, or kept on that page only if still too long. Readings show at once from page memory
+  and are saved in batches of up to 40 through the write lane ("The TMDB update", busy state shown; a change attempted
+  meanwhile is refused as usual) followed by the reread, only while the page is idle (no click, tap, key or scroll for
+  three seconds, no text box focused, no dialog, picker, queue drag or restore preview open, not in Games). A save names the revision the page held before its TMDB request
+  started; the database writes it only if that is still the stored revision (revisions are never reused), so a slower
+  page or device can't replace a newer row, and the page adopts what is stored. An unknown outcome of a cache save leaves
+  no pending-write warning. Rows older than 150 days are ignored by the page and deleted daily by a Cron job (TMDB's API
+  terms forbid caching for more than six months); while a Free project is paused nothing runs, so during a long pause
+  rows can outlive that deadline until the first run after resuming deletes them. The page opened after TC1 removes the
+  signed-in member's old per-device caches (`watchlist-episode-lists`, `watchlist-tmdb-show-ratings`); a page opened
+  before it keeps using its own copy until reloaded. Settings ends with Credits (TMDB's logo and notice). Season and episode scores aren't
   shown.
 - **Collection updates (item 4, CU1; design `docs/ITEM4_DESIGN.md`):** TV → + Add → Refresh shows checks every show
-  with TMDB (Skipped shows only when followed): new seasons, guarded dates, later matching and per-device episode
-  lists, which refresh by airing lifecycle (a season counts as finished on TMDB's Ended/Canceled status, an aired
+  with TMDB (Skipped shows only when followed): new seasons, guarded dates, later matching and episode
+  lists (the member's TMDB cache), which refresh by airing lifecycle (a season counts as finished on TMDB's Ended/Canceled status, an aired
   finale, or a later regular season having started; a finished season is read again only without a cached list or
   when its count changes; opening a list always reads fresh). Announcements come from a research brief (Settings →
   Collection updates) researched with the private `/refresh-catalogs` skill; its findings file is imported, checked

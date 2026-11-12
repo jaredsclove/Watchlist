@@ -3,7 +3,7 @@
 Migrations run as `postgres` in the Supabase SQL Editor, and every production step needs explicit approval and a validated backup first. The
 release tiers are in `docs/STATE.md`. What each script did when it ran, and the older rehearsals: `docs/history/DB_SCRIPTS.md`.
 
-**Current production state:** phase `contracted-g1`, backup format 9, `access = members`, through CU1e, W1's removal, the simplification, Q1 and G1 (2026-11-10), with the `igdb` Edge Function deployed. The recovery
+**Current production state:** phase `contracted-g1`, backup format 9, `access = members`, through CU1e, W1's removal, the simplification, Q1, G1 (2026-11-10) and TC1 (the TMDB cache, 2026-11-12; capability `tc1`), with the `igdb` Edge Function deployed and the pg_cron extension enabled for TC1's expiry job. The recovery
 archive is retired, exported privately first. There is no schema rollback, and none of the old rollback scripts can run against this state: repairs are fix-forward, and
 data recovery is a format-9 restore through the page or `docs/ADMIN_RESTORE.md`.
 
@@ -26,6 +26,8 @@ To rebuild a local database, the order is the replay in `tools/db-rehearsal-cu1e
 
 | G1 | `g1_games.sql` (`watchlist.g1_run`): the six game tables and the IGDB cache, their functions, `queue_entries.game_entry_id` (exactly one of a show, a library row or a game), `library_queue_add_game` and `library_queue_set_order` (a whole queue's order in one guarded write), completion (a game set to Finished leaves every queue), `restore_backup` at format 9, phase `contracted-g1`. Every existing row is fingerprinted unchanged. Local tests: `tools/g1-test.mjs`, `tools/g1-local-api-test.mjs`; the restore suite applies it after Q1. Lock order: a game entry's row, then the member's games lock (`private.g1_lock`) or the queue lock |
 
+| TC1 | `tc1_tmdb_cache.sql` (`watchlist.tc1_run`; needs the pg_cron extension enabled first, Dashboard → Integrations → Cron): `public.tmdb_tv_cache`, each member's TMDB show details and season episode lists (owner-only, function-only writes, never in a backup, untouched by restore); `library_tmdb_cache_put` (a row written only when the stored revision is the one the page sent; revisions from `private.tmdb_cache_rev`, never reused) and `library_tmdb_cache_purge`; `private.tmdb_cache_expire` and the daily Cron job `watchlist-tmdb-cache-expiry`, which deletes rows of this table older than 150 days and nothing else. Phase and backup format unchanged (capability `tc1: 1`). Every existing row is fingerprinted unchanged. Local runs load `test/pg_cron_shim.sql` first (jobs recorded, never run). Local tests: `tools/tc1-test.mjs`; the restore suite applies it after G1 |
+
 The `igdb` Edge Function (`supabase/functions/igdb`, deployed with `verify_jwt = false`, `supabase/config.toml`) is the page's only route to IGDB; its secrets `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` are set in the dashboard by the owner. It checks membership itself through `rpc/stage5_capabilities` with the caller's token. Since game length was removed (2026-11-10) it no longer reads time to beat; a `game_time_to_beats` query from a page opened before that is answered with an empty list (temporary). Offline: `tests/igdb-proxy.test.mjs`; on a local stack: `tools/g1-local-api-test.mjs`. `tools/igdb-feasibility.mjs` runs read-only IGDB requests from this machine with a credential file kept outside the repo.
 
 The local replays leave out W1 and its removal: the removal's test showed the catalog afterwards equals the one before W1, so together they add nothing to the state a replay needs.
@@ -46,11 +48,12 @@ ended; never rerun to find out); explicit revokes from `anon`, verified before c
 
 ## Tests
 
-`test/` is for local runs only: `replica_schema.sql`, `supabase_shim.sql`, `m1_test_marker.sql` and the test-only reverse scripts that `tools/db-rehearsal-cu1.mjs` runs. Older rehearsals and self-checks are in git history (`docs/history/DB_SCRIPTS.md` describes them).
+`test/` is for local runs only: `replica_schema.sql`, `supabase_shim.sql`, `pg_cron_shim.sql`, `m1_test_marker.sql` and the test-only reverse scripts that `tools/db-rehearsal-cu1.mjs` runs. Older rehearsals and self-checks are in git history (`docs/history/DB_SCRIPTS.md` describes them).
 
 Local tools:
 - `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/q1-test.mjs`: Q1 (queues) on PGlite, and simultaneous saves on real PostgreSQL with `PG_BIN`.
 - `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/g1-test.mjs`: G1 (games) on PGlite, and simultaneous saves on real PostgreSQL with `PG_BIN`.
+- `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/tc1-test.mjs`: TC1 (the TMDB cache) on PGlite: writes against the revision the page saw, a row deleted and made again, validation, isolation, the purge, the expiry and restore leaving the cache alone; two simultaneous writes on real PostgreSQL with `PG_BIN`.
 - `LOCAL_SERVICE_KEY=<key> node tools/g1-local-api-test.mjs --api http://127.0.0.1:54321 --key <key> --container <db container> --project <a folder under $HOME with the stack's supabase/config.toml>`: G1 through real Auth, PostgREST and the Edge Function runtime (a fake IGDB; Colima mounts only the home folder, so the function's folder must be there).
 - `LOCAL_SERVICE_KEY=<key> node tools/q1-local-api-test.mjs --api http://127.0.0.1:54321 --key <key> --container <db container>`: Q1 through real Auth and PostgREST on a fresh local stack.
 - `PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/restore-test.mjs`: the restore suite. Without `PG_BIN` it skips the concurrency and timing checks on real PostgreSQL, with a notice.
