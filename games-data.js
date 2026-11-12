@@ -32,7 +32,8 @@ const IGDB_REGIONS = { 1: 'Europe', 2: 'North America', 3: 'Australia', 4: 'New 
 const IGDB_MEMBERSHIP = { 1: 'member', 2: 'spinoff' };
 // Shorter labels for IGDB genre names too long for a pill (display only: records keep IGDB's name; the genre filter and
 // colours use the label).
-const GAME_GENRE_LABELS = { "Hack and slash/Beat 'em up": 'Hack and slash' };
+const GAME_GENRE_LABELS = { "Hack and slash/Beat 'em up": 'Hack and slash', 'Turn-based strategy (TBS)': 'Turn-based strategy',
+  'Real Time Strategy (RTS)': 'Real-time strategy', 'Role-playing (RPG)': 'RPG', 'Card & Board Game': 'Card & board' };
 const gameGenreLabel = name => GAME_GENRE_LABELS[name] || name;
 const IGDB_GAME_STATUS = { 0: 'released', 2: 'alpha', 3: 'beta', 4: 'early', 5: 'offline', 6: 'cancelled', 7: 'rumored', 8: 'delisted' };
 const GAME_SKIP_TYPES = ['dlc', 'expansion', 'bundle', 'mod', 'episode', 'season', 'fork', 'pack', 'update'];
