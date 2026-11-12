@@ -238,17 +238,20 @@ async function markSeasonFromRow(seasonId) {
 
 // ── The show row's target (EP5) ──
 // What a show row is about: its up-next season, as chosen before (Earlier seasons included; marks never
-// choose it). For a row that offers an action (Watching, not up to date, the season aired) on a season with
-// marks, its episodes too. kind: 'episode' (the next unwatched is known), 'listed' (every listed episode is
-// marked; no row action), 'marked' (marks, but no numbered list known yet: the season with honest
-// progress), else 'season' (the row as before). The row's Up next, action and progress, and the expanded row
-// of the season it represents, all read this.
+// choose it). For a row that offers an action (Watching, not up to date, the season aired) on a TMDB-matched
+// season, its episodes too, once its episode list is known, marked or not. kind: 'episode' (the next unwatched
+// is known, E1 included for a season with no marks), 'listed' (every listed episode is marked; no row action),
+// 'marked' (marks, but no numbered list known yet: the season with honest progress), else 'season' (the row as
+// before: no list known and no marks, an empty list, or no action). The row's Up next, action and progress, and
+// the expanded row of the season it represents, all read this.
 function showTarget(item) {
   const { show, upNext } = item;
   const actionable = !!upNext && !item.upToDate && show.status === 'watching' && !!item.upNextReleased && !upNext.watched && !upNext.skipped;
-  if (!actionable || !isEpisodeTrackable(upNext) || !episodeMarkCount(upNext.id)) return { season: upNext || null, kind: 'season', actionable };
-  const progress = episodeProgress(upNext), eps = knownEpisodeList(upNext);
-  if (!eps || !eps.length) return { season: upNext, kind: 'marked', actionable, progress };
+  if (!actionable || !isEpisodeTrackable(upNext)) return { season: upNext || null, kind: 'season', actionable };
+  const marked = episodeMarkCount(upNext.id), eps = knownEpisodeList(upNext);
+  if (!eps || !eps.length) return marked ? { season: upNext, kind: 'marked', actionable, progress: episodeProgress(upNext) } : { season: upNext || null, kind: 'season', actionable };
+  // No marks yet: "0/T episodes watched" against the known list (no bar at 0%).
+  const progress = marked ? episodeProgress(upNext) : { text: `0/${eps.length} episodes watched`, pct: 0 };
   const next = nextUnwatchedEpisode(upNext);
   return { season: upNext, kind: next ? 'episode' : 'listed', actionable, progress, next };
 }

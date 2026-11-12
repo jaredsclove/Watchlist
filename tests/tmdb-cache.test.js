@@ -369,4 +369,22 @@ test('a 429 without a readable Retry-After counts as a long wait: deferred to a 
   assert.ok(at.length === 2 && at[1] >= 120000);
 });
 
+test('a Watching show’s up-next season with no marks is read too, so its row offers Mark E1 watched without opening Episodes; later seasons aren’t', async () => {
+  const lib = library();
+  lib.sev.status = 'watching';
+  const { app } = await boot({ lib, marks: l => [mark(l.s1, 8001, 1)] });
+  assert.ok(tmdbReads(app).includes('/tv/95396/season/2'), 'the up-next season’s list is read');
+  assert.ok(!tmdbReads(app).includes('/tv/95396/season/3'), 'not a later season');
+  assert.ok(rowOf(app, 'season', 95396, 2), 'and saved for the member’s other devices');
+  const row = (app.el('tbody').innerHTML.match(new RegExp(`<tr[^>]*data-show-row="${lib.sev.id}"[\\s\\S]*?</tr>`)) || [''])[0];
+  assert.match(text(row), /Season 2 · Episode 1/);
+  assert.match(row, />Mark E1 watched</);
+  assert.match(text(row), /S2 · 0\/3 episodes watched/);
+  assert.deepStrictEqual(libraryWrites(app), [], 'no mark, no Watched');
+  const phone = await boot({ lib: (() => { const l = library(); l.sev.status = 'watching'; return l; })(), marks: l => [mark(l.s1, 8001, 1)],
+    cache: clone(app.store.tmdb_tv_cache), hook: () => { throw new Error('TMDB should not be read'); } });
+  assert.deepStrictEqual(tmdbReads(phone.app), []);
+  assert.match(html(phone.app), />Mark E1 watched</, 'another device shows it from the shared cache');
+});
+
 T.run();
