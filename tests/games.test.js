@@ -233,7 +233,7 @@ test('the Library toolbar is TV’s: Search, Filters (Genre, Status) with its co
   assert.match(bar(), /<div class="list-toolbar games-toolbar"><div class="filters"><div class="filter-line">/);
   assert.match(bar(), /id="gFiltersBtn" aria-expanded="false" aria-controls="gFilters"[^>]*>Filters <span aria-hidden="true">▾<\/span>/);
   assert.match(bar(), /id="gFilters" role="group" aria-label="Filters"[^>]*hidden>/, 'the panel starts closed');
-  assert.match(bar(), /<span class="filter-default">Status: All except Skipped<\/span>/);
+  assert.match(bar(), /<span class="filter-default">Status: All except Finished and Skipped<\/span>/);
   assert.match(bar(), /<p class="count-line" id="gamesCount">2 of 3 games<\/p>/, 'as TV: shown of listed');
   app.ctx.toggleGamesFilters();
   assert.match(bar(), /id="gFiltersBtn" aria-expanded="true"/);
@@ -653,6 +653,67 @@ test('focus: a status change keeps focus on that game’s status select; a delet
   assert.deepStrictEqual([b.closest('[data-game]').getAttribute('data-game'), b.getAttribute('data-gaction')], [ids[2], 'more'], 'the next game’s ⋯');
 });
 
+test('the Library’s default status filter is All except Finished and Skipped: Want to play, Playing and Paused; the other filters still reach the rest; Clear and the chip return to it', async () => {
+  const st = ['want', 'playing', 'paused', 'finished', 'skipped'];
+  const app = await bootWith({ entries: st.map((s, i) => entry(i + 1, [102, 140, 180, 110, 120][i], { status: s })) });
+  await openGames(app);
+  const E = k => ID('61000000', k), shown = () => libraryOrder(app).slice().sort();
+  const bar = () => screen(app).split('<table')[0];
+  assert.deepStrictEqual(shown(), [1, 2, 3].map(E).sort(), 'Want to play, Playing and Paused; not Finished or Skipped');
+  assert.strictEqual(app.get('gamesFilters.status'), 'unfinished');
+  assert.match(bar(), /<span class="filter-default">Status: All except Finished and Skipped<\/span>/);
+  assert.match(bar(), /<p class="count-line" id="gamesCount">3 of 5 games<\/p>/);
+  assert.doesNotMatch(bar(), /id="gchip-status"/, 'the default is no chip');
+  assert.deepStrictEqual([...bar().matchAll(/<option value="([a-z]+)"[^>]*>([^<]+)<\/option>/g)].filter(m => !/Any genre/.test(m[2])).map(m => [m[1], m[2]]),
+    [['unfinished', 'All except Finished and Skipped'], ['notskipped', 'All except Skipped'], ['all', 'All'], ['want', 'Want to play'], ['playing', 'Playing'], ['paused', 'Paused'], ['finished', 'Finished'], ['skipped', 'Skipped']]);
+  assert.match(bar(), /<option value="unfinished" selected>/);
+  // Explicit choices behave as before.
+  app.ctx.setGamesFilter('status', 'notskipped');
+  assert.deepStrictEqual(shown(), [1, 2, 3, 4].map(E).sort(), 'All except Skipped lists Finished');
+  assert.match(bar(), /id="gchip-status"[^>]*>.*All except Skipped/, 'a choice other than the default is a chip');
+  app.ctx.setGamesFilter('status', 'all');
+  assert.deepStrictEqual(shown(), [1, 2, 3, 4, 5].map(E).sort());
+  app.ctx.setGamesFilter('status', 'finished');
+  assert.deepStrictEqual(shown(), [E(4)]);
+  app.ctx.setGamesFilter('status', 'skipped');
+  assert.deepStrictEqual(shown(), [E(5)]);
+  app.ctx.removeGamesFilter('status');
+  assert.strictEqual(app.get('gamesFilters.status'), 'unfinished', 'removing the chip returns to the default');
+  app.ctx.setGamesFilter('status', 'all'); app.ctx.clearGamesFilters();
+  assert.strictEqual(app.get('gamesFilters.status'), 'unfinished', 'Clear filters returns to the default');
+  assert.deepStrictEqual(app.writes().filter(r => !/functions\/v1\/igdb/.test(r.url) && r.method !== 'GET').map(r => r.url), [], 'filtering writes nothing');
+  assert.deepStrictEqual(app.store.game_entries.map(e => e.status), st, 'visibility only');
+});
+
+test('under the default, a game set to Finished or Skipped leaves the list once saved; focus goes to the next game’s ⋯, else the previous one’s, else the empty note; a refused change keeps it', async () => {
+  const app = await bootWith({ entries: [entry(1, 102), entry(2, 140), entry(3, 180)] });
+  await openGames(app);
+  const ids = libraryOrder(app);
+  const at = () => { const a = app.dom.active(); const r = a.closest('[data-game]'); return [r ? r.getAttribute('data-game') : a.getAttribute('data-games-empty') ? 'empty' : a.id, a.getAttribute('data-gaction')]; };
+  app.dom.focus('gamesScreen', `[data-game="${ids[0]}"] [data-gaction="status"]`);
+  await app.ctx.setGameStatus(ids[0], 'finished'); await settle();
+  assert.deepStrictEqual(libraryOrder(app), ids.slice(1), 'Finished: gone after the save');
+  assert.deepStrictEqual(at(), [ids[1], 'more'], 'the next game’s ⋯');
+  assert.strictEqual(app.store.game_entries.find(e => e.id === ids[0]).status, 'finished', 'saved');
+  app.dom.focus('gamesScreen', `[data-game="${ids[2]}"] [data-gaction="status"]`);
+  await app.ctx.setGameStatus(ids[2], 'skipped'); await settle();
+  assert.deepStrictEqual(libraryOrder(app), [ids[1]], 'Skipped: gone');
+  assert.deepStrictEqual(at(), [ids[1], 'more'], 'the last game: the previous game’s ⋯');
+  // Changed on another device: the guarded change is refused and read again; the game stays, with the saved status.
+  app.store.game_entries.find(e => e.id === ids[1]).status = 'paused';
+  app.dom.focus('gamesScreen', `[data-game="${ids[1]}"] [data-gaction="status"]`);
+  await app.ctx.setGameStatus(ids[1], 'finished'); await settle();
+  assert.strictEqual(app.store.game_entries.find(e => e.id === ids[1]).status, 'paused', 'nothing saved');
+  assert.deepStrictEqual(libraryOrder(app), [ids[1]], 'still listed after the refusal and reread');
+  app.dom.focus('gamesScreen', `[data-game="${ids[1]}"] [data-gaction="status"]`);
+  await app.ctx.setGameStatus(ids[1], 'finished'); await settle();
+  assert.deepStrictEqual(libraryOrder(app), [], 'the last one gone');
+  assert.match(screen(app), /No games match these filters\./);
+  assert.strictEqual(app.dom.active().getAttribute('data-games-empty'), '1', 'focus on the empty note');
+  app.ctx.setGamesFilter('status', 'all');
+  assert.deepStrictEqual(libraryOrder(app).slice().sort(), ids.slice().sort(), 'all three still reachable');
+});
+
 test('leaving Games for any other view (by route, Back or a button) hides the Games screen; Games hides Queues', async () => {
   const app = await bootWith({ entries: [entry(1, 180)] });
   await openGames(app);
@@ -777,7 +838,7 @@ test('backup → restore with IGDB unavailable: a member’s whole games data co
     assert.deepStrictEqual(pick(dst.store, t, keys), pick(src.store, t, keys), `${t} restored exactly`);
   }
   // Without IGDB details every saved game is still there, by its saved title and status; the queue shows every entry in order.
-  await openGames(dst);
+  await openGames(dst); dst.ctx.setGamesFilter('status', 'all');
   assert.deepStrictEqual(libraryOrder(dst).length, 4, 'all four games listed (nothing hidden without details)');
   assert.match(text(rowOf(dst, entries[2].id)), /★ ZZ War 4 [\s\S]*Details not loaded yet: use Refresh/);
   assert.match(rowOf(dst, entries[2].id), /<option value="finished" selected>/);
@@ -894,7 +955,7 @@ test('a franchise with no platforms chosen lists every version; a saved version 
   const app = await bootWith({ follows: [follow(1, 7001, 'ZZ War')], settings: null });
   await openGames(app, 'gamesfranchises'); app.ctx.toggleFranchise(ID('62000000', 1));
   assert.ok(versionNames(app).includes('ZZ War 4'), 'nothing chosen: everything shows');
-  const restored = await bootWith({ entries: [entry(1, 101, { status: 'finished' })], igdb: null, noCache: true });
+  const restored = await bootWith({ entries: [entry(1, 101, { status: 'paused' })], igdb: null, noCache: true });
   await openGames(restored);
   assert.deepStrictEqual(libraryOrder(restored), [ID('61000000', 1)], 'missing IGDB details never hide a saved game');
 });
@@ -938,7 +999,7 @@ test('a saved version’s status in its franchise row is the Library’s control
 
 test('the Library’s default order (Franchise / release order) doesn’t use status: a status change moves nothing, the same on redraw, reread and Refresh; an explicit sort with its directions applies at once, focus following the moved row', async () => {
   const app = await bootWith({ entries: [entry(1, 102), entry(2, 140), entry(3, 180), entry(4, 110, { priority: 'high' })] });
-  await openGames(app);
+  await openGames(app); app.ctx.setGamesFilter('status', 'notskipped'); // (Finished stays listed)
   const usual = libraryOrder(app);
   assert.deepStrictEqual(usual, [3, 2, 1, 4].map(k => ID('61000000', k)), 'ZZ Astro, ZZ Shooter, then the ZZ War series in release order (priority plays no part)');
   app.dom.focus('gamesScreen', `[data-game="${ID('61000000', 3)}"] [data-gaction="status"]`);
@@ -1092,7 +1153,7 @@ test('filters first: a franchise left with one visible game is an ordinary row; 
   try {
     const app = await orderApp({ status: { 2: 'skipped', 9: 'finished' } });
     const calls = () => app.writes().filter(r => /functions\/v1\/igdb/.test(r.url)).length;
-    await openGames(app);
+    await openGames(app); app.ctx.setGamesFilter('status', 'notskipped'); // (Finished stays listed)
     const before = calls();
     assert.ok(!libraryOrder(app).includes(E(2)), 'Skipped is filtered out first');
     app.ctx.setGamesFilter('genre', 'Racing');

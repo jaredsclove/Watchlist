@@ -111,6 +111,16 @@ function gamesToolbarHtml({ line = '', panel = '', chips = '', sort = false, cou
     ${count ? `<div class="stats-row"><p class="count-line" id="gamesCount">${esc(count)}</p></div>` : ''}</div>`;
 }
 
+// The Library's Status filter: the default (owner, 2026-11-12) lists what is still to play (Want to play, Playing, Paused);
+// the wider groups and each single status stay choosable. Visibility only: statuses, queues and franchises are untouched.
+const GAMES_STATUS_DEFAULT = 'unfinished';
+const GAMES_STATUS_GROUP_LABELS = { unfinished: 'All except Finished and Skipped', notskipped: 'All except Skipped', all: 'All' };
+function gameStatusMatches(status, filter) {
+  if (filter === 'all') return true;
+  if (filter === 'notskipped') return status !== 'skipped';
+  if (filter === 'unfinished') return status !== 'skipped' && status !== 'finished';
+  return status === filter;
+}
 // Library: Search, Filters (genre, status), Sort and the count; then one row per visible game (cards on narrow screens).
 function gamesLibraryHtml(st) {
   const all = gamesData.entries.map(e => gameEntryView(e, st));
@@ -120,9 +130,10 @@ function gamesLibraryHtml(st) {
   const term = normalTitle(f.search);
   const list = shown.filter(v => (!term || normalTitle(v.title).includes(term))
     && (!f.genre || v.genres.includes(f.genre))
-    && (f.status === 'all' ? true : f.status === 'notskipped' ? v.entry.status !== 'skipped' : v.entry.status === f.status));
-  const statusOpts = [['notskipped', 'All except Skipped'], ['all', 'All'], ...Object.entries(GAME_STATUS_LABELS)];
-  const applied = [f.genre ? ['genre', 'Genre', f.genre] : null, f.status !== 'notskipped' ? ['status', 'Status', (statusOpts.find(o => o[0] === f.status) || [])[1] || f.status] : null].filter(Boolean);
+    && gameStatusMatches(v.entry.status, f.status));
+  const statusOpts = [...Object.entries(GAMES_STATUS_GROUP_LABELS), ...Object.entries(GAME_STATUS_LABELS)];
+  const isDefault = f.status === GAMES_STATUS_DEFAULT;
+  const applied = [f.genre ? ['genre', 'Genre', f.genre] : null, !isDefault ? ['status', 'Status', (statusOpts.find(o => o[0] === f.status) || [])[1] || f.status] : null].filter(Boolean);
   const open = gamesFiltersOpen;
   const line = `<label class="visually-hidden" for="gSearch">Search your games</label>
       <input id="gSearch" class="search-input" type="search" placeholder="Search your games" value="${esc(f.search)}" oninput="setGamesFilter('search', this.value)">
@@ -130,10 +141,10 @@ function gamesLibraryHtml(st) {
   const field = (label, id, control) => `<div class="filter-field"><label class="filter-field-label" for="${id}">${esc(label)}</label>${control}</div>`;
   const panel = `<div class="filter-more" id="gFilters" role="group" aria-label="Filters" onkeydown="gamesFiltersKeydown(event)"${open ? '' : ' hidden'}>
       <div class="filter-group" role="group" aria-label="Categories"><span class="filter-group-title" aria-hidden="true">Categories</span>${field('Genre', 'gGenre', `<select id="gGenre"${f.genre ? ' class="filter-set"' : ''} onchange="setGamesFilter('genre', this.value)"><option value="">Any genre</option>${genres.map(g => `<option value="${esc(g)}"${f.genre === g ? ' selected' : ''}>${esc(g)}</option>`).join('')}</select>`)}</div>
-      <div class="filter-group" role="group" aria-label="Your marks"><span class="filter-group-title" aria-hidden="true">Your marks</span>${field('Status', 'gStatus', `<select id="gStatus"${f.status !== 'notskipped' ? ' class="filter-set"' : ''} onchange="setGamesFilter('status', this.value)">${statusOpts.map(([v, l]) => `<option value="${v}"${f.status === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`)}</div>
+      <div class="filter-group" role="group" aria-label="Your marks"><span class="filter-group-title" aria-hidden="true">Your marks</span>${field('Status', 'gStatus', `<select id="gStatus"${!isDefault ? ' class="filter-set"' : ''} onchange="setGamesFilter('status', this.value)">${statusOpts.map(([v, l]) => `<option value="${v}"${f.status === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`)}</div>
     </div>`;
   const chip = ([k, l, t]) => `<button type="button" id="gchip-${k}" class="filter-chip" aria-label="${esc(`Remove filter: ${l}, ${t}`)}" title="${esc(`Remove filter: ${l}, ${t}`)}" onclick="removeGamesFilter('${k}')"><span class="chip-k">${esc(l)}:</span> <span class="chip-v">${esc(t)}</span><span class="chip-x" aria-hidden="true">✕</span></button>`;
-  const chips = `<div class="filter-chips" id="gFilterChips">${f.status === 'notskipped' ? '<span class="filter-default">Status: All except Skipped</span>' : ''}${applied.length
+  const chips = `<div class="filter-chips" id="gFilterChips">${isDefault ? `<span class="filter-default">Status: ${esc(GAMES_STATUS_GROUP_LABELS[GAMES_STATUS_DEFAULT])}</span>` : ''}${applied.length
     ? `<div class="chip-group" role="group" aria-label="Active filters"><span class="chips-label" aria-hidden="true">Active:</span>${applied.map(chip).join('')}</div>` : ''}${applied.length || f.search
     ? '<button type="button" class="btn-link filter-clear" id="gFilterClear" onclick="clearGamesFilters()">Clear filters</button>' : ''}</div>`;
   const count = gamesData.entries.length ? (list.length !== shown.length ? `${list.length} of ${countUnit(shown.length, 'game', 'games')}` : countUnit(list.length, 'game', 'games')) : '';
@@ -298,14 +309,14 @@ function setGamesFilter(key, value) {
   if (id) { const el = document.getElementById(id); if (el && document.activeElement !== el && key === 'search') { el.focus(); el.setSelectionRange && el.setSelectionRange(el.value.length, el.value.length); } }
 }
 function removeGamesFilter(key) {
-  gamesFilters[key] = key === 'status' ? 'notskipped' : '';
+  gamesFilters[key] = key === 'status' ? GAMES_STATUS_DEFAULT : '';
   renderGamesView();
   // Focus: the other chip, else Search (as TV's chips).
   const other = key === 'genre' ? 'gchip-status' : 'gchip-genre';
   focusFilterTarget(document.getElementById(other) ? other : 'gSearch');
 }
 function clearGamesFilters() {
-  gamesFilters = { search: '', genre: '', status: 'notskipped' };
+  gamesFilters = { search: '', genre: '', status: GAMES_STATUS_DEFAULT };
   renderGamesView();
   focusFilterTarget('gSearch');
 }
@@ -466,7 +477,8 @@ function applyGamesFocus(rec) {
     for (const r of rec.next.concat(rec.prev)) { if (usable(el)) break; el = inRow(r, '[data-gaction="more"], [data-gaction="expand"]'); }
   } else if (rec.id) el = document.getElementById(rec.id);
   else if (rec.hook) el = shownOf(`[data-gaction=${q(rec.hook)}]`);
-  if (!usable(el)) el = screen.querySelector('[data-games-empty], #gSearch, #gamesTitle');
+  // Nothing left in the list: the empty note, else Search, else the screen's heading (in that order, not document order).
+  if (!usable(el)) el = ['[data-games-empty]', '#gSearch', '#gamesTitle'].map(sel => screen.querySelector(sel)).find(usable) || null;
   if (!usable(el)) return;
   el.focus();
   if (rec.sel && el.id === rec.id && typeof el.setSelectionRange === 'function') el.setSelectionRange(...rec.sel);

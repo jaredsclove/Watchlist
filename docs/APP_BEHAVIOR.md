@@ -79,7 +79,10 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   +N shows the rest); the platform and release on one line ("PS4 · Playable on PS5 · Oct 10, 2021"; upcoming dates blue with
   TV's Upcoming tag; Date TBA faint; "per IGDB" is screen-reader text and a tooltip, Details lists every release; a hold or Store
   / publisher evidence stays visible); status as TV's quiet select (Want to play, Playing, Paused, Finished, Skipped). Filters:
-  Genre and Status (default All except Skipped). **Franchise / release order** (the default of the Library and of each game
+  Genre and Status: the default is All except Finished and Skipped (Want to play, Playing, Paused; owner, 2026-11-12), then
+  All except Skipped, All and each status; Clear filters and the status chip return to the default, and opening a game from a
+  queue still uses All. Visibility only. A game set to Finished or Skipped under the default leaves the list (as a hidden status
+  always has); focus goes to the next game's ⋯, else the previous one's, else the "No games match" note. **Franchise / release order** (the default of the Library and of each game
   collection; owner, 2026-11-11): after filters and platforms, each saved game sits in one broad franchise (IGDB's
   `franchises`, read from the cache only: the stored spot's record and its parents first, so a relink decides, then the game's own
   record and its parents, since remasters often list none; IGDB's main `franchise` when read, else A to Z then IGDB id; with no
