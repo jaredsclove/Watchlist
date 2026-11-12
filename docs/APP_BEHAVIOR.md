@@ -231,14 +231,18 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   Flat Seasons lists and Coming Soon keep their dates. The column is narrower and wraps, so the action sits beside it.
 - **Episode-aware show rows (EP5):** a show row's Up next, Action and Progress describe one target, its up-next season
   as chosen before (Earlier seasons included; marks never choose it). When the row offers an action (Watching, not up to
-  date, the season aired) and that season has marks: with its next unwatched episode known, "Season 35 · Episode 9" (the
+  date, the season aired) on a TMDB-matched season whose episode list is known, marked or not (since 2026-11-12; a season
+  not started reads "Season 2 · Episode 1", "Mark E1 watched" with TMDB's own first number, and "S2 · 0/10 episodes watched"
+  without a bar; the background queue reads the list of each Watching show's actionable up-next season, so it needs no
+  Episodes opening first): with its next unwatched episode known, "Season 35 · Episode 9" (the
   title below in the same type, while titles are shown by default), "Mark E9 watched" (the same one-episode change,
   ignoring a held key's repeats and, for a second after a row action settles, further presses on that show's row action)
   and "S35 · 8/12 episodes watched" with its bar (episode progress names its season: "S35", or a season's whole name,
   which may wrap); with every listed episode marked, "All listed episodes watched", no row action (the season is
-  completed from its expanded row or its list), focus going to the show's expand button; with no numbered list on this
-  device, the season, Mark S4 watched and the existing episode progress ("N episodes marked", or N/T from a
-  count only while the marks are fewer), a bar only with a known total. Anything else reads as before. While the row shows
+  completed from its expanded row or its list), focus going to the show's expand button; with marks but no numbered list
+  known yet, the season, Mark S4 watched and the existing episode progress ("N episodes marked", or N/T from a
+  count only while the marks are fewer), a bar only with a known total. Without marks and without a known non-empty list,
+  the row keeps the season and Mark S4 watched. Anything else reads as before. While the row shows
   a season's episodes, that season's expanded row has only Episodes, Mark S4 watched and Skip (its premiere is in its
   open list's summary), and the expanded show carries the season progress line; that line leaves the skipped count to
   "Show skipped seasons (N)" (a Skipped show keeps it; an all-skipped show keeps the control's note). Phone cards read Up

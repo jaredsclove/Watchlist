@@ -15,7 +15,8 @@
 // freshness clock), and answers every row with what is stored now, which the page adopts. Revisions are never reused, so a
 // row deleted and made again can't be overwritten by an old response.
 // The background queue (no scheduled service: it runs while the page is open): after each view's read, the episode lists of
-// seasons with marks (in progress: missing or a day old; Watched with marks: 30 days) and the details of every TMDB-matched
+// seasons with marks and each Watching show's actionable up-next season, marks or not (in progress: missing or a day old;
+// Watched with marks: 30 days) and the details of every TMDB-matched
 // show (missing or a week old), in that order, at most 20 TMDB requests a batch, 4 at a time, a pause between batches.
 // Bounded: two tries per item per page load (the second at least 30 seconds later); a 404 isn't tried again on this load;
 // TMDB's Retry-After is honoured in full (waited for when it is a minute or less; otherwise the queue stops until a later
@@ -143,6 +144,15 @@ function scheduleTmdbWork(rows) {
     const key = tmdbSeasonKey(r.tmdb_id, r.season_number), rank = r.watched ? 2 : 0, prev = wanted.get(key);
     if (!prev || rank < prev.rank) wanted.set(key, { rank, maxAge: r.watched ? TMDB_REFRESH_MS.season : TMDB_REFRESH_MS.inProgress });
   });
+  // A Watching show's up-next season that its row acts on (episodes.js showTarget), marked or not: its list lets the row offer
+  // the next episode (Mark E1 watched for a season not started), as for a season in progress.
+  if (typeof deriveCurrentlyWatching === 'function') {
+    deriveCurrentlyWatching(rows || [], tvShowsById, localTodayStr()).active.forEach(item => {
+      const r = item.upNext;
+      if (!r || item.upToDate || !item.upNextReleased || r.watched || r.skipped || !isEpisodeTrackable(r)) return;
+      wanted.set(tmdbSeasonKey(r.tmdb_id, r.season_number), { rank: 0, maxAge: TMDB_REFRESH_MS.inProgress });
+    });
+  }
   tvShowsById.forEach(s => {
     if (s && s.tmdb_id != null && !wanted.has(tmdbShowKey(s.tmdb_id))) wanted.set(tmdbShowKey(s.tmdb_id), { rank: 1, maxAge: TMDB_REFRESH_MS.show });
   });

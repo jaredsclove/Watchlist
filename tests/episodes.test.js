@@ -621,6 +621,63 @@ test('EP5 show row: every other target keeps the season presentation; nothing is
   assert.ok(!/Episode 2|markNextEpisode/.test(showRowOf(toWatch.app, toWatch.lib.sev)) && /1\/3 seasons watched/.test(showRowOf(toWatch.app, toWatch.lib.sev)), 'a show that isn’t Watching: as before');
 });
 
+test('a season not started with its list known: the row offers its first unwatched episode and "0/T episodes watched", in rows and cards, All TV, Currently Watching and a collection; the expanded season keeps Mark season watched', async () => {
+  const coll = { personalCollections: [{ id: '0c000000-0000-4000-8000-000000000003', name: 'Mine', legacy_source: null, sort_order: 1, archived_at: null, created_at: TS }],
+    memberships: [{ id: '0d000000-0000-4000-8000-000000000003', collection_id: '0c000000-0000-4000-8000-000000000003', show_id: null, item_id: null, created_at: TS }] };
+  const { app, lib } = await bootRow({ storage: listCache(memoryStorage(), S2_LIST), extra: coll, edit: l => { coll.memberships[0].show_id = l.sev.id; } });
+  const check = (where, row, c, actionCol) => {
+    const cells = cellsOf(row);
+    assert.match(cells[2], /^Season 2 · Episode 1/, `${where}: Up next names episode 1`);
+    assert.strictEqual(cells[actionCol], 'Mark E1 watched', `${where}: the episode action`);
+    assert.ok(row.includes(`markNextEpisode('${lib.s2.id}', 9001, '${lib.sev.id}')`), `${where}: the existing one-episode change`);
+    assert.strictEqual(cells[actionCol + 1], 'S2 · 0/4 episodes watched', `${where}: episode progress`);
+    assert.ok(!row.includes('mini-progress-fill'), `${where}: no bar at 0%`);
+    assert.ok(c.includes('Season 2 · Episode 1') && c.includes('Mark E1 watched') && c.includes('0/4 episodes watched') && !c.includes('Mark S2 watched'), `${where}: the card`);
+  };
+  check('All TV', showRowOf(app, lib.sev), showCardOf(app, lib.sev), 4);
+  app.ctx.switchView('watching'); await settle();
+  check('Currently Watching', showRowOf(app, lib.sev), showCardOf(app, lib.sev), 3);
+  app.ctx.openBrowseCollection('browse:0c000000-0000-4000-8000-000000000003'); await settle();
+  check('a collection', showRowOf(app, lib.sev), showCardOf(app, lib.sev), 4);
+  app.ctx.switchView('alltv'); await settle();
+  app.ctx.toggleDerivedShow(lib.sev.id); await settle();
+  assert.ok(seasonRow(app, lib.s2).includes(`toggleWatch('${lib.s2.id}')`) && text(seasonRow(app, lib.s2)).includes('Mark S2 watched'), 'the expanded season keeps the whole-season action');
+  assert.deepStrictEqual(app.writes(), [], 'nothing written to show it');
+});
+
+test('a season not started: the first unwatched episode by its own number; marking it moves the row on to the next; nothing else is changed', async () => {
+  const lists = { '95396:2': { ids: [9003, 9004, 9005], numbers: [3, 4, 5], names: ['', '', ''] } };
+  const { app, lib } = await bootRow({ storage: listCache(memoryStorage(), lists) });
+  let cells = cellsOf(showRowOf(app, lib.sev));
+  assert.deepStrictEqual([cells[2], cells[4], cells[5]], ['Season 2 · Episode 3', 'Mark E3 watched', 'S2 · 0/3 episodes watched'], 'TMDB’s numbering, not a hardcoded 1');
+  await app.ctx.markNextEpisode(lib.s2.id, 9003, lib.sev.id); await settle();
+  assert.deepStrictEqual(rpcs(app, 'library_set_episode_marks').map(r => r.body.p_episodes), [[{ tmdb_episode_id: 9003, episode_number: 3 }]], 'one mark, through the existing change');
+  cells = cellsOf(showRowOf(app, lib.sev));
+  assert.deepStrictEqual([cells[2], cells[4], cells[5]], ['Season 2 · Episode 4', 'Mark E4 watched', 'S2 · 1/3 episodes watched']);
+  assert.ok(showRowOf(app, lib.sev).includes('style="width:33%"'), 'now with its bar');
+  assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s2.id).watched, false, 'the season isn’t marked watched');
+  assert.ok(!app.writes().some(r => /toggle|watched|set_season/.test(r.url) && !r.url.endsWith('library_set_episode_marks')), 'no other change');
+});
+
+test('a season not started keeps the season presentation without a usable list, when not aired, not Watching, or up to date', async () => {
+  const row = async (o, expect, why) => {
+    const { app, lib } = await bootRow(o);
+    const cells = cellsOf(showRowOf(app, lib.sev));
+    assert.deepStrictEqual([cells[2], cells[4], cells[5]], expect, why);
+    return { app, lib };
+  };
+  await row({}, ['Season 2', 'Mark S2 watched', '1/3 seasons watched'], 'no list known: as before');
+  await row({ storage: listCache(memoryStorage(), { '95396:2': { count: 4 } }) }, ['Season 2', 'Mark S2 watched', '1/3 seasons watched'], 'a count only: as before (no episode is known)');
+  await row({ storage: listCache(memoryStorage(), { '95396:2': { ids: [], numbers: [], names: [] } }) }, ['Season 2', 'Mark S2 watched', '1/3 seasons watched'], 'an empty list: as before');
+  await row({ storage: listCache(memoryStorage(), { '95396:2': { ids: [9001, 9002], numbers: [1] } }) }, ['Season 2', 'Mark S2 watched', '1/3 seasons watched'], 'a list without numbers: as before');
+  await row({ storage: listCache(memoryStorage(), S2_LIST), edit: l => { l.s2.date_sort = '2099-03-01'; l.s2.display_date = 'Mar 1, 2099'; } },
+    ['Season 2 · Mar 1, 2099 Upcoming', 'Not aired yet', '1/3 seasons watched'], 'not aired yet');
+  const toWatch = await bootRow({ storage: listCache(memoryStorage(), S2_LIST), edit: l => { l.sev.status = 'confirmed'; } });
+  assert.ok(!/Episode 1|markNextEpisode/.test(showRowOf(toWatch.app, toWatch.lib.sev)), 'a show that isn’t Watching: as before');
+  const skipped = await bootRow({ storage: listCache(memoryStorage(), S2_LIST), edit: l => { l.s2.skipped = true; } });
+  assert.ok(!/markNextEpisode\('[^']*', 9001/.test(showRowOf(skipped.app, skipped.lib.sev)), 'a skipped season is never the target');
+});
+
 test('EP5 show row: an Earlier-seasons range keeps choosing the season; marks never choose it', async () => {
   const storage = listCache(memoryStorage(), { '95396:3': { ids: [7001, 7002], numbers: [1, 2], names: ['A', 'B'] } });
   const { app, lib } = await bootRow({ storage, edit: l => { l.s1.watched = false; l.s2.watched = true; }, marks: l => [mark(l.s3, 7001, 1)] });
