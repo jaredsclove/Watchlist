@@ -59,7 +59,7 @@ function gameEntryView(e, st) {
   const recs = rec ? [rec].concat((e.port_ids || []).map(p => st.cache.get(p)).filter(Boolean)) : [];
   const avail = gameAvailability(recs, st);
   return { entry: e, rec, avail, title: rec ? rec.name : e.title, hidden: !!avail.hiddenByPlatforms,
-    genres: rec ? rec.genres : [], dateKey: avail.line ? avail.line.key : null, group: gameGroupOf(e, st.cache) };
+    genres: rec ? [...new Set(rec.genres.map(gameGenreLabel))] : [], dateKey: avail.line ? avail.line.key : null, group: gameGroupOf(e, st.cache) };
 }
 
 // ── Drawing ──
@@ -1071,7 +1071,7 @@ function openGameDetails(igdbId, opener) {
       <button class="btn" onclick="saveGameEvidence(${rec.id})">Save evidence</button></div>` : '';
   showGameDialog(`<h2 class="modal-title" id="gameDialogTitle">${esc(rec.name)}</h2>
     <div class="modal-section"><div class="modal-label">From IGDB</div>
-      <p>${esc([rec.type === 'main' ? 'Game' : rec.type, rec.first ? `first released ${rec.first}` : 'not released yet', rec.genres.join(', ')].filter(Boolean).join(' · '))}</p>
+      <p>${esc([rec.type === 'main' ? 'Game' : rec.type, rec.first ? `first released ${rec.first}` : 'not released yet', rec.genres.map(gameGenreLabel).join(', ')].filter(Boolean).join(' · '))}</p>
       <p>${esc(gameScoresText(rec) || 'No scores on IGDB.')}</p></div>
     <div class="modal-section"><div class="modal-label">Releases (dates per IGDB)</div><ul class="manage-list">${rows.map(({ r, row }) => `<li>${esc(GAME_PLATFORM_LABEL[row.p])} · ${esc(gameDateText(row))}${row.r != null ? ` · ${esc(IGDB_REGIONS[row.r] || '')}` : ''} · ${esc(statusWords[row.s] || row.s)}${r.id !== rec.id ? ` · ${esc(r.name)}` : ''}${row.p === 'ps4' && onPs4OnlyList(r) ? ' · on Sony’s PS4-only list' : ''}</li>`).join('') || '<li>None listed.</li>'}</ul></div>
     ${rec.store ? `<p><a href="${esc(rec.store)}" target="_blank" rel="noopener noreferrer">PlayStation Store (US)</a></p>` : ''}

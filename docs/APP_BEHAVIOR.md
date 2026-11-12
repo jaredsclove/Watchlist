@@ -82,7 +82,9 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   one width for every status so the controls line up. **Layout (owner, 2026-11-12; game collections draw their rows the same
   way):** a long title wraps with its scores beside it; a desktop row shows as many genre pills as fit on one line, measured after
   each draw and on resize, with +N only when some don't fit (+N shows the rest, wrapped, and Fewer folds them; hidden pills are
-  out of the Tab order, and a focused pill that gets hidden hands focus to +N); a cell without layout shows every pill. Cards
+  out of the Tab order, and a focused pill that gets hidden hands focus to +N); a cell without layout shows every pill. IGDB's
+  "Hack and slash/Beat 'em up" is labelled "Hack and slash" wherever a game's genres are shown or filtered
+  (`games-data.js` `GAME_GENRE_LABELS`; display only, the record keeps IGDB's name). Cards
   stack the platform above the release and list every pill. A game with no release line on the member's platforms says so
   across both columns. The Library's filter summary and order summary share one line, wrapping on narrow screens. Filters:
   Genre and Status: the default is All except Finished and Skipped (Want to play, Playing, Paused; owner, 2026-11-12), then
