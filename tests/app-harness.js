@@ -1044,7 +1044,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
   // PostgREST error body carrying that code (a database refusal), applying nothing.
   const losses = [], refusals = [];
   app.loseNext = (pred, mode) => losses.push({ pred, mode });
-  app.refuseNext = (pred, code, message) => refusals.push({ pred, code, message });
+  app.refuseNext = (pred, code, message, status = 400) => refusals.push({ pred, code, message, status });
   // Database functions called as POST rpc/<name>. restore_backup replaces every
   // table with the backup's rows in one step, as the real function does.
   app.rpcHandlers = {
@@ -1123,7 +1123,7 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     if (forceFail) return response(500, { message: 'simulated failure' });
     const ri = refusals.findIndex(x => x.pred(req));
     if (ri !== -1) { refuse = refusals[ri]; refusals.splice(ri, 1); }
-    if (refuse) return response(400, { code: refuse.code, details: null, hint: null, message: refuse.message });
+    if (refuse) return response(refuse.status || 400, { code: refuse.code, details: null, hint: null, message: refuse.message });
     const li = losses.findIndex(x => x.pred(req));
     if (li !== -1) { lose = losses[li].mode; losses.splice(li, 1); }
     if (lose === 'before') throw new TypeError('Failed to fetch');
@@ -1464,6 +1464,11 @@ async function createApp({ rows = [], othertvShows = [], tvShows = [], customCol
     ctx.__harnessNow = () => (app.clock != null ? app.clock : Date.now());
     vm.runInContext(`tmdbDelay = __harnessDelay; tmdbNow = __harnessNow; tmdbQueueEnabled = ${tmdbQueue === true};`, ctx);
   }
+  // The wait before a read refused with "JWT issued at future" is sent again (api.js): recorded in app.readDelays; a turn of
+  // the event loop, or until app.readDelayGate (a promise a test sets) settles.
+  app.readDelays = [];
+  ctx.__readDelay = ms => { app.readDelays.push(ms); return app.readDelayGate || new Promise(r => setImmediate(r)); };
+  vm.runInContext('readRetryDelay = __readDelay;', ctx);
   await settle();
 
   app.writes = () => requests.filter(r => r.method !== 'GET');
