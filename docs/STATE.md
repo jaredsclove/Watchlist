@@ -27,21 +27,20 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: shorter game genre labels (owner's
-  request; PR #93, `6051c2f`), 2026-11-12 UTC, presentation tier: IGDB's long genre names show as Hack and slash, Turn-based
-  strategy, Real-time strategy, RPG and Card & board in Games pills, the Genre filter and Details (display only; records keep
-  IGDB's names; colours unchanged). Cache token `20261112-genrelabel`. Verified: 59 offline suites (1428); Pages built, the
-  changed files byte-identical to `main`; live, read-only: the filter and pills show the short labels, no writes.
-- Previous release: the Games Library layout cleanup
-  (owner's request; PR #91, `59a08ec`), 2026-11-12 UTC, presentation tier (page only): Platform and Release as separate aligned
-  columns (Upcoming beside the date; stacked on cards); as many genre pills as fit one line, measured after each draw and on
-  resize, +N only for real overflow; rebalanced widths, long titles wrapping beside their scores; one width for every status
-  control; the filter and order summaries on one line. Game collections share the row layout; Franchises, queues, TV and the
-  main Collections unchanged. Cache token `20261112-gameslayout`. Verified: 59 offline suites (1427); a local synthetic check in
-  Chrome at 1400–1110 px tables, 900 and 375 px cards, light and dark, with resizing; Pages built, changed files byte-identical
-  to `main`. Live, read-only (filters only, no status changed): the new columns, one genre overflow (a long label) and aligned
-  statuses at 1500 px, no wrap or horizontal scroll at 1130 and 375 px (same-origin frames). Not verified live: dark mode,
-  real phones.
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: one retry after Supabase's "JWT
+  issued at future" (owner's request; PR #95, `53b32e5`), 2026-11-13 UTC, page only: a database read (GET) refused with
+  exactly 401 PGRST303 "JWT issued at future" (the hosted API's clock lagging after idling) is sent once more after 2 s with
+  the session's headers read again (`api.js dbRead`, used by `sbFetch` GET, `fetchAllRows`, `fetchAllRowsStrict`); a second
+  failure keeps the load error and Retry; writes never resent; other 401s unchanged; this error alone no longer shows "Your
+  sign-in has ended". Cache token `20261113-readretry`. Verified: 60 offline suites (1439; `tests/read-retry.test.js`
+  simulates success after the error, repeated failure, other auth errors, writes, and navigation, sign-out, another account
+  and a change during the wait); Pages built, changed files byte-identical to `main`; live, read-only: the new code loaded,
+  All TV and Currently Watching loaded, GETs only. Not verified live: the retry itself (the error is intermittent and was
+  not provoked). No Fable review (no new authentication or isolation logic).
+- Previous release: shorter game genre labels (PR #93, `6051c2f`), 2026-11-12 UTC: IGDB's long genre names show as Hack
+  and slash, Turn-based strategy, Real-time strategy, RPG and Card & board (display only).
+- Earlier: the Games Library layout cleanup (PR #91, `59a08ec`), 2026-11-12 UTC: Platform and Release columns, a measured
+  one-line genre row, one status-control width, one summary line.
 - Earlier: the Games Library's default status filter (PR #89, `e9aa5af`), 2026-11-12 UTC: All except Finished and
   Skipped is the default; when the list empties, focus goes to the "No games match" note.
 - Earlier: first episode of a season not started (PR #87, `63089a3`), 2026-11-12 UTC: a Watching show's
