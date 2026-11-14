@@ -370,7 +370,12 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   unavailable (focus kept) and any other change is refused before anything is shown or sent.
   `api.js sbFetch` refuses a write sent outside the lane.
 - **Reads** publish only if no change overlapped them (`readFresh`) and they are the newest of their
-  kind; a refused read reads again once the lane is free.
+  kind; a refused read reads again once the lane is free. A database read (GET) refused with exactly HTTP 401
+  PGRST303 "JWT issued at future" (Supabase's hosted API clock lagging after idling; the token is fine) is sent once
+  more after two seconds, with the session's headers read again (`api.js dbRead`; signed out or another account in
+  the meantime: refused before sending). If that fails too, the view shows its usual load error and Retry. Writes are
+  never resent, other 401s are unchanged (a genuine rejection still shows "Your sign-in has ended"), and this error
+  alone never shows that notice.
 - **One reread path** (`reloadOpenView`): a shown list is read again in place. If that reread fails,
   the list stays, marked out of date, and changes from it (Match included) are refused until a read
   succeeds (Retry).

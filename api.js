@@ -69,13 +69,14 @@ async function sbFetch(method, path, body, opts = {}) {
   const write = method !== 'GET' && !opts.read;
   if (write && !writeLane) throw new Error('This change was not started through the write lane, so nothing was sent.');
   if (method !== 'GET') await requireWritablePhase();
-  const headers = await authHeaders({ 'Content-Type': 'application/json', 'Prefer': method === 'POST' ? 'return=representation' : 'return=minimal' });
+  const headerFields = { 'Content-Type': 'application/json', 'Prefer': method === 'POST' ? 'return=representation' : 'return=minimal' };
+  const headers = await authHeaders(headerFields);
   // opts.cache: a save of the TMDB cache (tmdb-cache.js), the provider's data: an unknown outcome there leaves nothing to warn about.
   const note = write && !opts.cache ? savePendingNote(opts.what || writeLane.label, opts.note) : null;
   if (write) writeSent();
   let answered = false;
   try {
-    const out = await sbRequest(method, path, body, headers, () => { answered = true; });
+    const out = await sbRequest(method, path, body, headers, () => { answered = true; }, method === 'GET' ? () => authHeaders(headerFields) : null);
     return out;
   } finally {
     if (write) { if (note) { if (answered) clearPendingNote(note); else keepPendingNote(note); } writeSettled(); }
@@ -102,16 +103,39 @@ function writeOutcomeOf(e) {
   return 'unknown';
 }
 
-async function sbRequest(method, path, body, headers, onAnswer = () => {}) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined
-  });
+// PostgREST's "JWT issued at future" (HTTP 401, PGRST303): a token Supabase Auth issued moments ago, refused because the
+// hosted API's own clock lags after it has been idle (a Supabase-side bug; the token itself is fine). A database read (GET)
+// refused with exactly this is sent once more after a short wait, with the session's headers read again (so a sign-out or
+// another account in the meantime refuses it before it is sent). Never a write, never more than once; any other 401 is
+// handled as before. Callers publish only after the read finishes, under their usual checks.
+const ISSUED_AT_FUTURE_RETRY_MS = 2000;
+let readRetryDelay = ms => new Promise(resolve => setTimeout(resolve, ms));
+function issuedAtFuture(status, text) {
+  if (status !== 401) return false;
+  let body = null;
+  try { body = JSON.parse(text); } catch (e) { return false; }
+  return !!body && body.code === 'PGRST303' && body.message === 'JWT issued at future';
+}
+// One database read: headersFor() gives each attempt's headers. Returns { res, err }: err is the failed answer's text, null if it succeeded.
+async function dbRead(url, headersFor) {
+  let res = await fetch(url, { headers: await headersFor(0) });
+  if (res.ok) return { res, err: null };
+  const err = await res.text();
+  if (!issuedAtFuture(res.status, err)) return { res, err };
+  await readRetryDelay(ISSUED_AT_FUTURE_RETRY_MS);
+  res = await fetch(url, { headers: await headersFor(1) });
+  return { res, err: res.ok ? null : await res.text() };
+}
+
+async function sbRequest(method, path, body, headers, onAnswer = () => {}, retryHeaders = null) {
+  const url = `${SUPABASE_URL}/rest/v1/${path}`;
+  let res, err = null;
+  if (method === 'GET' && retryHeaders) ({ res, err } = await dbRead(url, n => (n ? retryHeaders() : headers)));
+  else res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   if (!res.ok) {
-    const err = await res.text();
+    if (err === null) err = await res.text();
     if (confirmedAnswer(res.status, err)) onAnswer();
-    if (res.status === 401 && typeof sessionLost === 'function') sessionLost();
+    if (res.status === 401 && !issuedAtFuture(res.status, err) && typeof sessionLost === 'function') sessionLost();
     if (/not_a_member/.test(err) && typeof membershipEnded === 'function') membershipEnded();
     if (/research_not_enabled/.test(err)) noteResearchAccess(null);
     // A B4/B5 function that doesn't exist, or an EP1 one (the marks function, or delete_tv_season with
@@ -142,15 +166,12 @@ async function fetchAllRows(table, filter, select = '*') {
   let total = null;
 
   while (total === null || offset < total) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${select}${filter ? `&${filter}` : ''}&order=id.asc`, {
-      headers: await authHeaders({
-        'Range-Unit': 'items',
-        'Range': `${offset}-${offset + BACKUP_PAGE_SIZE - 1}`,
-        'Prefer': 'count=exact'
-      })
-    });
-    if (!res.ok) {
-      const err = await res.text();
+    const { res, err } = await dbRead(`${SUPABASE_URL}/rest/v1/${table}?select=${select}${filter ? `&${filter}` : ''}&order=id.asc`, () => authHeaders({
+      'Range-Unit': 'items',
+      'Range': `${offset}-${offset + BACKUP_PAGE_SIZE - 1}`,
+      'Prefer': 'count=exact'
+    }));
+    if (err !== null) {
       throw new Error(`Failed fetching ${table} (offset ${offset}): ${res.status} ${err}`);
     }
     const page = await res.json();
@@ -192,15 +213,12 @@ async function fetchAllRowsStrict(table, filter, pageSize = BACKUP_PAGE_SIZE) {
   let total = null;
   for (;;) {
     const offset = rows.length;
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*${filter ? `&${filter}` : ''}&order=id.asc`, {
-      headers: await authHeaders({
-        'Range-Unit': 'items',
-        'Range': `${offset}-${offset + pageSize - 1}`,
-        'Prefer': 'count=exact'
-      })
-    });
-    if (!res.ok) {
-      const err = await res.text();
+    const { res, err } = await dbRead(`${SUPABASE_URL}/rest/v1/${table}?select=*${filter ? `&${filter}` : ''}&order=id.asc`, () => authHeaders({
+      'Range-Unit': 'items',
+      'Range': `${offset}-${offset + pageSize - 1}`,
+      'Prefer': 'count=exact'
+    }));
+    if (err !== null) {
       throw new Error(`Failed reading ${table} (offset ${offset}): ${res.status} ${err}`);
     }
     const contentRange = (res.headers.get('content-range') || '').trim();
