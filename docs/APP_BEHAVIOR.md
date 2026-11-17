@@ -250,8 +250,11 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   title below in the same type, while titles are shown by default), "Mark E9 watched" (the same one-episode change,
   ignoring a held key's repeats and, for a second after a row action settles, further presses on that show's row action)
   and "S35 · 8/12 episodes watched" with its bar (episode progress names its season: "S35", or a season's whole name,
-  which may wrap); with every listed episode marked, "All listed episodes watched", no row action (the season is
-  completed from its expanded row or its list), focus going to the show's expand button; with marks but no numbered list
+  which may wrap); with every listed episode marked, "All listed episodes watched" and the season's Mark S1 watched
+  (since 2026-11-17: the ordinary season change, pressed, never automatic; focus stays on the row's action from Mark E10
+  to Mark S1 and on to the next season's), or "Unaired episodes remain" instead while a listed episode has a known air
+  date after today (the open list's dates, else the cached list's last episode; a missing date doesn't block), withheld
+  the same way on that season's expanded row and in its open list; with marks but no numbered list
   known yet, the season, Mark S4 watched and the existing episode progress ("N episodes marked", or N/T from a
   count only while the marks are fewer), a bar only with a known total. Without marks and without a known non-empty list,
   the row keeps the season and Mark S4 watched. Anything else reads as before. While the row shows
@@ -288,7 +291,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   next by then), ignores a held key's repeats and, for a second after a mark settles, further clicks on that season's
   button. Focus stays on it; when it goes (the last listed episode marked), focus goes to that season's Episodes. The
   list stays the way to mark another episode or undo one. Show-level Watching is unchanged; nothing completes a season automatically (a fully checked list offers
-  Mark season watched); a watched or skipped season's episodes are locked and its marks kept. The same
+  Mark season watched, or says the season can be marked once its unaired episodes have aired); a watched or skipped season's episodes are locked and its marks kept. The same
   controls are in collections; the flat Seasons lists show progress only; Coming Soon has no episode list.
 - **TMDB show ratings (item 2, first part):** a TMDB-matched show's score sits directly after its title (since PR #20;
   its explanation on a line below, PR #21) in show rows and cards (Currently Watching, All TV, collections) as the

@@ -332,15 +332,17 @@ test('Mark watched through: focus stays on Apply through the change and its redr
   }
 });
 
-test('the suggestion: only with a loaded, non-empty list and every listed episode checked; never automatic; it is the normal Watched action; marks kept and locked afterwards', async () => {
+test('the suggestion: only with a loaded, non-empty list and every listed episode checked; withheld while one is still to air; never automatic; marks kept and locked after the normal Watched action', async () => {
   const { app, lib } = await boot({ marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2), mark(l.s2, 9003, 3)] });
   await open(app, lib.s2);
   assert.doesNotMatch(panel(app), /Every listed episode/, 'three of four: no suggestion');
   await app.ctx.setEpisodeMark(lib.s2.id, 9004, true); await settle();
-  assert.match(panel(app), /Every listed episode is checked\. TMDB lists 4 episodes; 1 hasn’t aired yet and 1 has no air date\. Mark Season 2 watched/);
+  assert.match(panel(app), /Every listed episode is checked, but 1 hasn’t aired yet, so the season can be marked watched once it has\./);
+  assert.doesNotMatch(panel(app), /Mark Season 2 watched/, 'an episode still to air (checked or not) withholds it');
+  assert.ok(!seasonRow(app, lib.s2).includes(`toggleWatch('${lib.s2.id}')`) && /Unaired episodes remain/.test(text(seasonRow(app, lib.s2))), 'the expanded season row agrees');
   assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s2.id).watched, false, 'nothing completes the season by itself');
   assert.deepStrictEqual(writes(app), ['POST rpc/library_set_episode_marks']);
-  await app.ctx.toggleWatch(lib.s2.id); await settle(); // the suggestion's button
+  await app.ctx.toggleWatch(lib.s2.id); await settle(); // the season's ordinary Watched change (e.g. from another list)
   assert.deepStrictEqual(writes(app), ['POST rpc/library_set_episode_marks', 'POST rpc/set_season_watched']);
   assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002, 9003, 9004], 'marking the season kept every mark');
   const p = panel(app);
@@ -610,9 +612,10 @@ test('EP5 show row: every other target keeps the season presentation; nothing is
   const partial = await run({ why: 'a count above the marks: N/T with its bar', storage: listCache(memoryStorage(), { '95396:2': { count: 4 } }), marks: l => [mark(l.s2, 9001, 1)] },
     ['Season 2', 'Mark S2 watched', 'S2 · 1/4 episodes watched']);
   assert.ok(showRowOf(partial.app, partial.lib.sev).includes('style="width:25%"'));
-  const listed = await run({ why: 'every listed episode marked: said so, no row action; a mark TMDB no longer lists isn’t counted', storage: listCache(memoryStorage(), { '95396:2': { ids: [9001, 9002], numbers: [1, 2], names: ['', ''] } }),
-    marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2), mark(l.s2, 9009, 9)] }, ['Season 2 · All listed episodes watched', '', 'S2 · 2/2 episodes watched · 1 not listed']);
-  assert.ok(!/markSeasonFromRow|markNextEpisode|toggleWatch/.test(showRowOf(listed.app, listed.lib.sev) + showCardOf(listed.app, listed.lib.sev)), 'no action in the row or card: the season is completed deliberately');
+  const listed = await run({ why: 'every listed episode marked: said so, with the season’s Mark S2 watched; a mark TMDB no longer lists isn’t counted', storage: listCache(memoryStorage(), { '95396:2': { ids: [9001, 9002], numbers: [1, 2], names: ['', ''] } }),
+    marks: l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2), mark(l.s2, 9009, 9)] }, ['Season 2 · All listed episodes watched', 'Mark S2 watched', 'S2 · 2/2 episodes watched · 1 not listed']);
+  assert.ok(showRowOf(listed.app, listed.lib.sev).includes(`markSeasonFromRow('${listed.lib.s2.id}')`) && showCardOf(listed.app, listed.lib.sev).includes(`markSeasonFromRow('${listed.lib.s2.id}')`), 'the season’s own action in the row and card, pressed deliberately');
+  assert.strictEqual(listed.app.writes().length, 0, 'nothing completes it by itself');
   listed.app.ctx.toggleDerivedShow(listed.lib.sev.id); await settle();
   assert.ok(seasonRow(listed.app, listed.lib.s2).includes(`toggleWatch('${listed.lib.s2.id}')`) && text(seasonRow(listed.app, listed.lib.s2)).includes('Mark S2 watched'), 'the expanded season row keeps it');
   await run({ why: 'not aired yet: the restriction stands', storage: listCache(memoryStorage(), S2_LIST), marks: l => [mark(l.s2, 9001, 1)],
@@ -678,6 +681,75 @@ test('a season not started keeps the season presentation without a usable list, 
   assert.ok(!/markNextEpisode\('[^']*', 9001/.test(showRowOf(skipped.app, skipped.lib.sev)), 'a skipped season is never the target');
 });
 
+// Season completion from the show row: offered once every listed episode is marked, unless one has a known future air date.
+const S2_TWO = last => ({ '95396:2': { ids: [9001, 9002], numbers: [1, 2], names: ['', ''], last } });
+const bothMarked = l => [mark(l.s2, 9001, 1), mark(l.s2, 9002, 2)];
+const seasonAction = (app, lib) => `markSeasonFromRow('${lib.s2.id}')`;
+test('completion on the row: past or missing air dates offer Mark S2 watched, in All TV, Currently Watching and a collection, rows and cards', async () => {
+  const coll = { personalCollections: [{ id: '0c000000-0000-4000-8000-000000000004', name: 'Mine', legacy_source: null, sort_order: 1, archived_at: null, created_at: TS }],
+    memberships: [{ id: '0d000000-0000-4000-8000-000000000004', collection_id: '0c000000-0000-4000-8000-000000000004', show_id: null, item_id: null, created_at: TS }] };
+  for (const last of [{ type: 'finale', air: '2025-01-02' }, { type: null, air: null }, null]) {
+    const { app, lib } = await bootRow({ storage: listCache(memoryStorage(), S2_TWO(last)), marks: bothMarked, extra: coll, edit: l => { coll.memberships[0].show_id = l.sev.id; } });
+    const check = where => {
+      const row = showRowOf(app, lib.sev), c = showCardOf(app, lib.sev);
+      assert.match(text(row), /Season 2 · All listed episodes watched[\s\S]*Mark S2 watched/, `${where} ${JSON.stringify(last)}: the row`);
+      assert.ok(row.includes(seasonAction(app, lib)) && c.includes(seasonAction(app, lib)), `${where}: row and card`);
+      assert.ok(!/Unaired episodes remain/.test(row + c), where);
+    };
+    check('All TV');
+    app.ctx.switchView('watching'); await settle(); check('Currently Watching');
+    app.ctx.openBrowseCollection('browse:0c000000-0000-4000-8000-000000000004'); await settle(); check('collection');
+    assert.strictEqual(app.writes().length, 0, 'nothing written by itself');
+  }
+});
+
+test('completion withheld: a listed episode with a known future air date, checked, in the row, card, expanded season row and open list; nothing else changes', async () => {
+  const { app, lib } = await bootRow({ storage: listCache(memoryStorage(), S2_TWO({ type: 'finale', air: '2099-01-02' })), marks: bothMarked });
+  for (const where of ['alltv', 'watching']) {
+    if (where === 'watching') { app.ctx.switchView('watching'); await settle(); }
+    const row = showRowOf(app, lib.sev), c = showCardOf(app, lib.sev);
+    assert.match(text(row), /Season 2 · All listed episodes watched[\s\S]*Unaired episodes remain/, `${where}: the row says why`);
+    assert.ok(!(row + c).includes(seasonAction(app, lib)) && /Unaired episodes remain/.test(c), `${where}: no completion in row or card`);
+  }
+  app.ctx.toggleDerivedShow(lib.sev.id); await settle();
+  assert.ok(!seasonRow(app, lib.s2).includes(`toggleWatch('${lib.s2.id}')`) && /Unaired episodes remain/.test(text(seasonRow(app, lib.s2))), 'the expanded season row agrees');
+  assert.ok(seasonRow(app, lib.s3).includes(`toggleWatch('${lib.s3.id}')`), 'another season keeps its action');
+  app.setTmdb(tmdb({ 2: [E(9001, 1), E(9002, 2, { air_date: '2099-01-02' })] }));
+  await open(app, lib.s2);
+  assert.match(panel(app), /Every listed episode is checked, but 1 hasn’t aired yet/);
+  assert.doesNotMatch(panel(app), /Mark Season 2 watched/);
+  assert.strictEqual(app.writes().length, 0);
+});
+
+test('completion: a season not fully marked keeps its action despite a future episode; the open list overrides the cached date; missing dates alone offer it', async () => {
+  const partial = await bootRow({ storage: listCache(memoryStorage(), S2_TWO({ type: null, air: '2099-01-02' })), marks: l => [mark(l.s2, 9001, 1)] });
+  partial.app.ctx.toggleDerivedShow(partial.lib.sev.id); await settle();
+  assert.match(text(showRowOf(partial.app, partial.lib.sev)), /Mark E2 watched/);
+  assert.ok(seasonRow(partial.app, partial.lib.s2).includes(`toggleWatch('${partial.lib.s2.id}')`), 'unchanged: the expanded Mark S2 watched stays');
+  const { app, lib } = await bootRow({ storage: listCache(memoryStorage(), S2_TWO(null)), marks: bothMarked,
+    episodes: { 2: [E(9001, 1, { air_date: null }), E(9002, 2, { air_date: null })] } });
+  app.ctx.toggleDerivedShow(lib.sev.id); await settle();
+  await open(app, lib.s2);
+  assert.match(panel(app), /Every listed episode is checked\. TMDB lists 2 episodes; 2 have no air date\. Mark Season 2 watched/);
+  assert.ok(showRowOf(app, lib.sev).includes(seasonAction(app, lib)), 'the row offers it');
+});
+
+test('completion: unmarking an episode brings back its episode action; pressing Mark S2 watched is the ordinary change and moves on to Season 3', async () => {
+  const { app, lib } = await bootRow({ storage: listCache(memoryStorage(), S2_TWO(null)), marks: bothMarked, episodes: { 2: [E(9001, 1), E(9002, 2)] } });
+  app.ctx.toggleDerivedShow(lib.sev.id); await settle();
+  await open(app, lib.s2);
+  await app.ctx.setEpisodeMark(lib.s2.id, 9002, false); await settle();
+  assert.match(text(showRowOf(app, lib.sev)), /Season 2 · Episode 2[\s\S]*Mark E2 watched/, 'the episode action returns');
+  assert.ok(!showRowOf(app, lib.sev).includes(seasonAction(app, lib)));
+  await app.ctx.setEpisodeMark(lib.s2.id, 9002, true); await settle();
+  assert.ok(showRowOf(app, lib.sev).includes(seasonAction(app, lib)));
+  const before = app.writes().length;
+  await app.ctx.markSeasonFromRow(lib.s2.id); await settle();
+  assert.deepStrictEqual(app.writes().slice(before).map(r => r.url.split('/rest/v1/')[1]), ['rpc/set_season_watched'], 'one ordinary season change');
+  assert.deepStrictEqual(marksIn(app, lib.s2), [9001, 9002], 'marks kept');
+  assert.match(cellsOf(showRowOf(app, lib.sev))[2], /^Season 3/, 'the next season');
+});
+
 test('EP5 show row: an Earlier-seasons range keeps choosing the season; marks never choose it', async () => {
   const storage = listCache(memoryStorage(), { '95396:3': { ids: [7001, 7002], numbers: [1, 2], names: ['A', 'B'] } });
   const { app, lib } = await bootRow({ storage, edit: l => { l.s1.watched = false; l.s2.watched = true; }, marks: l => [mark(l.s3, 7001, 1)] });
@@ -689,7 +761,7 @@ test('EP5 show row: an Earlier-seasons range keeps choosing the season; marks ne
   assert.match(text(seasonRow(app, lib.s3)), /1\/2 episodes watched ▸ Episodes Next unwatched: E2 Mark E2 watched/, 'Season 3 keeps its own row');
 });
 
-test('EP5 row action: one episode per press, focus stays on the action as it moves on; repeats and stale presses send nothing; the last one leaves no action and focus on the expand button', async () => {
+test('EP5 row action: one episode per press, focus stays on the action as it moves on; repeats and stale presses send nothing; after the last, Mark S2 watched with focus, then the next season', async () => {
   for (const layout of ['tbody', 'cardList']) {
     const { app, lib } = await bootRow({ storage: listCache(memoryStorage(), { '95396:2': { ids: [9001, 9002, 9003], numbers: [1, 2, 3], names: ['', '', ''] } }), marks: l => [mark(l.s2, 9001, 1)] });
     const dom = makeMiniDom(app);
@@ -712,9 +784,14 @@ test('EP5 row action: one episode per press, focus stays on the action as it mov
     assert.strictEqual(rpcEpisodes(app).length, 1, `${layout}: a press naming an episode no longer next sends nothing`);
     await app.ctx.markNextEpisode(lib.s2.id, 9003, lib.sev.id); await settle();
     assert.match(text(layout === 'tbody' ? showRowOf(app, lib.sev) : showCardOf(app, lib.sev)), /All listed episodes watched/, `${layout}: the last one`);
-    assert.ok(!dom.in(layout, sel), `${layout}: no action replaces it`);
-    assert.strictEqual(dom.active(), dom.in(layout, `[data-item="${lib.sev.id}"] [data-primary]`), `${layout}: focus on the show’s expand button`);
+    assert.ok(dom.in(layout, sel) && /Mark S2 watched/.test(text(layout === 'tbody' ? showRowOf(app, lib.sev) : showCardOf(app, lib.sev))), `${layout}: Mark S2 watched replaces it`);
+    assert.strictEqual(dom.active(), dom.in(layout, sel), `${layout}: focus stays on the row’s action`);
     assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s2.id).watched, false, `${layout}: the season isn’t completed`);
+    app.run('episodeNextMark.until = 0');
+    await app.ctx.markSeasonFromRow(lib.s2.id); await settle();
+    assert.strictEqual(app.store.watchlist_items.find(r => r.id === lib.s2.id).watched, true, `${layout}: completed by the press`);
+    assert.match(text(layout === 'tbody' ? showRowOf(app, lib.sev) : showCardOf(app, lib.sev)), /Season 3/, `${layout}: the next season`);
+    assert.strictEqual(dom.active(), dom.in(layout, sel), `${layout}: focus on the next season’s action`);
   }
 });
 
