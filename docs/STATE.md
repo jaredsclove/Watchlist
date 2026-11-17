@@ -27,18 +27,18 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: one retry after Supabase's "JWT
-  issued at future" (owner's request; PR #95, `53b32e5`), 2026-11-13 UTC, page only: a database read (GET) refused with
-  exactly 401 PGRST303 "JWT issued at future" (the hosted API's clock lagging after idling) is sent once more after 2 s with
-  the session's headers read again (`api.js dbRead`, used by `sbFetch` GET, `fetchAllRows`, `fetchAllRowsStrict`); a second
-  failure keeps the load error and Retry; writes never resent; other 401s unchanged; this error alone no longer shows "Your
-  sign-in has ended". Cache token `20261113-readretry`. Verified: 60 offline suites (1439; `tests/read-retry.test.js`
-  simulates success after the error, repeated failure, other auth errors, writes, and navigation, sign-out, another account
-  and a change during the wait); Pages built, changed files byte-identical to `main`; live, read-only: the new code loaded,
-  All TV and Currently Watching loaded, GETs only. Not verified live: the retry itself (the error is intermittent and was
-  not provoked). No Fable review (no new authentication or isolation logic).
-- Previous release: shorter game genre labels (PR #93, `6051c2f`), 2026-11-12 UTC: IGDB's long genre names show as Hack
-  and slash, Turn-based strategy, Real-time strategy, RPG and Card & board (display only).
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Mark S1 watched on a fully
+  marked show row (owner's request; PR #97, `62d5edb`), 2026-11-17 UTC, page only: with every listed episode marked, the
+  collapsed show row offers the season's ordinary Mark season watched (pressed, never automatic), or "Unaired episodes
+  remain" while a listed episode has a known future air date (the open list's dates, else the cached last episode's; a
+  missing date doesn't block), withheld the same way on the expanded season row and in its open list. Cache token
+  `20261117-seasonrow`. Verified: 60 offline suites (1443); local Chrome with synthetic data (four cases; real clicks and
+  keys E2 → E3 → S1 → Season 2 with focus kept, only `set_season_watched` sent; 375 px cards, no overflow); Pages built,
+  changed files byte-identical to `main`; live, read-only: Better Call Saul's row shows Mark S1 watched, no write
+  functions called, nothing pressed. Limitation: a closed list checks only the cached last episode's date.
+- Previous release: one retry after Supabase's "JWT issued at future" (PR #95, `53b32e5`), 2026-11-13 UTC: a database
+  read refused with exactly that 401 is sent once more after 2 s with fresh session headers; writes never resent.
+- Earlier: shorter game genre labels (PR #93, `6051c2f`), 2026-11-12 UTC: IGDB's long genre names shortened (display only).
 - Earlier: the Games Library layout cleanup (PR #91, `59a08ec`), 2026-11-12 UTC: Platform and Release columns, a measured
   one-line genre row, one status-control width, one summary line.
 - Earlier: the Games Library's default status filter (PR #89, `e9aa5af`), 2026-11-12 UTC: All except Finished and
