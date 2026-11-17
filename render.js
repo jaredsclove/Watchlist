@@ -854,6 +854,9 @@ function seasonWatchControlHtml(r, opts, compact) {
   if (opts.requireReleased && !r.watched && !isReleasedRow(r, opts.today)) {
     return `<span class="not-aired-lbl">Not aired yet</span>`;
   }
+  // A show row's or expanded show's season whose every listed episode is marked, one with a known air date after today:
+  // its completion waits (episodes.js seasonCompletionWaits); other season lists are unchanged.
+  if ((opts.shortcutOf || opts.seasonLabel) && seasonCompletionWaits(r, opts.today)) return SEASON_WAITS_HTML;
   const stop = opts.stopPropagation ? 'event.stopPropagation(); ' : '';
   const show = opts.shortcutOf;
   // EP5: the show row's season action, named for its scope, under the row's hold (episodes.js markSeasonFromRow).

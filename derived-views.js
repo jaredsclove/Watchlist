@@ -909,14 +909,15 @@ function skippedSeasonsControlHtml(item, keyArg) {
 // S3: a collection's show entry is All TV's (browse-views.js browseShowHtml). opts: { section
 // (its focus section), kindTag (Combined), dateHtml (the collection's date text for a season),
 // expandBtn (the collection's own expand button, given isExpanded) }.
-// EP5: a show row's action for its target (episodes.js showTarget): Mark E9 watched; nothing once every listed episode is
-// marked (the season is completed deliberately, from its expanded row or its list); else the up-next season's Mark S4
-// watched while the show is in progress. Shared with a whole show in a queue (queues.js).
+// EP5: a show row's action for its target (episodes.js showTarget): Mark E9 watched; else the up-next season's Mark S4
+// watched while the show is in progress, also once every listed episode is marked (pressed, never automatic; "Unaired
+// episodes remain" instead while a listed episode's known air date is after today: seasonCompletionWaits). Shared with a
+// whole show in a queue (queues.js).
 function showRowActionHtml(item, today, stop, target = showTarget(item)) {
   const { show, upNext, upToDate } = item;
   const inProgress = !upToDate && show.status === 'watching' && !!upNext;
   return target.kind === 'episode' ? showRowEpisodeActionHtml(target, show, stop)
-    : target.kind === 'listed' ? '' : inProgress ? seasonWatchControlHtml(upNext, { requireReleased: true, today, shortcutOf: show, stopPropagation: stop }, false) : '';
+    : inProgress ? seasonWatchControlHtml(upNext, { requireReleased: true, today, shortcutOf: show, stopPropagation: stop }, false) : '';
 }
 function derivedShowHtml(item, today, opts = {}) {
   const { key, show, seasons, upNext, upToDate } = item;
@@ -988,8 +989,7 @@ function derivedShowHtml(item, today, opts = {}) {
   // B2: the show-level shortcut names the season it marks (the up-next season, or the
   // earlier-seasons range's next one).
   const shortcutOpts = { ...releaseOpts, shortcutOf: show };
-  // EP5: the row's action for its target: Mark E9 watched; nothing once every listed episode is marked (the season
-  // is completed deliberately, from its expanded row or its list); else Mark season watched as before.
+  // EP5: the row's action for its target: Mark E9 watched; else Mark season watched (showRowActionHtml).
   const rowAction = stop => showRowActionHtml(item, today, stop, target);
   const watchCell = rowAction(true); // empty when there's no action (no — placeholder)
   const expandBtn = opts.expandBtn ? opts.expandBtn(isExpanded) : derivedExpandBtnHtml(key, keyArg, item.title, isExpanded);

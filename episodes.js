@@ -240,7 +240,8 @@ async function markSeasonFromRow(seasonId) {
 // What a show row is about: its up-next season, as chosen before (Earlier seasons included; marks never
 // choose it). For a row that offers an action (Watching, not up to date, the season aired) on a TMDB-matched
 // season, its episodes too, once its episode list is known, marked or not. kind: 'episode' (the next unwatched
-// is known, E1 included for a season with no marks), 'listed' (every listed episode is marked; no row action),
+// is known, E1 included for a season with no marks), 'listed' (every listed episode is marked; the row offers the
+// season's Mark S1 watched, or says unaired episodes remain: seasonCompletionWaits),
 // 'marked' (marks, but no numbered list known yet: the season with honest progress), else 'season' (the row as
 // before: no list known and no marks, an empty list, or no action). The row's Up next, action and progress, and
 // the expanded row of the season it represents, all read this.
@@ -255,6 +256,21 @@ function showTarget(item) {
   const next = nextUnwatchedEpisode(upNext);
   return { season: upNext, kind: next ? 'episode' : 'listed', actionable, progress, next };
 }
+// Whether a season's completion waits for airing: every episode of its known list is marked and one of them has a known
+// air date after today (the open list's dates, else the cached list's last episode, the only date it keeps; a missing date
+// counts for nothing). Its Mark season watched is then withheld on the show row and in the expanded show, never completed
+// automatically. Nothing else changes: a season not fully marked, or without a known list, keeps its action.
+function listedEpisodeUnaired(r, today) {
+  if (episodePanel && episodePanel.seasonId === r.id && episodePanel.status === 'ready') return episodePanel.episodes.some(e => e.air_date && e.air_date > today);
+  const v = episodeListEntry(r.tmdb_id, r.season_number), air = v && v.last && v.last.air;
+  return typeof air === 'string' && isValidDateSort(air) && air > today;
+}
+function seasonCompletionWaits(r, today = localTodayStr()) {
+  if (!r || r.watched || r.skipped || !isEpisodeTrackable(r)) return false;
+  const eps = knownEpisodeList(r), marks = marksOf(r.id);
+  return !!eps && eps.length > 0 && eps.every(e => marks.has(e.id)) && listedEpisodeUnaired(r, today);
+}
+const SEASON_WAITS_HTML = '<span class="not-aired-lbl" title="Every listed episode is checked, but one hasn’t aired yet">Unaired episodes remain</span>';
 // The row's action for an episode target: Mark E9 watched, with the show shortcut's focus hook, so focus stays
 // on the row's action as it moves on.
 function showRowEpisodeActionHtml(t, show, stop) {
@@ -410,9 +426,11 @@ function episodePanelHtml(r, opts = {}, card = false) {
     const notAired = eps.filter(e => e.air_date && e.air_date > today).length, noDate = eps.filter(e => !e.air_date).length;
     parts.push(`<div class="ep-summary">${opts.premiere ? `Premiere: ${opts.premiere} · ` : ''}${eps.length ? (reference ? `${eps.length} episode${eps.length === 1 ? '' : 's'} listed` : `${done}/${eps.length} watched`) : 'TMDB lists no episodes for this season'}${notAired ? ` · ${notAired} not aired yet` : ''}${noDate ? ` · ${noDate} without an air date` : ''}</div>`);
     // The explicit completion suggestion: a loaded, non-empty list with every listed episode checked.
-    if (!locked && eps.length && done === eps.length) {
-      const why = notAired || noDate
-        ? ` TMDB lists ${eps.length} episode${eps.length === 1 ? '' : 's'}; ${[notAired ? `${notAired} ha${notAired === 1 ? 's' : 've'}n’t aired yet` : '', noDate ? `${noDate} ha${noDate === 1 ? 's' : 've'} no air date` : ''].filter(Boolean).join(' and ')}.` : '';
+    // A listed episode with a known future air date withholds it (seasonCompletionWaits); a missing date alone doesn't.
+    if (!locked && eps.length && done === eps.length && notAired) {
+      parts.push(`<div class="ep-suggest">Every listed episode is checked, but ${notAired} ha${notAired === 1 ? 's' : 've'}n’t aired yet, so the season can be marked watched once ${notAired === 1 ? 'it has' : 'they have'}.</div>`);
+    } else if (!locked && eps.length && done === eps.length) {
+      const why = noDate ? ` TMDB lists ${eps.length} episode${eps.length === 1 ? '' : 's'}; ${noDate} ha${noDate === 1 ? 's' : 've'} no air date.` : '';
       const finished = p.finish === 'finished';
       const claim = finished ? ' TMDB’s details indicate this season has finished, though that isn’t a guarantee.' : why;
       parts.push(`<div class="ep-suggest">Every listed episode is checked.${esc(claim)} ${seasonActionHtml('ep-complete', `<button type="button" class="watch-btn" onclick="toggleWatch('${idArg}')">Mark ${esc(r.season)} watched</button>`)}`
