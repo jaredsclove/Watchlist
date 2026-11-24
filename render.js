@@ -67,8 +67,13 @@ function toggleFilterPill(btn) {
   if (!toggleFilterSelect(pill.select, value) || !container) return;
   const box = document.getElementById(container);
   const sel = `[data-filter-kind="${kind}"][data-filter-value=${JSON.stringify(value)}]`;
-  const target = (owner && box && box.querySelector(`${sel}[data-pill-owner=${JSON.stringify(owner)}]`))
+  let target = (owner && box && box.querySelector(`${sel}[data-pill-owner=${JSON.stringify(owner)}]`))
     || (box && box.querySelector(sel)) || document.getElementById(pill.select);
+  // All Movies: a pill its line now hides behind +N (browse-views.js) hands focus to that +N.
+  if (target && target.classList && target.classList.contains('fit-hidden') && typeof target.closest === 'function') {
+    const line = target.closest('.movie-pill-line');
+    target = (line && line.querySelector('.meta-more')) || target;
+  }
   if (target && typeof target.focus === 'function') target.focus();
 }
 
@@ -101,9 +106,8 @@ function metadataEmpty(m) {
 // Fewer while they are shown. Without a budget (cards), every pill.
 function metadataChipsHtml(m, owner, fallback = '', opts = {}) {
   if (!m || (metadataEmpty(m) && !m.metadata_owner_set)) return fallback;
-  const chip = ([kind, v]) => filterPillHtml(kind, v, v, { cls: `badge meta-chip meta-${kind}${kind === 'genres' ? ` g-${genreFamily(v)}` : ''}`, attrs: kind === 'network' ? networkChipStyle(v) : '', title: `Filter by “${v}”`, owner });
-  const all = (m.network ? [['network', m.network]] : [])
-    .concat((m.franchises || []).map(v => ['franchises', v]), (m.genres || []).map(v => ['genres', v]), (m.forms || []).map(v => ['forms', v]));
+  const chip = e => metadataChipHtml(e, owner);
+  const all = metadataChipEntries(m);
   const open = expandedCategoryOwners.has(owner);
   const fit = opts.budget ? categoryFitCount(all, opts.budget) : all.length;
   const shown = open ? all.length : fit, hidden = all.length - fit;
@@ -113,6 +117,14 @@ function metadataChipsHtml(m, owner, fallback = '', opts = {}) {
     ? `<button type="button" class="meta-more" data-action="cats-more" aria-expanded="${open}" aria-label="${open ? 'Show fewer categories' : `Show ${hidden} more categor${hidden === 1 ? 'y' : 'ies'}`}" onclick="event.stopPropagation(); toggleCategoryOverflow('${ownerArg}')">${open ? 'Fewer' : `+${hidden}`}</button>`
     : '';
   return all.slice(0, shown).map(chip).join('') + more;
+}
+// A record's category pills as [kind, value], in that priority; one pill's HTML (a filter pill where the view has the filter).
+function metadataChipEntries(m) {
+  return (m.network ? [['network', m.network]] : [])
+    .concat((m.franchises || []).map(v => ['franchises', v]), (m.genres || []).map(v => ['genres', v]), (m.forms || []).map(v => ['forms', v]));
+}
+function metadataChipHtml([kind, v], owner) {
+  return filterPillHtml(kind, v, v, { cls: `badge meta-chip meta-${kind}${kind === 'genres' ? ` g-${genreFamily(v)}` : ''}`, attrs: kind === 'network' ? networkChipStyle(v) : '', title: `Filter by “${v}”`, owner });
 }
 // How many pills fit a budget: each costs its label's length plus CATEGORY_PILL_COST; the first always fits; when some
 // are left out, the +N needs room too (CATEGORY_MORE_COST), so one fewer when only it wouldn't fit.
