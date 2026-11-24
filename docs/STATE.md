@@ -27,16 +27,18 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Mark S1 watched on a fully
-  marked show row (owner's request; PR #97, `62d5edb`), 2026-11-17 UTC, page only: with every listed episode marked, the
-  collapsed show row offers the season's ordinary Mark season watched (pressed, never automatic), or "Unaired episodes
-  remain" while a listed episode has a known future air date (the open list's dates, else the cached last episode's; a
-  missing date doesn't block), withheld the same way on the expanded season row and in its open list. Cache token
-  `20261117-seasonrow`. Verified: 60 offline suites (1443); local Chrome with synthetic data (four cases; real clicks and
-  keys E2 → E3 → S1 → Season 2 with focus kept, only `set_season_watched` sent; 375 px cards, no overflow); Pages built,
-  changed files byte-identical to `main`; live, read-only: Better Call Saul's row shows Mark S1 watched, no write
-  functions called, nothing pressed. Limitation: a closed list checks only the cached last episode's date.
-- Previous release: one retry after Supabase's "JWT issued at future" (PR #95, `53b32e5`), 2026-11-13 UTC: a database
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: All Movies' Genres and Groups
+  columns (owner's request; PR #99, `c4a4ea4`), 2026-11-24 UTC, page only: desktop rows read Title | Genres | Groups |
+  Release | Status | Watched | ⋯ with fixed columns; franchise, collection-tag and watch-with pills moved from under the
+  title to Groups; each pill cell one measured line with +N (Fewer wraps; a lone long pill gets an ellipsis); cards list
+  genres, then groups. Collections' film rows, TV and Games unchanged. Cache token `20261124-movielayout`. Verified: 61
+  offline suites (1449); local Chrome with synthetic data at 1100–1500 px and 375 px, both themes (resizing refits; real
+  Tab/Enter on +N and a pill keep focus; only cache writes); Pages built, changed files byte-identical to `main`; live,
+  read-only: 39 film rows all one line, no pill past its cell, nothing pressed. Not verified: real phones.
+- Previous release: Mark S1 watched on a fully marked show row (PR #97, `62d5edb`), 2026-11-17 UTC: with every listed
+  episode marked, the collapsed show row offers the season's Mark season watched, withheld while a listed episode has a
+  known future air date. Limitation: a closed list checks only the cached last episode's date.
+- Earlier: one retry after Supabase's "JWT issued at future" (PR #95, `53b32e5`), 2026-11-13 UTC: a database
   read refused with exactly that 401 is sent once more after 2 s with fresh session headers; writes never resent.
 - Earlier: shorter game genre labels (PR #93, `6051c2f`), 2026-11-12 UTC: IGDB's long genre names shortened (display only).
 - Earlier: the Games Library layout cleanup (PR #91, `59a08ec`), 2026-11-12 UTC: Platform and Release columns, a measured
