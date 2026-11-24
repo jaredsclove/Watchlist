@@ -44,6 +44,13 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   one group across the action columns (Match and Delete set apart after them); flat Seasons lists keep "Mark watched".
   Season progress reads "1/3 seasons watched". In show views (Currently Watching, All TV Shows, collections) the desktop
   column is "Action" and Up next has more room.
+- **All Movies' layout:** desktop rows read Title | Genres | Groups | Release | Status | Watched | ⋯, with fixed columns so
+  dates, statuses and actions line up; long titles wrap. Genres holds the genre, form and network pills (else the original
+  label); Groups holds franchises, then collection tags (TMDB, curated and person collections) and watch-with people, in that
+  order; nothing sits under the title. Each pill cell is one line, measured after each draw and on resize: the pills that fit,
+  then +N (Fewer wraps them all; page memory per row and column); a lone pill too long for its cell ends in an ellipsis. Pills
+  keep their colours, labels and filtering; a pill a redraw hides hands focus to its +N. Cards list the genres, then the
+  groups, each on its own lines with every pill. Collections' film rows keep their own layout.
 - **Planning queues (Q1, item 7):** the app bar's Queues (`#/queues`) shows one of the member's named queues at a time,
   chosen in a selector in their saved order (the last one shown is remembered on this browser). Manage queues, on the page,
   makes, renames and deletes queues (the confirmation names the entry count; the library is never touched) and moves them up

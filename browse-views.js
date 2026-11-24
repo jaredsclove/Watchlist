@@ -816,7 +816,7 @@ function paintBrowseMessage(text, withRetry) {
   const hooks = isBrowseCollectionView(activeViewId);
   const retry = withRetry ? ` <button class="btn"${hooks ? ' data-retry="1"' : ''} onclick="loadBrowseView()">Retry</button>` : '';
   const hook = hooks && !withRetry ? ' tabindex="-1" data-loading="1"' : '';
-  document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="loading"${hook}>${esc(text)}${retry}</td></tr>`;
+  document.getElementById('tbody').innerHTML = `<tr><td colspan="${browseColspan()}" class="loading"${hook}>${esc(text)}${retry}</td></tr>`;
   document.getElementById('cardList').innerHTML = `<div class="loading"${hook}>${esc(text)}${retry}</div>`;
 }
 
@@ -954,7 +954,7 @@ function renderBrowseTable(chain = true) {
   const thead = document.getElementById('tableHead');
   if (thead) thead.innerHTML = collection
     ? `<tr><th>Title</th><th class="col-cats">Categories</th><th class="col-next">Next / Release</th><th>Status</th><th>Action</th><th>Progress</th></tr>`
-    : `<tr><th>Title</th><th>Categories</th><th>Release</th><th>Status</th><th>Watched</th><th></th></tr>`;
+    : `<tr><th class="col-movie">Title</th><th class="col-genres">Genres</th><th class="col-groups">Groups</th><th class="col-rel">Release</th><th class="col-status">Status</th><th class="col-watch">Watched</th><th class="col-menu"><span class="visually-hidden">More</span></th></tr>`;
   const today = localTodayStr();
   const val = id => document.getElementById(id)?.value || ''; // a control that isn't shown doesn't filter
   const q = val('fSearch').trim().toLowerCase();
@@ -973,11 +973,16 @@ function renderBrowseTable(chain = true) {
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+// All Movies has seven columns (its Genres and Groups); collections six.
+function browseColspan() {
+  return activeViewId === ALL_MOVIES_VIEW.id ? 7 : 6;
+}
+
 // empty: the view's empty-state message (S3: focusable by the page only, the focus chain's F-4).
 function browseNoteHtml(msg, extra = '', empty = false) {
   const hook = empty ? ' tabindex="-1" data-empty="1"' : '';
   return {
-    row: `<tr class="empty-row"><td colspan="6"${hook}>${esc(msg)}${extra}</td></tr>`,
+    row: `<tr class="empty-row"><td colspan="${browseColspan()}"${hook}>${esc(msg)}${extra}</td></tr>`,
     card: `<div class="empty-row" style="padding:1rem 0"${hook}>${esc(msg)}${extra}</div>`
   };
 }
@@ -1108,6 +1113,7 @@ function renderAllMovies(today, f) {
   if (shown.length === 0) add(browseNoteHtml(films.length === 0 ? 'No films saved yet.' : 'No films match these filters.', films.length ? filterEmptyClearHtml() : ''));
   document.getElementById('tbody').innerHTML = html;
   document.getElementById('cardList').innerHTML = cardHtml;
+  fitMoviePillLines(); // before the focus chain puts focus back, so it never lands on a pill this hides
   return { sections: [{ name: 'film', shown: true, open: true, heading: false, keys: sorted.map(r => r.id) }] };
 }
 
@@ -1267,6 +1273,78 @@ function filmLibraryActionHtml(r, policy) {
       ? `<button class="popover-action" onclick="delRow('${idArg}')" aria-label="${esc(`Skip ${r.title} (built-in catalog film)`)}">Skip film (built-in catalog)…</button>` : '';
 }
 
+// ─── All Movies' Genres and Groups ───────────────────────────────────────────
+// Genres: the network, genres and forms (in the categories' order), else, while every category is empty and the owner
+// hasn't saved Details, the original label. Groups: franchises, then the collection tags (TMDB collections, curated and
+// person collections) and the watch-with people. The same pills as before (looks, labels, order, filtering), each a list of HTML.
+function moviePillGroups(r) {
+  const entries = metadataChipEntries(r);
+  const genres = (metadataEmpty(r) && !r.metadata_owner_set) ? [themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)].filter(Boolean)
+    : entries.filter(([kind]) => kind !== 'franchises').map(e => metadataChipHtml(e, r.id));
+  const groups = entries.filter(([kind]) => kind === 'franchises').map(e => metadataChipHtml(e, r.id))
+    .concat((r.collections || []).map(cleanCollectionName).map(c => collectionTagPillsHtml([c], r.id)),
+      (r.watch_with || []).map(w => watchWithPillsHtml([w], r.id)));
+  return { genres, groups };
+}
+// A desktop cell's one line: every pill and a +N that starts hidden; fitMoviePillLines then shows as many as fit, and +N
+// only when some don't (+N shows the rest, wrapped; Fewer folds them again: page memory per row and column, as TV's).
+// Without layout (the offline tests) every pill shows.
+const MOVIE_PILL_RING = 5; // styles.css .movie-pill-line padding
+const MOVIE_PILL_NOUNS = { genres: ['genre', 'genres'], groups: ['group', 'groups'] };
+function moviePillLineHtml(pills, rowId, col) {
+  if (!pills.length) return '';
+  const owner = `${rowId}::${col}`, open = expandedCategoryOwners.has(owner), nouns = MOVIE_PILL_NOUNS[col][1];
+  const more = pills.length > 1
+    ? `<button type="button" class="meta-more fit-hidden" data-action="${col}-more" aria-expanded="${open}" aria-label="${open ? `Show fewer ${nouns}` : `Show more ${nouns}`}" onclick="event.stopPropagation(); toggleMoviePillLine('${esc(owner).replace(/'/g, "\\'")}')">${open ? 'Fewer' : '+'}</button>` : '';
+  return `<div class="movie-pill-line" data-col="${col}">${pills.join('')}${more}</div>`;
+}
+function toggleMoviePillLine(owner) {
+  if (expandedCategoryOwners.has(owner)) expandedCategoryOwners.delete(owner); else expandedCategoryOwners.add(owner);
+  renderTable();
+}
+// Measured after each draw and on resize. The line doesn't wrap: pills that end inside the cell stay; the rest are hidden
+// (out of the Tab order) behind +N, giving up one more pill when +N itself wouldn't fit; a first pill too long even alone is
+// shortened (pill-shrink) to leave room. Opened (Fewer), every pill shows, wrapped. A focused pill that gets hidden hands
+// focus to +N.
+function fitMoviePillLines() {
+  const box = typeof document !== 'undefined' && document.getElementById('tbody');
+  if (!box || typeof box.querySelectorAll !== 'function') return;
+  box.querySelectorAll('.movie-pill-line').forEach(fitMoviePillLine);
+}
+function fitMoviePillLine(line) {
+  if (!line.children || !line.classList || !line.offsetHeight) return; // (no layout: as drawn, every pill)
+  const more = line.querySelector('.meta-more');
+  const pills = [...line.children].filter(el => el !== more);
+  if (!pills.length) return;
+  const [one, many] = MOVIE_PILL_NOUNS[line.dataset.col] || MOVIE_PILL_NOUNS.genres;
+  const open = !!more && more.getAttribute('aria-expanded') === 'true';
+  const show = n => pills.forEach((p, i) => p.classList.toggle('fit-hidden', i >= n));
+  const end = line.getBoundingClientRect().right - MOVIE_PILL_RING + 0.5; // inside the line's padding (the focus ring's room)
+  const fits = el => el.getBoundingClientRect().right <= end;
+  const label = n => { const k = pills.length - n; more.textContent = `+${k}`; more.setAttribute('aria-label', `Show ${k} more ${k === 1 ? one : many}`); };
+  const focused = document.activeElement;
+  line.classList.remove('open'); pills[0].classList.remove('pill-shrink');
+  show(pills.length); if (more) more.classList.add('fit-hidden');
+  if (pills.every(fits)) return; // all on one line: no +N (nor Fewer)
+  if (!more) { pills[0].classList.add('pill-shrink'); return; } // one long pill: shortened
+  more.classList.remove('fit-hidden');
+  if (open) { line.classList.add('open'); return; } // opened: every pill, wrapped, then Fewer
+  let n = 0;
+  while (n < pills.length && fits(pills[n])) n++;
+  n = Math.max(n, 1);
+  show(n); label(n);
+  while (n > 1 && !fits(more)) { n--; show(n); label(n); }
+  if (!fits(more)) pills[0].classList.add('pill-shrink');
+  if (focused && pills.indexOf(focused) >= n) more.focus();
+}
+let moviePillFrame = 0;
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function' && typeof requestAnimationFrame === 'function') {
+  window.addEventListener('resize', () => {
+    if (moviePillFrame) return;
+    moviePillFrame = requestAnimationFrame(() => { moviePillFrame = 0; if (activeViewId === ALL_MOVIES_VIEW.id) fitMoviePillLines(); });
+  });
+}
+
 // A film in All Movies (Stage 4b; the focus chain's item since the row menu holds priority): the film actions of the old Movies tab, for every
 // film wherever it is stored. Status, Watched and the ⋯ menu (watch-with, the rest
 // of its franchise for a film stored with the films, Match for an eligible row, and,
@@ -1275,10 +1353,7 @@ function allMoviesFilmHtml(r, today, films) {
   const policy = editPolicyOf(r);
   const isSkipped = r.status === 'skipped';
   const dimClass = isSkipped ? 'row-skipped' : '';
-  const badges = metadataChipsHtml(r, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id));
-  const badgesCell = categoryCellHtml(r, r.id, themeBadgeHtml(rowCatalogOf(r), r.theme, r.id)); // the desktop row's one line; the card lists every pill
-  const pills = collectionTagPillsHtml((r.collections || []).map(cleanCollectionName), r.id) + watchWithPillsHtml(r.watch_with || [], r.id);
-  const labelsHtml = pills ? `<div class="ro-labels">${pills}</div>` : '';
+  const { genres, groups } = moviePillGroups(r);
   const item = ` data-item="${esc(r.id)}" data-row-section="film"`;
   const statusCell = `<span class="state-action" data-action="status">${filmStatusSelectHtml(r)}</span>`;
   const titleHtml = `${priorityMarkHtml(r.priority)}<span class="show-title">${esc(r.title)}</span>${priorityMarkHtml(r.priority, true)}<span class="season-lbl">${browseFilmNoun()}</span>${stateTagsHtml(r, 'film')}`;
@@ -1288,14 +1363,15 @@ function allMoviesFilmHtml(r, today, films) {
   const popover = filmMenuHtml(r, policy, libraryAction ? `<div class="popover-section-label" style="margin-top:8px">Library</div>${libraryAction}` : '');
   const moreBtn = `<button class="more-btn" data-action="more" aria-expanded="false" onclick="toggleMorePopover('${r.id}', this)" title="Priority, watch with, collection, TMDB, delete" aria-label="${esc(`More for ${r.title}`)}">⋯</button>`;
   const row = `<tr class="browse-film-row ${dimClass}"${item}>
-      <td tabindex="-1" data-primary="1">${titleHtml}${labelsHtml}</td>
-      <td>${badgesCell}</td>
+      <td tabindex="-1" data-primary="1">${titleHtml}</td>
+      <td class="movie-pills-cell">${moviePillLineHtml(genres, r.id, 'genres')}</td>
+      <td class="movie-pills-cell">${moviePillLineHtml(groups, r.id, 'groups')}</td>
       <td class="date-cell">${browseDateHtml(r, today)}</td>
       <td>${statusCell}</td>
       <td>${watchBtn}</td>
       <td class="more-cell">${moreBtn}${popover}</td>
     </tr>`;
-  const card = `<div class="item-card ${dimClass}"${item}>
+  const card = `<div class="item-card movie-card ${dimClass}"${item}>
       <div class="card-top">
         <div class="card-title-block" tabindex="-1" data-primary="1">
           <span class="card-title">${priorityMarkHtml(r.priority)}${esc(r.title)}${priorityMarkHtml(r.priority, true)}${stateTagsHtml(r, 'film')}</span>${browseFilmNoun() ? '<span class="card-season">Film</span>' : ''}
@@ -1307,7 +1383,8 @@ function allMoviesFilmHtml(r, today, films) {
       </div>
       <div class="card-meta">
         <span class="card-date">${browseDateHtml(r, today)}</span>
-        <span class="card-labels">${badges}${pills}</span>
+        ${genres.length ? `<span class="card-labels movie-card-genres"><span class="visually-hidden">Genres: </span>${genres.join('')}</span>` : ''}
+        ${groups.length ? `<span class="card-labels movie-card-groups"><span class="visually-hidden">Groups: </span>${groups.join('')}</span>` : ''}
       </div>
       <div class="card-actions">${statusCell} ${isSkipped ? '' : watchBtn}</div>
     </div>`;

@@ -1352,3 +1352,31 @@ td.spot-version-name { padding-left: 46px; font-size: 13px; color: var(--text2);
   .media-switch { flex-wrap: wrap; row-gap: 2px; }
   .media-switch-btn { flex: 0 1 auto; padding: 8px 6px; }
 }
+/* All Movies: Title | Genres | Groups | Release | Status | Watched | ⋯. Fixed columns, so dates, statuses and actions line up
+   on every row; the title takes what's left and wraps. Each pill cell is one line (browse-views.js fitMoviePillLine):
+   the pills that fit, then +N; a lone pill too long for the cell is shortened with an ellipsis (its full label stays its
+   accessible name, and on the card). +N's Fewer state wraps every pill. Scoped by All Movies' own header classes. */
+#desktopTable:has(th.col-genres) { table-layout: fixed; }
+#desktopTable:has(th.col-genres) th.col-movie { width: auto; }
+#desktopTable:has(th.col-genres) th.col-genres, #desktopTable:has(th.col-genres) th.col-groups { width: 18%; }
+#desktopTable:has(th.col-genres) th.col-rel { width: 168px; } /* "Dec 18, 2026" and Upcoming on one line */
+#desktopTable:has(th.col-genres) th.col-status { width: 108px; }
+#desktopTable:has(th.col-genres) th.col-watch { width: 116px; }
+#desktopTable:has(th.col-genres) th.col-menu { width: 40px; }
+@media (max-width: 1239px) { /* a narrower desktop: the title keeps about a quarter of the row */
+  #desktopTable:has(th.col-genres) th.col-genres, #desktopTable:has(th.col-genres) th.col-groups { width: 16%; }
+}
+#desktopTable:has(th.col-genres) td:first-child { overflow-wrap: anywhere; }
+#desktopTable:has(th.col-genres) td.date-cell { white-space: normal; }
+#desktopTable:has(th.col-genres) td .status-select { max-width: 100%; }
+.movie-pill-line { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; overflow: hidden;
+  padding: 5px; margin: -5px; } /* room for a focused pill's ring (offset 3 + 2 px), which overflow would clip */
+.movie-pill-line > * { flex: none; margin: 0; }
+.movie-pill-line > .pill-shrink { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.movie-pill-line > .fit-hidden { display: none; }
+.movie-pill-line.open { flex-wrap: wrap; overflow: visible; }
+.movie-pill-line.open > * { flex: 0 1 auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+/* Its card: the genres, then the groups, each on its own line; a long label wraps inside its pill, never widening the card. */
+.movie-card .card-meta .card-labels { flex: 1 0 100%; row-gap: 0; }
+.movie-card .card-meta .movie-card-genres + .movie-card-groups { margin-top: 6px; } /* set apart from the genres' wrapped rows */
+.movie-card .card-labels > :is(.badge, .collection-tag, .ww-tag) { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
