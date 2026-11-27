@@ -92,7 +92,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
 - **Standing decisions:** W1 is removed; item 11 is abandoned; item 10 (CU1e) stays. `pg_graphql` stays disabled: enabling it needs a new explicit
   decision (`db/README.md`). A member's crafted request on their own records is an accepted limitation; it can't reach another account.
 - **Restore** runs through the signed-in page or `docs/ADMIN_RESTORE.md`. Hosted restore performance has not been measured.
-- **Repairs are fix-forward.** Reopening anonymous access is never a recovery step. Data recovery is a format-9 restore.
+- **Repairs are fix-forward.** Reopening anonymous access is never a recovery step. Data recovery is a format-10 restore.
 
 ## Code map (classic globals; mutable page state is in `watchlist.html`)
 
@@ -104,9 +104,10 @@ membership enforcement, research permissions, holds, reliable backup and restore
 | Episodes, ratings | `episodes.js`, `show-ratings.js`, `tmdb-cache.js` (the member’s TMDB cache, TC1) |
 | Organization | `organization.js`, `organization-manage.js`, `collection-members.js`; planning queues `queues.js`; sorting `view-sort.js` |
 | Games (G1) | `games.js` (the area, Settings → Games), `games-data.js` (IGDB records and the rules), `games-research.js` (the games research brief and findings); the IGDB proxy `supabase/functions/igdb` |
+| Books (BK1) | `books.js` (the area, Review, + Add book, Refresh books), `books-data.js` (Hardcover records, list and series rules, what Refresh finds); the Hardcover and official-site proxy `supabase/functions/books` |
 | TMDB | `tmdb-match.js`, `tmdb-search.js`, `collections-pull.js`, `person-pull.js`, `universe-pull.js` |
 | Collection updates | `collection-updates.js`, `collection-research.js`, `collection-settings.js` |
-| Backup / restore | `backup-restore.js` (reads formats 5–9 and writes format 9) |
+| Backup / restore | `backup-restore.js` (reads formats 5–10 and writes format 10) |
 | Database | `db/` (migrations and tests; run order in `db/README.md`) |
 | Tests and tools | `tests/` (offline whole-page harness: `app-harness.js`, `mini-dom.js`, `b45-harness.js`), `tools/` (see `db/README.md`) |
 
