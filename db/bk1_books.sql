@@ -299,8 +299,9 @@ end $$;
 -- ── 5. Functions ───────────────────────────────────────────────────────────────
 -- Saves a book. p_book: {hardcover_id?, title, authors, series, chosen_date?}. Refused when that Hardcover book is already saved.
 -- p_clear_keys: the exclusions this explicit add lifts (the book's own keys: a removed or dismissed title is reconsidered by adding
--- it again). p_finding: the review item it settles, if any.
-create function public.library_book_add(p_book jsonb, p_status text, p_clear_keys text[], p_finding text) returns jsonb
+-- it again). p_finding: the review item it settles, if any. p_refuse_keys (an automatic add from a followed series): the book's own
+-- keys; refused when any of them is excluded, so a page that loaded before a removal or dismissal can't bring the title back.
+create function public.library_book_add(p_book jsonb, p_status text, p_clear_keys text[], p_finding text, p_refuse_keys text[] default null) returns jsonb
 language plpgsql security invoker set search_path = '' as $$
 declare v_owner uuid := private.current_owner_id(); e public.book_entries; v_hc integer; v_cleared integer;
 begin
@@ -309,11 +310,15 @@ begin
      or jsonb_typeof(p_book -> 'title') is distinct from 'string' or not private.g1_title_ok(p_book ->> 'title', 300)
      or not private.bk1_people_ok(coalesce(p_book -> 'authors', '[]')) or not private.bk1_series_ok(coalesce(p_book -> 'series', '[]'))
      or not private.bk1_date_ok(nullif(p_book -> 'chosen_date', 'null'::jsonb)) or not private.bk1_status_ok(p_status)
-     or not private.bk1_keys_ok(coalesce(p_clear_keys, '{}')) or (p_finding is not null and not private.bk1_key_ok(p_finding)) then
+     or not private.bk1_keys_ok(coalesce(p_clear_keys, '{}')) or (p_finding is not null and not private.bk1_key_ok(p_finding))
+     or not private.bk1_keys_ok(coalesce(p_refuse_keys, '{}')) or (cardinality(coalesce(p_refuse_keys, '{}')) > 0 and cardinality(coalesce(p_clear_keys, '{}')) > 0) then
     raise exception 'invalid_input: book' using errcode = '22023';
   end if;
   v_hc := nullif(p_book ->> 'hardcover_id', '')::integer;
   perform private.bk1_lock(v_owner);
+  if exists (select 1 from public.book_decisions where user_id = v_owner and kind = 'exclude' and key = any(coalesce(p_refuse_keys, '{}'))) then
+    perform private.lib_refuse('book_excluded', 'This title was removed or dismissed, so it wasn''t added. Add it yourself to bring it back.');
+  end if;
   if v_hc is not null and exists (select 1 from public.book_entries where user_id = v_owner and hardcover_id = v_hc) then
     perform private.lib_refuse('book_duplicate', 'This book is already in your library, so nothing was changed.');
   end if;
@@ -619,25 +624,25 @@ begin
   return jsonb_build_object('fingerprint', p_fingerprint, 'status', case when p_outcome = 'done' then null else p_outcome end);
 end $$;
 
--- The cache: up to 200 rows [{kind, key, data}] per call, replacing what was cached for them.
+-- The cache: up to 200 rows [{kind, key, data}] per call, replacing what was cached for them. A row too large to keep (over the
+-- table's 60,000 bytes) is skipped and counted, not refused: the cache is replaceable, and one large author mustn't stop a refresh.
 create function public.library_book_cache_put(p_rows jsonb) returns jsonb
 language plpgsql security invoker set search_path = '' as $$
 declare v_owner uuid := private.current_owner_id(); v_n integer;
 begin
   if jsonb_typeof(p_rows) is distinct from 'array' or jsonb_array_length(p_rows) > 200
      or exists (select 1 from jsonb_array_elements(p_rows) r where jsonb_typeof(r) <> 'object' or (r ->> 'kind') is null or (r ->> 'kind') not in ('book', 'author', 'series', 'site')
-       or jsonb_typeof(r -> 'key') is distinct from 'string' or char_length(r ->> 'key') not between 1 and 100 or jsonb_typeof(r -> 'data') is distinct from 'object'
-       or octet_length((r -> 'data')::text) > 60000)
+       or jsonb_typeof(r -> 'key') is distinct from 'string' or char_length(r ->> 'key') not between 1 and 100 or jsonb_typeof(r -> 'data') is distinct from 'object')
      or (select count(*) from jsonb_array_elements(p_rows)) <> (select count(distinct (r ->> 'kind') || ':' || (r ->> 'key')) from jsonb_array_elements(p_rows) r) then
     raise exception 'invalid_input: cache' using errcode = '22023';
   end if;
   perform private.bk1_lock(v_owner);
   perform set_config('watchlist.library_write', 'on', true);
   insert into public.book_cache (kind, key, data, fetched_at)
-  select r ->> 'kind', r ->> 'key', r -> 'data', now() from jsonb_array_elements(p_rows) r
+  select r ->> 'kind', r ->> 'key', r -> 'data', now() from jsonb_array_elements(p_rows) r where octet_length((r -> 'data')::text) <= 60000
   on conflict (user_id, kind, key) do update set data = excluded.data, fetched_at = excluded.fetched_at;
   get diagnostics v_n = row_count;
-  return jsonb_build_object('cached', v_n);
+  return jsonb_build_object('cached', v_n, 'skipped', jsonb_array_length(p_rows) - v_n);
 end $$;
 
 -- Empties this member's book cache (the provider's and sites' data, not the member's; Refresh books fills it again).
@@ -866,13 +871,13 @@ revoke all on function private.bk1_people_ok(jsonb), private.bk1_series_ok(jsonb
 grant execute on function private.bk1_people_ok(jsonb), private.bk1_series_ok(jsonb), private.bk1_date_ok(jsonb), private.bk1_url_ok(text), private.bk1_key_ok(text),
   private.bk1_keys_ok(text[]), private.bk1_status_ok(text), private.bk1_lock(uuid), private.bk1_entry_json(public.book_entries), private.bk1_entry(uuid, uuid),
   private.bk1_close(uuid, text) to authenticated;
-revoke all on function public.library_book_add(jsonb, text, text[], text), public.library_book_set(uuid, text, text), public.library_book_edit(uuid, jsonb, jsonb, text),
+revoke all on function public.library_book_add(jsonb, text, text[], text, text[]), public.library_book_set(uuid, text, text), public.library_book_edit(uuid, jsonb, jsonb, text),
   public.library_book_link(uuid, integer, integer, jsonb, text), public.library_book_delete(uuid, text, text[]), public.library_book_follow(text, integer, text, boolean),
   public.library_book_follow_set(uuid, boolean, boolean), public.library_book_unfollow(uuid), public.library_book_site_set(integer, text, text, text),
   public.library_book_association_set(integer, integer, text, boolean, text), public.library_book_decision_set(text, text, jsonb, jsonb, text, text),
   public.library_book_findings_record(jsonb, text[]), public.library_book_finding_resolve(text, text, text), public.library_book_cache_put(jsonb),
   public.library_book_cache_purge(), public.restore_backup(jsonb, boolean) from public, anon;
-grant execute on function public.library_book_add(jsonb, text, text[], text), public.library_book_set(uuid, text, text), public.library_book_edit(uuid, jsonb, jsonb, text),
+grant execute on function public.library_book_add(jsonb, text, text[], text, text[]), public.library_book_set(uuid, text, text), public.library_book_edit(uuid, jsonb, jsonb, text),
   public.library_book_link(uuid, integer, integer, jsonb, text), public.library_book_delete(uuid, text, text[]), public.library_book_follow(text, integer, text, boolean),
   public.library_book_follow_set(uuid, boolean, boolean), public.library_book_unfollow(uuid), public.library_book_site_set(integer, text, text, text),
   public.library_book_association_set(integer, integer, text, boolean, text), public.library_book_decision_set(text, text, jsonb, jsonb, text, text),
@@ -906,7 +911,7 @@ begin
     end if;
     if (select count(*) from pg_trigger where tgrelid = t::regclass and not tgisinternal and tgname like '%write_guard') <> 1 then raise exception 'bk1: % has no write guard', t; end if;
   end loop;
-  foreach f in array array['public.library_book_add(jsonb, text, text[], text)', 'public.library_book_set(uuid, text, text)', 'public.library_book_edit(uuid, jsonb, jsonb, text)',
+  foreach f in array array['public.library_book_add(jsonb, text, text[], text, text[])', 'public.library_book_set(uuid, text, text)', 'public.library_book_edit(uuid, jsonb, jsonb, text)',
     'public.library_book_link(uuid, integer, integer, jsonb, text)', 'public.library_book_delete(uuid, text, text[])', 'public.library_book_follow(text, integer, text, boolean)',
     'public.library_book_follow_set(uuid, boolean, boolean)', 'public.library_book_unfollow(uuid)', 'public.library_book_site_set(integer, text, text, text)',
     'public.library_book_association_set(integer, integer, text, boolean, text)', 'public.library_book_decision_set(text, text, jsonb, jsonb, text, text)',

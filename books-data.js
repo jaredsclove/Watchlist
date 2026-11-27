@@ -20,7 +20,10 @@ function normBookTitle(s) {
   return String(s == null ? '' : s).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[’'`ʼ]/g, '')
     .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim().replace(/^(the|a|an) /, '');
 }
-const bookSlug = s => normBookTitle(s).replace(/ /g, '-').slice(0, 200) || 'untitled';
+// A title with no Latin letters or digits (Cyrillic, CJK…) has no slug: a short hash of the title stands in, so such titles don't
+// share one key.
+const bookSlug = s => normBookTitle(s).replace(/ /g, '-').slice(0, 200) || `x${bookHash(String(s == null ? '' : s).normalize('NFC').trim().toLowerCase())}`;
+function bookHash(t) { let h = 5381; for (const ch of t) h = ((h * 33) ^ ch.codePointAt(0)) >>> 0; return h.toString(36); }
 const bookAuthorKey = a => (a && a.id ? String(a.id) : `n-${bookSlug(a && a.name).slice(0, 60)}`);
 const bookTitleKey = (author, title) => `t:${bookAuthorKey(author)}:${bookSlug(title)}`;
 // A saved book's key: its Hardcover record, else the entry itself.

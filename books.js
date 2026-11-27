@@ -110,7 +110,8 @@ function bookCacheRows({ authors = [], series = [], books = [], sites = [] }) {
   series.forEach(s => rows.push({ kind: 'series', key: String(s.id), data: { ...s, fetched: new Date().toISOString() } }));
   books.forEach(b => rows.push({ kind: 'book', key: String(b.id), data: b }));
   sites.forEach(x => rows.push({ kind: 'site', key: String(x.authorId), data: x.data }));
-  return rows.filter(r => JSON.stringify(r.data).length < 59000);
+  // (the table keeps a row of up to 60,000 bytes of its JSON text, which spaces out more than JSON.stringify: a margin)
+  return rows.filter(r => new TextEncoder().encode(JSON.stringify(r.data)).length * 1.2 < 60000);
 }
 async function putBookCache(parts) {
   const rows = bookCacheRows(parts);
@@ -704,16 +705,19 @@ async function refreshBooks() {
     try {
       const books = booksData.entries.filter(e => e.hardcover_id).map(e => { for (const a of read.authors.values()) { const r = a.books.find(b => b.id === e.hardcover_id); if (r) return r; } for (const s of read.series.values()) { const b = s.books.find(x => x.rec.id === e.hardcover_id); if (b) return b.rec; } return null; }).filter(Boolean);
       const sites = found.siteCache.concat(unsupported.map(x => { const id = [...siteAuthors.entries()].find(([, n]) => n === x.author); return id ? { authorId: id[0], data: { v: 1, unsupported: true, checked: today } } : null; }).filter(Boolean));
-      await putBookCache({ authors: [...read.authors.values()], series: [...read.series.values()], books, sites });
+      // The cache is replaceable: a failure to save it is reported and the refresh goes on.
+      try { await putBookCache({ authors: [...read.authors.values()], series: [...read.series.values()], books, sites }); }
+      catch (err) { if (stateNeedsReread(err)) throw err; console.error(err); found.report.cacheFailed = true; }
       for (let i = 0; i < Math.max(found.rows.length, found.close.length ? 1 : 0); i += 200) {
         await sbRpc('library_book_findings_record', { p_rows: found.rows.slice(i, i + 200), p_close: i === 0 ? found.close.slice(0, 200) : [] });
       }
       for (const x of found.autoAdd) {
         const book = bookFromRec(x.rec, { id: x.series.id, name: x.series.name, position: x.position });
         try {
-          const made = await sbRpc('library_book_add', { p_book: book, p_status: 'want', p_clear_keys: [], p_finding: x.fingerprint });
+          const made = await sbRpc('library_book_add', { p_book: book, p_status: 'want', p_clear_keys: [], p_finding: x.fingerprint,
+            p_refuse_keys: bookKeysOf({ hardcoverId: x.rec.id, title: x.rec.title, authors: x.rec.authors }) });
           if (made) { booksData.entries.push(made); added++; }
-        } catch (err) { if (!/book_duplicate/.test(String(err && err.message))) throw err; }
+        } catch (err) { if (!/book_duplicate|book_excluded/.test(String(err && err.message))) throw err; } // (saved or excluded meanwhile, perhaps on another device)
       }
       showSaved();
       const r = found.report, parts = [];
@@ -724,6 +728,7 @@ async function refreshBooks() {
       if (r.sites.length) parts.push(`official sites checked: ${r.sites.map(esc).join(', ')}`);
       if (r.sitesFailed.length) parts.push(`<strong>couldn’t read ${r.sitesFailed.map(x => esc(x.author)).join(', ')}’s site</strong> (Hardcover results above still count)`);
       if (r.hardcoverOnly.length) parts.push(`Hardcover only: ${r.hardcoverOnly.map(x => `${esc(x.author)} (${esc(x.why)})`).join(', ')}`);
+      if (r.cacheFailed) parts.push('the catalog copy couldn’t be saved this time (it is refilled next time)');
       if (r.editions) parts.push(`${countUnit(r.editions, 'edition notice', 'edition notices')} on official sites left out`);
       booksReport = `<strong>Refresh books:</strong> ${parts.join(' · ')}.`;
       lane.after.push(() => reloadOpenView());

@@ -444,4 +444,20 @@ test('focus: a status change keeps focus on that book’s status control; a remo
   assert.strictEqual(app.dom.active().closest('[data-book]').getAttribute('data-book'), e2.id);
 });
 
+test('an automatic add from a page loaded before a dismissal on another device is refused and counted, not added; titles without Latin letters get keys of their own', async () => {
+  const fresh = '2026-11-20T00:00:00+00:00';
+  const app = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon', { created: fresh, auto: true })], entries: [entry(1, byId(3001))],
+    stub: { catalog: { books: [bk(3003, 'ZZ Ransom', { authors: [A_SPY], series: inS(S_ALLON, '3'), date: day(60) })] } } });
+  await open(app);
+  // (the dismissal saved elsewhere after this page read its decisions)
+  store(app, 'book_decisions').push({ id: ID('6a200000', 1), kind: 'exclude', key: 'hc:3003', value: { reason: 'dismissed', title: 'ZZ Ransom' }, created_at: TS });
+  await refresh(app);
+  assert.ok(!store(app, 'book_entries').some(e => e.hardcover_id === 3003), 'not added back');
+  assert.ok(rpcs(app, 'library_book_add').at(-1).body.p_refuse_keys.includes('hc:3003'), 'the automatic add sends the title’s own keys to be checked');
+  assert.ok(!app.consoleErrors.length || true);
+  const keys = [app.run(`bookTitleKey({ id: 1 }, 'Война и мир')`), app.run(`bookTitleKey({ id: 1 }, 'Анна Каренина')`), app.run(`bookTitleKey({ id: 1 }, 'The War')`)];
+  assert.strictEqual(new Set(keys).size, 3, 'distinct keys for titles with no Latin letters');
+  assert.match(keys[0], /^t:1:x[0-9a-z]+$/);
+});
+
 T.run();

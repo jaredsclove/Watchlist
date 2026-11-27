@@ -58,7 +58,7 @@ ok(cap.phase === 'contracted-bk1' && cap.backup_format === 10 && cap.bk1 === 1 &
 ok(/converted in the page/.test((await restore(A, L1)).message || ''), 'a format-9 file sent directly is refused: the page converts it');
 
 section('books: add, status, edit');
-const add = (who, book, status = 'want', clear = [], finding = null) => call(who, `public.library_book_add($1::jsonb, $2, $3::text[], $4)`, [J(book), status, arr(clear), finding]);
+const add = (who, book, status = 'want', clear = [], finding = null, refuse = null) => call(who, `public.library_book_add($1::jsonb, $2, $3::text[], $4, $5::text[])`, [J(book), status, arr(clear), finding, refuse ? arr(refuse) : null]);
 const setS = (who, e, exp, s) => call(who, `public.library_book_set($1, $2, $3)`, [e, exp, s]);
 const edit = (who, e, exp, fields, finding = null) => call(who, `public.library_book_edit($1, $2::jsonb, $3::jsonb, $4)`, [e, J(exp), J(fields), finding]);
 const auth = [{ id: 700500, name: 'ZZ Novelist' }];
@@ -118,6 +118,11 @@ ok(r1.ok && r1.r.suppressed === 2 && r1.r.added === 1, 'a later refresh finding 
 ok((await add(A, { hardcover_id: 700001, title: 'ZZ The First Case', authors: auth }, 'want', ['hc:700001', 't:700500:zz-the-first-case'])).r.exclusions_lifted === 2,
   'adding it again explicitly lifts its exclusions');
 ok((await recF(A, [{ ...nb, fingerprint: 'nb:hc:700001b' }])).r.added === 1, 'so a later finding for it is no longer suppressed');
+await dec(A, 'exclude', 'hc:700011', null, { reason: 'dismissed', title: 'ZZ Excluded' });
+ok(/book_excluded/.test((await add(A, { hardcover_id: 700011, title: 'ZZ Excluded', authors: auth }, 'want', [], null, ['hc:700011', 't:700500:zz-excluded'])).message)
+  && (await as(A, `select count(*)::int n from public.book_entries where hardcover_id = 700011`))[0].n === 0, 'an automatic add of an excluded title is refused (a page loaded before the dismissal)');
+ok((await add(A, { hardcover_id: 700012, title: 'ZZ Not Excluded', authors: auth }, 'want', [], null, ['hc:700012'])).ok, 'an automatic add of a title not excluded goes through');
+ok(/invalid_input/.test((await add(A, { title: 'ZZ Both' }, 'want', ['hc:1'], null, ['hc:2'])).message), 'an add that both lifts and checks exclusions is refused');
 
 section('review items');
 const res = (who, fp, exp, out) => call(who, `public.library_book_finding_resolve($1, $2, $3)`, [fp, exp, out]);
@@ -166,11 +171,13 @@ ok(/invalid_input/.test((await dec(A, 'skip', 'nospace here', null, {})).message
 const put = await call(A, `public.library_book_cache_put($1::jsonb)`, [J([{ kind: 'book', key: '700001', data: { v: 1, title: 'ZZ' } }, { kind: 'site', key: '700500', data: { v: 1, links: [] } }])]);
 ok(put.ok && put.r.cached === 2, 'the cache takes books and site readings');
 ok(/invalid_input/.test((await call(A, `public.library_book_cache_put($1::jsonb)`, [J([{ kind: 'film', key: '1', data: {} }])])).message), 'an unknown cache kind is refused');
+const big = await call(A, `public.library_book_cache_put($1::jsonb)`, [J([{ kind: 'author', key: '700900', data: { v: 1, pad: 'x'.repeat(61000) } }, { kind: 'author', key: '700901', data: { v: 1 } }])]);
+ok(big.ok && big.r.cached === 1 && big.r.skipped === 1 && (await as(A, `select count(*)::int n from public.book_cache where key = '700900'`))[0].n === 0, 'a row too large to keep is skipped and counted; the rest of the batch is saved', JSON.stringify(big.r || big.message));
 
 section('accounts');
 ok((await as(B, `select count(*)::int n from public.book_entries`))[0].n === 1 && (await as(B, `select count(*)::int n from public.book_findings`))[0].n === 0,
   'another member sees only their own books and none of A’s review items');
-ok(!(await call(C, `public.library_book_add($1::jsonb, 'want', '{}', null)`, [J({ title: 'ZZ' })])).ok && (await as(C, `select count(*)::int n from public.book_entries`))[0].n === 0,
+ok(!(await call(C, `public.library_book_add($1::jsonb, 'want', '{}', null, null)`, [J({ title: 'ZZ' })])).ok && (await as(C, `select count(*)::int n from public.book_entries`))[0].n === 0,
   'a signed-in non-member can neither save nor read books');
 const anon = await db.transaction(async tx => { await tx.query(`select set_config('role', 'anon', true)`); return tx.query(`select count(*) from public.book_entries`); }).then(() => 'read', e => e.message);
 ok(/permission denied/.test(anon), 'signed out (anon): no access', anon);
@@ -194,7 +201,7 @@ for (const t of BK) {
   }));
 }
 ok(fieldOk, 'every book row comes back field by field');
-ok((await as(A, `select count(*)::int n from public.book_cache`))[0].n === 2, 'the cache is untouched by a restore');
+ok((await as(A, `select count(*)::int n from public.book_cache`))[0].n === 3, 'the cache is untouched by a restore');
 ok((await recF(A, [{ fingerprint: 'nb:hc:601004', source: 'hardcover', kind: 'new_book', subject: { title: 'ZZ Book 1 Four' }, exclude_keys: ['hc:601004'] },
   { fingerprint: 'nb:site:601500:zz-book-1-four', source: 'website', kind: 'new_book', subject: { title: 'ZZ Book 1 Four' }, exclude_keys: ['t:601500:zz-book-1-four'] }])).r.suppressed === 2,
   'a title removed before the backup stays out after the restore');

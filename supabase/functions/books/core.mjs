@@ -123,7 +123,9 @@ async function readPage(u, deps, hops = 0) {
     if (timer) clearTimeout(timer);
     const to = res.headers.get('location');
     if (!to || hops >= 3) return { url: u, ok: false, error: 'too many redirects' };
-    return readPage(new URL(to, u).toString(), deps, hops + 1);
+    let next;
+    try { next = new URL(to, u).toString(); } catch (e) { return { url: u, ok: false, error: 'a redirect to an address that can’t be read' }; }
+    return readPage(next, deps, hops + 1);
   }
   try {
     if (!res.ok) return { url: u, ok: false, status: res.status, error: `answered ${res.status}` };
@@ -131,8 +133,23 @@ async function readPage(u, deps, hops = 0) {
     if (!/text\/html|application\/xhtml/.test(type)) return { url: u, ok: false, status: res.status, error: 'not a web page' };
     const len = Number(res.headers.get('content-length') || 0);
     if (len > MAX_PAGE_BYTES) return { url: u, ok: false, error: 'page too large' };
-    const text = await res.text();
-    if (text.length > MAX_PAGE_BYTES) return { url: u, ok: false, error: 'page too large' };
+    // Read with a byte cap (a chunked or compressed page has no length to check first).
+    let text = '';
+    if (res.body && typeof res.body.getReader === 'function') {
+      const reader = res.body.getReader(), dec = new TextDecoder();
+      let n = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        n += value.byteLength;
+        if (n > MAX_PAGE_BYTES) { try { await reader.cancel(); } catch (e) { /* closed */ } return { url: u, ok: false, error: 'page too large' }; }
+        text += dec.decode(value, { stream: true });
+      }
+      text += dec.decode();
+    } else {
+      text = await res.text();
+      if (text.length > MAX_PAGE_BYTES) return { url: u, ok: false, error: 'page too large' };
+    }
     return { url: u, ok: true, status: res.status, html: text };
   } catch (e) { return { url: u, ok: false, error: 'couldn’t be read' }; }
   finally { if (timer) clearTimeout(timer); }

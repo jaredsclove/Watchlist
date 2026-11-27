@@ -15,6 +15,7 @@ function bk1Handlers({ store, DbError }) {
   let seq = 0;
   const newId = () => `6b000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
   const refuse = (code, text) => { throw new DbError('P0001', `${code}: ${text}`); };
+  const refuse_ = refuse;
   const invalid = what => { throw new DbError('22023', `invalid_input: ${what}`); };
   const changed = () => refuse('target_changed', 'This changed since the page showed it, so nothing was changed. Look at it again.');
   const now = () => new Date().toISOString();
@@ -26,8 +27,9 @@ function bk1Handlers({ store, DbError }) {
   const seriesOk = p => Array.isArray(p) && p.every(x => x && titleOk(x.name) && (x.position == null || /^\d{1,3}(\.\d{1,2})?$/.test(x.position)));
   const dateOk = d => d == null || (d && /^(\d{4}(-\d{2}(-\d{2})?)?|TBA)$/.test(d.value) && ['member', 'website'].includes(d.source) && (d.url == null || /^https:\/\/\S+$/.test(d.url)));
   return {
-    library_book_add({ p_book: b, p_status: status, p_clear_keys: clear, p_finding: finding }) {
-      if (!b || !titleOk(b.title) || !STATUSES.includes(status) || !peopleOk(b.authors || []) || !seriesOk(b.series || []) || !dateOk(b.chosen_date) || !keysOk(clear || [])) invalid('book');
+    library_book_add({ p_book: b, p_status: status, p_clear_keys: clear, p_finding: finding, p_refuse_keys: refuse }) {
+      if (!b || !titleOk(b.title) || !STATUSES.includes(status) || !peopleOk(b.authors || []) || !seriesOk(b.series || []) || !dateOk(b.chosen_date) || !keysOk(clear || []) || !keysOk(refuse || [])) invalid('book');
+      if (store.book_decisions.some(d => d.kind === 'exclude' && (refuse || []).includes(d.key))) refuse_('book_excluded', 'This title was removed or dismissed, so it wasn\'t added. Add it yourself to bring it back.');
       if (b.hardcover_id != null && store.book_entries.some(e => e.hardcover_id === b.hardcover_id)) refuse('book_duplicate', 'This book is already in your library, so nothing was changed.');
       const e = { id: newId(), hardcover_id: b.hardcover_id ?? null, title: b.title, authors: clone(b.authors || []), series: clone(b.series || []), status, chosen_date: clone(b.chosen_date ?? null), created_at: now(), updated_at: now() };
       store.book_entries.push(e);
@@ -155,12 +157,14 @@ function bk1Handlers({ store, DbError }) {
     },
     library_book_cache_put({ p_rows: rows }) {
       if (!Array.isArray(rows) || rows.length > 200 || rows.some(r => !['book', 'author', 'series', 'site'].includes(r.kind) || typeof r.key !== 'string' || !r.data || typeof r.data !== 'object')) invalid('cache');
+      let skipped = 0;
       for (const r of rows) {
+        if (Buffer.byteLength(JSON.stringify(r.data).replace(/([,:])/g, '$1 ')) > 60000) { skipped++; continue; }
         const old = store.book_cache.find(x => x.kind === r.kind && x.key === r.key);
         if (old) Object.assign(old, { data: clone(r.data), fetched_at: now() });
         else store.book_cache.push({ id: newId(), kind: r.kind, key: r.key, data: clone(r.data), fetched_at: now() });
       }
-      return { cached: rows.length };
+      return { cached: rows.length - skipped, skipped };
     },
     library_book_cache_purge() { const n = store.book_cache.length; store.book_cache = []; return { removed: n }; }
   };
