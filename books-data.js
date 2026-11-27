@@ -282,6 +282,33 @@ function bookAddAllPlan(target, { entries = [], decisions = new Map(), associati
 // list also has one-book "series" made by readers' typing, such as "Gabriel Allon #23", and translated series).
 const bookAuthorSeriesIds = list => (list || []).filter(x => x && Number.isInteger(x.id) && (Number(x.books_count) || 0) >= 2).map(x => x.id).slice(0, 12);
 
+// ── The Library's order (owner, 2026-11-27): author, then series, then reading order ──
+// Groups the visible books (views with title, authors, series and date) by their first-listed author (A–Z; books with no author
+// last, as "Unknown author"), then by their series placement (A–Z, each in position order: numbered positions by number, then
+// unnumbered by title), then that author's books with no series ("Standalone books", by date, undated last, then title). Each
+// book is in exactly one place: its own saved author and series, never a relationship made up for the layout. Empty groups
+// aren't made, since only visible books are grouped.
+function bookLibraryGroups(views) {
+  const authorKey = a => (a ? (a.id ? `id:${a.id}` : `n:${normBookTitle(a.name)}`) : '~');
+  const authors = new Map();
+  for (const v of views) {
+    const a = (v.authors || [])[0] || null, ak = authorKey(a);
+    const g = authors.get(ak) || authors.set(ak, { key: ak, name: a ? a.name : 'Unknown author', series: new Map(), standalone: [] }).get(ak);
+    if (v.series && v.series.name) {
+      const sk = v.series.id ? `id:${v.series.id}` : `n:${normBookTitle(v.series.name)}`;
+      (g.series.get(sk) || g.series.set(sk, { key: sk, name: v.series.name, books: [] }).get(sk)).books.push(v);
+    } else g.standalone.push(v);
+  }
+  const pos = v => { const n = Number(v.series && v.series.position); return v.series && v.series.position != null && v.series.position !== '' && Number.isFinite(n) ? n : Infinity; };
+  const byTitle = (a, b) => compareTitles(a.title, b.title) || String(a.entry.id).localeCompare(String(b.entry.id));
+  return [...authors.values()].sort((a, b) => (a.key === '~') - (b.key === '~') || compareTitles(a.name, b.name) || a.key.localeCompare(b.key)).map(g => ({
+    key: g.key, name: g.name,
+    series: [...g.series.values()].sort((a, b) => compareTitles(a.name, b.name) || a.key.localeCompare(b.key))
+      .map(s => ({ ...s, books: s.books.slice().sort((a, b) => (pos(a) - pos(b)) || byTitle(a, b)) })),
+    standalone: g.standalone.slice().sort((a, b) => bookDateSortKey(a.date).localeCompare(bookDateSortKey(b.date)) || byTitle(a, b))
+  }));
+}
+
 // ── Refresh books ──
 // A title is new for a follow when its Hardcover record wasn't in the follow's starting catalog (its baseline: every record the
 // member could see when they followed, BK1b). A follow without a baseline yet (made before BK1b) gets one from this refresh and

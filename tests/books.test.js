@@ -141,7 +141,7 @@ const dialog = app => app.el('bookDialogBox').innerHTML;
 const text = s => s.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
 const rpcs = (app, fn) => app.requests.filter(r => r.url.endsWith(`/rpc/${fn}`));
 const tableOf = app => screen(app).split('</tbody>')[0];
-const rowOf = (app, id) => (tableOf(app).split('<tr class="game-row').find(x => x.includes(`data-book="${id}"`)) || '');
+const rowOf = (app, id) => ((tableOf(app).split('<tr class="game-row').find(x => x.includes(`data-book="${id}"`)) || '').split('</tr>')[0]);
 const libraryOrder = app => [...tableOf(app).matchAll(/<tr class="game-row[^"]*" data-book="([^"]+)"/g)].map(m => m[1]);
 async function open(app, view = 'books') { app.ctx.switchView(view); await settle(); }
 async function refresh(app) { await app.ctx.refreshBooks(); await settle(); await settle(); }
@@ -167,7 +167,8 @@ test('Library: statuses, author and series columns, genres; dates as Hardcover g
   const app = await boot({ entries: [e1, e2, e3], cache });
   await open(app);
   const r1 = text(rowOf(app, e1.id));
-  assert.match(r1, /ZZ Third Case/); assert.match(r1, /ZZ Galbraith/); assert.match(r1, /ZZ Strike #3/);
+  assert.match(r1, /ZZ Third Case/); assert.match(r1, /#3/, 'its number in the series (the author and series are its headings)');
+  assert.match(text(tableOf(app)), /ZZ Galbraith ZZ Strike ZZ Third Case/);
   assert.match(r1, /Jan 1, 2023/, 'the date as Hardcover gives it'); assert.match(rowOf(app, e1.id), /class="book-ph"[^>]*aria-label="Possible placeholder date\. Hardcover lists 1 January/, 'marked as possibly a placeholder (compact, explained on focus), not converted');
   assert.match(rowOf(app, e1.id), /<option value="reading" selected>Reading<\/option>/);
   assert.match(text(rowOf(app, e2.id)), /Jun 1, 2017 .*your date/, 'the member’s date shown and labelled');
@@ -589,6 +590,59 @@ test('+ Add book browse: Show hidden opens and closes at once, starts closed on 
   assert.ok(app.get('booksShowHidden').has('s:9200'), 'the Series view’s choice is its own');
   const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
   assert.match(css, /\.game-dialog-box select:not\(\.status-select\):not\(\.priority-select\)/, 'the dialog rule leaves the status control’s own arrow alone');
+});
+
+test('Library order (owner, 2026-11-27): author A–Z, each series A–Z in reading order, then standalones by date; only visible books, no empty headings; numbers kept when earlier books are filtered out; missing data placed simply', async () => {
+  const A_X = { id: 9150, name: 'ZZ Aaron' };
+  const extra = { books: [bk(3011, 'ZZ Osbourne One', { authors: [A_SPY], series: [[9203, 'ZZ Osbourne', '1', A_SPY.id]], date: '1997-01-01' }),
+    bk(3012, 'ZZ Osbourne Two', { authors: [A_SPY], series: [[9203, 'ZZ Osbourne', '2', A_SPY.id]], date: '1998-01-01' }),
+    bk(3013, 'ZZ Later Standalone', { authors: [A_SPY], date: '2005-01-01' }), bk(3014, 'ZZ Undated Standalone', { authors: [A_SPY], date: null }),
+    bk(3015, 'ZZ Joint Book', { authors: [A_X, A_SPY], date: '2010-01-01' })] };
+  const all = catalog(extra).concat(extra.books);
+  const rec = id => all.find(b => b.id === id);
+  const e = (k, id, o = {}) => entry(k, rec(id), o);
+  const entries = [e(1, 3002), e(2, 3001, { status: 'finished' }), e(3, 3009, { status: 'finished' }), e(4, 3012), e(5, 3011), e(6, 3014), e(7, 3013), e(8, 3015),
+    e(9, 1002), e(10, 1003, { status: 'reading' }), entry(11, null, { title: 'ZZ Hand Written', authors: [], series: [{ name: 'ZZ Loose', position: null }] }),
+    entry(12, null, { title: 'ZZ No Number', authors: [{ id: A_SPY.id, name: A_SPY.name }], series: [{ id: 9202, name: 'ZZ Allon' }] })];
+  const app0 = await boot();
+  const cache = all.filter(b => entries.some(x => x.hardcover_id === b.id)).map((b, i) => ({ id: ID('6e100000', i + 1), kind: 'book', key: String(b.id), data: JSON.parse(app0.run(`JSON.stringify(bookRecord(${JSON.stringify(b)}))`)), fetched_at: TS }));
+  const app = await boot({ entries, cache });
+  await open(app);
+  const order = [...tableOf(app).matchAll(/<tr class="(book-group-row [^"]+|game-row[^"]*)"(?: data-book="([^"]+)")?>(?:<th colspan="5">([^<]+))?/g)]
+    .map(m => (m[2] ? store(app, 'book_entries').find(x => x.id === m[2]).title : `[${m[3]}]`));
+  assert.deepStrictEqual(order, ['[ZZ Aaron]', '[Standalone books]', 'ZZ Joint Book',
+    '[ZZ Galbraith]', '[ZZ Strike]', 'ZZ Second Case', 'ZZ Third Case',
+    '[ZZ Silva]', '[ZZ Allon]', 'ZZ English Assassin', 'ZZ No Number', '[ZZ Osbourne]', 'ZZ Osbourne One', 'ZZ Osbourne Two', '[Standalone books]', 'ZZ Later Standalone', 'ZZ Undated Standalone',
+    '[Unknown author]', '[ZZ Loose]', 'ZZ Hand Written'], 'Finished books are filtered out and no empty heading remains');
+  assert.match(rowOf(app, ID('6c000000', 1)), /#2/, 'the English Assassin keeps #2 although #1 is filtered out');
+  assert.match(rowOf(app, ID('6c000000', 8)), /with ZZ Silva/, 'a joint book once, under its first author, naming the other');
+  assert.strictEqual(libraryOrder(app).length, new Set(libraryOrder(app)).size, 'each book once');
+  assert.match(text(screen(app)), /10 of 12 books/);
+  // All statuses: the Finished books join their groups in order; a genre filter keeps only headings with books.
+  app.ctx.setBooksFilter('status', 'all'); await settle();
+  assert.match(text(tableOf(app)), /ZZ Allon ZZ Kill Artist .*ZZ English Assassin .*Standalone books ZZ Unlikely Spy .*ZZ Later Standalone/);
+  app.ctx.setBooksFilter('genre', 'Espionage'); await settle();
+  assert.deepStrictEqual([...tableOf(app).matchAll(/<th colspan="5">([^<]+)/g)].map(m => m[1]), ['ZZ Silva', 'ZZ Allon']);
+  // Cards: the same order with headings.
+  assert.match(text(screen(app).split('games-cards')[1]), /ZZ Silva ZZ Allon ZZ Kill Artist .*ZZ English Assassin/);
+});
+
+test('Library rows: genres on one line with +N (Games’ rule; every pill without layout); +N opens and closes, focus kept on it; genre pills still filter', async () => {
+  const e1 = entry(1, byId(2001)); // Young Adult, Mystery
+  const app0 = await boot();
+  const cache = [{ id: ID('6e200000', 1), kind: 'book', key: '2001', data: JSON.parse(app0.run(`JSON.stringify(bookRecord(${JSON.stringify(byId(2001))}))`)), fetched_at: TS }];
+  const app = await boot({ entries: [e1], cache });
+  await open(app);
+  const row = rowOf(app, e1.id);
+  assert.match(row, /data-baction="cats-more" aria-expanded="false"/, 'a +N, hidden until measured');
+  assert.match(row, /class="meta-more fit-hidden"/);
+  assert.ok(!/cats-more/.test(screen(app).split('games-cards')[1]), 'cards list every pill, no +N');
+  app.dom.focus('booksScreen', `[data-book="${e1.id}"] [data-baction="cats-more"]`);
+  app.ctx.toggleBookGenres(`book:${e1.id}`); await settle();
+  assert.match(rowOf(app, e1.id), /aria-expanded="true"[^>]*>Fewer/);
+  assert.strictEqual(app.dom.active().getAttribute('data-baction'), 'cats-more', 'focus stays on +N / Fewer');
+  app.ctx.setBooksFilter('genre', 'Mystery'); await settle();
+  assert.match(rowOf(app, e1.id), /aria-pressed="true"[^>]*>Mystery/);
 });
 
 T.run();

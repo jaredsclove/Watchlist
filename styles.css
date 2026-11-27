@@ -1384,13 +1384,22 @@ td.spot-version-name { padding-left: 46px; font-size: 13px; color: var(--text2);
 .movie-card .card-labels > :is(.badge, .collection-tag, .ww-tag) { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 
 /* BK1: books, drawn as Games (the same toolbar, table and cards; followed authors and series as expandable cards). */
-.books-table th.col-game { width: 26%; }
-.books-table th.col-author { width: 15%; }
-.books-table th.col-series { width: 15%; }
-.books-table th.col-cats { width: 16%; }
+/* The Library, grouped by author, then series (reading order), then standalones: compact heading rows (cards: headings). */
+.books-table th.col-game { width: 40%; }
+.books-table th.col-num { width: 6%; }
+.books-table th.col-cats { width: 24%; }
 .books-table th.col-rel { width: 16%; }
-.books-table th.col-status { width: 12%; }
-.book-author-cell, .book-series-cell { font-size: 13px; color: var(--text2); overflow-wrap: anywhere; }
+.books-table th.col-status { width: 14%; }
+.book-num-cell { font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.book-coauthors { font-size: 12.5px; color: var(--text2); font-weight: normal; }
+.books-table tr.book-group-row > th { text-align: left; font-weight: 600; border-bottom: 1px solid var(--border); background: none; text-transform: none; letter-spacing: 0; }
+.books-table tr.book-group-author > th { font-size: 15px; color: var(--text); padding: 14px 8px 4px; }
+.books-table tr.book-group-series > th { font-size: 12.5px; color: var(--text2); padding: 8px 8px 3px 20px; }
+.books-table tr.book-group-row:first-child > th { padding-top: 6px; }
+.book-group-head { margin: 0; font-weight: 600; }
+.book-group-head.book-group-author { font-size: 15px; margin: 14px 0 2px; color: var(--text); }
+.book-group-head.book-group-author:first-child { margin-top: 2px; }
+.book-group-head.book-group-series { font-size: 12.5px; margin: 6px 0 0 2px; color: var(--text2); }
 .book-bulk { margin: 6px 0; }
 .book-bulk-ask { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
 .book-bulk-ask p { margin: 0 0 6px; }
