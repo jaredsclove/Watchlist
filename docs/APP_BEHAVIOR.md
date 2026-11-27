@@ -191,6 +191,15 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   1 January date carries a small "?" mark (BK1b): its meaning ("often stands for a year-only date") is its accessible name and
   shows on hover, focus or tap (spanning the screen below it at 600 px and narrower); the date isn't changed. A date the member chooses
   (⋯ → Choose a date…) is kept until they change or clear it; official-site dates only ever arrive as suggestions in Review.
+  - **The Library's order** (owner, 2026-11-27; `bookLibraryGroups`): the books shown (after Search and Filters) grouped under
+    compact headings, not panels: each author A–Z (a book's first-listed author; a book with none under "Unknown author", last),
+    then that author's series A–Z, each in series order (numbered positions by number, then unnumbered by title), then
+    "Standalone books" (no series placement) by date, undated last. A heading with no book shown isn't drawn. Each saved book
+    appears once, by its own saved author and series placement; other authors are named beside the title ("with …"). Rows
+    show the book's real series number (#3 stays #3 when #1 and #2 are filtered out), genres, date and status; there is no
+    other sort. Desktop rows keep genres on one measured line with +N (Games' rule: refitted on resize; +N shows the rest,
+    wrapped, and Fewer folds them; focus stays on it); cards (narrower than 1,100 px) list every genre under the same
+    headings.
   - **Lists show, never change.** An author's list is Hardcover's Author credits (never translators or narrators), the
     member's manual credits, and the books of the author's verified series: series Hardcover gives the author as primary
     author with at least two books, in which at least half the main books credit them (or the official page lists them).

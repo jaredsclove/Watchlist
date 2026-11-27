@@ -146,6 +146,7 @@ function renderBooksView() {
     ${booksReport ? `<div class="games-report" role="status" data-books-report="1">${booksReport}</div>` : ''}`;
   const body = view === 'library' ? booksLibraryHtml() : view === 'series' ? booksSeriesHtml() : booksAuthorsHtml();
   screen.innerHTML = head + body + '<p class="games-note books-credit">Book data from <a href="https://hardcover.app" target="_blank" rel="noopener noreferrer">Hardcover</a> and authors’ official sites.</p>';
+  if (view === 'library') fitBookGenres(); // (before focus: a focused pill now behind +N hands focus to +N)
   applyBooksFocus(rec);
 }
 function booksActionsHtml() {
@@ -176,11 +177,28 @@ function bookDateHtml(d, today = booksToday()) {
   const ph = d.placeholder ? `<span class="book-ph" tabindex="0" role="note" aria-label="${esc(`Possible placeholder date. ${phNote}`)}" title="${esc(phNote)}" data-note="${esc(phNote)}" onclick="event.stopPropagation(); this.focus()">?</span>` : '';
   return `<span class="game-when${d.value === 'TBA' ? ' game-tba' : upcoming ? ' game-upcoming' : ''}">${esc(bookDateText(d))}<span class="visually-hidden">${esc(src)}</span></span>${upcoming && d.value !== 'TBA' ? '<span class="upcoming-tag">Upcoming</span>' : ''}${ph}${d.source !== 'hardcover' ? ` <span class="game-basis">${esc(d.source === 'member' ? 'your date' : 'official site')}</span>` : ''}`;
 }
-function bookGenrePillsHtml(v) {
-  return (v.genres || []).map(g => {
+// A desktop row (fit) draws every pill and a +N that starts hidden; fitBookGenres then shows one line, as Games' and Movies'.
+function bookGenrePillsHtml(v, fit = false) {
+  const all = v.genres || [], owner = `book:${v.entry.id}`, open = expandedCategoryOwners.has(owner);
+  const more = fit && all.length > 1 ? `<button type="button" class="meta-more fit-hidden" data-baction="cats-more" aria-expanded="${open}" aria-label="${open ? 'Show fewer genres' : 'Show more genres'}" onclick="event.stopPropagation(); toggleBookGenres('${bkArg(owner)}')">${open ? 'Fewer' : '+'}</button>` : '';
+  return all.map(g => {
     const pressed = booksFilters.genre === g;
     return `<button type="button" class="badge meta-chip meta-genres g-${genreFamily(g)} badge-clickable filter-pill" data-baction="${esc(`genre:${g}`)}" aria-pressed="${pressed}" title="${esc(pressed ? `Remove this filter (${g})` : `Filter by ${g}`)}" onclick="event.stopPropagation(); setBooksFilter('genre', booksFilters.genre === '${bkArg(g)}' ? '' : '${bkArg(g)}')">${esc(g)}</button>`;
-  }).join('');
+  }).join('') + more;
+}
+function toggleBookGenres(owner) { if (expandedCategoryOwners.has(owner)) expandedCategoryOwners.delete(owner); else expandedCategoryOwners.add(owner); renderBooksView(); }
+// Measured after each draw and on resize (Games' rule: the pills on the cell's first line stay, the rest behind +N).
+function fitBookGenres() {
+  const screen = typeof document !== 'undefined' && document.getElementById('booksScreen');
+  if (!screen || typeof screen.querySelectorAll !== 'function') return;
+  screen.querySelectorAll('.books-table .game-genres').forEach(fitGameGenreCell);
+}
+let booksFitFrame = 0;
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function' && typeof requestAnimationFrame === 'function') {
+  window.addEventListener('resize', () => {
+    if (booksFitFrame) return;
+    booksFitFrame = requestAnimationFrame(() => { booksFitFrame = 0; if (typeof isBooksView === 'function' && isBooksView() && BOOKS_VIEWS[activeViewId] === 'library') fitBookGenres(); });
+  });
 }
 const bookAuthorsText = v => (v.authors || []).map(a => a.name).join(', ') || '—';
 const bookSeriesText = s => (s ? `${s.name}${s.position ? ` #${s.position}` : ''}` : '');
@@ -200,20 +218,22 @@ function bookMenuHtml(v) {
         <button class="popover-action" data-baction="delete" onclick="closeRowMenu(this); confirmDeleteBook('${idArg}')">Remove from library…</button>
       </div></span>`;
 }
+// A Library row under its author and series headings: the title (with any other authors), its series number, genres, date, status.
 function bookRowParts(v) {
   const e = v.entry, id = esc(e.id), dim = e.status === 'dropped' || v.skipped ? ' row-skipped' : '';
-  const title = `<span class="show-title-main"><span class="show-title">${esc(v.title)}</span>${v.skipped ? ' <span class="state-tag">Skipped in series</span>' : ''}${e.hardcover_id ? '' : ' <span class="state-tag">Not on Hardcover</span>'}</span>`;
+  const others = (v.authors || []).slice(1).map(a => a.name);
+  const n = v.series && v.series.position ? `#${v.series.position}` : '';
+  const title = `<span class="show-title-main"><span class="show-title">${esc(v.title)}</span>${others.length ? ` <span class="book-coauthors">with ${esc(others.join(', '))}</span>` : ''}${v.skipped ? ' <span class="state-tag">Skipped in series</span>' : ''}${e.hardcover_id ? '' : ' <span class="state-tag">Not on Hardcover</span>'}</span>`;
   const menu = bookMenuHtml(v), status = `<span class="state-action">${bookStatusSelectHtml(e)}</span>`;
   const row = `<tr class="game-row${dim}" data-book="${id}">
       <td><div class="show-title-row"><div class="show-title-left">${title}</div>${menu}</div></td>
-      <td class="book-author-cell">${esc(bookAuthorsText(v))}</td>
-      <td class="book-series-cell">${esc(bookSeriesText(v.series))}</td>
-      <td class="game-genres-cell"><div class="game-genres">${bookGenrePillsHtml(v)}</div></td>
+      <td class="book-num-cell">${n ? `<span aria-label="${esc(`Number ${v.series.position} in ${v.series.name}`)}">${esc(n)}</span>` : ''}</td>
+      <td class="game-genres-cell"><div class="game-genres">${bookGenrePillsHtml(v, true)}</div></td>
       <td class="game-rel-cell"><span class="game-rel">${bookDateHtml(v.date)}</span></td>
       <td class="game-status-cell">${status}</td></tr>`;
   const card = `<div class="item-card game-card${dim}" data-book="${id}">
       <div class="card-top"><div class="card-title-block"><span class="card-title">${title}</span></div>${menu}</div>
-      <div class="card-meta"><span class="card-season book-card-by">${esc(bookAuthorsText(v))}${v.series ? ` · ${esc(bookSeriesText(v.series))}` : ''}</span>
+      <div class="card-meta">${n ? `<span class="card-season book-card-by">${esc(bookSeriesText(v.series))}</span>` : ''}
         <span class="card-date">${bookDateHtml(v.date)}</span>${v.genres.length ? `<span class="card-labels">${bookGenrePillsHtml(v)}</span>` : ''}
         <span class="card-actions card-complete">${status}</span></div></div>`;
   return { row, card };
@@ -224,8 +244,6 @@ function booksLibraryHtml() {
   const term = normalTitle(f.search);
   const list = all.filter(v => (!term || normalTitle(`${v.title} ${bookAuthorsText(v)} ${v.series ? v.series.name : ''}`).includes(term))
     && (!f.genre || v.genres.includes(f.genre)) && bookStatusMatches(v.entry.status, f.status));
-  list.sort((a, b) => compareTitles(bookAuthorsText(a), bookAuthorsText(b)) || compareTitles(a.series ? a.series.name : '~', b.series ? b.series.name : '~')
-    || ((a.series && b.series ? Number(a.series.position || 999) - Number(b.series.position || 999) : 0)) || compareTitles(a.title, b.title));
   const statusOpts = [...Object.entries(BOOKS_STATUS_GROUP_LABELS), ...Object.entries(BOOK_STATUS_LABELS)];
   const isDefault = f.status === BOOKS_STATUS_DEFAULT;
   const applied = [f.genre ? ['genre', 'Genre', f.genre] : null, !isDefault ? ['status', 'Status', (statusOpts.find(o => o[0] === f.status) || [])[1] || f.status] : null].filter(Boolean);
@@ -246,10 +264,18 @@ function booksLibraryHtml() {
   const toolbar = booksToolbarHtml({ line, panel, chips, count });
   if (!all.length) return toolbar + `<div class="games-empty" data-books-empty="1" tabindex="-1"><p>No books yet. Use <strong>+ Add book</strong> to search Hardcover, browse an author or enter a book by hand.</p></div>`;
   if (!list.length) return toolbar + `<div class="games-empty" data-books-empty="1" tabindex="-1"><p>No books match these filters.</p></div>`;
-  const parts = list.map(bookRowParts);
-  return toolbar + `<table class="games-table books-table" aria-label="Your books"><thead><tr><th class="col-game">Book</th><th class="col-author">Author</th><th class="col-series">Series</th><th class="col-cats">Genres</th><th class="col-rel">Release</th><th class="col-status">Status</th></tr></thead>
-    <tbody>${parts.map(p => p.row).join('')}</tbody></table>
-    <div class="card-list games-cards" aria-label="Your books">${parts.map(p => p.card).join('')}</div>`;
+  // Grouped (the Library's only order): author, then each series in reading order, then standalones by date; compact headings.
+  const groups = bookLibraryGroups(list), rows = [], cards = [];
+  const head = (cls, text, level) => { rows.push(`<tr class="book-group-row ${cls}"><th colspan="5">${esc(text)}</th></tr>`); cards.push(`<h${level} class="book-group-head ${cls}">${esc(text)}</h${level}>`); };
+  const add = v => { const p = bookRowParts(v); rows.push(p.row); cards.push(p.card); };
+  for (const g of groups) {
+    head('book-group-author', g.name, 3);
+    for (const s of g.series) { head('book-group-series', s.name, 4); s.books.forEach(add); }
+    if (g.standalone.length) { head('book-group-series', 'Standalone books', 4); g.standalone.forEach(add); }
+  }
+  return toolbar + `<table class="games-table books-table" aria-label="Your books, by author and series"><thead><tr><th class="col-game">Book</th><th class="col-num"><span class="visually-hidden">Number in series</span><span aria-hidden="true">#</span></th><th class="col-cats">Genres</th><th class="col-rel">Release</th><th class="col-status">Status</th></tr></thead>
+    <tbody>${rows.join('')}</tbody></table>
+    <div class="card-list games-cards" aria-label="Your books, by author and series">${cards.join('')}</div>`;
 }
 function setBooksFilter(key, value) {
   booksFilters[key] = value;
