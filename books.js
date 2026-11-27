@@ -64,7 +64,8 @@ function bookEntryView(e) {
   const rec = e.hardcover_id ? bookRecOf(e.hardcover_id) : null;
   const date = bookShownDate(e, rec);
   const series = (e.series || [])[0] || (rec && rec.series.find(s => s.position != null)) || null;
-  return { entry: e, rec, title: e.title, authors: (e.authors && e.authors.length ? e.authors : rec ? rec.authors : []), series, date,
+  const own = e.authors && e.authors.length ? e.authors : rec ? rec.authors : [];
+  return { entry: e, rec, title: e.title, authors: bookAuthorsWithCredits(own, e.hardcover_id, booksData.associations), series, date,
     genres: rec ? rec.genres : [], skipped: booksData.decisions.has(`skip|${bookEntryKey(e)}`) };
 }
 const booksToday = () => localTodayStr();

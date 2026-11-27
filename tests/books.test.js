@@ -726,4 +726,46 @@ test('a site’s “To Be Announced” is offered only when it replaces a known 
   assert.ok(!store(app, 'book_findings').some(f => f.subject.title === 'ZZ Moved Date' || f.subject.title === 'ZZ Sleep Tight'), 'settled; nothing offered again');
 });
 
+test('an accepted credit regroups the Library: the book moves under the credited author and its existing series, once, its status and saved data unchanged; it holds after a reload and a refresh; co-authors stay', async () => {
+  const joint = bk(2013, 'ZZ Joint Venture', { authors: [A_YA, A_SPY], date: '2021-01-01' });
+  const entries = [entry(1, byId(2001)), entry(2, byId(2002)), entry(3, byId(2003), { status: 'reading', chosen_date: { value: '2023-08-01', source: 'member' } }), entry(4, joint)];
+  const app = await boot({ follows: [follow(1, 'author', A_YA.id, A_YA.name)], decisions: [seen(1)], entries, stub: { catalog: { books: [joint] } } });
+  await open(app); await refresh(app);
+  const groups = a => [...tableOf(a).matchAll(/<tr class="(?:book-group-row [^"]+|game-row[^"]*)"(?: data-book="([^"]+)")?>(?:<th colspan="5"><button[^>]*>.*?<span class="book-group-name">([^<]+))?/g)]
+    .map(m => (m[1] ? store(a, 'book_entries').find(x => x.id === m[1]).title : `[${m[2]}]`));
+  assert.deepStrictEqual(groups(app), ['[ZZ McManus]', '[ZZ One of Us]', 'ZZ One of Us', 'ZZ One of Us Next', '[Standalone books]', 'ZZ Joint Venture',
+    '[ZZ Random House]', '[ZZ One of Us]', 'ZZ One of Us Back'], 'before: under Hardcover’s credit');
+  const savedBefore = JSON.stringify(store(app, 'book_entries'));
+  app.ctx.openBooksReview(null); await settle();
+  const i = app.run('bookReviewList().findIndex(f => f.kind === "credit_gap")');
+  assert.ok(i >= 0, 'the credit gap is offered');
+  await app.ctx.bookReviewCredit(i, true); await settle();
+  app.ctx.closeBooksDialog(); await settle();
+  const after = ['[ZZ McManus]', '[ZZ One of Us]', 'ZZ One of Us', 'ZZ One of Us Next', 'ZZ One of Us Back', '[Standalone books]', 'ZZ Joint Venture'];
+  assert.deepStrictEqual(groups(app), after, 'after: under the credited author, in its existing series at #3; no Random House group; once');
+  assert.match(rowOf(app, ID('6c000000', 3)), /#3/);
+  assert.match(rowOf(app, ID('6c000000', 3)), /with ZZ Random House/, 'Hardcover’s own credit is still named, after the credited author');
+  assert.match(rowOf(app, ID('6c000000', 4)), /with ZZ Silva/, 'a joint book keeps its co-author');
+  assert.strictEqual(JSON.stringify(store(app, 'book_entries')), savedBefore, 'the saved books are unchanged (status, date, authors, series)');
+  // A reload rereads everything; a refresh after it changes nothing.
+  const tables = t => JSON.parse(JSON.stringify(store(app, t)));
+  const again = await boot({ follows: tables('book_follows'), decisions: tables('book_decisions'), entries: tables('book_entries'), associations: tables('book_associations'),
+    findings: tables('book_findings'), cache: tables('book_cache'), stub: { catalog: { books: [joint] } } });
+  await open(again);
+  assert.deepStrictEqual(groups(again), after, 'after a reload');
+  await refresh(again);
+  assert.deepStrictEqual(groups(again), after, 'after a refresh');
+  assert.ok(!store(again, 'book_findings').some(f => f.kind === 'credit_gap'), 'the gap doesn’t come back');
+  assert.strictEqual(store(again, 'book_entries').length, 4, 'no duplicate added');
+  assert.strictEqual(store(again, 'book_entries').find(e => e.id === ID('6c000000', 3)).status, 'reading');
+  app.ctx.switchView('booksfollowing'); await settle();
+  // The rule itself: credited authors first in the order credited, an author already credited listed once, books without a credit untouched.
+  const r = app.run(`JSON.stringify([
+    bookAuthorsWithCredits([{ id: 1, name: 'P' }], 7, [{ hardcover_book_id: 7, hardcover_author_id: 3, author_name: 'C', created_at: '2026-02' }, { hardcover_book_id: 7, hardcover_author_id: 2, author_name: 'B', created_at: '2026-01' }]),
+    bookAuthorsWithCredits([{ id: 2, name: 'B' }, { id: 1, name: 'P' }], 7, [{ hardcover_book_id: 7, hardcover_author_id: 2, author_name: 'B' }]),
+    bookAuthorsWithCredits([{ id: 1, name: 'P' }], 8, [{ hardcover_book_id: 7, hardcover_author_id: 2, author_name: 'B' }]),
+    bookAuthorsWithCredits([{ name: 'Hand' }], null, [{ hardcover_book_id: 7, hardcover_author_id: 2, author_name: 'B' }])])`);
+  assert.deepStrictEqual(JSON.parse(r), [[{ id: 2, name: 'B' }, { id: 3, name: 'C' }, { id: 1, name: 'P' }], [{ id: 2, name: 'B' }, { id: 1, name: 'P' }], [{ id: 1, name: 'P' }], [{ name: 'Hand' }]]);
+});
+
 T.run();
