@@ -171,7 +171,7 @@ function bookDateHtml(d, today = booksToday()) {
   const upcoming = bookUpcoming(d, today);
   const src = d.source === 'member' ? ' · your date' : d.source === 'website' ? ' · from the official site' : '';
   const ph = d.placeholder ? `<span class="book-ph" title="Hardcover lists 1 January; this is often a placeholder for a year-only date">may be a placeholder</span>` : '';
-  return `<span class="game-when${d.value === 'TBA' ? ' game-tba' : upcoming ? ' game-upcoming' : ''}">${esc(bookDateText(d))}<span class="visually-hidden">${esc(src)}</span></span>${upcoming && d.value !== 'TBA' ? '<span class="upcoming-tag">Upcoming</span>' : ''}${ph}${d.source !== 'hardcover' ? `<span class="game-basis">${esc(d.source === 'member' ? 'your date' : 'official site')}</span>` : ''}`;
+  return `<span class="game-when${d.value === 'TBA' ? ' game-tba' : upcoming ? ' game-upcoming' : ''}">${esc(bookDateText(d))}<span class="visually-hidden">${esc(src)}</span></span>${upcoming && d.value !== 'TBA' ? '<span class="upcoming-tag">Upcoming</span>' : ''}${ph}${d.source !== 'hardcover' ? ` <span class="game-basis">${esc(d.source === 'member' ? 'your date' : 'official site')}</span>` : ''}`;
 }
 function bookGenrePillsHtml(v) {
   return (v.genres || []).map(g => {
@@ -273,8 +273,8 @@ function bookPickHtml(rec, entry, { skipKey = null, skipped = false, hook = '', 
   const skip = skipKey ? ` <button class="btn btn-link" data-baction="skip-${hook}" onclick="toggleBookSkip('${bkArg(skipKey)}', ${skipped})">${skipped ? 'Unskip' : 'Skip'}</button>` : '';
   return add + skip;
 }
-function bookRecLine(rec, extra = '') {
-  const d = bookShownDate(null, rec);
+function bookRecLine(rec, extra = '', entry = null) {
+  const d = bookShownDate(entry, rec); // (a saved book shows its own date: the member's choice when there is one)
   const lang = rec.lang === 'unknown' ? ' <span class="state-tag">Language unknown</span>' : '';
   return `<span class="spot-version-name">${esc(rec.title)}${lang}${extra}</span> <span class="muted">${bookDateHtml(d)}</span>`;
 }
@@ -290,7 +290,7 @@ function bookSeriesListHtml(s, { follow = null } = {}) {
   const v = bookSeriesView(s, { entries: booksData.entries, decisions: booksData.decisions, today: booksToday() });
   const item = (p, companion) => {
     const rec = p.rec, e = p.entry, key = e ? bookEntryKey(e) : rec ? `hc:${rec.id}` : null;
-    const name = rec ? bookRecLine(rec) : `<span class="spot-version-name">${esc(e.title)}</span> <span class="state-tag">Not on Hardcover</span>`;
+    const name = rec ? bookRecLine(rec, '', e) : `<span class="spot-version-name">${esc(e.title)}</span> <span class="state-tag">Not on Hardcover</span>`;
     const state = p.done && !companion ? ` <span class="state-tag">${p.skipped ? 'Skipped' : e ? esc(BOOK_STATUS_LABELS[e.status]) : 'Done'}</span>` : companion ? ' <span class="state-tag">Companion</span>' : '';
     const pick = rec ? bookPickHtml(rec, e, { skipKey: key, skipped: p.skipped, hook: `s${rec.id}`, seriesPl: { id: s.id, name: s.name, position: p.position } })
       : e ? `<span class="state-action">${bookStatusSelectHtml(e, `status-e${e.id}`)}</span>` : '';
@@ -309,9 +309,9 @@ function booksSeriesHtml() {
     const s = booksData.cache.series.get(f.hardcover_id), open = booksExpanded.has(f.id), id = esc(f.id), idArg = bkArg(f.id);
     const v = s ? bookSeriesView(s, { entries: booksData.entries, decisions: booksData.decisions, today: booksToday() }) : null;
     const next = !v ? '<span class="muted">Not read from Hardcover yet: use Refresh books</span>'
-      : v.next ? `<span class="visually-hidden">Next: </span><span class="fr-name">${esc(v.next.rec ? v.next.rec.title : v.next.entry.title)}</span> <span class="muted">#${esc(v.next.position)} · ${bookDateHtml(v.next.entry ? bookShownDate(v.next.entry, v.next.rec) : v.next.rec ? bookShownDate(null, v.next.rec) : null)}</span>`
-        : '<span class="visually-hidden">Next: </span><span class="status-pill s-caughtup">Caught up</span>';
-    const expand = `<button type="button" class="expand-btn" data-baction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Hide' : 'Show'} the books of ${f.name}`)}" onclick="event.stopPropagation(); toggleBookFollow('${idArg}')">${open ? '▾' : '▸'}</button>`;
+      : v.next ? `<span class="fr-label">Next</span> <span class="fr-name">${esc(v.next.rec ? v.next.rec.title : v.next.entry.title)}</span> <span class="muted">#${esc(v.next.position)} · ${bookDateHtml(v.next.entry ? bookShownDate(v.next.entry, v.next.rec) : v.next.rec ? bookShownDate(null, v.next.rec) : null)}</span>`
+        : '<span class="fr-label">Next</span> <span class="status-pill s-caughtup">Caught up</span>';
+    const expand = `<button type="button" class="expand-btn" data-baction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Hide' : 'Show'} the books of ${f.name}`)}" onclick="event.stopPropagation(); toggleBookFollow('${idArg}')"><span class="expand-chevron">${open ? '▾' : '▸'}</span></button>`;
     const auto = `<label class="settings-check book-auto"><input type="checkbox" data-baction="auto" ${f.auto_add ? 'checked' : ''} onchange="setSeriesAutoAdd('${idArg}', this.checked)"> Automatically add new titles on refresh</label>`;
     const body = open ? `<div class="book-follow-body">${s ? bookSeriesListHtml(s, { follow: f }) : '<p class="muted">Nothing read from Hardcover yet: use Refresh books.</p>'}
         ${auto}<p class="games-note">New main titles are added as Want to read when they have an English edition and nothing else holds their place; anything uncertain waits in Review.</p>
@@ -332,7 +332,7 @@ function booksAuthorsHtml() {
     const siteState = booksData.cache.site.get(f.hardcover_id);
     const siteLine = site ? `Official book page: <a href="${esc(site.listing_url)}" target="_blank" rel="noopener noreferrer">${esc(site.listing_url.replace(/^https:\/\//, ''))}</a>${siteState && siteState.unsupported ? ' · <strong>not recognised: Hardcover only</strong>' : siteState && siteState.checked ? ` · checked ${esc(siteState.checked)}` : ''}`
       : '<strong>Hardcover only</strong> (no official book page set)';
-    const expand = `<button type="button" class="expand-btn" data-baction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Hide' : 'Show'} the books of ${f.name}`)}" onclick="event.stopPropagation(); toggleBookFollow('${idArg}')">${open ? '▾' : '▸'}</button>`;
+    const expand = `<button type="button" class="expand-btn" data-baction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Hide' : 'Show'} the books of ${f.name}`)}" onclick="event.stopPropagation(); toggleBookFollow('${idArg}')"><span class="expand-chevron">${open ? '▾' : '▸'}</span></button>`;
     const body = open ? `<div class="book-follow-body">${bookSiteFormHtml(f.hardcover_id, f.name, site)}${a ? bookAuthorListHtml(a) : '<p class="muted">Nothing read from Hardcover yet: use Refresh books.</p>'}
         <button class="btn" data-baction="unfollow" onclick="unfollowBooks('${idArg}')">Stop following ${esc(f.name)}</button></div>` : '';
     return `<div class="item-card show-group-card book-follow" data-bfollow="${id}">
@@ -361,7 +361,7 @@ function bookAuthorListHtml(a, seriesSource = booksData.cache.series) {
   const gaps = v.gaps.length ? `<p class="games-note">${countUnit(v.gaps.length, 'book in their series is', 'books in their series are')} credited to someone else on Hardcover: ${v.gaps.map(g => `“${esc(g.rec.title)}”`).join(', ')}. Refresh books offers ${v.gaps.length === 1 ? 'it' : 'them'} in Review, where you can credit ${esc(a.name)}.</p>` : '';
   return `${v.verified.map(s => `<div class="book-author-series"><h4 class="book-sub">${esc(s.name)} ${followBtn(s)}</h4>${bookSeriesListHtml(s)}</div>`).join('')}
     ${gaps}<h4 class="book-sub">${v.verified.length ? 'Other books' : 'Books'}</h4>
-    <ul class="spot-versions">${others.map(x => `<li class="spot-version">${bookRecLine(x.rec)} <span class="book-pick">${bookPickHtml(x.rec, x.entry, { hook: `a${x.rec.id}` })}</span></li>`).join('') || '<li class="muted">None.</li>'}</ul>
+    <ul class="spot-versions">${others.map(x => `<li class="spot-version">${bookRecLine(x.rec, '', x.entry)} <span class="book-pick">${bookPickHtml(x.rec, x.entry, { hook: `a${x.rec.id}` })}</span></li>`).join('') || '<li class="muted">None.</li>'}</ul>
     ${bookHiddenListHtml(`a:${a.id}`, v.hidden)}`;
 }
 function toggleBookFollow(id) { if (booksExpanded.has(id)) booksExpanded.delete(id); else booksExpanded.add(id); renderBooksView(); }
@@ -647,6 +647,7 @@ async function readBookSite(authorId, authorName, url, known) {
 async function refreshBooks() {
   if (!booksData || booksRefreshing) return;
   if (writeLane) { showError(LANE_BUSY_TEXT(writeLane.label)); return; }
+  const fromButton = !!(document.activeElement && typeof document.activeElement.getAttribute === 'function' && document.activeElement.getAttribute('data-baction') === 'refresh');
   booksRefreshing = true; booksReport = ''; renderBooksView();
   const today = booksToday(), follows = booksData.follows.slice();
   const read = { authors: new Map(), series: new Map(), seriesOf: new Map(), sites: new Map() };
@@ -732,6 +733,8 @@ async function refreshBooks() {
     }
   }, { list: true });
   booksRefreshing = false;
+  // (the button was disabled while it ran, so focus may have left it: it goes back there)
+  if (fromButton) booksFocusIntent = { attr: null, row: null, hook: 'refresh', id: null, next: [], prev: [] };
   if (isBooksView()) renderBooksView();
 }
 
@@ -779,7 +782,7 @@ function booksReviewHtml() {
     <div class="modal-actions"><button class="btn" onclick="closeBooksDialog()">Close</button></div>`;
 }
 const reviewItem = i => bookReviewList()[i] || null;
-async function bookFindingResolve(i, outcome) {
+async function bookFindingResolve(i, outcome) { noteReviewPlace(i);
   const f = reviewItem(i);
   if (!f) return;
   await runWrite('Review', async lane => {
@@ -791,7 +794,7 @@ async function bookFindingResolve(i, outcome) {
     } catch (err) { if (stateNeedsReread(err)) { await reportStateFailure(err); return; } showError(stateErrorText(err)); }
   }, { list: true });
 }
-async function bookReviewAdd(i) {
+async function bookReviewAdd(i) { noteReviewPlace(i);
   const f = reviewItem(i);
   if (!f) return;
   const s = f.subject;
@@ -816,7 +819,7 @@ async function bookReviewAdd(i) {
     } catch (err) { if (stateNeedsReread(err)) { await reportStateFailure(err); return; } showError(stateErrorText(err)); }
   }, { list: true });
 }
-function bookReviewDismiss(i) {
+function bookReviewDismiss(i) { noteReviewPlace(i);
   const f = reviewItem(i);
   if (!f) return;
   const s = f.subject, keys = s.hardcover_id ? bookKeysOf({ hardcoverId: s.hardcover_id, title: s.title, authors: s.authors || [] })
@@ -827,15 +830,15 @@ function bookReviewDismiss(i) {
     for (const k of keys.slice(1)) if (!booksData.decisions.has(`exclude|${k}`)) await setBookDecision('exclude', k, { reason: 'dismissed', title: s.title }, `“${s.title}” · not interested`);
   })();
 }
-async function bookReviewUseDate(i) {
+async function bookReviewUseDate(i) { noteReviewPlace(i);
   const f = reviewItem(i);
   if (!f) return;
   const s = f.subject;
   await editBookFields(s.entry_id, { chosen_date: { value: s.suggested, source: 'website', url: s.url || null, chosen_at: booksToday() } }, `“${s.title}” · date`, f.fingerprint);
   redrawBooksDialog();
 }
-function bookReviewKeepDate(i) { const f = reviewItem(i); if (f) return setBookDecision('keep_date', f.fingerprint, { date: f.subject.suggested }, `“${f.subject.title}” · keep date`, f.fingerprint, 'done'); }
-async function bookReviewCredit(i, yes) {
+function bookReviewKeepDate(i) { noteReviewPlace(i); const f = reviewItem(i); if (f) return setBookDecision('keep_date', f.fingerprint, { date: f.subject.suggested }, `“${f.subject.title}” · keep date`, f.fingerprint, 'done'); }
+async function bookReviewCredit(i, yes) { noteReviewPlace(i);
   const f = reviewItem(i);
   if (!f) return;
   const s = f.subject;
@@ -850,7 +853,7 @@ async function bookReviewCredit(i, yes) {
     } catch (err) { if (stateNeedsReread(err)) { await reportStateFailure(err); return; } showError(stateErrorText(err)); }
   }, { list: true });
 }
-async function bookReviewMatch(i, yes) {
+async function bookReviewMatch(i, yes) { noteReviewPlace(i);
   const f = reviewItem(i);
   if (!f) return;
   const s = f.subject;
@@ -860,7 +863,7 @@ async function bookReviewMatch(i, yes) {
   if (!rec) { showError('Hardcover’s record couldn’t be read; try again later. Nothing was changed.'); return; }
   await linkBook(s.entry_id, rec, f.fingerprint);
 }
-function bookReviewNotSame(i) { const f = reviewItem(i); if (f) return setBookDecision('not_same', f.fingerprint, {}, 'Different books', f.fingerprint, 'done'); }
+function bookReviewNotSame(i) { noteReviewPlace(i); const f = reviewItem(i); if (f) return setBookDecision('not_same', f.fingerprint, {}, 'Different books', f.fingerprint, 'done'); }
 function bookReviewRemoveCopy(i, entryId) {
   const f = reviewItem(i);
   const e = f && booksData.entries.find(x => x.id === entryId);
@@ -869,7 +872,7 @@ function bookReviewRemoveCopy(i, entryId) {
   closeBooksDialog(false);
   return deleteBook(entryId, { keys: [`e:${e.id}`], label: `“${e.title}” · remove copy` });
 }
-async function bookReviewSiteReset(i) {
+async function bookReviewSiteReset(i) { noteReviewPlace(i);
   const f = reviewItem(i);
   if (!f) return;
   await runWrite('Official site · offer its links', async lane => {
@@ -1099,7 +1102,15 @@ function redrawBooksDialog() {
   if (!booksDialog) return;
   const k = booksDialog.kind;
   showBooksDialog(k === 'review' ? booksReviewHtml() : k === 'date' ? bookDateDialogHtml() : k === 'edit' ? bookEditDialogHtml() : booksAddHtml());
+  // Review: after an item is decided, focus goes to the item now in its place (else the one before, else Close).
+  const box = document.getElementById('bookDialogBox');
+  if (k === 'review' && booksDialog.place != null && box && document.activeElement === box && typeof box.querySelector === 'function') {
+    const n = box.querySelectorAll('li[data-bfinding]').length, at = Math.min(booksDialog.place, n - 1);
+    const el = at >= 0 ? box.querySelector(`li[data-bfinding="${at}"] button`) : box.querySelector('.modal-actions button');
+    if (el && typeof el.focus === 'function') el.focus();
+  }
 }
+function noteReviewPlace(i) { if (booksDialog && booksDialog.kind === 'review') booksDialog.place = i; }
 function showBooksDialog(html) {
   const overlay = document.getElementById('bookDialogOverlay'), box = document.getElementById('bookDialogBox');
   if (!overlay || !box) return;

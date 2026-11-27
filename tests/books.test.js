@@ -189,7 +189,7 @@ test('Series: main titles in order with the next book; Dropped and skipped books
   assert.match(text(screen(app)), /Not read from Hardcover yet: use Refresh books/);
   await refresh(app);
   const fid = ID('6d000000', 1);
-  assert.match(text(screen(app)), /Next: ZZ Third Case #3/, 'Finished #1 and Dropped #2 count as passed (owner, 2026-11-26)');
+  assert.match(text(screen(app)), /Next ZZ Third Case #3/, 'Finished #1 and Dropped #2 count as passed (owner, 2026-11-26)');
   app.ctx.toggleBookFollow(fid); await settle();
   const s = text(screen(app));
   assert.match(s, /#1 ZZ First Case .*#2 ZZ Second Case .*#3 ZZ Third Case .*Next .*#4 ZZ Fourth Case/);
@@ -201,7 +201,7 @@ test('Series: main titles in order with the next book; Dropped and skipped books
   assert.match(h, /nothing is merged or changed/);
   await app.ctx.toggleBookSkip('hc:1003', false); await settle();
   assert.deepStrictEqual(rpcs(app, 'library_book_decision_set').at(-1).body.p_key, 'hc:1003');
-  assert.match(text(screen(app)), /Next: ZZ Fourth Case #4 .*Date unknown/, 'a skipped book is passed over; an announced book with no date is next');
+  assert.match(text(screen(app)), /Next ZZ Fourth Case #4 .*Date unknown/, 'a skipped book is passed over; an announced book with no date is next');
 });
 
 test('Authors: their books plus their verified series; the publisher-credited series book is offered for review and a manual credit puts it under the author; another author’s book never is', async () => {

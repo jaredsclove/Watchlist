@@ -1409,3 +1409,6 @@ td.spot-version-name { padding-left: 46px; font-size: 13px; color: var(--text2);
 .books-credit { margin-top: 16px; }
 .books-screen .card-list.games-cards .item-card .card-meta { flex-wrap: wrap; }
 @media (max-width: 1099px) { .books-table { display: none; } }
+.books-screen a, #bookDialogBox a { color: var(--blue); }
+.book-follow-body ul.spot-versions, .games-preview ul.spot-versions { list-style: none; padding-left: 0; }
+.book-follow-body ul.spot-versions > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
