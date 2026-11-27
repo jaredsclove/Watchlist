@@ -102,6 +102,19 @@ function bookShownDate(entry, rec) {
   if (rec && rec.year) return { value: String(rec.year), source: 'hardcover' };
   return null;
 }
+// A book's authors as the member's lists show them: authors they credited in Review (a manual credit, book_associations) first,
+// in the order credited, then the book's own credits (co-authors kept; an author listed in both, once). Display only: the saved
+// entry and Hardcover's record keep their own credits.
+function bookAuthorsWithCredits(authors, hardcoverId, associations = []) {
+  const own = authors || [];
+  if (!hardcoverId) return own;
+  const credited = associations.filter(a => a.hardcover_book_id === hardcoverId)
+    .slice().sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
+    .map(a => ({ id: a.hardcover_author_id, name: a.author_name }));
+  if (!credited.length) return own;
+  const ids = new Set(credited.map(a => a.id));
+  return credited.concat(own.filter(a => !(a && a.id && ids.has(a.id))));
+}
 // A date suggestion that would change nothing: the official site says TBA and the library shows no date or TBA. It isn't offered,
 // an open one isn't shown and the next Refresh closes it (no decision is saved; a later real date is still suggested).
 const bookDateNoChange = (current, suggested) => suggested === 'TBA' && (!current || current === 'TBA');
