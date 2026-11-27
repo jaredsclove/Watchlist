@@ -27,7 +27,17 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Books Review's TBA date suggestions (owner's
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Books' accepted author credits in the Library
+  (owner's report; PR #111, `cff40ad`), 2026-11-27 UTC, page only. Cause: Review's Credit saved its `book_associations` row
+  correctly, but the Library took a book's authors only from its saved entry (Hardcover's credit), so it stayed under that
+  credit. Now the member's credited authors come first, then the book's own credits (co-authors kept, none twice); the book
+  joins that author's existing series group, Hardcover's credit named beside it. No data change or repair; saved entries
+  untouched. Cache token `20261127-bookcredit`. Verified: 63 offline suites (1512; the new case, accept → reload →
+  refresh with saved entries byte-identical and no duplicate, fails without the fix); Pages built, changed files
+  byte-identical to `main`; production read-only before the fix (the owner's association present, the item closed, the
+  Library view still Hardcover's credit) and after it with writes blocked: One of Us Is Back #3 under Karen M. McManus →
+  One of Us Is Lying, once, no Random House group, status unchanged, no write attempted. Not verified: real phones.
+- Previous release: Books Review's TBA date suggestions (owner's
   request; PR #109, `18f9228`), 2026-11-27 UTC, page only: an official site's "To Be Announced" for a book with no date (or
   already TBA) is no longer offered; an open item of that kind isn't shown or counted, and the next Refresh closes it
   through the existing close list (no decision saved, the book unchanged); a known date changed to TBA stays for review as
@@ -36,7 +46,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
   Tight, Evangeline item (no date → TBA) is still stored but not shown or counted (Review: "Nothing to review"), the book
   still has no chosen date, The Kill Artist and The Unlikely Spy still Finished, no write attempted. Not verified: a live
   Refresh closing the stored item (it would change the owner's findings); real phones.
-- Previous release: Books' Library and Following tabs
+- Earlier: Books' Library and Following tabs
   and collapsible Library groups (owner's request; PR #107, `25a59ac`), 2026-11-27 UTC, page only: Following replaces Series
   and Authors (followed authors with their page, series, Add/Skip/Add all and other books; then other followed series); a
   series also followed under its followed author shows once there with its own automatic-adding and Stop following controls;
