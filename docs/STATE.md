@@ -27,7 +27,19 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Books fixes from the owner's
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: the Books Library grouped by author,
+  series and reading order (owner's request; PR #105, `8f09233`), 2026-11-27 UTC, page only: the visible books under compact
+  headings (author A–Z by first-listed author, "Unknown author" last; each series A–Z in series order; then "Standalone
+  books" by date, undated last; empty headings not drawn; each book once by its own saved author and series); a "#" column
+  keeps the real series number when earlier books are filtered out; co-authors beside the title; desktop genres on one
+  measured line with +N (Games' fitter, refitted on resize). No sort control existed, so this is the Library's order. Cache
+  token `20261127-booklib`. Verified: 63 offline suites (1509); local Chrome with synthetic data (several authors, series and
+  standalones, missing author, position and date, Finished filtered): ordering, empty groups, +N by click and keyboard with
+  focus kept, refit at 1100–1500 px, cards at 375 and 800 px, no horizontal scroll; Pages built, changed files byte-identical
+  to `main`; live, read-only with writes blocked: the owner's library grouped (Daniel Silva → Gabriel Allon #2–#26, Michael
+  Osbourne, Standalone books), +N and Fewer, The Kill Artist and The Unlikely Spy still Finished, no write attempted. Not
+  verified: real phones.
+- Previous release: Books fixes from the owner's
   Silva walkthrough (item 6, BK1b; PR #103, `b5d0b26`), 2026-11-27 UTC, ordinary function tier: "new" for a follow means not in
   its starting catalog (decision kind `baseline`, saved on follow; follows made before get one on their next refresh, which
   offers nothing new for them that time) instead of "released within 180 days" (why Ransom showed as new); a series-only
@@ -49,7 +61,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
   follow or Add all (each would change the owner's library). The owner's next Refresh saves baselines for the two existing
   follows and closes the two open official-site items if Hardcover lists those titles for the author; the open Ransom item
   stays for the owner to decide.
-- Previous release: Books (item 6, BK1; PR #101, `307eb1a`), 2026-11-27 UTC, schema tier: a Books area (Library, Series,
+- Earlier: Books (item 6, BK1; PR #101, `307eb1a`), 2026-11-27 UTC, schema tier: a Books area (Library, Series,
   Authors) with Hardcover as the catalog through the `books` Edge Function (secret `HARDCOVER_TOKEN`, a `read:catalog` key of
   the owner's Hardcover account, replaced when it expires) and Refresh books reading supported official book-listing pages.
   Database `db/bk1_books.sql` (phase `contracted-bk1`, backup format 10). Fable reviewed the database, restore, function and
