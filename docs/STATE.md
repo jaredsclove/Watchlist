@@ -27,7 +27,25 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: All Movies' Genres and Groups
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Books (item 6, BK1; PR #101,
+  `307eb1a`), 2026-11-27 UTC, schema tier: a Books area (Library, Series, Authors) with Hardcover as the catalog through the
+  new `books` Edge Function (secret `HARDCOVER_TOKEN`, a `read:catalog` key of the owner's Hardcover account; it expires on the
+  date chosen when made and must then be replaced), and Refresh books reading supported official book-listing pages
+  (Galbraith, Silva, McManus; others by the same rule, else Hardcover only). Owner decisions (2026-11-26): Dropped counts as
+  passed in a series; companions are listed but never next or added automatically; website checks for every member. Database
+  `db/bk1_books.sql` (phase `contracted-bk1`, backup format 10; run record confirmed). Cache token `20261127-books`.
+  Verified: 63 offline suites (1502); BK1's database tests (84) and the restore suite (212) on PGlite and PostgreSQL 17 (with
+  the G1, TC1 and Q1 suites); a local synthetic Chrome check (desktop, 375 and 320 px, both themes); a local read-only run of
+  the function and the page's rules against real Hardcover and the three official sites (every listed book matched, Ransom's
+  announcement read, McManus's *One of Us Is Back* flagged as credited to Random House). Fable reviewed the database,
+  restore, function and isolation once (no blocking findings; four fixed and confirmed closed). Release: pre-release format-9
+  backup validated; read-only preflight; the SQL Editor's text checked against the file's hash; run record confirmed by a
+  separate read (seven book tables, none readable by anon, empty); function deployed and answering (401 signed out); Pages
+  built, 39 page files byte-identical to `main`; live, read-only with writes blocked: an author search and browse through the
+  function, and the deployed function reading all three sites; post-release format-10 backup equal to the pre-release one in
+  all 27 earlier tables, the six book tables empty. Not verified: real phones; a live Refresh books, follow or add (no
+  synthetic member to run them on without changing the owner's library); another member's use.
+- Previous release: All Movies' Genres and Groups
   columns (owner's request; PR #99, `c4a4ea4`), 2026-11-24 UTC, page only: desktop rows read Title | Genres | Groups |
   Release | Status | Watched | ⋯ with fixed columns; franchise, collection-tag and watch-with pills moved from under the
   title to Groups; each pill cell one measured line with +N (Fewer wraps; a lone long pill gets an ellipsis); cards list
@@ -86,7 +104,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
 - Earlier: games (G1, item 5; PR #60, `5ada6c4`), 2026-11-10 UTC, schema tier (backup format 9; Fable review once, five fixed).
   Sorting library views (item 13; PR #58, `2dc1256`), 2026-11-10 UTC, presentation tier; Q1 (item 7; PR #56)
   2026-11-05 UTC.
-- Database phase `contracted-g1` with TC1 (capability `tc1`), backup format 9 (twenty-seven tables, no `user_id`, never the IGDB or TMDB cache), `access = members`, research per member. One flat
+- Database phase `contracted-bk1` with TC1 (capability `tc1`) and BK1, backup format 10 (thirty-three tables, no `user_id`, never the IGDB, TMDB or book cache), `access = members`, research per member. One flat
   `public.restore_backup`; the recovery archive is retired, exported privately first. The API exposes only `public` and `graphql_public`. The owner's production library holds the collection setup; one
   retained test account has no membership and reaches nothing (`docs/MEMBER_RECOVERY.md`).
 - **Standing decisions:** W1 is removed; item 11 is abandoned; item 10 (CU1e) stays. `pg_graphql` stays disabled: enabling it needs a new explicit
@@ -183,6 +201,12 @@ migration, merge after the migration's run record is confirmed.
 - Temporary: the `igdb` function answers `game_time_to_beats` with an empty list for pages opened before game length was
   removed (`EMPTY_ENDPOINTS` in `supabase/functions/igdb/core.mjs`). Remove it in a later function deploy, once no such page can
   still be open.
+- BK1 not verified: real phones; a live Refresh books, follow or add; another member's use. Accepted limits: website discovery reads
+  book-listing pages, not news feeds (an announcement may be found later than its first news post); a site the shared rule
+  doesn't recognise is checked on Hardcover only until a small maintenance change supports it; Hardcover's 1 January dates are
+  shown as given and marked as possible placeholders; the Hardcover key must be replaced when it expires (Refresh and search
+  then fail until it is). Open point: Hardcover's website terms forbid compiling a database from the Site without permission,
+  and its API rules allow API data in a personal project; the owner chose to proceed (a note to Hardcover support would settle it).
 - Pre-existing (seen in Q1's review): a film with collection-update records of its own (an alias, a hold, a remembered removal)
   can't be deleted from the page, because those tables guard deletes; queue entries don't add to this.
 
