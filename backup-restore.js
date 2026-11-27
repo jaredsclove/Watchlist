@@ -631,7 +631,9 @@ function validateFormat9Rows(tables, report) {
 
 // Format 10: what the book tables' keys and checks enforce (db/bk1_books.sql), before anything is sent.
 const BK1_STATUSES = ['want', 'reading', 'paused', 'finished', 'dropped'];
-const BK1_DECISION_KINDS = ['skip', 'exclude', 'keep_date', 'not_same', 'not_author'];
+const BK1_DECISION_KINDS = ['skip', 'exclude', 'keep_date', 'not_same', 'not_author', 'baseline'];
+// BK1b: a follow's starting catalog, {ids: [Hardcover book ids]} (at most 5,000 positive integers; 60,000 bytes; other kinds 4,000).
+const bk1BaselineOk = v => bk1Obj(v) && Object.keys(v).length === 1 && Array.isArray(v.ids) && v.ids.length <= 5000 && v.ids.every(x => Number.isInteger(x) && x > 0 && x < 1e10);
 const BK1_FINDING_KINDS = ['new_book', 'date', 'credit_gap', 'match', 'duplicate', 'site_changed'];
 const bk1Trimmed = (v, max) => typeof v === 'string' && v === v.trim() && v !== '' && v.length <= max;
 const bk1Id = v => Number.isInteger(v) && v > 0 && v <= 9999999999;
@@ -681,7 +683,7 @@ function validateFormat10Rows(tables, report) {
   const decisions = new Set();
   rows('book_decisions').forEach((d, i) => {
     const at = `book_decisions row ${i + 1}`;
-    if (!BK1_DECISION_KINDS.includes(d.kind) || !bk1Key(d.key) || !bk1Obj(d.value) || JSON.stringify(d.value).length > 4000) problems.push(`${at} has values the database refuses`);
+    if (!BK1_DECISION_KINDS.includes(d.kind) || !bk1Key(d.key) || !bk1Obj(d.value) || JSON.stringify(d.value).length > (d.kind === 'baseline' ? 60000 : 4000) || (d.kind === 'baseline' && !bk1BaselineOk(d.value))) problems.push(`${at} has values the database refuses`);
     seen(decisions, `${d.kind}|${d.key}`, `${at} repeats a decision`);
   });
   const findings = new Set();

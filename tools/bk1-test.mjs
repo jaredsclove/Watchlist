@@ -57,6 +57,29 @@ const cap = (await call(A, `public.stage5_capabilities()`)).r;
 ok(cap.phase === 'contracted-bk1' && cap.backup_format === 10 && cap.bk1 === 1 && cap.g1 === 1 && cap.tc1 === 1 && cap.member === true, 'the capability says contracted-bk1, format 10', JSON.stringify(cap));
 ok(/converted in the page/.test((await restore(A, L1)).message || ''), 'a format-9 file sent directly is refused: the page converts it');
 
+section('BK1b: a follow\'s starting catalog');
+{
+  const MIGB = file('db/bk1b_baselines.sql'), bk1b = run => `select set_config('watchlist.bk1b_run', '${run}', false);\n` + MIGB;
+  ok(/set watchlist.bk1b_run/.test(await attempt(`select set_config('watchlist.bk1b_run', '', false);\n` + MIGB)), 'without a run id: refused');
+  const beforeB = await fpAll();
+  ok(!(await attempt(bk1b('local-bk1b'))), 'the migration commits');
+  ok(beforeB === await fpAll(), 'no other row changed');
+  ok(/already installed/.test(await attempt(bk1b('local-bk1b-again'))), 'a rerun is refused');
+  const capB = (await call(A, `public.stage5_capabilities()`)).r;
+  ok(capB.phase === 'contracted-bk1' && capB.backup_format === 10, 'phase and backup format unchanged');
+}
+const decB = (who, key, exp, value) => call(who, `public.library_book_decision_set('baseline', $1, $2::jsonb, $3::jsonb, null, null)`, [key, J(exp), J(value)]);
+{
+  const ids = Array.from({ length: 3000 }, (_, i) => 800000 + i);
+  ok((await decB(A, 'f:zz-follow-1', null, { ids })).ok, 'a baseline of 3,000 Hardcover ids is kept (beyond the 4,000 bytes of other decisions)');
+  ok(/invalid_input/.test((await decB(A, 'f:zz-follow-2', null, { ids: [1, -2] })).message) && /invalid_input/.test((await decB(A, 'f:zz-follow-2', null, { ids: [1], extra: 1 })).message)
+    && /invalid_input/.test((await decB(A, 'f:zz-follow-2', null, { ids: Array.from({ length: 5001 }, (_, i) => i + 1) })).message), 'a malformed or oversized baseline is refused');
+  ok(/invalid_input/.test((await call(A, `public.library_book_decision_set('skip', 'hc:1', null, $1::jsonb, null, null)`, [J({ pad: 'x'.repeat(5000) })])).message), 'other kinds keep their 4,000-byte limit');
+  ok(/target_changed/.test((await decB(A, 'f:zz-follow-1', null, { ids: [1] })).message), 'a stale baseline write is refused');
+  ok((await as(B, `select count(*)::int n from public.book_decisions where kind = 'baseline'`))[0].n === 0, 'another member sees none');
+  await decB(A, 'f:zz-follow-1', { ids }, null);
+}
+
 section('books: add, status, edit');
 const add = (who, book, status = 'want', clear = [], finding = null, refuse = null) => call(who, `public.library_book_add($1::jsonb, $2, $3::text[], $4, $5::text[])`, [J(book), status, arr(clear), finding, refuse ? arr(refuse) : null]);
 const setS = (who, e, exp, s) => call(who, `public.library_book_set($1, $2, $3)`, [e, exp, s]);
