@@ -27,7 +27,24 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Books' accepted author credits in the Library
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Books BK1c, a credit can replace one Hardcover credit
+  (owner's request; PR #113, `4a0a032`), 2026-11-27 UTC, ordinary function tier. Cause: Review's credit saved only an added
+  author (an association), so a known-wrong credit stayed beside the corrected one. Review now offers "Credit X instead of
+  <credit>" per Hardcover credit and "Credit X as well"; a replacement is a `replace_credit` decision (key
+  `rc:<book>:<replaced author>`, value `{by}`), applied only while that credit exists; associations stay additive; the book's
+  ⋯ menu offers "Show X instead of <credit>" / "Show <credit> again". Hardcover's record and saved books unchanged. Database
+  `db/bk1c_credit_replace.sql` (decision kind and checks; phase, format and tables unchanged). Cache token
+  `20261127-bookreplace`. No Fable review (no new table, restore path or isolation change; a display-only decision checked by
+  the table, the function and backup validation, as BK1b). Verified: 63 offline suites (1514); BK1 database tests (105) on
+  PGlite and PostgreSQL 17 and the restore suite (212, with a replacement row in its fixtures); release: pre-release backup
+  validated, the editor text checked against the run file's hash, run record and kind confirmed by a separate read (11
+  decisions, 1 association, no replacement, not executable by anon); Pages built, changed files byte-identical to `main`;
+  live, read-only with writes blocked: the owner's existing credit still additive ("One of Us Is Back with Random House")
+  under Karen M. McManus, its ⋯ menu offering "Show Karen M. McManus instead of Random House", no write attempted;
+  post-release backup identical to the pre-release one in all 33 tables. Open: the owner's one confirmation in that menu
+  (the stored correction recorded no replacement). Not verified: real phones; a live replacement (it would change the
+  owner's decisions).
+- Previous release: Books' accepted author credits in the Library
   (owner's report; PR #111, `cff40ad`), 2026-11-27 UTC, page only. Cause: Review's Credit saved its `book_associations` row
   correctly, but the Library took a book's authors only from its saved entry (Hardcover's credit), so it stayed under that
   credit. Now the member's credited authors come first, then the book's own credits (co-authors kept, none twice); the book
@@ -37,7 +54,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
   byte-identical to `main`; production read-only before the fix (the owner's association present, the item closed, the
   Library view still Hardcover's credit) and after it with writes blocked: One of Us Is Back #3 under Karen M. McManus →
   One of Us Is Lying, once, no Random House group, status unchanged, no write attempted. Not verified: real phones.
-- Previous release: Books Review's TBA date suggestions (owner's
+- Earlier: Books Review's TBA date suggestions (owner's
   request; PR #109, `18f9228`), 2026-11-27 UTC, page only: an official site's "To Be Announced" for a book with no date (or
   already TBA) is no longer offered; an open item of that kind isn't shown or counted, and the next Refresh closes it
   through the existing close list (no decision saved, the book unchanged); a known date changed to TBA stays for review as
