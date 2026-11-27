@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Watchlist Tracker</title>
-<link rel="stylesheet" href="styles.css?v=20261124-movielayout">
+<link rel="stylesheet" href="styles.css?v=20261127-books">
 </head>
 <body>
 
@@ -50,6 +50,9 @@
 <div id="gameDialogOverlay" class="modal-overlay" style="display:none">
   <div class="modal-box manage-box game-dialog-box" id="gameDialogBox" role="dialog" aria-modal="true" aria-labelledby="gameDialogTitle" tabindex="-1" onkeydown="gameDialogKeydown(event)"></div>
 </div>
+<div id="bookDialogOverlay" class="modal-overlay" style="display:none">
+  <div class="modal-box manage-box game-dialog-box" id="bookDialogBox" role="dialog" aria-modal="true" aria-labelledby="bookDialogTitle" tabindex="-1" onkeydown="bookDialogKeydown(event)"></div>
+</div>
 <div id="effectModalOverlay" class="modal-overlay" style="display:none">
   <div class="modal-box" id="effectModalBox" role="alertdialog" aria-modal="true" aria-labelledby="effectModalText" tabindex="-1" onkeydown="effectDialogKeydown(event)"></div>
 </div>
@@ -68,6 +71,7 @@
   <div id="settingsScreen" class="settings-screen" style="display:none"></div>
   <div id="queuesScreen" class="queues-screen" style="display:none"></div>
   <div id="gamesScreen" class="games-screen" style="display:none"></div>
+  <div id="booksScreen" class="games-screen books-screen" style="display:none"></div>
   <div class="list-toolbar">
     <div class="filters" id="filtersRow"></div>
     <div class="stats-row" id="statsRow"></div>
@@ -107,39 +111,41 @@
 <!-- @supabase/supabase-js 2.117.2 (MIT, vendor/supabase-js-LICENSE), the npm package's dist/umd build; used for sign-in only (auth.js). -->
 <script src="vendor/supabase-js-2.117.2.umd.js"></script>
 <script src="identity.js"></script>
-<script src="auth.js?v=20261124-movielayout"></script>
-<script src="api.js?v=20261124-movielayout"></script>
-<script src="write-lane.js?v=20261124-movielayout"></script>
-<script src="ui-helpers.js?v=20261124-movielayout"></script>
-<script src="metadata.js?v=20261124-movielayout"></script>
-<script src="backup-restore.js?v=20261124-movielayout"></script>
-<script src="tabs.js?v=20261124-movielayout"></script>
-<script src="render.js?v=20261124-movielayout"></script>
-<script src="row-actions.js?v=20261124-movielayout"></script>
-<script src="tmdb-search.js?v=20261124-movielayout"></script>
-<script src="collections-pull.js?v=20261124-movielayout"></script>
-<script src="universe-pull.js?v=20261124-movielayout"></script>
-<script src="person-pull.js?v=20261124-movielayout"></script>
-<script src="tmdb-match.js?v=20261124-movielayout"></script>
-<script src="derived-views.js?v=20261124-movielayout"></script>
-<script src="tv-shows.js?v=20261124-movielayout"></script>
-<script src="episodes.js?v=20261124-movielayout"></script>
-<script src="show-ratings.js?v=20261124-movielayout"></script>
-<script src="tmdb-cache.js?v=20261124-movielayout"></script>
-<script src="organization.js?v=20261124-movielayout"></script>
-<script src="organization-manage.js?v=20261124-movielayout"></script>
-<script src="collection-members.js?v=20261124-movielayout"></script>
-<script src="collection-updates.js?v=20261124-movielayout"></script>
-<script src="collection-research.js?v=20261124-movielayout"></script>
-<script src="collection-settings.js?v=20261124-movielayout"></script>
-<script src="browse-views.js?v=20261124-movielayout"></script>
-<script src="view-sort.js?v=20261124-movielayout"></script>
-<script src="queues.js?v=20261124-movielayout"></script>
-<script src="games-data.js?v=20261124-movielayout"></script>
-<script src="games.js?v=20261124-movielayout"></script>
-<script src="games-research.js?v=20261124-movielayout"></script>
-<script src="history.js?v=20261124-movielayout"></script>
-<script src="library.js?v=20261124-movielayout"></script>
+<script src="auth.js?v=20261127-books"></script>
+<script src="api.js?v=20261127-books"></script>
+<script src="write-lane.js?v=20261127-books"></script>
+<script src="ui-helpers.js?v=20261127-books"></script>
+<script src="metadata.js?v=20261127-books"></script>
+<script src="backup-restore.js?v=20261127-books"></script>
+<script src="tabs.js?v=20261127-books"></script>
+<script src="render.js?v=20261127-books"></script>
+<script src="row-actions.js?v=20261127-books"></script>
+<script src="tmdb-search.js?v=20261127-books"></script>
+<script src="collections-pull.js?v=20261127-books"></script>
+<script src="universe-pull.js?v=20261127-books"></script>
+<script src="person-pull.js?v=20261127-books"></script>
+<script src="tmdb-match.js?v=20261127-books"></script>
+<script src="derived-views.js?v=20261127-books"></script>
+<script src="tv-shows.js?v=20261127-books"></script>
+<script src="episodes.js?v=20261127-books"></script>
+<script src="show-ratings.js?v=20261127-books"></script>
+<script src="tmdb-cache.js?v=20261127-books"></script>
+<script src="organization.js?v=20261127-books"></script>
+<script src="organization-manage.js?v=20261127-books"></script>
+<script src="collection-members.js?v=20261127-books"></script>
+<script src="collection-updates.js?v=20261127-books"></script>
+<script src="collection-research.js?v=20261127-books"></script>
+<script src="collection-settings.js?v=20261127-books"></script>
+<script src="browse-views.js?v=20261127-books"></script>
+<script src="view-sort.js?v=20261127-books"></script>
+<script src="queues.js?v=20261127-books"></script>
+<script src="games-data.js?v=20261127-books"></script>
+<script src="games.js?v=20261127-books"></script>
+<script src="games-research.js?v=20261127-books"></script>
+<script src="books-data.js?v=20261127-books"></script>
+<script src="books.js?v=20261127-books"></script>
+<script src="history.js?v=20261127-books"></script>
+<script src="library.js?v=20261127-books"></script>
 <script>
 // ─── Supabase config ──────────────────────────────────────────────────────────
 
@@ -162,7 +168,7 @@
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let activeMediaType = 'tv'; // 'tv' | 'movie' — controls which views are visible (the last TV / Movies area, also while Collections or Settings is open)
-let activeArea = 'tv'; // S2: 'tv' | 'movie' | 'collections' | 'games' | 'queues' | 'settings' — the primary area shown as current; set only by switchView (tabs.js areaOfView)
+let activeArea = 'tv'; // S2: 'tv' | 'movie' | 'collections' | 'games' | 'books' | 'queues' | 'settings' — the primary area shown as current; set only by switchView (tabs.js areaOfView)
 let activeViewId = 'watching'; // the open view (derived or browse)
 let tabData = {}; // per-run caches by name: tabData.films = the movie tools' films (library.js); no storage
 let libraryGovernance = { shows: new Map(), films: new Map(), kinds: new Map(), knownShows: new Set(), knownItems: new Set(), seq: 0 }; // the newest catalog-governance snapshot (library.js)
@@ -277,6 +283,19 @@ let gamesCollectionEdit = null; // G1: a game collection being renamed or confir
 let gamesCollectionNew = ''; // G1: the New collection field as typed
 let gamesCollectionAdd = null; // G1: the open Add to collection dialog
 let gamesDetailsOpener = null, gamesReviewOpener = null, gamesDialogOpener = null; // G1: where focus goes back when a games dialog closes
+let booksData = null; // BK1: the Books area's read: { loaded, entries, follows, sites, associations, decisions (Map 'kind|key'), decisionRows, findings, cache: { book, author, series, site } (Maps by Hardcover id) } (books.js); null until read
+let booksLoadSeq = 0; // BK1: lets a late Books read see that it's been superseded
+let booksFilters = { search: '', genre: '', status: 'notdone' }; // BK1: the Library's filters (page memory); status default BOOKS_STATUS_DEFAULT (books.js)
+let booksFiltersOpen = false; // BK1: the Library's Filters panel (page memory)
+let booksExpanded = new Set(); // BK1: followed authors and series (follow ids) shown expanded (page memory)
+let booksShowHidden = new Set(); // BK1: lists whose hidden records are shown ('s:<series id>', 'a:<author id>'; page memory)
+let booksFocusIntent = null; // BK1: where focus goes after the next Books redraw; null: the list's rule
+let booksRefreshing = false; // BK1: Refresh books is reading Hardcover and sites, or saving what it found
+let booksReport = ''; // BK1: the last Refresh books' report (HTML, escaped), shown until the view is left
+let booksDialog = null; // BK1: the open books dialog (+ Add book, Review, a date, an edit): its kind, session and state
+let booksDialogSeq = 0; // BK1: bumped each time a books dialog opens; a late answer for an earlier one changes nothing
+let booksDialogOpener = null; // BK1: where focus goes back when a books dialog closes
+let bookSiteDraft = new Map(); // BK1: official-page addresses being typed, by Hardcover author id (page memory)
 let gamesSettingsRead = null; // G1: Settings → Games as read at sign-in (and by the Games area): { status: 'loading' | 'ready' | 'error', settings }
 
 

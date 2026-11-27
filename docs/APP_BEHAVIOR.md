@@ -180,6 +180,80 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   request; a backup is the member's own file of their own choices, and the database copy (cache and records) can be deleted.
   Unresolved: the agreement doesn't say whether its deletion duty reaches files a member has already downloaded, and those
   can't be recalled.
+- **Books (BK1, item 6; `books.js`, `books-data.js`, `db/bk1_books.sql`, the `books` function):** the app bar's Books (`#/books`,
+  `#/books/series`, `#/books/authors`) has three views drawn as Games': Library, Series and Authors, with Search, Filters
+  (Genre, Status; the default lists everything except Finished and Dropped), + Add book, Refresh books and Review (its count).
+  One entry per underlying book: editions, formats and translations are never tracked. Statuses: Want to read, Reading, Paused,
+  Finished, Dropped. Catalog data comes from Hardcover (`hardcover.app`) through the `books` function, which holds the
+  Hardcover token (a `read:catalog` key of the owner's account, function secret `HARDCOVER_TOKEN`), answers members only and
+  sends only fixed read-only queries; the page never holds the token. A book's genres are Hardcover's readers' genre tags
+  mapped onto a short list (`BOOK_GENRE_ALIASES`; at most four; others left out). Dates are shown as Hardcover gives them; a
+  1 January date is marked "may be a placeholder" (often a year-only value) and not changed. A date the member chooses
+  (⋯ → Choose a date…) is kept until they change or clear it; official-site dates only ever arrive as suggestions in Review.
+  - **Lists show, never change.** An author's list is Hardcover's Author credits (never translators or narrators), the
+    member's manual credits, and the books of the author's verified series: series Hardcover gives the author as primary
+    author with at least two books, in which at least half the main books credit them (or the official page lists them).
+    Merged records are left out by the queries; translations (an edition language other than English only), collections
+    and box sets (Hardcover's flag or the title), partial books, placeholder titles ("Untitled", "<series> #N") and possible
+    duplicates (the same title, the same title before a colon, or another record at a series position: the record with more
+    readers is shown) go under "Show N hidden records", with the reason. A book with no edition language is "Language unknown",
+    never taken as English; it stays listed when it is announced or holds a series place. A saved book is always shown.
+    Nothing hides, merges or changes a saved book.
+  - **Series** are in order. Main titles are whole-number positions; the next book is the first main title that isn't
+    Finished, Dropped (owner, 2026-11-26: Dropped counts as passed) or skipped (⋯ → Skip in its series, or Skip beside a book
+    not saved; a skip decision, kept for a book not saved too). Companions (fractional or unnumbered positions) are listed
+    and can be saved and tracked, but are never the next book and never added automatically (owner, 2026-11-26).
+  - **Following** is explicit and adds nothing. A followed series has "Automatically add new titles on refresh" (off unless
+    turned on). Following an author whose official site is supported (`KNOWN_BOOK_SITES`: Robert Galbraith, Daniel Silva,
+    Karen M. McManus) also saves that site's book-listing page as the member's setting; any author's page can be set or
+    changed in Authors.
+  - **Refresh books** (one button, members alike; owner, 2026-11-26: website checks aren't limited by research access)
+    reads Hardcover for each followed author (their books and series) and series, then each official listing page set for a
+    followed author or a followed series' author. A title is new for a follow when it has no date, is upcoming, or came out
+    at most 180 days before the follow began (an author's backlist is on their page, not in Review). Author discoveries
+    always wait in Review. A followed series with automatic adding on adds a new main title as Want to read only when it is
+    a Hardcover record at a whole-number position with an English edition, not excluded or skipped, with no other saved
+    record at its place and no open duplicate question; anything else waits in Review. Websites: the shared rule reads the
+    listing page's same-site links under the commonest book prefix (three pages or more, as `/strike-books/<book>` or
+    `/books/<book>`), or on a flat site every single-level page that isn't a navigation page; a link matching a known title
+    (Hardcover's, a saved book's or an alternative title) offers nothing; up to five unmatched links' pages are read for their
+    title and dated phrase ("Published on …", "Expected Release Date: …", "Coming <date>", "On sale …", "Available on …",
+    "Coming in <year>"); a book page with no date that links to its publisher's page has that page read too (two at most); a
+    site's front page announcement ("Coming July 14, 2026! In the 26th book of the … series") is read for the supported site
+    that has one. The first check of a site offers every unmatched book link for review (marked as a first check); after
+    that only new ones. A link whose title names a known title with edition words (paperback, anniversary edition, box set …)
+    is left out and counted. When a site's links change wholesale (more than six new, or most of them gone), one "changed a
+    lot" item is offered instead, with "Offer its links for review". A page that doesn't look like this author's book list
+    (fewer than three links, or fewer than three matching their Hardcover titles) is reported and that author is checked on
+    Hardcover only; so is an author with no page set. A site that can't be read is reported; Hardcover's results still count.
+    General news feeds are never read (accepted: an announcement may be found later than its first news post). Page text is
+    data: only links, titles and dated phrases are taken from it.
+  - **Date suggestions** come from a site for a saved book whose shown date is missing, TBA, possibly a placeholder, only a
+    year or month, or upcoming, and which the member hasn't dated: "Use this date" saves it as the book's chosen date (with
+    its source), "Keep current date" declines that date until the site shows another. An edition's or news post's date is
+    never used; a long-published book's regional date difference is never suggested.
+  - **Review** (pending first, then Later) shows each item's source (Hardcover, Official site, Your library), a short
+    explanation and its source links: a new title (Add as Want to read, Not interested, Later); a date (Use this date, Keep
+    current date); a credit gap (a verified series' book Hardcover credits to no other author of the series: Credit the
+    author, which saves a manual credit and shows it under them, or Not theirs); a match (a book saved by hand or from a site
+    that a Hardcover record with the same title and author now matches: Link to Hardcover, which keeps its status, chosen
+    date, skip and placement, or Different books); a possible duplicate (two saved books with the same title or series
+    place: Different books, or Remove one copy, which excludes only that copy); a site that changed a lot. A decided item
+    leaves; its decision (or the saved book) keeps it from coming back. "Removed and dismissed" lists the excluded titles with
+    Allow again.
+  - **Removing a book** (⋯ → Remove from library…) excludes its Hardcover record and its title under its authors in the same
+    change: no refresh offers it again, from Hardcover or a site, after the cache is emptied or after a restore, until the
+    member adds it again (which lifts the exclusions) or allows it again in Review. Not interested does the same for a title
+    not saved.
+  - **+ Add book** searches Hardcover (Books, Authors, Series); a book result is Add (Want to read), an author or series is
+    Browse books (its list, with Add and Skip, adding nothing by itself) and Follow. "Enter a book by hand" saves a title,
+    author, optional series and number and optional date; it can be matched to Hardcover later (⋯ → Match to Hardcover…).
+    ⋯ → Edit corrects a saved book's title, authors or series place (the member's copy; Hardcover's record isn't changed).
+  - **Data:** `book_entries`, `book_follows`, `book_sites`, `book_associations`, `book_decisions` (skip, exclude, keep_date,
+    not_same, not_author) and `book_findings` (open review items, pending or later) are the member's, owner-only, written only
+    through the `library_book_*` functions (expected values; one saved book per Hardcover id) or a restore, and in backups.
+    `book_cache` (Hardcover records and each site's last reading) is replaceable: never in a backup, untouched by restore,
+    emptied by `library_book_cache_purge`. Books aren't in queues (owner's scope).
 - **Games in queues (G1):** Add to queue… in a game's ⋯; the entry reads "Game · <platform line>" with the status select.
   Adding changes no status; setting a game to Finished takes it out of every queue (the database, in the same transaction); it
   can be queued again for a replay. A game on none of the member's platforms is hidden in the queue ("+N hidden") and keeps its
@@ -366,10 +440,11 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   `library_cu_sync_show_network`, `delete_tv_season`, `restore_backup`).
   Some take `p_expected` values and refuse a stale write; not every path does, so check each one before relying
   on it. `delete_tv_season` takes the mark count the page showed: a page from before EP1 can't delete a marked season.
-- **Backup** is format 9 (twenty-seven tables: format 8's twenty-one — format 7's nineteen plus the two queue tables, with
-  both orders — plus six game tables; queue entries carry `game_entry_id`; no `user_id`; never the IGDB cache). **Restore**
-  converts a file of format 5 to 8 to format 9 first (a format-5 file has no marks, a format-6 file no collection updates, a
-  format-7 file no queues, a format-8 file no games; the preview says what a restore removes) and leaves out any `conversion` or `recovery` section an old file carries, saying so.
+- **Backup** is format 10 (thirty-three tables: format 8's twenty-one — format 7's nineteen plus the two queue tables, with
+  both orders — plus six game tables and six book tables; queue entries carry `game_entry_id`; no `user_id`; never the IGDB,
+  TMDB or book cache). **Restore** converts a file of format 5 to 9 to format 10 first (a format-5 file has no marks, a format-6
+  file no collection updates, a format-7 file no queues, a format-8 file no games, a format-9 file no books; the preview says
+  what a restore removes) and leaves out any `conversion` or `recovery` section an old file carries, saying so.
   Formats 1 to 4 are refused (`docs/ADMIN_RESTORE.md` has the offline route). It validates the file, checks for identity loss, makes and validates a safety backup,
   then replaces the owner's rows in one database transaction and verifies field by field.
 

@@ -7,6 +7,7 @@ function renderFilters() {
   if (typeof isCollectionsStateView === 'function' && isCollectionsStateView()) return; // nor has the Collections state (S2)
   if (typeof isQueuesView === 'function' && isQueuesView()) return; // nor has Queues (Q1)
   if (typeof isGamesView === 'function' && isGamesView()) return; // Games draws its own (G1)
+  if (typeof isBooksView === 'function' && isBooksView()) return; // and so do Books (BK1)
   const focus = captureFilterFocus();
   if (isBrowseView(activeViewId)) renderBrowseFilters();
   else if (activeViewId) renderDerivedFilters();
@@ -763,6 +764,7 @@ function renderTable() {
   if (typeof isCollectionsStateView === 'function' && isCollectionsStateView()) return; // nor has the Collections state (S2)
   if (typeof isQueuesView === 'function' && isQueuesView()) { renderQueuesView(); return; } // Q1: the queue is its own list
   if (typeof isGamesView === 'function' && isGamesView()) { renderGamesView(); return; } // G1
+  if (typeof isBooksView === 'function' && isBooksView()) { renderBooksView(); return; } // BK1
   if (isBrowseView(activeViewId)) { renderBrowseTable(); return; }
   if (activeViewId) renderDerivedTable();
 }

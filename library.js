@@ -222,6 +222,7 @@ function reloadOpenView() {
   if (typeof isCollectionsStateView === 'function' && isCollectionsStateView()) { renderCollectionsState(); buildBrowseBar({ resolve: false }); return true; } // the Collections state (S2): drawn again; nothing is read or opened
   if (typeof isQueuesView === 'function' && isQueuesView()) return loadQueuesView(); // Q1
   if (typeof isGamesView === 'function' && isGamesView()) return loadGamesView(); // G1
+  if (typeof isBooksView === 'function' && isBooksView()) return loadBooksView(); // BK1
   if (isBrowseView(activeViewId)) return loadBrowseView();
   else if (activeViewId) return loadDerivedView();
   return null;

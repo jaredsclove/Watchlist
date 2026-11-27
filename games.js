@@ -68,7 +68,7 @@ function hideListForGames() {
   SETTINGS_LIST_CONTAINERS.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   const filtersRow = document.getElementById('filtersRow');
   if (filtersRow) filtersRow.dataset.tab = '';
-  ['settingsScreen', 'queuesScreen'].forEach(id => { const el = document.getElementById(id); if (el) { el.style.display = 'none'; el.innerHTML = ''; } });
+  ['settingsScreen', 'queuesScreen', 'booksScreen'].forEach(id => { const el = document.getElementById(id); if (el) { el.style.display = 'none'; el.innerHTML = ''; } });
 }
 function paintGamesMessage(text, withRetry) {
   hideListForGames();

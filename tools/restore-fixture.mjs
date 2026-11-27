@@ -37,6 +37,18 @@ export async function replay(exec, { through = 'final' } = {}) {
   await exec(`insert into private.library_members (user_id, note) values ('${B}', 'local B')`);
 }
 
+// After replay: the simplification, Q1, G1, TC1 (with the local stand-in for pg_cron) and, unless books: false, BK1 — the current
+// production state.
+export async function toCurrent(exec, { books = true } = {}) {
+  const run = (key, f) => exec(`select set_config('watchlist.${key}_run', 'local-${key}', false);\n` + file(f));
+  await run('simplify', 'db/simplify_restore_cleanup.sql');
+  await run('q1', 'db/q1_queues.sql');
+  await run('g1', 'db/g1_games.sql');
+  await exec(file('db/test/pg_cron_shim.sql'));
+  await run('tc1', 'db/tc1_tmdb_cache.sql');
+  if (books) await run('bk1', 'db/bk1_books.sql');
+}
+
 // The page's own code, loaded as the admin tool loads it: P('validateBackupObject')(doc).
 export function pageCode() {
   const page = { console, Map, Set, JSON, Date, Math, Array, Object, String, Number, Boolean, RegExp, Error, Promise, parseInt, isFinite,
@@ -168,9 +180,49 @@ export function library9(seed = 1, scale = 8) {
   tables.queue_entries = qe;
   return { format: d.format, formatVersion: 9, exportedAt: d.exportedAt, rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
 }
+// The same library at format 10 (BK1): saved books (one from Hardcover, Finished; one entered by hand with a series placement and a
+// chosen date; one Hardcover book Dropped), a followed author and a followed series with automatic adding on, an author's official
+// listing page, a manual author credit, one decision of each kind (a removed title's exclusions among them) and two open review
+// items (one pending, one later). Made-up Hardcover ids; the site is a reserved example domain.
+export const SPEC_BK1 = ['book_entries', 'book_follows', 'book_sites', 'book_associations', 'book_decisions', 'book_findings'];
+export function library10(seed = 1, scale = 8) {
+  const d = library9(seed, scale), id = n => `7${seed}000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const hc = n => 600000 + seed * 1000 + n, at = h => `2026-11-1${h % 10}T0${h % 10}:30:00.123456+00:00`;
+  const t = {};
+  t.book_entries = [
+    { id: id(95001), hardcover_id: hc(1), title: `ZZ Book ${seed} One`, authors: [{ id: hc(500), name: `ZZ Author ${seed}` }], series: [{ id: hc(900), name: `ZZ Saga ${seed}`, position: '1' }],
+      status: 'finished', chosen_date: null, created_at: at(1), updated_at: at(2) },
+    { id: id(95002), hardcover_id: null, title: `ZZ Book ${seed} By Hand`, authors: [{ name: `ZZ Author ${seed}` }], series: [{ name: `ZZ Saga ${seed}`, position: '2.5' }],
+      status: 'want', chosen_date: { value: '2027-03', source: 'member', chosen_at: '2026-11-12' }, created_at: at(3), updated_at: at(3) },
+    { id: id(95003), hardcover_id: hc(3), title: `ZZ Book ${seed} Three`, authors: [{ id: hc(500), name: `ZZ Author ${seed}` }, { id: hc(501), name: `ZZ Co-Author ${seed}` }], series: [],
+      status: 'dropped', chosen_date: { value: '2026-09-15', source: 'website', url: 'https://zz.example.com/books/three', chosen_at: '2026-11-13' }, created_at: at(4), updated_at: at(5) }];
+  t.book_follows = [
+    { id: id(95011), kind: 'author', hardcover_id: hc(500), name: `ZZ Author ${seed}`, auto_add: false, created_at: at(1), updated_at: at(1) },
+    { id: id(95012), kind: 'series', hardcover_id: hc(900), name: `ZZ Saga ${seed}`, auto_add: true, created_at: at(2), updated_at: at(6) }];
+  t.book_sites = [{ id: id(95021), hardcover_author_id: hc(500), author_name: `ZZ Author ${seed}`, listing_url: 'https://zz.example.com/books/', created_at: at(2), updated_at: at(2) }];
+  t.book_associations = [{ id: id(95031), hardcover_book_id: hc(7), hardcover_author_id: hc(500), author_name: `ZZ Author ${seed}`, created_at: at(3) }];
+  t.book_decisions = [
+    { id: id(95041), kind: 'skip', key: `hc:${hc(2)}`, value: {}, created_at: at(1) },
+    { id: id(95042), kind: 'exclude', key: `hc:${hc(4)}`, value: { reason: 'removed', title: `ZZ Book ${seed} Four` }, created_at: at(2) },
+    { id: id(95043), kind: 'exclude', key: `t:${hc(500)}:zz-book-${seed}-four`, value: { reason: 'removed', title: `ZZ Book ${seed} Four` }, created_at: at(2) },
+    { id: id(95044), kind: 'keep_date', key: `dt:hc:${hc(1)}:2013-04-04`, value: { date: '2013-04-04' }, created_at: at(3) },
+    { id: id(95045), kind: 'not_same', key: `dp:hc:${hc(1)}:hc:${hc(8)}`, value: {}, created_at: at(4) },
+    { id: id(95046), kind: 'not_author', key: `cg:${hc(9)}:${hc(500)}`, value: {}, created_at: at(5) }];
+  t.book_findings = [
+    { id: id(95051), fingerprint: `nb:site:${hc(500)}:zz-book-${seed}-five`, source: 'website', kind: 'new_book', status: 'pending',
+      subject: { title: `ZZ Book ${seed} Five`, author_id: hc(500), author: `ZZ Author ${seed}`, url: 'https://zz.example.com/books/five' },
+      evidence: [{ url: 'https://zz.example.com/books/five', text: 'Listed on the author’s book page' }], first_seen_at: at(6), last_seen_at: at(7) },
+    { id: id(95052), fingerprint: `nb:hc:${hc(6)}`, source: 'hardcover', kind: 'new_book', status: 'later',
+      subject: { title: `ZZ Book ${seed} Six`, hardcover_id: hc(6), author_id: hc(500), author: `ZZ Author ${seed}` }, evidence: [], first_seen_at: at(6), last_seen_at: at(6) }];
+  const tables = {};
+  for (const [k, v] of Object.entries(d.tables)) { if (k === 'watch_queues') Object.assign(tables, t); tables[k] = v; }
+  return { format: d.format, formatVersion: 10, exportedAt: d.exportedAt, rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
+}
+// A format-10 document as format 9: no book tables.
+export const as9 = d => { const x = JSON.parse(JSON.stringify(d)); SPEC_BK1.forEach(t => { delete x.tables[t]; delete x.rowCounts[t]; }); x.formatVersion = 9; return x; };
 // A format-9 document as format 8: no game tables, queue entries without game_entry_id (and without the games in them).
 export const as8 = d => {
-  const x = JSON.parse(JSON.stringify(d));
+  const x = JSON.parse(JSON.stringify(d.formatVersion === 10 ? as9(d) : d));
   SPEC_G1.forEach(t => { delete x.tables[t]; delete x.rowCounts[t]; });
   x.tables.queue_entries = x.tables.queue_entries.filter(e => e.game_entry_id == null).map(({ game_entry_id, ...e }) => e);
   x.rowCounts.queue_entries = x.tables.queue_entries.length; x.formatVersion = 8; return x;

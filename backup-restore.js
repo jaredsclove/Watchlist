@@ -76,7 +76,7 @@ async function detectBackupFormat() {
   if (b45Stopped) throw new Error(STATE_MISMATCH_TEXT + ' No file was made.');
   if (cap && cap.access === 'members' && cap.member !== true) throw new Error(NOT_A_MEMBER_TEXT + ' No file was made.');
   if (pageMayWrite(cap)) return PAGE_BACKUP_FORMAT;
-  throw new Error('This page makes backups only of a database in its own state (format 9), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
+  throw new Error('This page makes backups only of a database in its own state (format 10), and this database isn’t in it, so no file was made and nothing was changed. Reload the page.');
 }
 
 // At boot (doesn't hold up the first view): which phase this database is in. A database
@@ -203,7 +203,7 @@ function validateBackupObject(obj) {
   if (obj.format !== BACKUP_FORMAT) errors.push(`Unrecognized backup format ("${obj.format}") — this doesn't look like a Watchlist Tracker backup file.`);
   const spec = backupSpec(obj.formatVersion);
   if ([1, 2, 3, 4].includes(obj.formatVersion)) {
-    errors.push(`This is a format ${obj.formatVersion} backup, which this page no longer reads. It restores formats 5 to 9. Nothing was changed. The file is fine: docs/ADMIN_RESTORE.md in the project shows how to convert a format 3 or 4 file offline with the tools at commit ${LAST_FORMAT_3_4_COMMIT}.`);
+    errors.push(`This is a format ${obj.formatVersion} backup, which this page no longer reads. It restores formats 5 to 10. Nothing was changed. The file is fine: docs/ADMIN_RESTORE.md in the project shows how to convert a format 3 or 4 file offline with the tools at commit ${LAST_FORMAT_3_4_COMMIT}.`);
     return errors;
   }
   if (!spec) { errors.push(`Unsupported backup format version (${obj.formatVersion}).`); return errors; }
@@ -335,8 +335,25 @@ const RESTORE_COLUMNS_V9 = {
   queue_entries: { id: 'uuid', queue_id: 'uuid', show_id: 'uuid?', item_id: 'uuid?', game_entry_id: 'uuid?', position: 'int', created_at: 'timestamp' }
 };
 const BACKUP_FORMAT_V9 = { tables: Object.keys(RESTORE_COLUMNS_V9), columns: RESTORE_COLUMNS_V9 };
+// Format 10 (BK1, item 6): format 9 plus the books: saved books with their status, Hardcover id, title, authors, series
+// placements and the date the member chose; followed authors and series (with a series' automatic adding); authors' official
+// listing pages; manual author credits; standing decisions (skips, removed and dismissed titles, declined suggestions); and the
+// open review items (db/bk1_books.sql). The book cache (Hardcover records and site readings) is never in a backup.
+const BK1_TABLES = ['book_entries', 'book_follows', 'book_sites', 'book_associations', 'book_decisions', 'book_findings'];
+const RESTORE_COLUMNS_V10 = {};
+Object.entries(RESTORE_COLUMNS_V9).forEach(([t, c]) => {
+  if (t === 'watch_queues') Object.assign(RESTORE_COLUMNS_V10, {
+    book_entries: { id: 'uuid', hardcover_id: 'int?', title: 'text', authors: 'json', series: 'json', status: 'text', chosen_date: 'json?', created_at: 'timestamp', updated_at: 'timestamp' },
+    book_follows: { id: 'uuid', kind: 'text', hardcover_id: 'int', name: 'text', auto_add: 'bool', created_at: 'timestamp', updated_at: 'timestamp' },
+    book_sites: { id: 'uuid', hardcover_author_id: 'int', author_name: 'text', listing_url: 'text', created_at: 'timestamp', updated_at: 'timestamp' },
+    book_associations: { id: 'uuid', hardcover_book_id: 'int', hardcover_author_id: 'int', author_name: 'text', created_at: 'timestamp' },
+    book_decisions: { id: 'uuid', kind: 'text', key: 'text', value: 'json', created_at: 'timestamp' },
+    book_findings: { id: 'uuid', fingerprint: 'text', source: 'text', kind: 'text', status: 'text', subject: 'json', evidence: 'json', first_seen_at: 'timestamp', last_seen_at: 'timestamp' } });
+  RESTORE_COLUMNS_V10[t] = c;
+});
+const BACKUP_FORMAT_V10 = { tables: Object.keys(RESTORE_COLUMNS_V10), columns: RESTORE_COLUMNS_V10 };
 // The format this page makes and restores.
-const PAGE_BACKUP_FORMAT = 9;
+const PAGE_BACKUP_FORMAT = 10;
 const CATALOG_GOVERNANCE_IDS = ['disney', '90day', 'sheridan'];
 const PRESENTATION_KEYS = ['disney', '90day', 'sheridan', 'truecrime'];
 // The last commit whose page and admin tool read formats 3 and 4 (docs/ADMIN_RESTORE.md has the offline route).
@@ -344,7 +361,7 @@ const LAST_FORMAT_3_4_COMMIT = '7f650da';
 
 // The tables and columns of a format this page reads; null for any other.
 function backupSpec(formatVersion) {
-  return formatVersion === 9 ? BACKUP_FORMAT_V9 : formatVersion === 8 ? BACKUP_FORMAT_V8 : formatVersion === 7 ? BACKUP_FORMAT_V7 : formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : null;
+  return formatVersion === 10 ? BACKUP_FORMAT_V10 : formatVersion === 9 ? BACKUP_FORMAT_V9 : formatVersion === 8 ? BACKUP_FORMAT_V8 : formatVersion === 7 ? BACKUP_FORMAT_V7 : formatVersion === 6 ? BACKUP_FORMAT_V6 : formatVersion === 5 ? BACKUP_FORMAT_V5 : null;
 }
 
 const TV_SHOW_STATUSES = ['confirmed', 'watching', 'skipped'];
@@ -431,6 +448,7 @@ function validateBackupRows(tables, formatVersion) {
   if (formatVersion >= 7) validateFormat7Rows(tables, items, report);
   if (formatVersion >= 8) validateFormat8Rows(tables, items, report);
   if (formatVersion >= 9) validateFormat9Rows(tables, report);
+  if (formatVersion >= 10) validateFormat10Rows(tables, report);
   return errors;
 }
 
@@ -611,7 +629,72 @@ function validateFormat9Rows(tables, report) {
   report('games (format 9)', problems);
 }
 
-// ─── Converting an older document to format 9 ─────────────────────────────────
+// Format 10: what the book tables' keys and checks enforce (db/bk1_books.sql), before anything is sent.
+const BK1_STATUSES = ['want', 'reading', 'paused', 'finished', 'dropped'];
+const BK1_DECISION_KINDS = ['skip', 'exclude', 'keep_date', 'not_same', 'not_author'];
+const BK1_FINDING_KINDS = ['new_book', 'date', 'credit_gap', 'match', 'duplicate', 'site_changed'];
+const bk1Trimmed = (v, max) => typeof v === 'string' && v === v.trim() && v !== '' && v.length <= max;
+const bk1Id = v => Number.isInteger(v) && v > 0 && v <= 9999999999;
+const bk1Key = v => typeof v === 'string' && v.length >= 3 && v.length <= 300 && /^[a-z]{1,3}:\S+$/.test(v);
+const bk1Url = v => typeof v === 'string' && v.length <= 500 && /^https:\/\/[A-Za-z0-9.-]+(:\d{1,5})?(\/\S*)?$/.test(v);
+const bk1Obj = v => !!v && typeof v === 'object' && !Array.isArray(v);
+function bk1PeopleOk(p) {
+  return Array.isArray(p) && p.length <= 20 && p.every(x => bk1Obj(x) && Object.keys(x).every(k => k === 'id' || k === 'name') && bk1Trimmed(x.name, 200) && (x.id == null || bk1Id(x.id)));
+}
+function bk1SeriesOk(p) {
+  return Array.isArray(p) && p.length <= 10 && p.every(x => bk1Obj(x) && Object.keys(x).every(k => ['id', 'name', 'position'].includes(k)) && bk1Trimmed(x.name, 200)
+    && (x.id == null || bk1Id(x.id)) && (x.position == null || (typeof x.position === 'string' && /^\d{1,3}(\.\d{1,2})?$/.test(x.position))));
+}
+function bk1DateOk(d) {
+  return d === null || (bk1Obj(d) && Object.keys(d).every(k => ['value', 'source', 'url', 'chosen_at'].includes(k)) && typeof d.value === 'string'
+    && /^(\d{4}(-\d{2}(-\d{2})?)?|TBA)$/.test(d.value) && ['member', 'website'].includes(d.source) && (d.url == null || bk1Url(d.url))
+    && (d.chosen_at == null || typeof d.chosen_at === 'string'));
+}
+function validateFormat10Rows(tables, report) {
+  const problems = [], rows = t => (tables[t] || []).filter(r => r && typeof r === 'object');
+  const seen = (set, key, label) => { if (set.has(key)) problems.push(label); set.add(key); };
+  const hc = new Set();
+  rows('book_entries').forEach((e, i) => {
+    const at = `book_entries row ${i + 1}`;
+    if (!bk1Trimmed(e.title, 300) || !BK1_STATUSES.includes(e.status) || (e.hardcover_id != null && !bk1Id(e.hardcover_id)) || !bk1PeopleOk(e.authors)
+      || !bk1SeriesOk(e.series) || !bk1DateOk(e.chosen_date)) problems.push(`${at} has values the database refuses`);
+    if (e.hardcover_id != null) seen(hc, e.hardcover_id, `${at} saves Hardcover book ${e.hardcover_id}, which another book in the file saves too`);
+  });
+  const follows = new Set();
+  rows('book_follows').forEach((f, i) => {
+    const at = `book_follows row ${i + 1}`;
+    if (!['author', 'series'].includes(f.kind) || !bk1Id(f.hardcover_id) || !bk1Trimmed(f.name, 200) || (f.kind === 'author' && f.auto_add)) problems.push(`${at} has values the database refuses`);
+    seen(follows, `${f.kind}|${f.hardcover_id}`, `${at} repeats a follow`);
+  });
+  const sites = new Set();
+  rows('book_sites').forEach((s, i) => {
+    const at = `book_sites row ${i + 1}`;
+    if (!bk1Id(s.hardcover_author_id) || !bk1Trimmed(s.author_name, 200) || !bk1Url(s.listing_url)) problems.push(`${at} has values the database refuses`);
+    seen(sites, s.hardcover_author_id, `${at} repeats an author's site`);
+  });
+  const credits = new Set();
+  rows('book_associations').forEach((a, i) => {
+    const at = `book_associations row ${i + 1}`;
+    if (!bk1Id(a.hardcover_book_id) || !bk1Id(a.hardcover_author_id) || !bk1Trimmed(a.author_name, 200)) problems.push(`${at} has values the database refuses`);
+    seen(credits, `${a.hardcover_book_id}|${a.hardcover_author_id}`, `${at} repeats a credit`);
+  });
+  const decisions = new Set();
+  rows('book_decisions').forEach((d, i) => {
+    const at = `book_decisions row ${i + 1}`;
+    if (!BK1_DECISION_KINDS.includes(d.kind) || !bk1Key(d.key) || !bk1Obj(d.value) || JSON.stringify(d.value).length > 4000) problems.push(`${at} has values the database refuses`);
+    seen(decisions, `${d.kind}|${d.key}`, `${at} repeats a decision`);
+  });
+  const findings = new Set();
+  rows('book_findings').forEach((f, i) => {
+    const at = `book_findings row ${i + 1}`;
+    if (!bk1Key(f.fingerprint) || !['hardcover', 'website'].includes(f.source) || !BK1_FINDING_KINDS.includes(f.kind) || !['pending', 'later'].includes(f.status)
+      || !bk1Obj(f.subject) || !Array.isArray(f.evidence) || f.evidence.length > 10) problems.push(`${at} has values the database refuses`);
+    seen(findings, f.fingerprint, `${at} repeats a review item`);
+  });
+  report('books (format 10)', problems);
+}
+
+// ─── Converting an older document to format 10 ────────────────────────────────
 // Format 9 adds the games, which a format-8 file can't have: the converted document has none, and every queue entry gains an
 // empty game_entry_id; every other table is kept as it is. Restoring it therefore removes the current games, their settings,
 // follows, decisions and collections, and games in queues (the safety backup keeps them). The IGDB cache isn't touched.
@@ -651,18 +734,37 @@ function convertFormat5To6(doc5) {
   return { format: doc5.format, formatVersion: 6, exportedAt: doc5.exportedAt,
     rowCounts: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), tables };
 }
-// What a restore sends for a validated file of format 5 to 9: format 9, and only its library. A file
+// What a restore sends for a validated file of format 5 to 10: format 10, and only its library. A file
 // converted long ago can carry `conversion` and `recovery` sections from format 3; the archive they
 // belonged to is retired, so they are left out of what is sent (the file itself is never changed).
 function restoreDocument(doc) {
   const doc7 = doc.formatVersion >= 7 ? doc : convertFormat6To7(doc.formatVersion === 5 ? convertFormat5To6(doc) : doc);
   const doc8 = doc7.formatVersion >= 8 ? doc7 : convertFormat7To8(doc7);
-  const doc9 = doc8.formatVersion === 9 ? doc8 : convertFormat8To9(doc8);
-  return { format: doc9.format, formatVersion: 9, exportedAt: doc9.exportedAt, rowCounts: doc9.rowCounts, tables: doc9.tables };
+  const doc9 = doc8.formatVersion >= 9 ? doc8 : convertFormat8To9(doc8);
+  const doc10 = doc9.formatVersion === 10 ? doc9 : convertFormat9To10(doc9);
+  return { format: doc10.format, formatVersion: 10, exportedAt: doc10.exportedAt, rowCounts: doc10.rowCounts, tables: doc10.tables };
+}
+// Format 10 adds the books, which a format-9 file can't have: the converted document has none, every other table kept as it is.
+// Restoring it therefore removes the current books, follows, sites, credits, decisions and review items (the safety backup keeps
+// them). The book cache isn't touched.
+function convertFormat9To10(doc9) {
+  const tables = { ...doc9.tables };
+  BK1_TABLES.forEach(t => { tables[t] = []; });
+  const ordered = {};
+  BACKUP_FORMAT_V10.tables.forEach(t => { ordered[t] = tables[t]; });
+  return { format: doc9.format, formatVersion: 10, exportedAt: doc9.exportedAt,
+    rowCounts: Object.fromEntries(Object.entries(ordered).map(([k, v]) => [k, v.length])), tables: ordered };
+}
+function format9ConversionHtml(currentCounts) {
+  const books = currentCounts.book_entries || 0, other = BK1_TABLES.filter(t => t !== 'book_entries').reduce((n, t) => n + (currentCounts[t] || 0), 0);
+  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 10 before restoring</div><ul class="manage-list">
+    <li>Format 10 adds books: saved books, followed authors and series, official book pages, your author corrections and decisions, and review items. This backup was made before them, so it has none.</li>
+    ${books || other ? `<li>Restoring it removes your ${books} saved book${books === 1 ? '' : 's'}${other ? ` and ${other} other book record${other === 1 ? '' : 's'} (follows, sites, credits, decisions, review items)` : ''} (the safety backup keeps them).</li>` : ''}
+    <li>The file itself isn’t changed.</li></ul></div>`;
 }
 function format8ConversionHtml(currentCounts) {
   const games = currentCounts.game_entries || 0, other = G1_TABLES.filter(t => t !== 'game_entries').reduce((n, t) => n + (currentCounts[t] || 0), 0);
-  return `<div class="modal-section"><div class="modal-label">This backup is converted to format 9 before restoring</div><ul class="manage-list">
+  return `<div class="modal-section"><div class="modal-label">This backup also has no games</div><ul class="manage-list">
     <li>Format 9 adds games: your platforms, saved games, followed franchises, your decisions about release dates and versions, and game collections. This backup was made before them, so it has none.</li>
     ${games || other ? `<li>Restoring it removes your ${games} saved game${games === 1 ? '' : 's'}${other ? ` and ${other} other game record${other === 1 ? '' : 's'} (settings, follows, decisions, collections)` : ''}, and any games in your queues (the safety backup keeps them). Your films, shows, queues and progress come from the backup as usual.</li>` : ''}
     <li>The file itself isn’t changed.</li></ul></div>`;
@@ -858,7 +960,7 @@ async function handleRestoreFileSelected(event) {
   await renderRestorePreview(parsed, session);
 }
 
-// A file of format 5 to 8 is converted to format 9 first, and the preview says what that
+// A file of format 5 to 9 is converted to format 10 first, and the preview says what that
 // means; only the prepared document is ever sent. Nothing is converted or sent again
 // automatically if the database refuses it.
 async function renderRestorePreview(backup, session = restoreSessionSeq) {
@@ -869,13 +971,13 @@ async function renderRestorePreview(backup, session = restoreSessionSeq) {
   let currentItems = [];
   let dbFormat;
   try {
-    // A restore needs a database in this page's phase (format 9). Never a fallback to another format.
+    // A restore needs a database in this page's phase (format 10). Never a fallback to another format.
     const phaseCap = await stage5Capabilities();
     if (!restoreSessionLive(session)) return;
     if (!pageMayWrite(phaseCap)) {
       showRestoreModal(`<div class="modal-title">Restore isn't available</div>
         <div class="modal-error">${b45Stopped ? esc(STATE_MISMATCH_TEXT) : phaseCap
-          ? 'This page restores only into a database in its own state (format 9), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
+          ? 'This page restores only into a database in its own state (format 10), and this database isn’t in it, so it can’t restore here. Nothing was changed. Reload the page.'
           : 'This page needs a database update that hasn’t been made yet, so it can’t restore here. Nothing was changed.'}</div>
         <div class="modal-actions"><button class="btn" onclick="closeRestoreModal()">Close</button></div>`);
       pendingRestoreData = null;
@@ -929,6 +1031,7 @@ async function renderRestorePreview(backup, session = restoreSessionSeq) {
       <div class="modal-label">Backup created</div>
       <div>${esc(backupDate)}</div>
     </div>
+    ${fromFormat < 10 ? format9ConversionHtml(currentCounts) : ''}
     ${fromFormat < 9 ? format8ConversionHtml(currentCounts) : ''}
     ${fromFormat < 8 ? format7ConversionHtml(currentCounts) : ''}
     ${fromFormat < 7 ? format6ConversionHtml(currentCounts) : ''}

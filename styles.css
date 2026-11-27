@@ -1380,3 +1380,35 @@ td.spot-version-name { padding-left: 46px; font-size: 13px; color: var(--text2);
 .movie-card .card-meta .card-labels { flex: 1 0 100%; row-gap: 0; }
 .movie-card .card-meta .movie-card-genres + .movie-card-groups { margin-top: 6px; } /* set apart from the genres' wrapped rows */
 .movie-card .card-labels > :is(.badge, .collection-tag, .ww-tag) { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+
+/* BK1: books, drawn as Games (the same toolbar, table and cards; followed authors and series as expandable cards). */
+.books-table th.col-game { width: 26%; }
+.books-table th.col-author { width: 15%; }
+.books-table th.col-series { width: 15%; }
+.books-table th.col-cats { width: 16%; }
+.books-table th.col-rel { width: 16%; }
+.books-table th.col-status { width: 12%; }
+.book-author-cell, .book-series-cell { font-size: 13px; color: var(--text2); overflow-wrap: anywhere; }
+.book-ph { font-size: 11px; color: var(--text3, var(--text2)); margin-left: 6px; border-bottom: 1px dotted currentColor; }
+.books-follows { display: flex; flex-direction: column; gap: 8px; }
+.book-follow .card-top { align-items: center; }
+.book-follow-body { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.book-follow-body > .btn { align-self: flex-start; }
+.book-series-list { list-style: none; padding-left: 0; }
+.book-pos { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.book-pos-n { min-width: 2.5em; color: var(--text2); font-variant-numeric: tabular-nums; }
+.book-pick { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
+.book-sub { font-size: 14px; margin: 10px 0 4px; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.book-site-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.book-site-form input { flex: 1 1 240px; min-width: 0; }
+.book-site-form .games-note { flex-basis: 100%; }
+.book-auto { display: flex; gap: 6px; align-items: center; }
+.book-manual { display: flex; flex-direction: column; gap: 8px; }
+.games-review li.book-later { opacity: .8; }
+.book-excluded summary { cursor: pointer; margin: 8px 0; }
+.books-credit { margin-top: 16px; }
+.books-screen .card-list.games-cards .item-card .card-meta { flex-wrap: wrap; }
+@media (max-width: 1099px) { .books-table { display: none; } }
+.books-screen a, #bookDialogBox a { color: var(--blue); }
+.book-follow-body ul.spot-versions, .games-preview ul.spot-versions { list-style: none; padding-left: 0; }
+.book-follow-body ul.spot-versions > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
