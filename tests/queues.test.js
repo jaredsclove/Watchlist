@@ -295,7 +295,7 @@ test('backup is format 9 with both queue tables (entries name a game or not); it
   const { data, queues } = seeded();
   const app = await boot(data, queues);
   const b = await app.ctx.buildBackupObject();
-  assert.strictEqual(b.formatVersion, 9);
+  assert.strictEqual(b.formatVersion, 10);
   assert.deepStrictEqual(Object.keys(b.tables.watch_queues[0]), ['id', 'name', 'sort_order', 'created_at'], JSON.stringify(b.tables.watch_queues[0]));
   assert.deepStrictEqual(Object.keys(b.tables.queue_entries[0]), ['id', 'queue_id', 'show_id', 'item_id', 'game_entry_id', 'position', 'created_at']);
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(b)), [], Array.from(app.ctx.validateBackupObject(b)).join(' | '));

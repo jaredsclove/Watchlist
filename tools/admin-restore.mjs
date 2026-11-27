@@ -6,7 +6,7 @@
 // convert them offline with this tool at the commit docs/ADMIN_RESTORE.md names.
 //
 //   node tools/admin-restore.mjs export-sql --owner <auth user id>
-//       Prints the read-only SQL that exports that member's library as a format-9 backup (the safety backup), acting as that member (role authenticated + their JWT claims), in one repeatable-read
+//       Prints the read-only SQL that exports that member's library as a format-10 backup (the safety backup), acting as that member (role authenticated + their JWT claims), in one repeatable-read
 //       snapshot whose first statement refuses unless that account is a member (a non-member reads no rows,
 //       which must never become an "empty" backup).
 //   node tools/admin-restore.mjs export-owner-sql --user <auth user id>
@@ -49,8 +49,8 @@ for (const f of ['config.js', 'ui-helpers.js', 'metadata.js', 'api.js', 'backup-
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), page, { filename: f });
 }
 const P = expr => vm.runInContext(expr, page);
-const FORMAT = 9;
-if (opt('--format') !== null) die('--format is gone: the database and this tool use format 9');
+const FORMAT = 10;
+if (opt('--format') !== null) die('--format is gone: the database and this tool use format 10');
 const specOf = v => P(`backupSpec(${v})`);
 // The database names the format it writes: an export or restore for another format stops before anything runs.
 const FORMAT_GUARD = (v, what) => `if (public.stage5_capabilities() ->> 'backup_format') is distinct from '${v}' then
@@ -107,7 +107,7 @@ rollback;`);
   const f = readDoc(opt('--file')), s = readDoc(opt('--safety'));
   const problems = [];
   const safetyErrors = arr(P('validateBackupObject')(s.doc));
-  if (safetyErrors.length || s.doc.formatVersion !== FORMAT) problems.push(`the safety backup isn’t a valid format-9 backup: ${safetyErrors.concat(s.doc.formatVersion !== FORMAT ? [`format ${s.doc.formatVersion}`] : []).join('; ')}`);
+  if (safetyErrors.length || s.doc.formatVersion !== FORMAT) problems.push(`the safety backup isn’t a valid format-10 backup: ${safetyErrors.concat(s.doc.formatVersion !== FORMAT ? [`format ${s.doc.formatVersion}`] : []).join('; ')}`);
   const fileErrors = arr(P('validateBackupObject')(f.doc));
   if (fileErrors.length) problems.push(`the file doesn’t validate: ${fileErrors.join('; ')}`);
   let doc = f.doc;
@@ -137,7 +137,7 @@ rollback;`);
   const f = readDoc(opt('--file'));
   const owner = opt('--owner'), email = opt('--email'), run = opt('--run');
   if (!UUID.test(owner || '') || !/^[^@\s']+@[^@\s']+$/.test(email || '') || !/^[A-Za-z0-9_-]{6,64}$/.test(run || '')) die('--owner <id> --email <email> --run <run id>');
-  if (f.doc.formatVersion !== FORMAT || f.doc.conversion !== undefined || f.doc.recovery !== undefined) die('restore-sql takes the plain format-9 document from check (--out for a prepared file)', 1);
+  if (f.doc.formatVersion !== FORMAT || f.doc.conversion !== undefined || f.doc.recovery !== undefined) die('restore-sql takes the plain format-10 document from check (--out for a prepared file)', 1);
   let tag = 'wlr';
   while (f.text.includes(`$${tag}$`)) tag += 'x';
   console.log(`-- Admin restore runbook, step 5: restore. Only after check printed OK for this exact file and the
@@ -162,7 +162,7 @@ commit;`);
   const f = readDoc(opt('--file')), a = readDoc(opt('--after'));
   const errors = [];
   const spec = specOf(f.doc.formatVersion);
-  if (f.doc.formatVersion !== FORMAT || a.doc.formatVersion !== FORMAT) die('verify compares a format-9 file with a format-9 export', 1);
+  if (f.doc.formatVersion !== FORMAT || a.doc.formatVersion !== FORMAT) die('verify compares a format-10 file with a format-10 export', 1);
   for (const t of spec.tables) {
     const want = f.doc.tables[t] || [], have = a.doc.tables[t] || [];
     if (want.length !== have.length) { errors.push(`${t}: expected ${want.length} rows, found ${have.length}`); continue; }

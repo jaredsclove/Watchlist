@@ -585,7 +585,7 @@ test('collections: create, add and remove; membership is independent of queues, 
   await app.ctx.unfollowFranchise(ID('62000000', 1)); await settle();
   assert.strictEqual(app.store.game_collection_members.length, 2, 'Finished and unfollowing leave the collection alone');
   const backup = await app.ctx.buildBackupObject();
-  assert.strictEqual(backup.formatVersion, 9);
+  assert.strictEqual(backup.formatVersion, 10);
   assert.deepStrictEqual(Object.keys(backup.tables).filter(t => /^game_/.test(t)), ['game_settings', 'game_entries', 'game_follows', 'game_decisions', 'game_collections', 'game_collection_members'], 'no IGDB cache in a backup');
   assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(backup)), []);
   const m = app.store.game_collection_members.find(x => x.entry_id === ID('61000000', 3));
@@ -896,7 +896,7 @@ test('backup → restore with IGDB unavailable: a member’s whole games data co
   const members = [{ id: ID('69000000', 1), collection_id: collections[0].id, entry_id: entries[1].id, created_at: TS }, { id: ID('69000000', 2), collection_id: collections[0].id, entry_id: entries[2].id, created_at: TS }];
   const src = await bootWith({ rows: x.rows, shows: x.shows, entries, queues: x.queues, follows: [follow(1, 7001, 'ZZ War')], decisions, collections, members, style: 'completionist' });
   const backup = JSON.parse(JSON.stringify(await src.ctx.buildBackupObject()));
-  assert.strictEqual(backup.formatVersion, 9);
+  assert.strictEqual(backup.formatVersion, 10);
   assert.ok(!('game_titles' in backup.tables), 'no provider details in the file');
   assert.deepStrictEqual(Object.keys(backup.tables.game_entries[0]), ['id', 'igdb_id', 'spot_igdb_id', 'port_ids', 'title', 'status', 'priority', 'created_at', 'updated_at'], 'saved fields only');
   // Another device, an empty library and no IGDB: restore the file through the page.

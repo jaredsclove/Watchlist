@@ -1,6 +1,6 @@
 // The restore suite: what restore_backup must do on a database replayed to its final state, tested against expected behaviour.
 //   PGLITE_DIR=<dir with @electric-sql/pglite> [PG_BIN=<postgres 17 bin>] node tools/restore-test.mjs
-// PGlite covers behaviour: twenty-seven tables (format 9) field by field, older formats through the page's converters, the admin tool, refusals, a late
+// PGlite covers behaviour: thirty-three tables (format 10) field by field, older formats through the page's converters, the admin tool, refusals, a late
 // failure, accounts, research permissions and ordinary functions afterwards. Real PostgreSQL 17 (a throwaway server on a Unix socket, removed
 // at the end) adds what one session can't show: concurrent writes and restores, and local timing. Without PG_BIN that part is skipped, with a
 // notice. Synthetic data only. Output: pass/fail and counts. Local timing says nothing about hosted performance.
@@ -9,7 +9,7 @@ import os from 'os';
 import path from 'path';
 import { execFileSync, spawn } from 'child_process';
 import { createRequire } from 'module';
-import { replay, library9, as8, as7, pageCode, clone, recount, rekey, file, ROOT, A, B, C, SPEC_CU1, SPEC_Q1, SPEC_G1 } from './restore-fixture.mjs';
+import { replay, library10, as9, as8, as7, pageCode, clone, recount, rekey, file, ROOT, A, B, C, SPEC_CU1, SPEC_Q1, SPEC_G1, SPEC_BK1 } from './restore-fixture.mjs';
 
 if (!process.env.PGLITE_DIR) { console.error('usage: PGLITE_DIR=<dir> [PG_BIN=<postgres 17 bin>] node tools/restore-test.mjs'); process.exit(2); }
 const req = createRequire(path.join(process.env.PGLITE_DIR, 'package.json'));
@@ -22,13 +22,15 @@ let passed = 0, failed = 0;
 const ok = (c, l, d = '') => { c ? passed++ : failed++; if (!c) console.log(`  FAIL ${l}${d ? `\n       ${String(d).slice(0, 600)}` : ''}`); };
 const section = t => console.log(`[${t}]`);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const TABLES = Array.from(P('backupSpec')(9).tables);
-const COLUMNS = P('backupSpec')(9).columns;
+const TABLES = Array.from(P('backupSpec')(10).tables);
+const COLUMNS = P('backupSpec')(10).columns;
 const Q1_STEP = `select set_config('watchlist.q1_run', 'local-q1', false);\n` + file('db/q1_queues.sql');
 const G1_STEP = `select set_config('watchlist.g1_run', 'local-g1', false);\n` + file('db/g1_games.sql');
 // TC1 (the TMDB cache; its own suite is tools/tc1-test.mjs), with the local stand-in for pg_cron.
 const TC1_STEP = file('db/test/pg_cron_shim.sql') + `\nselect set_config('watchlist.tc1_run', 'local-tc1', false);\n` + file('db/tc1_tmdb_cache.sql');
-const old = d => as7(as8(d)); // a format-9 fixture as format 7
+// BK1 (books; its own suite is tools/bk1-test.mjs).
+const BK1_STEP = `select set_config('watchlist.bk1_run', 'local-bk1', false);\n` + file('db/bk1_books.sql');
+const old = d => as7(as8(d)); // a format-10 fixture as format 7
 
 // ── PGlite ──
 const db = new PGlite();
@@ -65,7 +67,7 @@ const differences = async (who, doc) => {
   return out;
 };
 
-const L1 = library9(1), L2 = library9(2), L3 = library9(3, 3);
+const L1 = library10(1), L2 = library10(2), L3 = library10(3, 3);
 
 if (FINAL) {
   section('the migration');
@@ -90,24 +92,25 @@ if (FINAL) {
   ok(gone === 0, 'the archive and rollback tables are gone');
 }
 // Q1, G1 and TC1 on top (their own suites are tools/q1-test.mjs, tools/g1-test.mjs and tools/tc1-test.mjs): the rest of this
-// suite is format 9 on the current database.
+// suite is format 10 on the current database (with BK1).
 await db.exec(Q1_STEP);
 await db.exec(G1_STEP);
 await db.exec(TC1_STEP);
+await db.exec(BK1_STEP);
 section('the fixture');
 ok(!Array.from(P('validateBackupObject')(L1)).length && !Array.from(P('validateBackupObject')(L2)).length, 'the library passes the page’s validation', Array.from(P('validateBackupObject')(L1)).join('; '));
-ok(TABLES.length === 27 && TABLES.every(t => L1.tables[t].length > 0), 'it has rows in all twenty-seven tables', TABLES.filter(t => !L1.tables[t].length).join());
+ok(TABLES.length === 33 && TABLES.every(t => L1.tables[t].length > 0), 'it has rows in all thirty-three tables', TABLES.filter(t => !L1.tables[t].length).join());
 
-section('a valid format-9 file');
+section('a valid format-10 file');
 {
   const r = await restore(A, L1);
   ok(r.ok, 'A’s restore is accepted', r.message);
-  ok(r.ok && r.r.formatVersion === 9 && TABLES.every(t => r.r.restored[t] === L1.tables[t].length), 'its answer counts every table', JSON.stringify(r.r));
-  ok(same(await differences(A, L1), []), 'all twenty-seven tables equal the file, field by field', (await differences(A, L1)).slice(0, 5).join('; '));
+  ok(r.ok && r.r.formatVersion === 10 && TABLES.every(t => r.r.restored[t] === L1.tables[t].length), 'its answer counts every table', JSON.stringify(r.r));
+  ok(same(await differences(A, L1), []), 'all thirty-three tables equal the file, field by field', (await differences(A, L1)).slice(0, 5).join('; '));
   const before = await fp();
   ok((await restore(A, L1)).ok && same(before, await fp()), 'restoring it again changes no row');
   const r2 = await restore(B, L2);
-  ok(r2.ok && same(await differences(B, L2), []), 'a member without research access restores all twenty-seven too (an Available decision included)', r2.message);
+  ok(r2.ok && same(await differences(B, L2), []), 'a member without research access restores all thirty-three too (an Available decision included)', r2.message);
   ok(same(await differences(A, L1), []), 'A’s library is untouched by B’s restore');
   const small = await restore(A, L3);
   ok(small.ok && same(await differences(A, L3), []), 'a smaller file replaces the whole library: nothing of the old one stays', small.message || (await differences(A, L3)).slice(0, 5).join('; '));
@@ -148,7 +151,7 @@ section('the TMDB cache (TC1) across restores');
   const cacheA = await cacheOf(A);
   ok(!TABLES.includes('tmdb_tv_cache') && !JSON.stringify(L1).includes('tmdb_tv_cache'), 'the backup format has no cache table');
   const r9 = await restore(A, L3), r7 = await restore(A, clone(P('restoreDocument')(as7(as8(L1)))));
-  ok(r9.ok && r7.ok && same(cacheA, await cacheOf(A)), 'restores of format 9 and of format 7 (converted by the page) leave the cache exactly as it was', [r9.message, r7.message].join(' / '));
+  ok(r9.ok && r7.ok && same(cacheA, await cacheOf(A)), 'restores of format 10 and of format 7 (converted by the page) leave the cache exactly as it was', [r9.message, r7.message].join(' / '));
   ok((await as(B, `select count(*)::int n from public.tmdb_tv_cache`))[0].n === 0, 'another member sees none of it');
   await restore(A, L1);
 }
@@ -159,9 +162,9 @@ section('older formats, through the page');
   const eight = as8(L1);
   ok(!Array.from(P('validateBackupObject')(eight)).length, 'a format-8 file validates', Array.from(P('validateBackupObject')(eight)).join('; '));
   const p8 = clone(P('restoreDocument')(eight));
-  ok(p8.formatVersion === 9 && SPEC_G1.every(t => same(p8.tables[t], [])) && p8.tables.queue_entries.length === eight.tables.queue_entries.length
+  ok(p8.formatVersion === 10 && [...SPEC_G1, ...SPEC_BK1].every(t => same(p8.tables[t], [])) && p8.tables.queue_entries.length === eight.tables.queue_entries.length
     && p8.tables.queue_entries.every(e => e.game_entry_id === null) && same(Object.keys(p8.tables), TABLES) && !Array.from(P('validateBackupObject')(p8)).length,
-    'format 8 becomes format 9: no games, every queue entry kept with no game', Array.from(P('validateBackupObject')(p8)).join('; '));
+    'format 8 becomes format 10: no games or books, every queue entry kept with no game', Array.from(P('validateBackupObject')(p8)).join('; '));
   const r8 = await restore(A, p8);
   ok(r8.ok && same(await differences(A, p8), []), 'restored: queues and every other table equal the file; the game tables are empty', r8.message);
   const seven = as7(eight);
@@ -169,13 +172,13 @@ section('older formats, through the page');
   const five = { ...drop(seven, [...SPEC_CU1, 'episode_marks']), formatVersion: 5 };
   ok(!Array.from(P('validateBackupObject')(seven)).length, 'a format-7 file validates', Array.from(P('validateBackupObject')(seven)).join('; '));
   const p7 = clone(P('restoreDocument')(seven));
-  ok(p7.formatVersion === 9 && same(p7.tables.watch_queues, []) && same(p7.tables.queue_entries, []) && SPEC_G1.every(t => same(p7.tables[t], [])) && !Array.from(P('validateBackupObject')(p7)).length, 'format 7 becomes format 9 with no queues and no games');
+  ok(p7.formatVersion === 10 && same(p7.tables.watch_queues, []) && same(p7.tables.queue_entries, []) && SPEC_G1.every(t => same(p7.tables[t], [])) && !Array.from(P('validateBackupObject')(p7)).length, 'format 7 becomes format 10 with no queues, games or books');
   const r7 = await restore(A, p7);
   ok(r7.ok && same(await differences(A, p7), []), 'restored: every other table equals the file; the queues are empty', r7.message);
   ok(!Array.from(P('validateBackupObject')(six)).length && !Array.from(P('validateBackupObject')(five)).length, 'format-5 and format-6 files validate', Array.from(P('validateBackupObject')(five)).join('; '));
   const prepared = doc => clone(P('restoreDocument')(doc));
   const p6 = prepared(six), p5 = prepared(five);
-  ok(p6.formatVersion === 9 && !('conversion' in p6) && !('recovery' in p6) && !Array.from(P('validateBackupObject')(p6)).length, 'format 6 becomes a plain format-9 document');
+  ok(p6.formatVersion === 10 && !('conversion' in p6) && !('recovery' in p6) && !Array.from(P('validateBackupObject')(p6)).length, 'format 6 becomes a plain format-10 document');
   const r6 = await restore(A, p6);
   ok(r6.ok && same(await differences(A, p6), []), 'restored: its nine tables equal the file; collection updates are empty', r6.message);
   const r5 = await restore(A, p5);
@@ -184,13 +187,13 @@ section('older formats, through the page');
   const legacy = clone(L1); legacy.conversion = { source_format: 3, source_exported_at: '2026-01-01T00:00:00Z', source_sha256: 'b'.repeat(64), converter_version: '5.1' };
   legacy.recovery = { storage_map: { items: [], shows: [], personal_collections: [] }, othertv_shows: [{ id: 'not-even-valid' }] };
   const pl = prepared(legacy);
-  ok(!('conversion' in pl) && !('recovery' in pl) && same(pl.tables, L1.tables), 'a format-9 file’s conversion and recovery sections are left out of what is sent, its tables kept');
+  ok(!('conversion' in pl) && !('recovery' in pl) && same(pl.tables, L1.tables), 'a format-10 file’s conversion and recovery sections are left out of what is sent, its tables kept');
   ok('recovery' in legacy, 'the document read from the file keeps them');
   const rl = await restore(A, pl);
   ok(rl.ok && same(await differences(A, L1), []), 'restored, the library tables fully checked', rl.message);
   const sixLegacy = clone(six); sixLegacy.conversion = { source_format: 3, source_exported_at: '2026-01-01T00:00:00Z', source_sha256: 'b'.repeat(64), converter_version: '5.1+ep1.1' }; sixLegacy.recovery = legacy.recovery;
   const ps = prepared(sixLegacy);
-  ok(ps.formatVersion === 9 && !('conversion' in ps) && !('recovery' in ps) && (await restore(A, ps)).ok, 'the same on a format-6 file: converted, sections left out, restored');
+  ok(ps.formatVersion === 10 && !('conversion' in ps) && !('recovery' in ps) && (await restore(A, ps)).ok, 'the same on a format-6 file: converted, sections left out, restored');
   await restore(A, L1);
   if (FINAL) {
     const direct = await restore(A, legacy);
@@ -216,7 +219,7 @@ section('refusals leave everything as it was');
     'not a backup': d => { d.format = 'other'; },
     'no format': d => { delete d.formatVersion; },
     'format 1': d => { d.formatVersion = 1; }, 'format 2': d => { d.formatVersion = 2; }, 'format 5 unconverted': d => { d.formatVersion = 5; }, 'format 6 unconverted': d => { d.formatVersion = 6; },
-    'a future format': d => { d.formatVersion = 10; }, 'format 7 unconverted': d => { d.formatVersion = 7; }, 'format 8 unconverted': d => { d.formatVersion = 8; },
+    'a future format': d => { d.formatVersion = 11; }, 'format 7 unconverted': d => { d.formatVersion = 7; }, 'format 8 unconverted': d => { d.formatVersion = 8; }, 'format 9 unconverted': d => { d.formatVersion = 9; },
     'an unknown top-level field': d => { d.extra = 1; },
     'a missing table': d => { delete d.tables.update_holds; delete d.rowCounts.update_holds; },
     'an extra table': d => { d.tables.zz = []; d.rowCounts.zz = 0; },
@@ -277,6 +280,11 @@ section('refusals leave everything as it was');
     'a collection member naming a missing game': d => { d.tables.game_collection_members[0].entry_id = '70000000-0000-4000-8000-000000000000'; },
     'a queue entry naming a missing game': d => { d.tables.queue_entries.find(e => e.game_entry_id).game_entry_id = '70000000-0000-4000-8000-000000000000'; },
     'a queue entry naming a game and a film': d => { const e = d.tables.queue_entries.find(x => x.game_entry_id); e.item_id = row(d, 'watchlist_items', w => w.media_type === 'movie').id; },
+    'a Hardcover book saved twice': d => { const b = d.tables.book_entries; b.push({ ...b[0], id: '7a000000-0000-4000-8000-000000000008', title: 'ZZ Copy' }); recount(d); },
+    'an unknown book status': d => { d.tables.book_entries[0].status = 'abandoned'; },
+    'an author follow adding automatically': d => { d.tables.book_follows[0].auto_add = true; },
+    'a review item of an unknown kind': d => { d.tables.book_findings[0].kind = 'gossip'; },
+    'an official page that isn’t https': d => { d.tables.book_sites[0].listing_url = 'http://zz.example.com/books/'; },
     'a game twice in one queue': d => { const q = d.tables.queue_entries, e = q.find(x => x.game_entry_id); q.push({ ...e, id: '7a000000-0000-4000-8000-000000000007', position: 99 }); recount(d); }
   };
   for (const [name, fn] of Object.entries(CASES)) {
@@ -405,7 +413,7 @@ section('ordinary functions afterwards');
   const del = await rpc(A, 'delete_tv_season', [rows[1].id, 0]);
   ok(del.ok && (await as(A, `select resume_start_season_id s from public.tv_shows where id = $1`, [show]))[0].s === null, 'deleting a season clears its range', del.message);
   const cap = (await as(A, `select public.stage5_capabilities() c`))[0].c;
-  ok(cap.phase === 'contracted-g1' && cap.backup_format === 9 && cap.g1 === 1 && cap.member === true && cap.research === true && cap.access === 'members', 'the capability answers as before', JSON.stringify(cap));
+  ok(cap.phase === 'contracted-bk1' && cap.backup_format === 10 && cap.g1 === 1 && cap.bk1 === 1 && cap.member === true && cap.research === true && cap.access === 'members', 'the capability answers as before', JSON.stringify(cap));
   ok(cap.recovery_archive === (FINAL ? 'retired' : 'active'), 'and reports the archive', cap.recovery_archive);
   if (FINAL) {
     const stale = await rpc(A, 'library_dismiss_catalog_new_b45', [[]]);
@@ -431,11 +439,11 @@ section('the admin tool');
     ok(c.ok && /OK/.test(c.out), 'check accepts a format-7 file with inherited sections', c.out);
     const out = JSON.parse(fs.readFileSync(path.join(dir, 'out.json'), 'utf8'));
     ok(!('conversion' in out) && !('recovery' in out) && fs.readFileSync(path.join(dir, 'legacy.json')).equals(legacyBefore), 'its output has neither; the original file is unchanged');
-    const six = JSON.parse(safety); [...SPEC_CU1, ...SPEC_Q1, ...SPEC_G1].forEach(t => { delete six.tables[t]; delete six.rowCounts[t]; }); six.formatVersion = 6;
+    const six = JSON.parse(safety); [...SPEC_CU1, ...SPEC_Q1, ...SPEC_G1, ...SPEC_BK1].forEach(t => { delete six.tables[t]; delete six.rowCounts[t]; }); six.formatVersion = 6;
     fs.writeFileSync(path.join(dir, 'six.json'), JSON.stringify(six));
     const c6 = tool('check', '--file', path.join(dir, 'six.json'), '--safety', path.join(dir, 'safety.json'), '--out', path.join(dir, 'six7.json'));
     const six7 = JSON.parse(fs.readFileSync(path.join(dir, 'six7.json'), 'utf8'));
-    ok(c6.ok && six7.formatVersion === 9 && !('conversion' in six7), 'check converts a format-6 file to plain format 9', c6.out);
+    ok(c6.ok && six7.formatVersion === 10 && !('conversion' in six7), 'check converts a format-6 file to plain format 10', c6.out);
     const r = await db.exec(tool('restore-sql', '--file', path.join(dir, 'out.json'), '--owner', A, '--email', 'a@test.invalid', '--run', 'restore-suite-1').out).then(() => ({ ok: true }), e => ({ ok: false, message: e.message }));
     ok(r.ok, 'the restore SQL restores it as the member', r.message);
     fs.writeFileSync(path.join(dir, 'after.json'), await exportDoc());
@@ -486,6 +494,7 @@ else {
   psql(Q1_STEP);
   psql(G1_STEP);
   psql(TC1_STEP);
+  psql(BK1_STEP);
   const fA = docFile('a.json', L1), fB = docFile('b.json', L2), fA2 = docFile('a2.json', rekey(L1, '71', '74'));
   const season = L1.tables.watchlist_items.find(w => w.show_id && !w.watched).id;
   ok(/^t$/m.test(psql(setAs(A) + '\n' + rest(fA))) && /^t$/m.test(psql(setAs(B) + '\n' + rest(fB))), 'both libraries restore on a real server');
@@ -554,7 +563,7 @@ else {
   s1.end(); s2.end();
 
   section('real PostgreSQL 17: local timing');
-  const big = library9(1, 2500), fBig = docFile('big.json', big);
+  const big = library10(1, 2500), fBig = docFile('big.json', big);
   psql('analyze');
   const rows = Object.values(big.rowCounts).reduce((a, b) => a + b, 0);
   const times = [];

@@ -9,6 +9,7 @@ function buildTabs() {
   // by buildBrowseBar.
   const views = isSettingsView() || activeArea === 'collections' || activeArea === 'queues' ? []
     : activeArea === 'games' ? Object.keys(GAMES_VIEWS).map(id => ({ id, label: GAMES_VIEW_LABELS[id] })) // (as TV's views)
+    : activeArea === 'books' ? Object.keys(BOOKS_VIEWS).map(id => ({ id, label: BOOKS_VIEW_LABELS[id] })) // BK1 (as Games')
     : tabViewsFor(activeMediaType);
   // A redraw keeps keyboard focus on the view tabs (the open view's tab takes it).
   const active = document.activeElement;
@@ -42,6 +43,7 @@ function buildMediaSwitch() {
       + `<button class="media-switch-btn${cls('movie')}" id="areaBtn-movie"${cur('movie')} onclick="switchMediaType('movie')">Movies</button>`
       + `<button class="media-switch-btn${cls('collections')}" id="areaBtn-collections"${cur('collections')} onclick="openCollections(this)">Collections</button>`
       + `<button class="media-switch-btn${cls('games')}" id="areaBtn-games"${cur('games')} onclick="openGames()">Games</button>`
+      + `<button class="media-switch-btn${cls('books')}" id="areaBtn-books"${cur('books')} onclick="openBooks()">Books</button>`
       + `<button class="media-switch-btn${cls('queues')}" id="areaBtn-queues"${cur('queues')} onclick="openQueues()">Queues</button>`;
     const again = keepCollections ? document.getElementById('areaBtn-collections') : null;
     if (again && again !== active && typeof again.focus === 'function') again.focus();
@@ -91,6 +93,7 @@ function switchView(id) {
   if (typeof addPickerOnNavigate === 'function') addPickerOnNavigate(); // S5: an idle picker closes; a running batch stops after its current request
   if (typeof queueOnNavigate === 'function') queueOnNavigate(); // Q1: an idle Add to queue dialog closes; a drag ends
   if (typeof gamesOnNavigate === 'function') gamesOnNavigate(); // G1: an idle games dialog closes
+  if (typeof booksOnNavigate === 'function') booksOnNavigate(); // BK1: an idle books dialog closes
   activeViewId = id;
   activeArea = areaOfView(id);
   // Back from a collection keeps its origin only while the Collections area is open,
@@ -126,7 +129,7 @@ function switchView(id) {
   // that opened a collection, so this entry is over.
   if (activeViewId !== id) return;
   // Q1 / G1: a screen of its own shows only in its own area (an entry by route or Back included).
-  [['queuesScreen', isQueuesView(id)], ['gamesScreen', isGamesView(id)]].forEach(([sid, keep]) => {
+  [['queuesScreen', isQueuesView(id)], ['gamesScreen', isGamesView(id)], ['booksScreen', isBooksView(id)]].forEach(([sid, keep]) => {
     const el = !keep && document.getElementById(sid);
     if (el) { el.style.display = 'none'; el.innerHTML = ''; }
   });
@@ -134,6 +137,7 @@ function switchView(id) {
   if (isCollectionsStateView(id)) { renderCollectionsState(); return; }
   if (isQueuesView(id)) { queuesData = null; loadQueuesView(); return; }
   if (isGamesView(id)) { gamesData = null; loadGamesView(); return; } // G1
+  if (isBooksView(id)) { booksData = null; loadBooksView(); return; } // BK1
   showListContainers();
   if (isBrowseView(id)) loadBrowseView();
   else loadDerivedView();
@@ -169,6 +173,7 @@ function areaOfView(id) {
   if (isCollectionsAreaView(id)) return 'collections';
   if (isQueuesView(id)) return 'queues';
   if (typeof isGamesView === 'function' && isGamesView(id)) return 'games';
+  if (typeof isBooksView === 'function' && isBooksView(id)) return 'books';
   return activeMediaType;
 }
 
@@ -249,6 +254,8 @@ function showListContainers() {
   if (queues) { queues.style.display = 'none'; queues.innerHTML = ''; }
   const games = document.getElementById('gamesScreen'); // G1
   if (games) { games.style.display = 'none'; games.innerHTML = ''; }
+  const books = document.getElementById('booksScreen'); // BK1
+  if (books) { books.style.display = 'none'; books.innerHTML = ''; }
   SETTINGS_LIST_CONTAINERS.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
 }
 
