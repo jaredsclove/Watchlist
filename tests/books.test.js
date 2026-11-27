@@ -279,6 +279,7 @@ test('Refresh books: an author’s new and announced titles go to review (never 
   assert.ok(ransom && ransom.status === 'want' && ransom.series[0].position === '3', 'added as Want to read in its place');
   assert.ok(!store(app, 'book_findings').some(f => f.subject.hardcover_id === 3003), 'its review item went with it');
   assert.match(text(screen(app)), /1 title added automatically as Want to read/);
+  assert.doesNotMatch(text(screen(app)), /1 new item for review/, 'the added title isn’t also counted for review');
   // An unknown-language or translated record, or a place another saved record holds, is never added automatically.
   const app2 = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon', { created: fresh, auto: true })], entries: [entry(1, byId(3001))],
     stub: { catalog: { books: [bk(3004, 'ZZ Unknown Lang', { authors: [A_SPY], series: inS(S_ALLON, '4'), date: day(30), lang: 'unknown' })] } } });

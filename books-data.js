@@ -452,5 +452,6 @@ function bookRefreshFindings(read, state) {
     return false;
   }).map(x => x.fingerprint);
   report.autoAdded = autoAdd.length;
-  return { rows: [...rows.values()].filter(r => !close.includes(r.fingerprint)), close, autoAdd, siteCache, report };
+  const added = new Set(autoAdd.map(x => x.fingerprint)); // (a title added automatically isn't also offered for review)
+  return { rows: [...rows.values()].filter(r => !close.includes(r.fingerprint) && !added.has(r.fingerprint)), close, autoAdd, siteCache, report };
 }
