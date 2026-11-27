@@ -103,17 +103,25 @@ function bookShownDate(entry, rec) {
   return null;
 }
 // A book's authors as the member's lists show them: authors they credited in Review (a manual credit, book_associations) first,
-// in the order credited, then the book's own credits (co-authors kept; an author listed in both, once). Display only: the saved
-// entry and Hardcover's record keep their own credits.
-function bookAuthorsWithCredits(authors, hardcoverId, associations = []) {
+// in the order credited, then the book's own credits (co-authors kept; an author listed in both, once), except a credit the member
+// replaced: a 'replace_credit' decision (key rc:<book>:<replaced author>, value {by}) omits that one credit while their credit to
+// `by` for the book exists. A credit added without a replacement keeps every original credit. Display only: the saved entry and
+// Hardcover's record keep their own credits.
+const bookReplaceKey = (bookId, authorId) => `rc:${bookId}:${authorId}`;
+function bookCreditsOf(hardcoverId, associations = []) {
+  return hardcoverId ? associations.filter(a => a.hardcover_book_id === hardcoverId)
+    .slice().sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || ''))).map(a => ({ id: a.hardcover_author_id, name: a.author_name })) : [];
+}
+function bookCreditReplaced(hardcoverId, authorId, associations = [], decisions = new Map()) {
+  const d = decisions.get(`replace_credit|${bookReplaceKey(hardcoverId, authorId)}`);
+  return !!(d && d.value && associations.some(a => a.hardcover_book_id === hardcoverId && a.hardcover_author_id === d.value.by));
+}
+function bookAuthorsWithCredits(authors, hardcoverId, associations = [], decisions = new Map()) {
   const own = authors || [];
-  if (!hardcoverId) return own;
-  const credited = associations.filter(a => a.hardcover_book_id === hardcoverId)
-    .slice().sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
-    .map(a => ({ id: a.hardcover_author_id, name: a.author_name }));
+  const credited = bookCreditsOf(hardcoverId, associations);
   if (!credited.length) return own;
   const ids = new Set(credited.map(a => a.id));
-  return credited.concat(own.filter(a => !(a && a.id && ids.has(a.id))));
+  return credited.concat(own.filter(a => !(a && a.id && (ids.has(a.id) || bookCreditReplaced(hardcoverId, a.id, associations, decisions)))));
 }
 // A date suggestion that would change nothing: the official site says TBA and the library shows no date or TBA. It isn't offered,
 // an open one isn't shown and the next Refresh closes it (no decision is saved; a later real date is still suggested).
@@ -419,7 +427,7 @@ function bookRefreshFindings(read, state) {
     }
     for (const g of view.gaps) {
       put({ fingerprint: `cg:${g.rec.id}:${a.id}`, source: 'hardcover', kind: 'credit_gap',
-        subject: { title: g.rec.title, hardcover_id: g.rec.id, author_id: a.id, author: a.name, credited: g.rec.authors.map(x => x.name).slice(0, 5),
+        subject: { title: g.rec.title, hardcover_id: g.rec.id, author_id: a.id, author: a.name, credited: g.rec.authors.map(x => x.name).slice(0, 5), credited_ids: g.rec.authors.map(x => x.id).slice(0, 5),
           series: { id: g.series.id, name: g.series.name, position: g.position } },
         evidence: [{ url: `https://hardcover.app/books/${g.rec.id}`, text: 'Hardcover' }], exclude_keys: [] });
     }

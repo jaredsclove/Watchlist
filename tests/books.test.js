@@ -768,4 +768,103 @@ test('an accepted credit regroups the Library: the book moves under the credited
   assert.deepStrictEqual(JSON.parse(r), [[{ id: 2, name: 'B' }, { id: 3, name: 'C' }, { id: 1, name: 'P' }], [{ id: 2, name: 'B' }, { id: 1, name: 'P' }], [{ id: 1, name: 'P' }], [{ name: 'Hand' }]]);
 });
 
+// BK1c: a credit can replace one of Hardcover's credits or be added beside them.
+const A_CO = { id: 9103, name: 'ZZ Coauthor' }, A_IMPRINT = { id: 9104, name: 'ZZ Imprint' };
+const libGroups = a => [...tableOf(a).matchAll(/<tr class="(?:book-group-row [^"]+|game-row[^"]*)"(?: data-book="([^"]+)")?>(?:<th colspan="5"><button[^>]*>.*?<span class="book-group-name">([^<]+))?/g)]
+  .map(m => (m[1] ? store(a, 'book_entries').find(x => x.id === m[1]).title : `[${m[2]}]`));
+const titleOf = (a, k) => text((rowOf(a, ID('6c000000', k)).match(/<span class="show-title-main">(.*?)<\/span><\/span>/) || [, ''])[1]);
+async function restoreFrom(app, b) {
+  app.ctx.openSettings(null); await settle();
+  const fileText = JSON.stringify(b);
+  await app.ctx.handleRestoreFileSelected({ target: { files: [{ text: async () => fileText }], value: 'x' } }); await settle();
+  await app.ctx.executeRestore(); await settle();
+  await app.run(`continueRestoreAfterSafetyConfirm('safety.json')`); await settle();
+  assert.match(app.el('restoreModalBox').innerHTML, /restored and verified/);
+  app.ctx.closeRestoreModal(); await open(app);
+}
+
+test('Review: “instead of” replaces only the named Hardcover credit (one wrong credit; one of two on a multi-author book); “as well” keeps them; both hold after a reload, a refresh and a restore', async () => {
+  const four = bk(2014, 'ZZ One of Us Four', { authors: [A_CO, A_IMPRINT], series: inS(S_ONE, '4'), date: '2024-01-01' });
+  const entries = [entry(1, byId(2001)), entry(2, byId(2002)), entry(3, byId(2003), { status: 'reading', chosen_date: { value: '2023-08-01', source: 'member' } }), entry(4, four, { status: 'finished' })];
+  const skip = { id: ID('6a700000', 1), kind: 'skip', key: 'hc:2002', value: {}, created_at: TS };
+  const app = await boot({ follows: [follow(1, 'author', A_YA.id, A_YA.name)], decisions: [seen(1), skip], entries, stub: { catalog: { books: [four] } } });
+  await open(app); await refresh(app);
+  app.ctx.setBooksFilter('status', 'all'); await settle();
+  const savedBefore = JSON.stringify(store(app, 'book_entries'));
+  app.ctx.openBooksReview(null); await settle();
+  const d = text(dialog(app));
+  assert.match(d, /“ZZ One of Us Back” is #3 in ZZ One of Us, but Hardcover credits it to ZZ Random House, not ZZ McManus\. “Instead of” shows ZZ McManus in place of that credit in your lists; “as well” keeps it beside ZZ McManus\. Hardcover isn’t changed\. .*Credit ZZ McManus instead of ZZ Random House Credit ZZ McManus as well Not ZZ McManus’s Later/);
+  assert.match(d, /Credit ZZ McManus instead of ZZ Coauthor Credit ZZ McManus instead of ZZ Imprint Credit ZZ McManus as well/, 'each of a multi-author book’s credits can be replaced on its own');
+  const gap = id => app.run(`bookReviewList().findIndex(f => f.kind === "credit_gap" && f.subject.hardcover_id === ${id})`);
+  await app.ctx.bookReviewCredit(gap(2003), true, PUBLISHER.id); await settle();
+  await app.ctx.bookReviewCredit(gap(2014), true, A_IMPRINT.id); await settle();
+  app.ctx.closeBooksDialog(); await settle();
+  const after = ['[ZZ McManus]', '[ZZ One of Us]', 'ZZ One of Us', 'ZZ One of Us Next', 'ZZ One of Us Back', 'ZZ One of Us Four'];
+  const check = (a, when) => {
+    assert.deepStrictEqual(libGroups(a), after, `${when}: grouped under the credited author in the existing series, once each`);
+    assert.strictEqual(titleOf(a, 3), 'ZZ One of Us Back', `${when}: the replaced credit isn’t shown`);
+    assert.strictEqual(titleOf(a, 4), 'ZZ One of Us Four with ZZ Coauthor', `${when}: only the named credit is replaced; the co-author stays`);
+  };
+  check(app, 'after accepting');
+  assert.deepStrictEqual(store(app, 'book_decisions').filter(x => x.kind === 'replace_credit').map(x => [x.key, x.value.by]).sort(), [[`rc:2003:${PUBLISHER.id}`, A_YA.id], [`rc:2014:${A_IMPRINT.id}`, A_YA.id]]);
+  assert.deepStrictEqual(store(app, 'book_associations').map(a => [a.hardcover_book_id, a.hardcover_author_id]).sort(), [[2003, A_YA.id], [2014, A_YA.id]]);
+  assert.ok(!store(app, 'book_findings').some(f => f.kind === 'credit_gap'), 'both items settled');
+  assert.strictEqual(JSON.stringify(store(app, 'book_entries')), savedBefore, 'saved books unchanged: status, date, series, Hardcover’s credits');
+  assert.deepStrictEqual(app.run(`JSON.stringify(bookRecOf(2003).authors.map(a => a.id))`), JSON.stringify([PUBLISHER.id]), 'Hardcover’s record keeps its own credit');
+  const tables = t => JSON.parse(JSON.stringify(store(app, t)));
+  const again = await boot({ follows: tables('book_follows'), decisions: tables('book_decisions'), entries: tables('book_entries'), associations: tables('book_associations'),
+    findings: tables('book_findings'), cache: tables('book_cache'), stub: { catalog: { books: [four] } } });
+  await open(again); again.ctx.setBooksFilter('status', 'all'); await settle();
+  check(again, 'after a reload');
+  await refresh(again); check(again, 'after a refresh');
+  assert.ok(!store(again, 'book_findings').some(f => f.kind === 'credit_gap'), 'no gap again');
+  assert.ok(store(again, 'book_decisions').some(x => x.kind === 'skip' && x.key === 'hc:2002') && store(again, 'book_decisions').some(x => x.kind === 'baseline'), 'other decisions kept');
+  const b = await again.ctx.buildBackupObject();
+  assert.deepStrictEqual(Array.from(again.ctx.validateBackupObject(b)), []);
+  assert.strictEqual(b.formatVersion, 10);
+  store(again, 'book_decisions').length = 0; store(again, 'book_associations').length = 0;
+  await restoreFrom(again, b); again.ctx.setBooksFilter('status', 'all'); await settle();
+  check(again, 'after a restore');
+  // A malformed replacement is refused before anything is restored.
+  for (const bad of [{ by: PUBLISHER.id }, { by: '9101' }, { by: A_YA.id, x: 1 }]) {
+    const c = JSON.parse(JSON.stringify(b)); c.tables.book_decisions.find(x => x.kind === 'replace_credit' && x.key === `rc:2003:${PUBLISHER.id}`).value = bad;
+    assert.ok(Array.from(again.ctx.validateBackupObject(c)).some(x => /book_decisions/.test(x)), JSON.stringify(bad));
+  }
+  const k = JSON.parse(JSON.stringify(b)); k.tables.book_decisions.find(x => x.kind === 'replace_credit').key = 'rc:2003';
+  assert.ok(Array.from(again.ctx.validateBackupObject(k)).some(x => /book_decisions/.test(x)), 'a malformed key is refused');
+  // "As well" keeps every Hardcover credit.
+  const add = await boot({ follows: [follow(1, 'author', A_YA.id, A_YA.name)], decisions: [seen(1)], entries, stub: { catalog: { books: [four] } } });
+  await open(add); await refresh(add); add.ctx.setBooksFilter('status', 'all'); await settle();
+  add.ctx.openBooksReview(null); await settle();
+  await add.ctx.bookReviewCredit(add.run('bookReviewList().findIndex(f => f.subject.hardcover_id === 2014)'), true); await settle();
+  add.ctx.closeBooksDialog(); await settle();
+  assert.strictEqual(titleOf(add, 4), 'ZZ One of Us Four with ZZ Coauthor, ZZ Imprint', 'an added author keeps both co-authors');
+  assert.ok(!store(add, 'book_decisions').some(x => x.kind === 'replace_credit'), 'no replacement saved');
+});
+
+test('an existing added credit keeps its meaning (Hardcover’s credit still shown); the book’s ⋯ menu replaces it explicitly and can show it again', async () => {
+  const assoc = { id: ID('6b700000', 1), hardcover_book_id: 2003, hardcover_author_id: A_YA.id, author_name: A_YA.name, created_at: TS };
+  const entries = [entry(1, byId(2001)), entry(3, byId(2003), { status: 'reading' })];
+  const app0 = await boot();
+  const cache = [2001, 2003].map((id, i) => ({ id: ID('6e700000', i + 1), kind: 'book', key: String(id), data: JSON.parse(app0.run(`JSON.stringify(bookRecord(${JSON.stringify(byId(id))}))`)), fetched_at: TS }));
+  const app = await boot({ entries, associations: [assoc], cache });
+  await open(app);
+  assert.strictEqual(titleOf(app, 3), 'ZZ One of Us Back with ZZ Random House', 'an association alone is additive');
+  assert.match(rowOf(app, ID('6c000000', 3)), /Show ZZ McManus instead of ZZ Random House/);
+  assert.doesNotMatch(rowOf(app, ID('6c000000', 1)), /instead of/, 'a book without a credit has no such action');
+  await app.ctx.setBookCreditReplaced(2003, PUBLISHER.id, A_YA.id, false, PUBLISHER.name, A_YA.name, 'ZZ One of Us Back'); await settle();
+  assert.strictEqual(titleOf(app, 3), 'ZZ One of Us Back');
+  assert.deepStrictEqual(store(app, 'book_decisions').map(d => [d.kind, d.key, d.value.by]), [['replace_credit', `rc:2003:${PUBLISHER.id}`, A_YA.id]]);
+  assert.match(rowOf(app, ID('6c000000', 3)), /Show ZZ Random House again/);
+  assert.strictEqual(store(app, 'book_associations').length, 1, 'the credit itself unchanged');
+  await app.ctx.setBookCreditReplaced(2003, PUBLISHER.id, A_YA.id, true, PUBLISHER.name, A_YA.name, 'ZZ One of Us Back'); await settle();
+  assert.strictEqual(titleOf(app, 3), 'ZZ One of Us Back with ZZ Random House', 'shown again');
+  assert.strictEqual(store(app, 'book_decisions').length, 0);
+  // A replacement without its credit (the credit gone) hides nothing.
+  const lone = await boot({ entries, cache, decisions: [{ id: ID('6a700000', 9), kind: 'replace_credit', key: `rc:2003:${PUBLISHER.id}`, value: { by: A_YA.id }, created_at: TS }] });
+  await open(lone);
+  assert.strictEqual(titleOf(lone, 3), 'ZZ One of Us Back', 'Hardcover’s credit is the only author: shown under it, never authorless');
+  assert.match(text(tableOf(lone)), /\[?ZZ Random House/);
+});
+
 T.run();

@@ -65,7 +65,7 @@ function bookEntryView(e) {
   const date = bookShownDate(e, rec);
   const series = (e.series || [])[0] || (rec && rec.series.find(s => s.position != null)) || null;
   const own = e.authors && e.authors.length ? e.authors : rec ? rec.authors : [];
-  return { entry: e, rec, title: e.title, authors: bookAuthorsWithCredits(own, e.hardcover_id, booksData.associations), series, date,
+  return { entry: e, rec, title: e.title, own, authors: bookAuthorsWithCredits(own, e.hardcover_id, booksData.associations, booksData.decisions), series, date,
     genres: rec ? rec.genres : [], skipped: booksData.decisions.has(`skip|${bookEntryKey(e)}`) };
 }
 const booksToday = () => localTodayStr();
@@ -206,6 +206,26 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 }
 const bookAuthorsText = v => (v.authors || []).map(a => a.name).join(', ') || '—';
 const bookSeriesText = s => (s ? `${s.name}${s.position ? ` #${s.position}` : ''}` : '');
+// A Hardcover book the member credited to an author: each of its own credits can be shown instead of, or again beside, that author
+// (a 'replace_credit' decision; Hardcover's record and the saved book are unchanged).
+function bookCreditMenuHtml(v) {
+  const e = v.entry, hc = e.hardcover_id;
+  if (!hc) return '';
+  const credits = bookCreditsOf(hc, booksData.associations);
+  if (!credits.length) return '';
+  const out = [];
+  for (const c of credits) for (const y of (v.own || [])) {
+    if (!y || !y.id || credits.some(x => x.id === y.id)) continue;
+    const d = booksData.decisions.get(`replace_credit|${bookReplaceKey(hc, y.id)}`), replaced = !!(d && d.value && d.value.by === c.id);
+    if (d && !replaced) continue; // (replaced by another credited author: that author's choice)
+    out.push(`<button class="popover-action" data-baction="credit-${y.id}" onclick="closeRowMenu(this); setBookCreditReplaced(${hc}, ${y.id}, ${c.id}, ${replaced}, '${bkArg(y.name)}', '${bkArg(c.name)}', '${bkArg(e.title)}')">${replaced ? `Show ${esc(y.name)} again` : `Show ${esc(c.name)} instead of ${esc(y.name)}`}</button>`);
+  }
+  return out.join('');
+}
+function setBookCreditReplaced(bookId, replacedId, byId, replaced, replacedName, byName, title) {
+  return setBookDecision('replace_credit', bookReplaceKey(bookId, replacedId), replaced ? null : { by: byId },
+    replaced ? `“${title}” · show ${replacedName} again` : `“${title}” · ${byName} instead of ${replacedName}`);
+}
 function bookMenuHtml(v) {
   const e = v.entry, id = esc(e.id), idArg = bkArg(e.id);
   const inSeries = !!v.series;
@@ -219,6 +239,7 @@ function bookMenuHtml(v) {
         <button class="popover-action" data-baction="match" onclick="closeRowMenu(this); openBookMatch('${idArg}', this)">${e.hardcover_id ? 'Match to another Hardcover record…' : 'Match to Hardcover…'}</button>
         ${followA.map(a => `<button class="popover-action" data-baction="follow-a${a.id}" onclick="closeRowMenu(this); followBookAuthor(${a.id}, '${bkArg(a.name)}')">Follow the author ${esc(a.name)}</button>`).join('')}
         ${followS.map(s => `<button class="popover-action" data-baction="follow-s${s.id}" onclick="closeRowMenu(this); followBookSeries(${s.id}, '${bkArg(s.name)}')">Follow the series ${esc(s.name)}</button>`).join('')}
+        ${bookCreditMenuHtml(v)}
         <button class="popover-action" data-baction="delete" onclick="closeRowMenu(this); confirmDeleteBook('${idArg}')">Remove from library…</button>
       </div></span>`;
 }
@@ -932,18 +953,26 @@ function bookFindingText(f) {
   const by = s.authors ? ` by ${s.authors.map(a => a.name).join(', ')}` : s.author ? ` by ${s.author}` : '';
   if (f.kind === 'new_book') return { src, text: `${s.why ? `${s.why}: ` : ''}“${s.title}”${by}${s.date ? ` · ${bookDateText({ value: s.date })}` : ''}${s.lang === 'unknown' ? ' · language unknown on Hardcover' : ''}${s.maybe === 'edition' ? ' · this may be an edition or collection rather than a new book' : ''}${f.source === 'website' && s.first_check ? ' · listed on their book page (first check of this site)' : f.source === 'website' ? ' · newly listed on their book page; not on Hardcover yet' : ''}${s.series_hint ? ` · listed under ${s.series_hint}` : ''}.` };
   if (f.kind === 'date') return { src, text: `“${s.title}”: ${s.author ? `${s.author}’s site` : 'the official site'} says ${s.quote ? `“${s.quote}”` : bookDateText({ value: s.suggested })}; your library shows ${s.current ? bookDateText({ value: s.current }) : 'no date'}${s.current_source === 'hardcover' ? ' (from Hardcover)' : ''}.` };
-  if (f.kind === 'credit_gap') return { src, text: `“${s.title}” is #${s.series.position} in ${s.series.name}, but Hardcover credits it to ${(s.credited || []).join(', ') || 'no-one'}, not ${s.author}.` };
+  if (f.kind === 'credit_gap') return { src, text: `“${s.title}” is #${s.series.position} in ${s.series.name}, but Hardcover credits it to ${(s.credited || []).join(', ') || 'no-one'}, not ${s.author}.${bookGapCredits(f).length ? ` “Instead of” shows ${s.author} in place of that credit in your lists; “as well” keeps it beside ${s.author}. Hardcover isn’t changed.` : ''}` };
   if (f.kind === 'match') return { src, text: `Your book “${s.title}” (not linked to Hardcover) may be Hardcover’s “${s.hardcover_title}”${s.authors ? ` by ${s.authors.map(a => a.name).join(', ')}` : ''}.` };
   if (f.kind === 'duplicate') return { src: 'Your library', text: `These saved books may be the same book: ${(s.entries || []).map(e => `“${e.title}” (${BOOK_STATUS_LABELS[e.status] || e.status})`).join(' and ')}.` };
   if (f.kind === 'site_changed') return { src, text: `${s.author}’s book page changed a lot (${s.fresh} new links, ${s.vanished} gone), so its links weren’t offered one by one. The site may have been redesigned.` };
   return { src, text: 'A change to review.' };
+}
+// A credit gap's Hardcover credits that could be replaced (with their ids: the item's own, else the cached record's).
+function bookGapCredits(f) {
+  const s = f.subject || {}, names = s.credited || [];
+  let ids = s.credited_ids;
+  if (!Array.isArray(ids) || ids.length !== names.length) { const rec = bookRecOf(s.hardcover_id); ids = names.map(n => { const a = rec && rec.authors.find(x => x.name === n); return a ? a.id : null; }); }
+  return names.map((name, k) => ({ id: ids[k], name })).filter(c => Number.isInteger(c.id) && c.id > 0 && c.id !== s.author_id).slice(0, 3);
 }
 function bookFindingActions(f, i) {
   const s = f.subject || {}, b = (label, fn, primary = false) => `<button class="btn${primary ? ' btn-accent' : ''}" onclick="${fn}">${esc(label)}</button>`;
   const later = f.status === 'later' ? b('Back to review', `bookFindingResolve(${i}, 'pending')`) : b('Later', `bookFindingResolve(${i}, 'later')`);
   if (f.kind === 'new_book') return `${b('Add as Want to read', `bookReviewAdd(${i})`, true)} ${b('Not interested', `bookReviewDismiss(${i})`)} ${later}`;
   if (f.kind === 'date') return `${b(s.suggested === 'TBA' ? 'Mark date as TBA' : 'Use this date', `bookReviewUseDate(${i})`, true)} ${b('Keep current date', `bookReviewKeepDate(${i})`)} ${later}`;
-  if (f.kind === 'credit_gap') return `${b(`Credit ${s.author}`, `bookReviewCredit(${i}, true)`, true)} ${b(`Not ${s.author}’s`, `bookReviewCredit(${i}, false)`)} ${later}`;
+  if (f.kind === 'credit_gap') { const g = bookGapCredits(f);
+    return `${g.map((c, k) => b(`Credit ${s.author} instead of ${c.name}`, `bookReviewCredit(${i}, true, ${c.id})`, k === 0)).join(' ')} ${b(g.length ? `Credit ${s.author} as well` : `Credit ${s.author}`, `bookReviewCredit(${i}, true)`, !g.length)} ${b(`Not ${s.author}’s`, `bookReviewCredit(${i}, false)`)} ${later}`; }
   if (f.kind === 'match') return `${b('Link to Hardcover', `bookReviewMatch(${i}, true)`, true)} ${b('Different books', `bookReviewMatch(${i}, false)`)} ${later}`;
   if (f.kind === 'duplicate') return `${b('Different books', `bookReviewNotSame(${i})`, true)} ${(s.entries || []).map(e => b(`Remove “${e.title}” (${BOOK_STATUS_LABELS[e.status] || e.status})`, `bookReviewRemoveCopy(${i}, '${bkArg(e.id)}')`)).join(' ')} ${later}`;
   if (f.kind === 'site_changed') return `${b('Offer its links for review', `bookReviewSiteReset(${i})`, true)} ${b('Dismiss', `bookFindingResolve(${i}, 'done')`)}`;
@@ -1026,16 +1055,26 @@ async function bookReviewUseDate(i) { noteReviewPlace(i);
   redrawBooksDialog();
 }
 function bookReviewKeepDate(i) { noteReviewPlace(i); const f = reviewItem(i); if (f) return setBookDecision('keep_date', f.fingerprint, { date: f.subject.suggested }, `“${f.subject.title}” · keep date`, f.fingerprint, 'done'); }
-async function bookReviewCredit(i, yes) { noteReviewPlace(i);
+// Credit the author: "instead of" a Hardcover credit (replaceId) saves the replacement first, then the credit, which settles the
+// item; the replacement shows only once the credit exists, so a failure between them leaves the item open and nothing changed.
+async function bookReviewCredit(i, yes, replaceId = null) { noteReviewPlace(i);
   const f = reviewItem(i);
   if (!f) return;
   const s = f.subject;
   if (!yes) return setBookDecision('not_author', f.fingerprint, {}, `“${s.title}” · not ${s.author}’s`, f.fingerprint, 'done');
-  await runWrite(`“${s.title}” · credit ${s.author}`, async lane => {
+  const replaced = replaceId ? bookGapCredits(f).find(c => c.id === replaceId) : null;
+  if (replaceId && !replaced) return;
+  await runWrite(`“${s.title}” · credit ${s.author}${replaced ? ` instead of ${replaced.name}` : ''}`, async lane => {
     try {
+      if (replaced) {
+        const key = bookReplaceKey(s.hardcover_id, replaced.id), cur = booksData.decisions.get(`replace_credit|${key}`);
+        await sbRpc('library_book_decision_set', { p_kind: 'replace_credit', p_key: key, p_expected: cur ? cur.value : null, p_value: { by: s.author_id }, p_finding: null, p_outcome: null });
+        booksData.decisions.set(`replace_credit|${key}`, { kind: 'replace_credit', key, value: { by: s.author_id } });
+      }
       const a = await sbRpc('library_book_association_set', { p_book_id: s.hardcover_id, p_author_id: s.author_id, p_author_name: String(s.author).slice(0, 200), p_on: true, p_finding: f.fingerprint });
-      booksData.associations.push(a); booksData.findings = booksData.findings.filter(x => x !== f);
-      showSaved(); showNotice(`“${s.title}” now shows under ${s.author}. Hardcover’s own credit is unchanged.`);
+      if (!booksData.associations.some(x => x.hardcover_book_id === a.hardcover_book_id && x.hardcover_author_id === a.hardcover_author_id)) booksData.associations.push(a);
+      booksData.findings = booksData.findings.filter(x => x !== f);
+      showSaved(); showNotice(replaced ? `“${s.title}” now shows under ${s.author}, in place of ${replaced.name}. Hardcover’s own credit is unchanged.` : `“${s.title}” now shows under ${s.author}${(s.credited || []).length ? `, with ${s.credited.join(', ')}` : ''}. Hardcover’s own credit is unchanged.`);
       redrawBooksDialog(); renderBooksView();
       lane.after.push(() => reloadOpenView());
     } catch (err) { if (stateNeedsReread(err)) { await reportStateFailure(err); return; } showError(stateErrorText(err)); }

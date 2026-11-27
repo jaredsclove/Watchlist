@@ -631,8 +631,11 @@ function validateFormat9Rows(tables, report) {
 
 // Format 10: what the book tables' keys and checks enforce (db/bk1_books.sql), before anything is sent.
 const BK1_STATUSES = ['want', 'reading', 'paused', 'finished', 'dropped'];
-const BK1_DECISION_KINDS = ['skip', 'exclude', 'keep_date', 'not_same', 'not_author', 'baseline'];
+const BK1_DECISION_KINDS = ['skip', 'exclude', 'keep_date', 'not_same', 'not_author', 'baseline', 'replace_credit'];
 // BK1b: a follow's starting catalog, {ids: [Hardcover book ids]} (at most 5,000 positive integers; 60,000 bytes; other kinds 4,000).
+// A replaced credit (BK1c): key rc:<book>:<replaced author>, value {by: <credited author>}, positive integers, by not the replaced one.
+const bk1ReplaceOk = (key, v) => { const m = /^rc:([1-9][0-9]{0,9}):([1-9][0-9]{0,9})$/.exec(key || ''); return !!m && bk1Obj(v) && Object.keys(v).length === 1
+  && Number.isInteger(v.by) && v.by > 0 && v.by <= 2147483647 && String(v.by) !== m[2]; };
 const bk1BaselineOk = v => bk1Obj(v) && Object.keys(v).length === 1 && Array.isArray(v.ids) && v.ids.length <= 5000 && v.ids.every(x => Number.isInteger(x) && x > 0 && x < 1e10);
 const BK1_FINDING_KINDS = ['new_book', 'date', 'credit_gap', 'match', 'duplicate', 'site_changed'];
 const bk1Trimmed = (v, max) => typeof v === 'string' && v === v.trim() && v !== '' && v.length <= max;
@@ -683,7 +686,7 @@ function validateFormat10Rows(tables, report) {
   const decisions = new Set();
   rows('book_decisions').forEach((d, i) => {
     const at = `book_decisions row ${i + 1}`;
-    if (!BK1_DECISION_KINDS.includes(d.kind) || !bk1Key(d.key) || !bk1Obj(d.value) || JSON.stringify(d.value).length > (d.kind === 'baseline' ? 60000 : 4000) || (d.kind === 'baseline' && !bk1BaselineOk(d.value))) problems.push(`${at} has values the database refuses`);
+    if (!BK1_DECISION_KINDS.includes(d.kind) || !bk1Key(d.key) || !bk1Obj(d.value) || JSON.stringify(d.value).length > (d.kind === 'baseline' ? 60000 : 4000) || (d.kind === 'baseline' && !bk1BaselineOk(d.value)) || (d.kind === 'replace_credit' && !bk1ReplaceOk(d.key, d.value))) problems.push(`${at} has values the database refuses`);
     seen(decisions, `${d.kind}|${d.key}`, `${at} repeats a decision`);
   });
   const findings = new Set();
