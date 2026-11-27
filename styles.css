@@ -1393,13 +1393,24 @@ td.spot-version-name { padding-left: 46px; font-size: 13px; color: var(--text2);
 .book-num-cell { font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .book-coauthors { font-size: 12.5px; color: var(--text2); font-weight: normal; }
 .books-table tr.book-group-row > th { text-align: left; font-weight: 600; border-bottom: 1px solid var(--border); background: none; text-transform: none; letter-spacing: 0; }
-.books-table tr.book-group-author > th { font-size: 15px; color: var(--text); padding: 14px 8px 4px; }
-.books-table tr.book-group-series > th { font-size: 12.5px; color: var(--text2); padding: 8px 8px 3px 20px; }
+/* One indentation step per level: author, then series (and Standalone books), then the book titles under them; the other
+   columns stay aligned. The headings are disclosure buttons. */
+.books-table tr.book-group-author > th { font-size: 15px; color: var(--text); padding: 12px 8px 3px; }
+.books-table tr.book-group-series > th { font-size: 12.5px; color: var(--text2); padding: 7px 8px 2px 32px; }
 .books-table tr.book-group-row:first-child > th { padding-top: 6px; }
+.books-table tr.game-row > td:first-child { padding-left: 80px; }
+.book-group-toggle { background: none; border: 0; padding: 2px 4px 2px 0; margin: 0; font: inherit; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 0; text-align: left; border-radius: 4px; }
+.book-group-toggle:hover .book-group-name { text-decoration: underline; }
+.book-group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.book-group-toggle .expand-chevron { width: 18px; height: 18px; margin-right: 6px; }
+.book-group-toggle:hover .expand-chevron, .book-group-toggle:focus-visible .expand-chevron { border-color: var(--accent); color: var(--accent); }
+.book-group-count { font-weight: normal; color: var(--text2); font-size: 12px; margin-left: 6px; }
 .book-group-head { margin: 0; font-weight: 600; }
-.book-group-head.book-group-author { font-size: 15px; margin: 14px 0 2px; color: var(--text); }
+.book-group-head.book-group-author { font-size: 15px; margin: 12px 0 2px; color: var(--text); }
 .book-group-head.book-group-author:first-child { margin-top: 2px; }
-.book-group-head.book-group-series { font-size: 12.5px; margin: 6px 0 0 2px; color: var(--text2); }
+.book-group-head.book-group-series { font-size: 12.5px; margin: 6px 0 0 24px; color: var(--text2); }
+.books-screen .games-cards > .item-card.game-card { margin-left: 48px; }
+@media (max-width: 480px) { .book-group-head.book-group-series { margin-left: 12px; } .books-screen .games-cards > .item-card.game-card { margin-left: 24px; } }
 .book-bulk { margin: 6px 0; }
 .book-bulk-ask { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
 .book-bulk-ask p { margin: 0 0 6px; }
@@ -1412,6 +1423,9 @@ td.spot-version-name { padding-left: 46px; font-size: 13px; color: var(--text2);
 /* (narrow screens: the note spans the screen below the mark, so it is never cut off at an edge) */
 @media (max-width: 600px) { .book-ph:focus::after, .book-ph:hover::after { position: fixed; left: 16px; right: 16px; top: auto; transform: none; width: auto; max-width: none; margin-top: 20px; } }
 .books-follows { display: flex; flex-direction: column; gap: 8px; }
+.book-follow .card-meta { flex-wrap: wrap; gap: 2px 14px; }
+.book-follow-head { font-size: 15px; margin: 14px 0 6px; }
+.book-series-controls { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: 6px 0 4px; }
 .book-follow .card-top { align-items: center; }
 .book-follow-body { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 .book-follow-body > .btn { align-self: flex-start; }

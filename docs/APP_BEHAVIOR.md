@@ -180,9 +180,10 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   request; a backup is the member's own file of their own choices, and the database copy (cache and records) can be deleted.
   Unresolved: the agreement doesn't say whether its deletion duty reaches files a member has already downloaded, and those
   can't be recalled.
-- **Books (BK1, item 6; `books.js`, `books-data.js`, `db/bk1_books.sql`, the `books` function):** the app bar's Books (`#/books`,
-  `#/books/series`, `#/books/authors`) has three views drawn as Games': Library, Series and Authors, with Search, Filters
-  (Genre, Status; the default lists everything except Finished and Dropped), + Add book, Refresh books and Review (its count).
+- **Books (BK1, item 6; `books.js`, `books-data.js`, `db/bk1_books.sql`, the `books` function):** the app bar's Books has two views drawn as Games'
+  (owner, 2026-11-27): Library (`#/books`: saved books, with Search and Filters: Genre, Status; the default lists everything
+  except Finished and Dropped) and Following (`#/books/following`; the old `#/books/series` and `#/books/authors` open it),
+  each with + Add book, Refresh books and Review (its count).
   One entry per underlying book: editions, formats and translations are never tracked. Statuses: Want to read, Reading, Paused,
   Finished, Dropped. Catalog data comes from Hardcover (`hardcover.app`) through the `books` function, which holds the
   Hardcover token (a `read:catalog` key of the owner's account, function secret `HARDCOVER_TOKEN`), answers members only and
@@ -199,7 +200,17 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
     show the book's real series number (#3 stays #3 when #1 and #2 are filtered out), genres, date and status; there is no
     other sort. Desktop rows keep genres on one measured line with +N (Games' rule: refitted on resize; +N shows the rest,
     wrapped, and Fewer folds them; focus stays on it); cards (narrower than 1,100 px) list every genre under the same
-    headings.
+    headings. Each heading is a disclosure (open at first; the choice is page memory, kept while browsing): an author's hides
+    its series and Standalone books, whose own choices are kept for when it reopens; a closed heading shows its count of the
+    books currently shown. Collapsing changes the display only. Author, series and book titles are indented one even step
+    each; the other columns stay aligned.
+  - **Following** lists followed authors (each: official book page and its notice, their series with Next, Add, Skip and
+    Add all, their other books, Stop following the author), then "Other series": followed series not shown under a followed
+    author (each: Next, the list, automatic adding, Stop following the series). A followed series that is also one of a
+    followed author's verified series is shown once, under that author, with its own automatic-adding and Stop following
+    controls (the author's card says "Series also followed" when closed). Author and series follows are independent: following
+    an author follows none of their series, and stopping one leaves the others. The Library's ⋯ says "Follow the author …" or
+    "Follow the series …".
   - **Lists show, never change.** An author's list is Hardcover's Author credits (never translators or narrators), the
     member's manual credits, and the books of the author's verified series: series Hardcover gives the author as primary
     author with at least two books, in which at least half the main books credit them (or the official page lists them).
@@ -215,7 +226,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
     not saved; a skip decision, kept for a book not saved too). Companions (fractional or unnumbered positions) are listed
     and can be saved and tracked, but are never the next book and never added automatically (owner, 2026-11-26).
   - **Add all** (BK1b, owner's walkthrough): "Add all in series (N)" on a series list and "Add all books (N)" on an author's,
-    in Series, Authors and + Add book's browse. It saves as Want to read each main title shown with nothing saved at its place
+    in Following and + Add book's browse. It saves as Want to read each main title shown with nothing saved at its place
     that isn't skipped or dismissed/removed, and, for an author, their other shown books that aren't a companion anywhere:
     never hidden records (showing them changes nothing) or companions; saved books keep their statuses; each title once. An
     inline confirmation names the count (Cancel returns focus to the button). One write adds them in turn, each refused if
@@ -225,7 +236,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   - **Following** is explicit and adds nothing. A followed series has "Automatically add new titles on refresh" (off unless
     turned on). Following an author whose official site is supported (`KNOWN_BOOK_SITES`: Robert Galbraith, Daniel Silva,
     Karen M. McManus) also saves that site's book-listing page as the member's setting; any author's page can be set or
-    changed in Authors. A follow's starting catalog (BK1b: the ids of every record of the series, or of the author and their
+    changed in Following. A follow's starting catalog (BK1b: the ids of every record of the series, or of the author and their
     series, hidden ones included) is saved with it as a `baseline` decision; a follow without one (made before BK1b) gets it
     from its next refresh, which offers nothing new for that follow that time.
   - **Refresh books** (one button, members alike; owner, 2026-11-26: website checks aren't limited by research access)
