@@ -27,7 +27,20 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: the Books Library grouped by author,
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Books' Library and Following tabs
+  and collapsible Library groups (owner's request; PR #107, `25a59ac`), 2026-11-27 UTC, page only: Following replaces Series
+  and Authors (followed authors with their page, series, Add/Skip/Add all and other books; then other followed series); a
+  series also followed under its followed author shows once there with its own automatic-adding and Stop following controls;
+  author and series follows stay independent; `#/books/series` and `#/books/authors` open `#/books/following`. Library
+  headings (author, series, Standalone books) are disclosures, open at first, kept for the page session, counts when closed,
+  display only; even indentation author → series → title. Cache token `20261127-bookfollow`. Verified: 63 offline suites
+  (1510); local Chrome with synthetic data: author alone, series alone, both (no duplicate), automatic adding and Stop
+  following the author by real clicks (the series follow and its setting kept), old routes, Library collapse by click and
+  keyboard with focus and counts, choices kept across tabs, 1444 and 375 px; Pages built, changed files byte-identical to
+  `main`; live, read-only with writes blocked: the old route opens Following, Gabriel Allon once under Daniel Silva with its
+  own controls, a Library group collapsed with its count, The Kill Artist and The Unlikely Spy still Finished, no write
+  attempted. Not verified: real phones.
+- Previous release: the Books Library grouped by author,
   series and reading order (owner's request; PR #105, `8f09233`), 2026-11-27 UTC, page only: the visible books under compact
   headings (author A–Z by first-listed author, "Unknown author" last; each series A–Z in series order; then "Standalone
   books" by date, undated last; empty headings not drawn; each book once by its own saved author and series); a "#" column
@@ -39,7 +52,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
   to `main`; live, read-only with writes blocked: the owner's library grouped (Daniel Silva → Gabriel Allon #2–#26, Michael
   Osbourne, Standalone books), +N and Fewer, The Kill Artist and The Unlikely Spy still Finished, no write attempted. Not
   verified: real phones.
-- Previous release: Books fixes from the owner's
+- Earlier: Books fixes from the owner's
   Silva walkthrough (item 6, BK1b; PR #103, `b5d0b26`), 2026-11-27 UTC, ordinary function tier: "new" for a follow means not in
   its starting catalog (decision kind `baseline`, saved on follow; follows made before get one on their next refresh, which
   offers nothing new for them that time) instead of "released within 180 days" (why Ransom showed as new); a series-only
