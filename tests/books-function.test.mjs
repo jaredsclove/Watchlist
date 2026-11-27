@@ -114,12 +114,15 @@ const hq = (name, q, vars) => ({ name, q, vars });
     if (String(url).includes('stage5_capabilities')) return new Response(JSON.stringify({ member: true }), { status: 200 });
     if (String(url).endsWith('/stream')) { let i = 0; const chunk = new Uint8Array(500_000).fill(120);
       return new Response(new ReadableStream({ pull(c) { if (i++ < 8) c.enqueue(chunk); else c.close(); } }), { status: 200, headers: { 'content-type': 'text/html' } }); }
+    if (String(url).endsWith('/latin1')) return new Response(new Uint8Array([60,104,49,62,90,90,32,67,97,102,233,60,47,104,49,62]), { status: 200, headers: { 'content-type': 'text/html; charset=ISO-8859-1' } });
     if (String(url).endsWith('/odd')) return new Response('', { status: 302, headers: { location: 'https://[bad' } });
     return new Response('<a href="/zz-books/a">A</a>', { status: 200, headers: { 'content-type': 'text/html' } });
   }, sleep: async () => {} };
   const rc = await answer(await handle(req(MEMBER, { op: 'site', pages: ['https://zz.example.com/stream', 'https://zz.example.com/odd', 'https://zz.example.com/fine'] }), ENV, chunked));
   ok(rc.status === 200 && !rc.body.pages[0].ok && /too large/.test(rc.body.pages[0].error) && !rc.body.pages[1].ok && /can’t be read/.test(rc.body.pages[1].error) && rc.body.pages[2].ok,
     'a chunked page over the cap is refused while reading; a malformed redirect fails only its page', JSON.stringify(rc.body).slice(0, 300));
+  const rl = await answer(await handle(req(MEMBER, { op: 'site', pages: ['https://zz.example.com/latin1'] }), ENV, chunked));
+  ok(rl.body.pages[0].ok && rl.body.pages[0].title === 'ZZ Café', 'a page in another declared charset is decoded with it', JSON.stringify(rl.body.pages[0]));
 }
 // ── Extraction rules (synthetic pages shaped like the inspected sites) ──
 {

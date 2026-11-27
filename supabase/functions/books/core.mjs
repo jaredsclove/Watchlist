@@ -136,7 +136,10 @@ async function readPage(u, deps, hops = 0) {
     // Read with a byte cap (a chunked or compressed page has no length to check first).
     let text = '';
     if (res.body && typeof res.body.getReader === 'function') {
-      const reader = res.body.getReader(), dec = new TextDecoder();
+      const cs = (/charset=([\w-]+)/i.exec(type) || [])[1];
+      let dec;
+      try { dec = new TextDecoder(cs || 'utf-8'); } catch (e) { dec = new TextDecoder(); } // (the page's declared charset, else UTF-8)
+      const reader = res.body.getReader();
       let n = 0;
       for (;;) {
         const { done, value } = await reader.read();
