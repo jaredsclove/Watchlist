@@ -102,6 +102,10 @@ function bookShownDate(entry, rec) {
   if (rec && rec.year) return { value: String(rec.year), source: 'hardcover' };
   return null;
 }
+// A date suggestion that would change nothing: the official site says TBA and the library shows no date or TBA. It isn't offered,
+// an open one isn't shown and the next Refresh closes it (no decision is saved; a later real date is still suggested).
+const bookDateNoChange = (current, suggested) => suggested === 'TBA' && (!current || current === 'TBA');
+const bookFindingOffered = f => !(f && f.kind === 'date' && f.subject && bookDateNoChange(f.subject.current, f.subject.suggested));
 const bookDateSortKey = d => (!d || d.value === 'TBA' ? '9999-12-31' : d.value.length === 4 ? `${d.value}-12-31` : d.value.length === 7 ? `${d.value}-28` : d.value);
 function bookUpcoming(d, today) { return !!d && (d.value === 'TBA' || bookDateSortKey(d) > today); }
 function bookDateText(d) {
@@ -519,6 +523,7 @@ function bookRefreshFindings(read, state) {
       const upcoming = bookUpcoming(shown, today) || bookUpcoming({ value: found.value }, today);
       const weak = !shown || shown.value === 'TBA' || shown.placeholder || (shown.value.length < 10);
       if (!(weak || upcoming)) continue;
+      if (bookDateNoChange(shown && shown.value, found.value)) continue;
       if (shown && (shown.value === found.value || (found.value.length === 4 && shown.value.startsWith(found.value) && shown.value.length > 4))) continue;
       const src = (page && page.date) ? c.url : ann ? ann.url : pub ? page.publisherUrl : c.url;
       put({ fingerprint: `dt:${bookEntryKey(e)}:${found.value}`, source: 'website', kind: 'date',
@@ -537,6 +542,7 @@ function bookRefreshFindings(read, state) {
     if (x.kind === 'match') return !entryIds.has(s.entry_id) || entries.some(e => e.id === s.entry_id && e.hardcover_id);
     if (x.kind === 'credit_gap') return associations.some(a => a.hardcover_book_id === s.hardcover_id && a.hardcover_author_id === s.author_id);
     if (x.kind === 'duplicate') return (s.entries || []).some(e => !entryIds.has(e.id));
+    if (x.kind === 'date' && bookDateNoChange(s.current, s.suggested) && !rows.has(x.fingerprint)) return true;
     if (x.kind === 'date') return !entryIds.has(s.entry_id) || entries.some(e => e.id === s.entry_id && e.chosen_date && e.chosen_date.value === s.suggested);
     return false;
   }).map(x => x.fingerprint);

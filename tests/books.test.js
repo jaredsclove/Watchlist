@@ -687,4 +687,43 @@ test('Following: an author alone, a series alone, and both: a followed series sh
   assert.match(text(screen(both)), /0 authors · 1 series followed .*Series ▸ ZZ Allon Series by ZZ Silva Adds new titles/);
 });
 
+test('a site’s “To Be Announced” is offered only when it replaces a known date (“Mark date as TBA”); no date → TBA is never offered, and an open one is hidden and closed without changing the date or any decision', async () => {
+  const sleep = bk(2010, 'ZZ Sleep Tight', { authors: [A_YA], date: null }), moved = bk(2011, 'ZZ Moved Date', { authors: [A_YA], date: day(120) });
+  const e1 = entry(1, sleep), e2 = entry(2, moved), e3 = entry(3, byId(2005));
+  const tbaPage = t => html('<p>Expected Release Date: To Be Announced</p>').replace('<head></head>', `<head><meta property="og:title" content="${t} | zz-ya"></head>`);
+  const old = { id: ID('6b800000', 1), fingerprint: 'dt:hc:2010:TBA', source: 'website', kind: 'date', status: 'pending', first_seen_at: TS, last_seen_at: TS, exclude_keys: [],
+    subject: { entry_id: e1.id, title: 'ZZ Sleep Tight', current: null, current_source: null, suggested: 'TBA', url: 'https://www.zz-ya.example.com/zz-sleep-tight', quote: 'Expected Release Date: To Be Announced', author: A_YA.name }, evidence: [] };
+  const skip = { id: ID('6a800000', 1), kind: 'skip', key: 'hc:2001', value: {}, created_at: TS };
+  const app = await boot({ follows: [follow(1, 'author', A_YA.id, A_YA.name)], entries: [e1, e2, e3], findings: [old], decisions: [seen(1), skip],
+    sites: [{ id: ID('6f000000', 1), hardcover_author_id: A_YA.id, author_name: A_YA.name, listing_url: YA_SITE, created_at: TS, updated_at: TS }],
+    stub: { catalog: { books: [sleep, moved] }, sites: yaSites({ extra: [['zz-sleep-tight', 'ZZ Sleep Tight', 'Standalone Novels'], ['zz-moved-date', 'ZZ Moved Date', 'Standalone Novels']],
+      pages: { 'https://www.zz-ya.example.com/zz-sleep-tight': tbaPage('ZZ Sleep Tight'), 'https://www.zz-ya.example.com/zz-moved-date': tbaPage('ZZ Moved Date') } }) } });
+  await open(app);
+  // The open no-change item is not shown or counted (nothing is written to hide it).
+  assert.match(text(screen(app)), /Refresh books Review$|Refresh books Review /);
+  assert.doesNotMatch(text(screen(app)), /Review \(/, 'not counted');
+  app.ctx.openBooksReview(null); await settle();
+  assert.doesNotMatch(text(dialog(app)), /ZZ Sleep Tight/, 'not shown in Review');
+  app.ctx.closeBooksDialog();
+  const writes = app.requests.filter(r => r.method && r.method !== 'GET').length;
+  assert.strictEqual(writes, 0, 'hiding it writes nothing');
+  await refresh(app);
+  const dates = store(app, 'book_findings').filter(f => f.kind === 'date');
+  assert.deepStrictEqual(dates.map(f => [f.subject.title, f.subject.current, f.subject.suggested]).sort(),
+    [['ZZ Dying Debut', '2027-01-01', '2027-05-11'], ['ZZ Moved Date', day(120), 'TBA']], 'the placeholder gets its real date; a known date changed to TBA is kept; no date → TBA is closed and not offered again');
+  assert.strictEqual(store(app, 'book_entries').find(e => e.id === e1.id).chosen_date, null, 'the saved date is unchanged');
+  assert.deepStrictEqual(store(app, 'book_decisions').map(d => d.kind).sort(), ['baseline', 'skip'], 'no decision saved or removed');
+  app.ctx.openBooksReview(null); await settle();
+  const d = text(dialog(app));
+  assert.match(d, /“ZZ Moved Date”: ZZ McManus’s site says “Expected Release Date: To Be Announced”; your library shows .*Mark date as TBA Keep current date/);
+  assert.match(d, /“ZZ Dying Debut”: .*Use this date Keep current date/);
+  assert.doesNotMatch(d, /ZZ Sleep Tight/);
+  const i = app.run('bookReviewList().findIndex(f => f.subject.title === "ZZ Moved Date")');
+  await app.ctx.bookReviewUseDate(i); await settle();
+  const cd = store(app, 'book_entries').find(e => e.id === e2.id).chosen_date;
+  assert.ok(cd && cd.value === 'TBA' && cd.source === 'website', JSON.stringify(cd));
+  await refresh(app);
+  assert.ok(!store(app, 'book_findings').some(f => f.subject.title === 'ZZ Moved Date' || f.subject.title === 'ZZ Sleep Tight'), 'settled; nothing offered again');
+});
+
 T.run();

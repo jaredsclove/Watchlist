@@ -266,11 +266,14 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
     data: only links, titles and dated phrases are taken from it.
   - **Date suggestions** come from a site for a saved book whose shown date is missing, TBA, possibly a placeholder, only a
     year or month, or upcoming, and which the member hasn't dated: "Use this date" saves it as the book's chosen date (with
-    its source), "Keep current date" declines that date until the site shows another. An edition's or news post's date is
-    never used; a long-published book's regional date difference is never suggested.
+    its source), "Keep current date" declines that date until the site shows another. A site's "To Be Announced" is offered
+    only when it replaces a date the library shows, as "Mark date as TBA"; for a book with no date (or already TBA) it changes
+    nothing and isn't offered: an open item of that kind isn't shown or counted, and the next Refresh closes it without
+    saving a decision or changing the book. An edition's or news post's date is never used; a long-published book's regional
+    date difference is never suggested.
   - **Review** (pending first, then Later) shows each item's source (Hardcover, Official site, Your library), a short
-    explanation and its source links: a new title (Add as Want to read, Not interested, Later); a date (Use this date, Keep
-    current date); a credit gap (a verified series' book Hardcover credits to no other author of the series: Credit the
+    explanation and its source links: a new title (Add as Want to read, Not interested, Later); a date (Use this date, or Mark
+    date as TBA, Keep current date); a credit gap (a verified series' book Hardcover credits to no other author of the series: Credit the
     author, which saves a manual credit and shows it under them, or Not theirs); a match (a book saved by hand or from a site
     that a Hardcover record with the same title and author now matches: Link to Hardcover, which keeps its status, chosen
     date, skip and placement, or Different books); a possible duplicate (two saved books with the same title or series
