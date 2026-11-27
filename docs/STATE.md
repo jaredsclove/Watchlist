@@ -27,7 +27,16 @@ membership enforcement, research permissions, holds, reliable backup and restore
 
 ## Production now
 
-- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Books' Library and Following tabs
+- `main` is the source of truth; check it with `git ls-remote origin main`. Last release: Books Review's TBA date suggestions (owner's
+  request; PR #109, `18f9228`), 2026-11-27 UTC, page only: an official site's "To Be Announced" for a book with no date (or
+  already TBA) is no longer offered; an open item of that kind isn't shown or counted, and the next Refresh closes it
+  through the existing close list (no decision saved, the book unchanged); a known date changed to TBA stays for review as
+  "Mark date as TBA". Cache token `20261127-booktba`. Verified: 63 offline suites (1511; the new case fails without the
+  fix); Pages built, changed files byte-identical to `main`; live, read-only with writes blocked: the owner's open Sleep
+  Tight, Evangeline item (no date → TBA) is still stored but not shown or counted (Review: "Nothing to review"), the book
+  still has no chosen date, The Kill Artist and The Unlikely Spy still Finished, no write attempted. Not verified: a live
+  Refresh closing the stored item (it would change the owner's findings); real phones.
+- Previous release: Books' Library and Following tabs
   and collapsible Library groups (owner's request; PR #107, `25a59ac`), 2026-11-27 UTC, page only: Following replaces Series
   and Authors (followed authors with their page, series, Add/Skip/Add all and other books; then other followed series); a
   series also followed under its followed author shows once there with its own automatic-adding and Stop following controls;
@@ -40,7 +49,7 @@ membership enforcement, research permissions, holds, reliable backup and restore
   `main`; live, read-only with writes blocked: the old route opens Following, Gabriel Allon once under Daniel Silva with its
   own controls, a Library group collapsed with its count, The Kill Artist and The Unlikely Spy still Finished, no write
   attempted. Not verified: real phones.
-- Previous release: the Books Library grouped by author,
+- Earlier: the Books Library grouped by author,
   series and reading order (owner's request; PR #105, `8f09233`), 2026-11-27 UTC, page only: the visible books under compact
   headings (author A–Z by first-listed author, "Unknown author" last; each series A–Z in series order; then "Standalone
   books" by date, undated last; empty headings not drawn; each book once by its own saved author and series); a "#" column
