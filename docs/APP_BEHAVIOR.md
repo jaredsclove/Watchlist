@@ -188,7 +188,8 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   Hardcover token (a `read:catalog` key of the owner's account, function secret `HARDCOVER_TOKEN`), answers members only and
   sends only fixed read-only queries; the page never holds the token. A book's genres are Hardcover's readers' genre tags
   mapped onto a short list (`BOOK_GENRE_ALIASES`; at most four; others left out). Dates are shown as Hardcover gives them; a
-  1 January date is marked "may be a placeholder" (often a year-only value) and not changed. A date the member chooses
+  1 January date carries a small "?" mark (BK1b): its meaning ("often stands for a year-only date") is its accessible name and
+  shows on hover, focus or tap (spanning the screen below it at 600 px and narrower); the date isn't changed. A date the member chooses
   (⋯ → Choose a date…) is kept until they change or clear it; official-site dates only ever arrive as suggestions in Review.
   - **Lists show, never change.** An author's list is Hardcover's Author credits (never translators or narrators), the
     member's manual credits, and the books of the author's verified series: series Hardcover gives the author as primary
@@ -196,27 +197,42 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
     Merged records are left out by the queries; translations (an edition language other than English only), collections
     and box sets (Hardcover's flag or the title), partial books, placeholder titles ("Untitled", "<series> #N") and possible
     duplicates (the same title, the same title before a colon, or another record at a series position: the record with more
-    readers is shown) go under "Show N hidden records", with the reason. A book with no edition language is "Language unknown",
+    readers is shown) go under "Show N hidden records", with the reason. The main views remember which lists show them (page
+    memory); + Add book's browse keeps its own, closed on each fresh browse and kept while that browse is redrawn. A book with no edition language is "Language unknown",
     never taken as English; it stays listed when it is announced or holds a series place. A saved book is always shown.
     Nothing hides, merges or changes a saved book.
   - **Series** are in order. Main titles are whole-number positions; the next book is the first main title that isn't
     Finished, Dropped (owner, 2026-11-26: Dropped counts as passed) or skipped (⋯ → Skip in its series, or Skip beside a book
     not saved; a skip decision, kept for a book not saved too). Companions (fractional or unnumbered positions) are listed
     and can be saved and tracked, but are never the next book and never added automatically (owner, 2026-11-26).
+  - **Add all** (BK1b, owner's walkthrough): "Add all in series (N)" on a series list and "Add all books (N)" on an author's,
+    in Series, Authors and + Add book's browse. It saves as Want to read each main title shown with nothing saved at its place
+    that isn't skipped or dismissed/removed, and, for an author, their other shown books that aren't a companion anywhere:
+    never hidden records (showing them changes nothing) or companions; saved books keep their statuses; each title once. An
+    inline confirmation names the count (Cancel returns focus to the button). One write adds them in turn, each refused if
+    dismissed or removed meanwhile (counted, never brought back); a failure stops it and says what was added, what failed (or
+    wasn't confirmed: it may or may not have been added) and how many weren't tried, after the list is read again. With
+    nothing left it says so, and focus stays at that place.
   - **Following** is explicit and adds nothing. A followed series has "Automatically add new titles on refresh" (off unless
     turned on). Following an author whose official site is supported (`KNOWN_BOOK_SITES`: Robert Galbraith, Daniel Silva,
     Karen M. McManus) also saves that site's book-listing page as the member's setting; any author's page can be set or
-    changed in Authors.
+    changed in Authors. A follow's starting catalog (BK1b: the ids of every record of the series, or of the author and their
+    series, hidden ones included) is saved with it as a `baseline` decision; a follow without one (made before BK1b) gets it
+    from its next refresh, which offers nothing new for that follow that time.
   - **Refresh books** (one button, members alike; owner, 2026-11-26: website checks aren't limited by research access)
     reads Hardcover for each followed author (their books and series) and series, then each official listing page set for a
-    followed author or a followed series' author. A title is new for a follow when it has no date, is upcoming, or came out
-    at most 180 days before the follow began (an author's backlist is on their page, not in Review). Author discoveries
+    followed author or a followed series' author. A title is new for a follow when its record wasn't in the follow's starting
+    catalog, however recent (owner's walkthrough: the newest book already listed isn't "new"); open items stay until decided. Author discoveries
     always wait in Review. A followed series with automatic adding on adds a new main title as Want to read only when it is
     a Hardcover record at a whole-number position with an English edition, not excluded or skipped, with no other saved
     record at its place and no open duplicate question; anything else waits in Review. Websites: the shared rule reads the
     listing page's same-site links under the commonest book prefix (three pages or more, as `/strike-books/<book>` or
     `/books/<book>`), or on a flat site every single-level page that isn't a navigation page; a link matching a known title
-    (Hardcover's, a saved book's or an alternative title) offers nothing; up to five unmatched links' pages are read for their
+    (Hardcover's, a saved book's or an alternative title) offers nothing. A followed series' author with a page set has their
+    whole Hardcover catalog read for this matching only: a known book keeps its Hardcover identity, and an open website item
+    for a title now matching one is closed (counted in the report; no decision changes). For an author followed only through
+    a series, only links the page lists under that series' heading are in scope; their other books and standalones are
+    counted out of scope until the author is followed; up to five unmatched links' pages are read for their
     title and dated phrase ("Published on …", "Expected Release Date: …", "Coming <date>", "On sale …", "Available on …",
     "Coming in <year>"); a book page with no date that links to its publisher's page has that page read too (two at most); a
     site's front page announcement ("Coming July 14, 2026! In the 26th book of the … series") is read for the supported site
@@ -250,7 +266,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
     author, optional series and number and optional date; it can be matched to Hardcover later (⋯ → Match to Hardcover…).
     ⋯ → Edit corrects a saved book's title, authors or series place (the member's copy; Hardcover's record isn't changed).
   - **Data:** `book_entries`, `book_follows`, `book_sites`, `book_associations`, `book_decisions` (skip, exclude, keep_date,
-    not_same, not_author) and `book_findings` (open review items, pending or later) are the member's, owner-only, written only
+    not_same, not_author, and BK1b's baseline: `{ids}`, at most 5,000, 60,000 bytes) and `book_findings` (open review items, pending or later) are the member's, owner-only, written only
     through the `library_book_*` functions (expected values; one saved book per Hardcover id) or a restore, and in backups.
     `book_cache` (Hardcover records and each site's last reading) is replaceable: never in a backup, untouched by restore,
     emptied by `library_book_cache_purge`. Books aren't in queues (owner's scope).

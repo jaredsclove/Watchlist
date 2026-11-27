@@ -37,7 +37,7 @@ export async function replay(exec, { through = 'final' } = {}) {
   await exec(`insert into private.library_members (user_id, note) values ('${B}', 'local B')`);
 }
 
-// After replay: the simplification, Q1, G1, TC1 (with the local stand-in for pg_cron) and, unless books: false, BK1 — the current
+// After replay: the simplification, Q1, G1, TC1 (with the local stand-in for pg_cron) and, unless books: false, BK1 and BK1b — the current
 // production state.
 export async function toCurrent(exec, { books = true } = {}) {
   const run = (key, f) => exec(`select set_config('watchlist.${key}_run', 'local-${key}', false);\n` + file(f));
@@ -46,7 +46,7 @@ export async function toCurrent(exec, { books = true } = {}) {
   await run('g1', 'db/g1_games.sql');
   await exec(file('db/test/pg_cron_shim.sql'));
   await run('tc1', 'db/tc1_tmdb_cache.sql');
-  if (books) await run('bk1', 'db/bk1_books.sql');
+  if (books) { await run('bk1', 'db/bk1_books.sql'); await run('bk1b', 'db/bk1b_baselines.sql'); }
 }
 
 // The page's own code, loaded as the admin tool loads it: P('validateBackupObject')(doc).
@@ -207,7 +207,8 @@ export function library10(seed = 1, scale = 8) {
     { id: id(95043), kind: 'exclude', key: `t:${hc(500)}:zz-book-${seed}-four`, value: { reason: 'removed', title: `ZZ Book ${seed} Four` }, created_at: at(2) },
     { id: id(95044), kind: 'keep_date', key: `dt:hc:${hc(1)}:2013-04-04`, value: { date: '2013-04-04' }, created_at: at(3) },
     { id: id(95045), kind: 'not_same', key: `dp:hc:${hc(1)}:hc:${hc(8)}`, value: {}, created_at: at(4) },
-    { id: id(95046), kind: 'not_author', key: `cg:${hc(9)}:${hc(500)}`, value: {}, created_at: at(5) }];
+    { id: id(95046), kind: 'not_author', key: `cg:${hc(9)}:${hc(500)}`, value: {}, created_at: at(5) },
+    { id: id(95047), kind: 'baseline', key: `f:${id(95012)}`, value: { ids: [hc(1), hc(2), hc(3)] }, created_at: at(2) }];
   t.book_findings = [
     { id: id(95051), fingerprint: `nb:site:${hc(500)}:zz-book-${seed}-five`, source: 'website', kind: 'new_book', status: 'pending',
       subject: { title: `ZZ Book ${seed} Five`, author_id: hc(500), author: `ZZ Author ${seed}`, url: 'https://zz.example.com/books/five' },

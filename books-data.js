@@ -13,7 +13,6 @@ const KNOWN_BOOK_SITES = {
 };
 const BOOK_STATUS_LABELS = { want: 'Want to read', reading: 'Reading', paused: 'Paused', finished: 'Finished', dropped: 'Dropped' };
 const BOOK_DONE = new Set(['finished', 'dropped']); // (owner, 2026-11-26: a Dropped book counts as passed in its series)
-const BOOK_NEW_WINDOW_DAYS = 180; // a title is "new" for a follow when it has no date, is upcoming, or came out at most this long before the follow
 
 // ── Titles and keys ──
 function normBookTitle(s) {
@@ -250,18 +249,54 @@ function bookAuthorView(author, { seriesList = [], associations = [], entries = 
   return { author, shown, hidden, verified, gaps };
 }
 
+// Add all: the titles a bulk add would save as Want to read. A series' main positions with a shown record and nothing saved there
+// (no record of that place saved, no book saved by hand placed there), not skipped and not excluded (dismissed or removed); for
+// an author, their verified series that way, then their other shown books that aren't a companion anywhere. Hidden records and
+// companions are never included (showing Hidden changes nothing). Saved books are left as they are. One entry per record.
+function bookAddAllPlan(target, { entries = [], decisions = new Map(), associations = [], today = '9999-12-31' } = {}) {
+  const out = new Map(), excluded = rec => bookKeysOf({ hardcoverId: rec.id, title: rec.title, authors: rec.authors }).some(k => decisions.has(`exclude|${k}`));
+  const idx = bookSavedIndex(entries);
+  const fromSeries = s => {
+    const v = bookSeriesView(s, { entries, decisions, today });
+    for (const p of v.positions) {
+      if (!p.main || !p.rec || p.entry || p.done || p.skipped || out.has(p.rec.id) || excluded(p.rec)) continue;
+      out.set(p.rec.id, { rec: p.rec, seriesPl: { id: s.id, name: s.name, position: p.position } });
+    }
+  };
+  if (target.kind === 'series') fromSeries(target.series);
+  else {
+    const v = bookAuthorView(target.author, { seriesList: target.seriesList || [], associations, entries, decisions, today });
+    v.verified.forEach(fromSeries);
+    const inVerified = new Set(v.verified.flatMap(s => s.books.map(b => b.rec.id)));
+    for (const x of v.shown) {
+      const r = x.rec;
+      if (inVerified.has(r.id) || x.entry || bookSavedFor(r, idx) || out.has(r.id) || excluded(r) || decisions.has(`skip|hc:${r.id}`)) continue;
+      if ((r.series || []).some(pl => pl.position != null && !bookMainPosition(pl.position))) continue; // (a companion somewhere)
+      out.set(r.id, { rec: r, seriesPl: null });
+    }
+  }
+  return [...out.values()];
+}
+
 // The series worth reading for an author: those Hardcover gives them as primary author with at least two books (an author's
 // list also has one-book "series" made by readers' typing, such as "Gabriel Allon #23", and translated series).
 const bookAuthorSeriesIds = list => (list || []).filter(x => x && Number.isInteger(x.id) && (Number(x.books_count) || 0) >= 2).map(x => x.id).slice(0, 12);
 
 // ── Refresh books ──
-// A title is new for a follow when it has no date, is upcoming, or came out within BOOK_NEW_WINDOW_DAYS before the follow began
-// (so following an author offers their latest and announced books, not their whole backlist, which the author's page lists).
-function bookNewForFollow(rec, follow, today) {
-  const d = bookShownDate(null, rec);
-  if (!d || d.value === 'TBA' || bookUpcoming(d, today)) return true;
-  const since = new Date(new Date(String(follow.created_at)).getTime() - BOOK_NEW_WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
-  return bookDateSortKey(d) >= since;
+// A title is new for a follow when its Hardcover record wasn't in the follow's starting catalog (its baseline: every record the
+// member could see when they followed, BK1b). A follow without a baseline yet (made before BK1b) gets one from this refresh and
+// offers nothing new until the next: what is listed now was there to see, however recent (the owner's walkthrough, 2026-11-27).
+const bookBaselineKey = follow => `f:${follow.id}`;
+function bookNewForFollow(rec, baseline) { return !!baseline && !baseline.has(rec.id); }
+// The ids a follow starts with: every record of the series, or of the author and their series (hidden ones included).
+function bookFollowCatalogIds(follow, read) {
+  const ids = new Set();
+  if (follow.kind === 'series') { const s = read.series.get(follow.hardcover_id); if (s) s.books.forEach(b => ids.add(b.rec.id)); }
+  else {
+    const a = read.authors.get(follow.hardcover_id);
+    if (a) { a.books.forEach(r => ids.add(r.id)); (read.seriesOf.get(a.id) || []).forEach(sid => { const s = read.series.get(sid); if (s) s.books.forEach(b => ids.add(b.rec.id)); }); }
+  }
+  return [...ids].slice(0, 5000);
 }
 // A website candidate's names: its link texts and its address's last part, with the wording sites put around a title removed.
 function bookCandidateNames(c, authorName) {
@@ -295,15 +330,24 @@ function bookRefreshFindings(read, state) {
     subject: { title: rec.title, hardcover_id: rec.id, authors: rec.authors.slice(0, 5), date: rec.date || (rec.year ? String(rec.year) : null), lang: rec.lang, why, ...extra },
     evidence: [{ url: `https://hardcover.app/books/${rec.id}`, text: 'Hardcover' }], exclude_keys: bookKeysOf({ hardcoverId: rec.id, title: rec.title, authors: rec.authors }) });
   const authorFollows = follows.filter(f => f.kind === 'author'), seriesFollows = follows.filter(f => f.kind === 'series');
+  // Baselines: the follow's own (a decision row), else one made now from this read (saved by the page; nothing new this time).
+  const baselines = [], baselineOf = f => {
+    const d = decisions.get(`baseline|${bookBaselineKey(f)}`);
+    if (d && d.value && Array.isArray(d.value.ids)) return new Set(d.value.ids);
+    const ids = bookFollowCatalogIds(f, read);
+    if (ids.length) baselines.push({ follow: f, ids });
+    return null;
+  };
   // Followed series: new main and companion titles; a main title added automatically when the follow allows it.
   for (const f of seriesFollows) {
     const s = read.series.get(f.hardcover_id);
     if (!s) { report.hardcoverFailed.push(f.name); continue; }
     report.hardcover++;
+    const base = baselineOf(f);
     const view = bookSeriesView(s, { entries, decisions, today });
     for (const p of [...view.positions, ...view.companions]) {
       if (!p.rec || p.entry || savedKeyOf(p.rec) || p.skipped) continue;
-      if (!bookNewForFollow(p.rec, f, today)) continue;
+      if (!bookNewForFollow(p.rec, base)) continue;
       const keys = bookKeysOf({ hardcoverId: p.rec.id, title: p.rec.title, authors: p.rec.authors });
       if (excluded(keys)) continue;
       const fp = `nb:hc:${p.rec.id}`;
@@ -321,9 +365,10 @@ function bookRefreshFindings(read, state) {
     report.hardcover++;
     const site = read.sites.get(f.hardcover_id);
     const siteTitles = site && site.ok && site.listing ? new Set(site.listing.candidates.flatMap(c => bookCandidateNames(c, a.name))) : null;
+    const base = baselineOf(f);
     const view = bookAuthorView(a, { seriesList: (read.seriesOf.get(a.id) || []).map(id => read.series.get(id)).filter(Boolean), associations, entries, decisions, siteTitles, today });
     for (const x of view.shown) {
-      if (x.entry || savedKeyOf(x.rec) || !bookNewForFollow(x.rec, f, today)) continue;
+      if (x.entry || savedKeyOf(x.rec) || !bookNewForFollow(x.rec, base)) continue;
       const keys = bookKeysOf({ hardcoverId: x.rec.id, title: x.rec.title, authors: x.rec.authors });
       if (excluded(keys)) continue;
       put(newBookRow(x.rec, `New from ${a.name}`));
@@ -373,8 +418,13 @@ function bookRefreshFindings(read, state) {
     }
   }
   // Official sites.
-  const siteCache = [];
+  const siteCache = [], followedAuthors = new Set(authorFollows.map(f => f.hardcover_id));
+  const followedSeriesNames = new Map(); // author id → normalized names of their followed series (a series-only author's scope)
+  seriesFollows.forEach(f => { const s = read.series.get(f.hardcover_id); if (s && s.author) (followedSeriesNames.get(s.author.id) || followedSeriesNames.set(s.author.id, []).get(s.author.id)).push(normBookTitle(s.name)); });
+  const misread = []; // open website items for a title that is in the author's Hardcover catalog (a misidentification to close)
+  report.outOfScope = 0; report.siteMatched = 0;
   for (const [authorId, site] of read.sites) {
+    // Matching uses the author's whole Hardcover catalog (read for a series-only author too), so a known book keeps its identity.
     const a = read.authors.get(authorId) || { id: authorId, name: site.authorName, books: [] };
     if (!site.ok || !site.listing || !site.listing.ok) { report.sitesFailed.push({ author: site.authorName, error: site.error || (site.listing && site.listing.error) || 'couldn’t be read' }); continue; }
     const known = new Map(); // normalized title → record or entry
@@ -385,6 +435,10 @@ function bookRefreshFindings(read, state) {
       const k = normBookTitle(e.title), had = known.get(k);
       known.set(k, { entry: e, rec: had && !had.entry ? had : had && had.rec ? had.rec : null });
     });
+    // Open website items whose title is in this author's Hardcover catalog: they were misidentified (a known or saved book
+    // isn't a website-only one) and are closed; Hardcover's own record is what Review and the lists use.
+    findings.filter(x => x.source === 'website' && x.kind === 'new_book' && !x.subject.hardcover_id && x.subject.author_id === authorId)
+      .forEach(x => { const k = known.get(normBookTitle(x.subject.title)); if (k) { misread.push(x.fingerprint); report.siteMatched++; } });
     const cands = site.listing.candidates;
     const matchOf = c => { for (const n of bookCandidateNames(c, a.name)) if (known.has(n)) return known.get(n); return null; };
     const matched = cands.filter(c => matchOf(c)).length;
@@ -403,7 +457,11 @@ function bookRefreshFindings(read, state) {
         evidence: [{ url: site.listing.url, text: 'Official book page' }], exclude_keys: [] });
       continue;
     }
+    // A series-only follow's scope: only links the site lists under that series; the author's other books are out of scope until
+    // the author is followed.
+    const inScope = c => followedAuthors.has(authorId) || (c.headings || []).some(h => (followedSeriesNames.get(authorId) || []).some(n => n && normBookTitle(h).includes(n)));
     for (const c of unmatched) {
+      if (!inScope(c)) { report.outOfScope++; continue; }
       const page = site.pages.get(c.url) || null;
       const title = bookCandidateTitle(c, page, a.name);
       const names = bookCandidateNames(c, a.name).concat(page && page.title ? [normBookTitle(page.title)] : []);
@@ -445,6 +503,7 @@ function bookRefreshFindings(read, state) {
   // Open items now settled: a book now saved, a match now linked or gone, a credit now given, a pair no longer both saved.
   const entryIds = new Set(entries.map(e => e.id));
   const close = findings.filter(x => {
+    if (misread.includes(x.fingerprint)) return true;
     const s = x.subject || {};
     if (x.kind === 'new_book' && s.hardcover_id) return savedHc.has(s.hardcover_id);
     if (x.kind === 'new_book' && s.title) return !!idx.byKey.get(bookTitleKey({ id: s.author_id, name: s.author }, s.title));
@@ -456,5 +515,5 @@ function bookRefreshFindings(read, state) {
   }).map(x => x.fingerprint);
   report.autoAdded = autoAdd.length;
   const added = new Set(autoAdd.map(x => x.fingerprint)); // (a title added automatically isn't also offered for review)
-  return { rows: [...rows.values()].filter(r => !close.includes(r.fingerprint) && !added.has(r.fingerprint)), close, autoAdd, siteCache, report };
+  return { rows: [...rows.values()].filter(r => !close.includes(r.fingerprint) && !added.has(r.fingerprint)), close, autoAdd, siteCache, baselines, report };
 }

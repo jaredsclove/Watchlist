@@ -122,6 +122,8 @@ const entry = (k, rec, o = {}) => ({ id: ID('6c000000', k), hardcover_id: rec ? 
   series: o.series || (rec ? rec.book_series.filter(s => s.position).map(s => ({ id: s.series.id, name: s.series.name, position: s.position })) : []), status: o.status || 'want', chosen_date: o.chosen_date || null, created_at: TS, updated_at: TS });
 const follow = (k, kind, id, name, o = {}) => ({ id: ID('6d000000', k), kind, hardcover_id: id, name, auto_add: !!o.auto, created_at: o.created || TS, updated_at: TS });
 const byId = id => catalog().find(b => b.id === id);
+// A follow's starting catalog (BK1b): every synthetic record except the ones given, which count as new.
+const seen = (k, ...except) => ({ id: ID('6a900000', k), kind: 'baseline', key: `f:${ID('6d000000', k)}`, value: { ids: catalog().map(b => b.id).filter(id => !except.includes(id)) }, created_at: TS });
 async function boot(opts = {}) {
   const core = await import('../supabase/functions/books/core.mjs');
   const stub = booksStub({ core, ...opts.stub });
@@ -166,7 +168,7 @@ test('Library: statuses, author and series columns, genres; dates as Hardcover g
   await open(app);
   const r1 = text(rowOf(app, e1.id));
   assert.match(r1, /ZZ Third Case/); assert.match(r1, /ZZ Galbraith/); assert.match(r1, /ZZ Strike #3/);
-  assert.match(r1, /Jan 1, 2023/, 'the date as Hardcover gives it'); assert.match(r1, /may be a placeholder/, 'marked as possibly a placeholder, not converted');
+  assert.match(r1, /Jan 1, 2023/, 'the date as Hardcover gives it'); assert.match(rowOf(app, e1.id), /class="book-ph"[^>]*aria-label="Possible placeholder date\. Hardcover lists 1 January/, 'marked as possibly a placeholder (compact, explained on focus), not converted');
   assert.match(rowOf(app, e1.id), /<option value="reading" selected>Reading<\/option>/);
   assert.match(text(rowOf(app, e2.id)), /Jun 1, 2017 .*your date/, 'the member’s date shown and labelled');
   assert.ok(!libraryOrder(app).includes(e3.id), 'the default status filter leaves out Finished and Dropped');
@@ -265,7 +267,7 @@ test('+ Add book: Hardcover search; browsing an author adds nothing; Add saves o
 test('Refresh books: an author’s new and announced titles go to review (never added); a followed series adds a matched new main title only with automatic adding on', async () => {
   const fresh = '2026-11-20T00:00:00+00:00';
   const app = await boot({ follows: [follow(1, 'author', A_PEN.id, A_PEN.name, { created: fresh }), follow(2, 'series', 9202, 'ZZ Allon', { created: fresh })],
-    entries: [entry(1, byId(3001)), entry(2, byId(3002))], stub: { catalog: { books: [bk(3003, 'ZZ Ransom', { authors: [A_SPY], series: inS(S_ALLON, '3'), date: day(60) })] } } });
+    decisions: [seen(1, 1004), seen(2)], entries: [entry(1, byId(3001)), entry(2, byId(3002))], stub: { catalog: { books: [bk(3003, 'ZZ Ransom', { authors: [A_SPY], series: inS(S_ALLON, '3'), date: day(60) })] } } });
   await open(app);
   await refresh(app);
   const nb = store(app, 'book_findings').filter(f => f.kind === 'new_book').map(f => f.subject.title).sort();
@@ -281,7 +283,7 @@ test('Refresh books: an author’s new and announced titles go to review (never 
   assert.match(text(screen(app)), /1 title added automatically as Want to read/);
   assert.doesNotMatch(text(screen(app)), /1 new item for review/, 'the added title isn’t also counted for review');
   // An unknown-language or translated record, or a place another saved record holds, is never added automatically.
-  const app2 = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon', { created: fresh, auto: true })], entries: [entry(1, byId(3001))],
+  const app2 = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon', { created: fresh, auto: true })], decisions: [seen(1)], entries: [entry(1, byId(3001))],
     stub: { catalog: { books: [bk(3004, 'ZZ Unknown Lang', { authors: [A_SPY], series: inS(S_ALLON, '4'), date: day(30), lang: 'unknown' })] } } });
   await open(app2); await refresh(app2);
   assert.ok(!store(app2, 'book_entries').some(e => e.hardcover_id === 3004) && store(app2, 'book_findings').some(f => f.subject.hardcover_id === 3004), 'language unknown: reviewed, not added');
@@ -446,7 +448,7 @@ test('focus: a status change keeps focus on that book’s status control; a remo
 
 test('an automatic add from a page loaded before a dismissal on another device is refused and counted, not added; titles without Latin letters get keys of their own', async () => {
   const fresh = '2026-11-20T00:00:00+00:00';
-  const app = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon', { created: fresh, auto: true })], entries: [entry(1, byId(3001))],
+  const app = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon', { created: fresh, auto: true })], decisions: [seen(1)], entries: [entry(1, byId(3001))],
     stub: { catalog: { books: [bk(3003, 'ZZ Ransom', { authors: [A_SPY], series: inS(S_ALLON, '3'), date: day(60) })] } } });
   await open(app);
   // (the dismissal saved elsewhere after this page read its decisions)
@@ -458,6 +460,135 @@ test('an automatic add from a page loaded before a dismissal on another device i
   const keys = [app.run(`bookTitleKey({ id: 1 }, 'Война и мир')`), app.run(`bookTitleKey({ id: 1 }, 'Анна Каренина')`), app.run(`bookTitleKey({ id: 1 }, 'The War')`)];
   assert.strictEqual(new Set(keys).size, 3, 'distinct keys for titles with no Latin letters');
   assert.match(keys[0], /^t:1:x[0-9a-z]+$/);
+});
+
+// ── The owner's Silva walkthrough (2026-11-27), reproduced with synthetic data ──
+const SPY_SITE = 'https://www.zz-spy.example.com/the-books/';
+const spySite = () => ({ id: ID('6f000000', 9), hardcover_author_id: A_SPY.id, author_name: A_SPY.name, listing_url: SPY_SITE, created_at: TS, updated_at: TS });
+function spySites() {
+  const links = [['zz-kill-artist', 'ZZ Kill Artist', 'The ZZ Allon Series'], ['zz-english-assassin', 'ZZ English Assassin', 'The ZZ Allon Series'], ['zz-ransom', 'ZZ Ransom', 'The ZZ Allon Series'],
+    ['zz-unlikely-spy', 'ZZ Unlikely Spy', 'Standalone Novels'], ['zz-mark-of-the-assassin', 'ZZ Mark of the Assassin', 'Standalone Novels'], ['zz-marching-season', 'ZZ Marching Season', 'Standalone Novels']];
+  let last = null, body = '<a href="/about/">About</a><a href="/news/">News</a>';
+  for (const [slug, title, heading] of links) { if (heading !== last) { body += `<h2>${heading}</h2>`; last = heading; } body += `<a href="/${slug}/">${title}</a>`; }
+  const page = t => html(`<h1>${t}</h1>`).replace('<head></head>', `<head><meta property="og:title" content="${t} | zz-spy"></head>`);
+  return { [SPY_SITE]: html(body), 'https://www.zz-spy.example.com/zz-marching-season/': page('ZZ Marching Season'), 'https://www.zz-spy.example.com/zz-mark-of-the-assassin/': page('ZZ Mark of the Assassin') };
+}
+const spyCatalog = { books: [bk(3003, 'ZZ Ransom', { authors: [A_SPY], series: inS(S_ALLON, '3'), date: day(-20) }), bk(3010, 'ZZ Mark of the Assassin', { authors: [A_SPY], date: '1998-01-01' })] };
+
+test('Silva walkthrough: a series-only follow checks only that series on the site; known books keep their Hardcover identity; the catalog at follow time is never “new”; following the author later adds no duplicates', async () => {
+  const app = await boot({ sites: [spySite()], stub: { catalog: spyCatalog, sites: spySites() } });
+  await open(app, 'booksseries');
+  // Follow the series only: its starting catalog is noted (Ransom, the newest, included), nothing is added.
+  await app.ctx.followBookSeries(9202, 'ZZ Allon'); await settle();
+  const fs = store(app, 'book_follows')[0];
+  const base = store(app, 'book_decisions').find(d => d.kind === 'baseline' && d.key === `f:${fs.id}`);
+  assert.ok(base && [3001, 3002, 3003].every(id => base.value.ids.includes(id)), 'the series’ records at follow time');
+  assert.strictEqual(store(app, 'book_entries').length, 0, 'following adds nothing');
+  await refresh(app);
+  assert.deepStrictEqual(store(app, 'book_findings').map(f => f.fingerprint), [], 'no Ransom “new”, no other series or standalones from the site');
+  assert.match(text(screen(app)), /nothing new for review .*Hardcover: 1 follow checked .*official sites checked: ZZ Silva/);
+  // Finished two books, one in the series and one standalone; then follow the author.
+  await app.ctx.addHardcoverBook(3001, { id: 9202, name: 'ZZ Allon', position: '1' }, null, 'finished'); await settle();
+  app.run(`booksData.cache.book.set(3009, bookRecord(${JSON.stringify(byId(3009))}))`);
+  await app.ctx.addHardcoverBook(3009, null, null, 'finished'); await settle();
+  await app.ctx.followBookAuthor(A_SPY.id, A_SPY.name); await settle();
+  const fa = store(app, 'book_follows').find(f => f.kind === 'author');
+  assert.ok(store(app, 'book_decisions').find(d => d.key === `f:${fa.id}`).value.ids.includes(3010), 'the author’s catalog at follow time');
+  await refresh(app); await refresh(app);
+  const fps = store(app, 'book_findings').map(f => f.fingerprint);
+  assert.deepStrictEqual(fps, [`nb:site:${A_SPY.id}:zz-marching-season`], 'only the genuine website-only book, once; the known Mark of the Assassin keeps its Hardcover identity; saved books aren’t offered');
+  assert.deepStrictEqual(store(app, 'book_entries').map(e => [e.hardcover_id, e.status]).sort(), [[3001, 'finished'], [3009, 'finished']], 'the Finished books are unchanged');
+});
+
+test('a follow made before starting catalogs gets one from the next refresh (nothing offered as new that time; open items stay); a misidentified website item is closed; personal decisions are kept', async () => {
+  const pending = { id: ID('6b900000', 1), fingerprint: 'nb:hc:3003', source: 'hardcover', kind: 'new_book', status: 'pending', subject: { hardcover_id: 3003, title: 'ZZ Ransom' }, evidence: [], exclude_keys: ['hc:3003'], first_seen_at: TS, last_seen_at: TS };
+  const misread = { id: ID('6b900000', 2), fingerprint: `nb:site:${A_SPY.id}:zz-mark-of-the-assassin`, source: 'website', kind: 'new_book', status: 'later', subject: { title: 'ZZ Mark of the Assassin', author_id: A_SPY.id, author: A_SPY.name, url: 'https://www.zz-spy.example.com/zz-mark-of-the-assassin/' }, evidence: [], exclude_keys: [], first_seen_at: TS, last_seen_at: TS };
+  const skip = { id: ID('6a900000', 50), kind: 'skip', key: 'hc:3002', value: {}, created_at: TS }, dismissed = { id: ID('6a900000', 51), kind: 'exclude', key: 'hc:3099', value: { reason: 'dismissed' }, created_at: TS };
+  const app = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon')], sites: [spySite()], findings: [pending, misread], decisions: [skip, dismissed],
+    stub: { catalog: spyCatalog, sites: spySites() } });
+  await open(app);
+  await refresh(app);
+  const base = store(app, 'book_decisions').find(d => d.kind === 'baseline');
+  assert.ok(base && base.key === `f:${ID('6d000000', 1)}` && base.value.ids.includes(3003), 'made from this read');
+  assert.deepStrictEqual(store(app, 'book_findings').map(f => [f.fingerprint, f.status]), [['nb:hc:3003', 'pending']], 'the owner’s open item stays for them; the misidentified website item is closed');
+  assert.ok(store(app, 'book_decisions').some(d => d.key === 'hc:3002') && store(app, 'book_decisions').some(d => d.key === 'hc:3099'), 'skips and dismissals kept');
+  assert.match(text(screen(app)), /1 follow’s current catalog noted as already seen .*1 official-site item closed: Hardcover lists that book/);
+  // In backups as a decision row: valid at up to 5,000 ids; a malformed one is refused before anything is restored.
+  const backup = await app.ctx.buildBackupObject();
+  assert.ok(backup.tables.book_decisions.some(d => d.kind === 'baseline') && !Array.from(app.ctx.validateBackupObject(backup)).length);
+  const big = JSON.parse(JSON.stringify(backup)); big.tables.book_decisions.find(d => d.kind === 'baseline').value.ids = Array.from({ length: 5000 }, (_, i) => 10000000 + i);
+  assert.deepStrictEqual(Array.from(app.ctx.validateBackupObject(big)), []);
+  const bad = JSON.parse(JSON.stringify(backup)); bad.tables.book_decisions.find(d => d.kind === 'baseline').value = { ids: ['3003'] };
+  assert.ok(Array.from(app.ctx.validateBackupObject(bad)).some(x => /book_decisions/.test(x)), 'a malformed starting catalog is refused');
+  // A title Hardcover lists later is new.
+  app.stub.calls.length = 0;
+  const app2 = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon')], decisions: [base], stub: { catalog: { books: spyCatalog.books.concat(bk(3011, 'ZZ Next One', { authors: [A_SPY], series: inS(S_ALLON, '4'), date: day(90) })) } } });
+  await open(app2); await refresh(app2);
+  assert.deepStrictEqual(store(app2, 'book_findings').map(f => f.fingerprint), ['nb:hc:3011']);
+});
+
+test('Add all in series and Add all books: main titles not saved, skipped or dismissed, as Want to read; hidden records and companions never; saved books unchanged; confirmed, counted, deduped', async () => {
+  const extra = { books: [bk(3003, 'ZZ Ransom', { authors: [A_SPY], series: inS(S_ALLON, '3'), date: '2024-01-01' }), bk(3004, 'ZZ Dismissed One', { authors: [A_SPY], series: inS(S_ALLON, '4'), date: '2025-01-01' }),
+    bk(3005, 'ZZ Allon Novella', { authors: [A_SPY], series: inS(S_ALLON, '4.5'), date: '2025-06-01' }), bk(3006, 'ZZ Fifth', { authors: [A_SPY], series: inS(S_ALLON, '5'), date: '2025-09-01' }),
+    bk(3007, 'ZZ Fifth (German)', { authors: [A_SPY], series: inS(S_ALLON, '5'), date: '2025-09-01', lang: 'other', users: 1 }), bk(3010, 'ZZ Mark of the Assassin', { authors: [A_SPY], date: '1998-01-01' })] };
+  const kill = entry(1, byId(3001), { status: 'finished' }), spy = entry(2, byId(3009), { status: 'finished' });
+  const decisions = [{ id: ID('6a900000', 60), kind: 'skip', key: 'hc:3002', value: {}, created_at: TS }, { id: ID('6a900000', 61), kind: 'exclude', key: 'hc:3004', value: { reason: 'dismissed' }, created_at: TS }];
+  const app = await boot({ entries: [kill, spy], decisions, follows: [follow(1, 'series', 9202, 'ZZ Allon')], stub: { catalog: extra } });
+  await open(app, 'booksseries'); await refresh(app);
+  app.ctx.toggleBookFollow(ID('6d000000', 1)); await settle();
+  app.ctx.toggleBookHidden('s:9202'); await settle(); // (showing Hidden makes nothing eligible)
+  assert.match(text(screen(app)), /Add all in series \(2\)/);
+  app.ctx.askBookAddAll('s:9202'); await settle();
+  assert.match(text(screen(app)), /Add 2 books as Want to read\? Saved books keep their statuses/);
+  assert.strictEqual(app.dom.active().getAttribute('data-baction'), 'bulk-s:9202-yes', 'focus on the confirmation');
+  await app.ctx.addAllBooks('s:9202'); await settle();
+  const ids = store(app, 'book_entries').map(e => [e.hardcover_id, e.status]).sort((a, b) => a[0] - b[0]);
+  assert.deepStrictEqual(ids, [[3001, 'finished'], [3003, 'want'], [3006, 'want'], [3009, 'finished']], 'Ransom and #5; not the skipped #2, the dismissed #4, the companion or the translation');
+  assert.ok(rpcs(app, 'library_book_add').every(r => r.body.p_refuse_keys.length && !r.body.p_clear_keys.length), 'dismissals are checked, never lifted');
+  assert.match(text(app.el('banner').innerHTML), /Added 2 books from ZZ Allon as Want to read/);
+  assert.match(text(screen(app)), /Add all in series: nothing to add/);
+  // Add all books from the author in + Add book: their other main title only (the series is done; duplicates across lists never).
+  app.ctx.openBooksAdd(null); await settle();
+  await app.ctx.browseBooks('author', A_SPY.id); await settle();
+  assert.match(text(dialog(app)), /Add all books \(1\)/);
+  app.ctx.askBookAddAll(`a:${A_SPY.id}`, true); await settle();
+  await app.ctx.addAllBooks(`a:${A_SPY.id}`, true); await settle();
+  assert.ok(store(app, 'book_entries').some(e => e.hardcover_id === 3010 && e.status === 'want') && store(app, 'book_entries').length === 5);
+  assert.strictEqual(app.dom.active().getAttribute('data-baction'), `bulk-a:${A_SPY.id}-none`, 'focus stays at the Add all place');
+});
+
+test('Add all: a title dismissed meanwhile is refused and counted; a failure of unknown outcome stops it and is reported as such', async () => {
+  const extra = { books: [bk(3003, 'ZZ Ransom', { authors: [A_SPY], series: inS(S_ALLON, '3'), date: '2024-01-01' }), bk(3006, 'ZZ Fourth', { authors: [A_SPY], series: inS(S_ALLON, '4'), date: '2025-09-01' }), bk(3008, 'ZZ Fifth', { authors: [A_SPY], series: inS(S_ALLON, '5'), date: '2026-01-01' })] };
+  const app = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon')], stub: { catalog: extra } });
+  await open(app, 'booksseries'); await refresh(app);
+  store(app, 'book_decisions').push({ id: ID('6a900000', 70), kind: 'exclude', key: 'hc:3001', value: { reason: 'dismissed' }, created_at: TS });
+  let n = 0;
+  app.loseNext(r => r.url.endsWith('/rpc/library_book_add') && ++n === 3, 'after');
+  await app.ctx.addAllBooks('s:9202'); await settle();
+  const t = text(app.el('errorBanner').innerHTML);
+  assert.match(t, /Added 1 book from ZZ Allon as Want to read; 1 was saved or dismissed meanwhile .*“ZZ Ransom” wasn’t confirmed: it may or may not have been added; 2 titles after it weren’t tried\. The list has been read again/);
+  assert.ok(store(app, 'book_entries').some(e => e.hardcover_id === 3003), '(the lost answer’s add did happen; the list read again shows it)');
+  assert.ok(!store(app, 'book_entries').some(e => e.hardcover_id === 3001), 'the dismissed title stays out');
+});
+
+test('+ Add book browse: Show hidden opens and closes at once, starts closed on each fresh browse, never shares the main views’ choice; focus stays on the toggle; the dialog’s selects keep the app’s own arrow', async () => {
+  const app = await boot({ follows: [follow(1, 'series', 9200, 'ZZ Strike')] });
+  await open(app, 'booksseries'); await refresh(app);
+  app.ctx.toggleBookFollow(ID('6d000000', 1)); app.ctx.toggleBookHidden('s:9200'); await settle();
+  app.ctx.openBooksAdd(null); await settle();
+  await app.ctx.browseBooks('series', 9200); await settle();
+  assert.match(dialog(app), /aria-expanded="false"[^>]*>Show \d+ hidden record/, 'closed although the Series view shows them');
+  app.dom.focus('bookDialogBox', '[data-baction="hidden-s:9200"]');
+  app.ctx.toggleBookHidden('s:9200', true); await settle();
+  assert.match(dialog(app), /aria-expanded="true"/); assert.match(text(dialog(app)), /ZZ Premier Cas/);
+  assert.strictEqual(app.dom.active().getAttribute('data-baction'), 'hidden-s:9200', 'focus stays on the toggle');
+  app.ctx.toggleBookHidden('s:9200', true); await settle();
+  assert.match(dialog(app), /aria-expanded="false"/);
+  app.ctx.toggleBookHidden('s:9200', true); await app.ctx.browseBooks('series', 9200); await settle();
+  assert.match(dialog(app), /aria-expanded="false"/, 'a fresh browse starts closed');
+  assert.ok(app.get('booksShowHidden').has('s:9200'), 'the Series view’s choice is its own');
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
+  assert.match(css, /\.game-dialog-box select:not\(\.status-select\):not\(\.priority-select\)/, 'the dialog rule leaves the status control’s own arrow alone');
 });
 
 T.run();

@@ -171,7 +171,9 @@ function bookDateHtml(d, today = booksToday()) {
   if (!d) return '<span class="muted">Date unknown</span>';
   const upcoming = bookUpcoming(d, today);
   const src = d.source === 'member' ? ' · your date' : d.source === 'website' ? ' · from the official site' : '';
-  const ph = d.placeholder ? `<span class="book-ph" title="Hardcover lists 1 January; this is often a placeholder for a year-only date">may be a placeholder</span>` : '';
+  // A possible placeholder: a small mark beside the date, its meaning on hover, keyboard focus or tap, and in its accessible name.
+  const phNote = 'Hardcover lists 1 January, which often stands for a year-only date: the exact day may not be known.';
+  const ph = d.placeholder ? `<span class="book-ph" tabindex="0" role="note" aria-label="${esc(`Possible placeholder date. ${phNote}`)}" title="${esc(phNote)}" data-note="${esc(phNote)}" onclick="event.stopPropagation(); this.focus()">?</span>` : '';
   return `<span class="game-when${d.value === 'TBA' ? ' game-tba' : upcoming ? ' game-upcoming' : ''}">${esc(bookDateText(d))}<span class="visually-hidden">${esc(src)}</span></span>${upcoming && d.value !== 'TBA' ? '<span class="upcoming-tag">Upcoming</span>' : ''}${ph}${d.source !== 'hardcover' ? ` <span class="game-basis">${esc(d.source === 'member' ? 'your date' : 'official site')}</span>` : ''}`;
 }
 function bookGenrePillsHtml(v) {
@@ -279,16 +281,24 @@ function bookRecLine(rec, extra = '', entry = null) {
   const lang = rec.lang === 'unknown' ? ' <span class="state-tag">Language unknown</span>' : '';
   return `<span class="spot-version-name">${esc(rec.title)}${lang}${extra}</span> <span class="muted">${bookDateHtml(d)}</span>`;
 }
-function bookHiddenListHtml(owner, hidden) {
+// Which lists show their hidden records: the main screen's (page memory) or the open browse dialog's own set, which starts empty
+// on each fresh browse (an author or series opened from + Add book), so it never inherits the main views' choices.
+const bookHiddenSet = inDialog => (inDialog && booksDialog ? (booksDialog.showHidden || (booksDialog.showHidden = new Set())) : booksShowHidden);
+function bookHiddenListHtml(owner, hidden, inDialog = false) {
   if (!hidden.length) return '';
-  const open = booksShowHidden.has(owner);
-  return `<div class="book-hidden"><button class="btn btn-link" data-baction="hidden" aria-expanded="${open}" onclick="toggleBookHidden('${bkArg(owner)}')">${open ? 'Hide' : 'Show'} ${countUnit(hidden.length, 'hidden record', 'hidden records')}</button>
+  const open = bookHiddenSet(inDialog).has(owner);
+  return `<div class="book-hidden"><button class="btn btn-link" data-baction="${esc(`hidden-${owner}`)}" aria-expanded="${open}" onclick="toggleBookHidden('${bkArg(owner)}', ${inDialog})">${open ? 'Hide' : 'Show'} ${countUnit(hidden.length, 'hidden record', 'hidden records')}</button>
     ${open ? `<p class="games-note">Shown here only. Hardcover keeps these as separate records; nothing is merged or changed.</p><ul class="spot-versions">${hidden.map(h => `<li class="spot-version">${bookRecLine(h.rec, h.position ? ` <span class="muted">#${esc(h.position)}</span>` : '')} <span class="muted">· ${esc(h.reason)}</span> ${bookPickHtml(h.rec, bookSavedFor(h.rec, bookSavedIndex(booksData.entries)), { hook: `h${h.rec.id}` })}</li>`).join('')}</ul>` : ''}</div>`;
 }
-function toggleBookHidden(owner) { if (booksShowHidden.has(owner)) booksShowHidden.delete(owner); else booksShowHidden.add(owner); renderBooksView(); }
+function toggleBookHidden(owner, inDialog = false) {
+  const set = bookHiddenSet(inDialog);
+  if (set.has(owner)) set.delete(owner); else set.add(owner);
+  if (inDialog) redrawBooksDialog(); else renderBooksView();
+}
 // A series' list (the Series view's expanded row, and Browse in + Add book).
-function bookSeriesListHtml(s, { follow = null } = {}) {
+function bookSeriesListHtml(s, { follow = null, inDialog = false } = {}) {
   const v = bookSeriesView(s, { entries: booksData.entries, decisions: booksData.decisions, today: booksToday() });
+  const bulk = bookAddAllHtml(`s:${s.id}`, bookAddAllPlan({ kind: 'series', series: s }, bookPlanCtx()), inDialog, 'Add all in series');
   const item = (p, companion) => {
     const rec = p.rec, e = p.entry, key = e ? bookEntryKey(e) : rec ? `hc:${rec.id}` : null;
     const name = rec ? bookRecLine(rec, '', e) : `<span class="spot-version-name">${esc(e.title)}</span> <span class="state-tag">Not on Hardcover</span>`;
@@ -298,9 +308,9 @@ function bookSeriesListHtml(s, { follow = null } = {}) {
     const next = v.next === p ? ' <span class="status-pill s-watching">Next</span>' : '';
     return `<li class="spot-version book-pos"><span class="book-pos-n">${p.position ? `#${esc(p.position)}` : '—'}</span> ${name}${state}${next} <span class="book-pick">${pick}</span></li>`;
   };
-  return `<ol class="spot-versions book-series-list">${v.positions.map(p => item(p, false)).join('')}</ol>
+  return `${bulk}<ol class="spot-versions book-series-list">${v.positions.map(p => item(p, false)).join('')}</ol>
     ${v.companions.length ? `<p class="games-note">Companions (novellas and extras): listed and trackable, never the next book, never added automatically.</p><ul class="spot-versions">${v.companions.map(p => item(p, true)).join('')}</ul>` : ''}
-    ${bookHiddenListHtml(`s:${s.id}`, v.hidden)}`;
+    ${bookHiddenListHtml(`s:${s.id}`, v.hidden, inDialog)}`;
 }
 function booksSeriesHtml() {
   const follows = booksData.follows.filter(f => f.kind === 'series').sort((a, b) => compareTitles(a.name, b.name));
@@ -352,7 +362,7 @@ function bookSiteFormHtml(authorId, name, site) {
     <p class="games-note">Refresh books reads this page for new book pages and dates. ${known ? 'This author’s site is supported.' : 'Sites other than the supported ones are read with the same rule; a page that doesn’t look like a list of their books is reported and the author is checked on Hardcover only.'}</p></div>`;
 }
 // An author's books: their verified series in order, then their other books; Hidden below.
-function bookAuthorListHtml(a, seriesSource = booksData.cache.series) {
+function bookAuthorListHtml(a, seriesSource = booksData.cache.series, inDialog = false) {
   const seriesList = (a.seriesIds || []).map(id => seriesSource.get(id)).filter(Boolean);
   const v = bookAuthorView(a, { seriesList, associations: booksData.associations, entries: booksData.entries, decisions: booksData.decisions, today: booksToday() });
   const inVerified = new Set(v.verified.flatMap(s => s.books.map(b => b.rec.id)));
@@ -360,10 +370,87 @@ function bookAuthorListHtml(a, seriesSource = booksData.cache.series) {
   const followBtn = s => (booksData.follows.some(f => f.kind === 'series' && f.hardcover_id === s.id) ? '<span class="state-tag">Following</span>'
     : `<button class="btn btn-link" data-baction="follow-s${s.id}" onclick="followBookSeries(${s.id}, '${bkArg(s.name)}')">Follow ${esc(s.name)}</button>`);
   const gaps = v.gaps.length ? `<p class="games-note">${countUnit(v.gaps.length, 'book in their series is', 'books in their series are')} credited to someone else on Hardcover: ${v.gaps.map(g => `“${esc(g.rec.title)}”`).join(', ')}. Refresh books offers ${v.gaps.length === 1 ? 'it' : 'them'} in Review, where you can credit ${esc(a.name)}.</p>` : '';
-  return `${v.verified.map(s => `<div class="book-author-series"><h4 class="book-sub">${esc(s.name)} ${followBtn(s)}</h4>${bookSeriesListHtml(s)}</div>`).join('')}
+  const bulk = bookAddAllHtml(`a:${a.id}`, bookAddAllPlan({ kind: 'author', author: a, seriesList }, bookPlanCtx()), inDialog, 'Add all books');
+  return `${bulk}${v.verified.map(s => `<div class="book-author-series"><h4 class="book-sub">${esc(s.name)} ${followBtn(s)}</h4>${bookSeriesListHtml(s, { inDialog })}</div>`).join('')}
     ${gaps}<h4 class="book-sub">${v.verified.length ? 'Other books' : 'Books'}</h4>
     <ul class="spot-versions">${others.map(x => `<li class="spot-version">${bookRecLine(x.rec, '', x.entry)} <span class="book-pick">${bookPickHtml(x.rec, x.entry, { hook: `a${x.rec.id}` })}</span></li>`).join('') || '<li class="muted">None.</li>'}</ul>
-    ${bookHiddenListHtml(`a:${a.id}`, v.hidden)}`;
+    ${bookHiddenListHtml(`a:${a.id}`, v.hidden, inDialog)}`;
+}
+// ── Add all ──
+const bookPlanCtx = () => ({ entries: booksData.entries, decisions: booksData.decisions, associations: booksData.associations, today: booksToday() });
+const bookBulkAsk = inDialog => (inDialog ? (booksDialog && booksDialog.bulkAsk) || null : booksBulkAsk);
+// The button, or its confirmation in place. Nothing to add: a short line instead (no button that would add nothing).
+function bookAddAllHtml(owner, plan, inDialog, label) {
+  const o = bkArg(owner), hook = `bulk-${owner}`;
+  if (!plan.length) return `<p class="games-note book-bulk" tabindex="-1" data-baction="${esc(hook)}-none">${esc(label)}: nothing to add (every main title is saved, skipped or dismissed).</p>`;
+  if (bookBulkAsk(inDialog) !== owner) return `<p class="book-bulk"><button class="btn" data-baction="${esc(hook)}" onclick="askBookAddAll('${o}', ${inDialog})">${esc(label)} (${plan.length})</button></p>`;
+  return `<div class="book-bulk book-bulk-ask" role="group" aria-label="${esc(label)}"><p>Add ${countUnit(plan.length, 'book', 'books')} as Want to read? Saved books keep their statuses; hidden records, companions, skipped and dismissed titles aren’t included.</p>
+    <button class="btn btn-accent" data-baction="${esc(hook)}-yes" onclick="addAllBooks('${o}', ${inDialog})">Add ${plan.length}</button> <button class="btn" data-baction="${esc(hook)}-no" onclick="askBookAddAll(null, ${inDialog}, '${o}')">Cancel</button></div>`;
+}
+function bookBulkRedraw(inDialog, hook) {
+  if (inDialog) { if (booksDialog) { booksDialog.focusHook = hook; redrawBooksDialog(); } return; }
+  booksFocusIntent = { attr: null, row: null, hook, id: null, next: [], prev: [] };
+  renderBooksView();
+}
+function askBookAddAll(owner, inDialog = false, back = null) {
+  if (inDialog) { if (booksDialog) booksDialog.bulkAsk = owner; } else booksBulkAsk = owner;
+  bookBulkRedraw(inDialog, owner ? `bulk-${owner}-yes` : `bulk-${back}`);
+}
+// The list an owner names, read now (the plan is made again at the moment of adding, from what is saved then).
+function bookBulkTarget(owner, inDialog) {
+  const [kind, raw] = String(owner).split(':'), id = Number(raw), b = inDialog && booksDialog ? booksDialog.browse : null;
+  const seriesOf = sid => (b ? (b.series || []).find(s => s.id === sid) : null) || booksData.cache.series.get(sid) || null;
+  if (kind === 's') { const s = seriesOf(id); return s ? { kind: 'series', series: s } : null; }
+  const a = (b && b.author && b.author.id === id ? b.author : null) || booksData.cache.author.get(id);
+  return a ? { kind: 'author', author: a, seriesList: (a.seriesIds || []).map(seriesOf).filter(Boolean) } : null;
+}
+// One write: the records cached, then each title added in turn (an automatic-style add: a title dismissed or removed meanwhile is
+// refused, never brought back; one saved meanwhile is skipped). A failure stops it; what was added, skipped and not tried is said,
+// and a failure whose outcome is unknown is reported as such. The list is read again afterwards.
+async function addAllBooks(owner, inDialog = false) {
+  const target = bookBulkTarget(owner, inDialog);
+  const plan = target ? bookAddAllPlan(target, bookPlanCtx()) : [];
+  if (inDialog) { if (booksDialog) booksDialog.bulkAsk = null; } else booksBulkAsk = null;
+  const hook = `bulk-${owner}`;
+  if (!plan.length) { showNotice('Nothing to add: every main title is saved, skipped or dismissed.'); bookBulkRedraw(inDialog, `${hook}-none`); return; }
+  const name = target.kind === 'series' ? target.series.name : target.author.name;
+  await runWrite(`${name} · add all`, async lane => {
+    let added = 0, skipped = 0, failed = null, i = 0;
+    try { await putBookCache({ books: plan.map(x => x.rec) }); }
+    catch (err) { if (stateNeedsReread(err)) { showError(stateErrorText(err)); lane.after.push(() => reloadOpenView()); return; } console.error(err); }
+    for (; i < plan.length; i++) {
+      const { rec, seriesPl } = plan[i];
+      try {
+        const made = await sbRpc('library_book_add', { p_book: bookFromRec(rec, seriesPl), p_status: 'want', p_clear_keys: [], p_finding: null,
+          p_refuse_keys: bookKeysOf({ hardcoverId: rec.id, title: rec.title, authors: rec.authors }) });
+        if (made && booksData) booksData.entries.push(made);
+        added++;
+      } catch (err) {
+        if (/book_duplicate|book_excluded/.test(String(err && err.message))) { skipped++; continue; }
+        failed = { err, title: rec.title, unknown: orgErrorInfo(err).kind !== 'database' }; break;
+      }
+    }
+    const notTried = failed ? plan.length - i - 1 : 0;
+    const parts = [`Added ${countUnit(added, 'book', 'books')} from ${name} as Want to read`];
+    if (skipped) parts.push(`${countUnit(skipped, 'was', 'were')} saved or dismissed meanwhile and left as ${skipped === 1 ? 'it was' : 'they were'}`);
+    if (failed) {
+      parts.push(failed.unknown ? `“${failed.title}” wasn’t confirmed: it may or may not have been added` : `“${failed.title}” wasn’t added (${stateErrorText(failed.err)})`);
+      if (notTried) parts.push(`${countUnit(notTried, 'title', 'titles')} after it ${notTried === 1 ? 'wasn’t' : 'weren’t'} tried`);
+    }
+    if (booksDialog && inDialog) booksDialog.focusHook = hook;
+    else booksFocusIntent = { attr: null, row: null, hook, id: null, next: [], prev: [] };
+    if (booksDialog) redrawBooksDialog();
+    if (failed) {
+      // (read again first: a reread clears the error line, and what was saved must be what is shown)
+      const ok = isBooksView() ? await reloadOpenView() : null;
+      if (booksDialog && inDialog) { booksDialog.focusHook = hook; redrawBooksDialog(); }
+      showError(`${parts.join('; ')}.${rereadText(ok)}`);
+      return;
+    }
+    showSaved(); showNotice(`${parts.join('; ')}.`);
+    if (isBooksView()) renderBooksView();
+    lane.after.push(() => reloadOpenView());
+  }, { list: true });
 }
 function toggleBookFollow(id) { if (booksExpanded.has(id)) booksExpanded.delete(id); else booksExpanded.add(id); renderBooksView(); }
 
@@ -399,7 +486,11 @@ function applyBooksFocus(rec) {
     if (!usable(el)) el = inRow(rec.row, '[data-baction="more"], [data-baction="expand"]');
     for (const r of rec.next.concat(rec.prev)) { if (usable(el)) break; el = inRow(r, '[data-baction="more"], [data-baction="expand"]'); }
   } else if (rec.id) el = document.getElementById(rec.id);
-  else if (rec.hook) el = shownOf(`[data-baction=${q(rec.hook)}]`);
+  else if (rec.hook) {
+    el = shownOf(`[data-baction=${q(rec.hook)}]`);
+    // (Add all: its button, else the line that says nothing is left to add)
+    if (!usable(el) && /^bulk-/.test(rec.hook)) { const base = rec.hook.replace(/-(yes|no|none)$/, ''); el = shownOf(`[data-baction=${q(base)}]`) || shownOf(`[data-baction=${q(`${base}-none`)}]`); }
+  }
   if (!usable(el)) el = ['[data-books-empty]', '#bSearch', '#booksTitle'].map(sel => screen.querySelector(sel)).find(usable) || null;
   if (!usable(el)) return;
   el.focus();
@@ -542,6 +633,17 @@ async function linkBook(entryId, rec, finding = null) {
 }
 
 // ── Following ──
+// A new follow's starting catalog (its baseline): what is listed now is never offered as new later. A failure to save it is
+// reported and harmless: the next Refresh makes it from that read, and offers nothing new for the follow that time.
+async function saveBookBaseline(f, read) {
+  const ids = bookFollowCatalogIds(f, read);
+  if (!f || !ids.length) return true;
+  try {
+    const d = await sbRpc('library_book_decision_set', { p_kind: 'baseline', p_key: bookBaselineKey(f), p_expected: null, p_value: { ids }, p_finding: null, p_outcome: null });
+    if (booksData && d) booksData.decisions.set(`baseline|${bookBaselineKey(f)}`, { kind: 'baseline', key: bookBaselineKey(f), value: { ids } });
+    return true;
+  } catch (err) { if (stateNeedsReread(err)) throw err; console.error(err); return false; }
+}
 async function followBookAuthor(id, name) {
   let got;
   try { got = await hardcoverAuthor(id); } catch (e) { showError(`${e.message} Nothing was changed.`); return; }
@@ -549,6 +651,7 @@ async function followBookAuthor(id, name) {
   await runWrite(`Follow ${name}`, async lane => {
     try {
       const f = await sbRpc('library_book_follow', { p_kind: 'author', p_hardcover_id: id, p_name: String(name).slice(0, 200), p_auto_add: false });
+      await saveBookBaseline(f, { authors: new Map([[id, got.author]]), seriesOf: new Map([[id, got.author.seriesIds]]), series: new Map(got.series.map(x => [x.id, x])) });
       await putBookCache({ authors: [got.author], series: got.series });
       if (known && !hasSite) { const s = await sbRpc('library_book_site_set', { p_author_id: id, p_author_name: String(name).slice(0, 200), p_expected_url: null, p_url: known.listing }); if (booksData) booksData.sites.push(s); }
       if (booksData && f) booksData.follows.push(f);
@@ -567,6 +670,7 @@ async function followBookSeries(id, name) {
   await runWrite(`Follow ${name}`, async lane => {
     try {
       const f = await sbRpc('library_book_follow', { p_kind: 'series', p_hardcover_id: id, p_name: String(name).slice(0, 200), p_auto_add: false });
+      await saveBookBaseline(f, { authors: new Map(), seriesOf: new Map(), series: new Map([[id, s]]) });
       await putBookCache({ series: [s] });
       if (known && !hasSite) { const x = await sbRpc('library_book_site_set', { p_author_id: author.id, p_author_name: String(author.name).slice(0, 200), p_expected_url: null, p_url: known.listing }); if (booksData) booksData.sites.push(x); }
       if (booksData && f) booksData.follows.push(f);
@@ -668,6 +772,14 @@ async function refreshBooks() {
       const s = read.series.get(f.hardcover_id);
       if (s && s.author) { const list = read.seriesOf.get(s.author.id) || []; if (!list.includes(s.id)) read.seriesOf.set(s.author.id, list.concat(s.id)); }
     }
+    // A followed series' author with an official page set: their whole catalog is read too, only so the site's links can be
+    // matched to books Hardcover knows (their other books stay out of scope until the author is followed).
+    for (const f of follows.filter(x => x.kind === 'series')) {
+      const s = read.series.get(f.hardcover_id), aid = s && s.author && s.author.id;
+      if (!aid || read.authors.has(aid) || !booksData.sites.some(x => x.hardcover_author_id === aid)) continue;
+      try { const got = await hardcoverAuthor(aid); read.authors.set(aid, got.author); read.seriesOf.set(aid, [...new Set((read.seriesOf.get(aid) || []).concat(got.author.seriesIds))]); got.series.forEach(x => { if (!read.series.has(x.id)) read.series.set(x.id, x); }); }
+      catch (e) { read.noCatalog = (read.noCatalog || new Set()).add(aid); }
+    }
   } catch (e) {
     booksRefreshing = false; booksReport = '';
     showError(`Refresh books couldn’t read Hardcover (${e.message}), so nothing was changed.`);
@@ -682,6 +794,8 @@ async function refreshBooks() {
   for (const [authorId, name] of siteAuthors) {
     const site = booksData.sites.find(s => s.hardcover_author_id === authorId);
     if (!site) continue;
+    // (without their catalog the site's links couldn't be matched, so it isn't checked this time)
+    if (read.noCatalog && read.noCatalog.has(authorId)) { read.sites.set(authorId, { ok: false, authorName: name, error: 'their Hardcover catalog couldn’t be read' }); siteFailures.push(name); continue; }
     const known = new Map();
     const a = read.authors.get(authorId);
     (a ? a.books : []).forEach(r => known.set(normBookTitle(r.title), { rec: r }));
@@ -711,6 +825,9 @@ async function refreshBooks() {
       for (let i = 0; i < Math.max(found.rows.length, found.close.length ? 1 : 0); i += 200) {
         await sbRpc('library_book_findings_record', { p_rows: found.rows.slice(i, i + 200), p_close: i === 0 ? found.close.slice(0, 200) : [] });
       }
+      // Starting catalogs for follows made before BK1b (from this read; nothing was offered as new for them this time).
+      let based = 0;
+      for (const b of found.baselines) if (await saveBookBaseline(b.follow, read)) based++;
       for (const x of found.autoAdd) {
         const book = bookFromRec(x.rec, { id: x.series.id, name: x.series.name, position: x.position });
         try {
@@ -729,6 +846,8 @@ async function refreshBooks() {
       if (r.sitesFailed.length) parts.push(`<strong>couldn’t read ${r.sitesFailed.map(x => esc(x.author)).join(', ')}’s site</strong> (Hardcover results above still count)`);
       if (r.hardcoverOnly.length) parts.push(`Hardcover only: ${r.hardcoverOnly.map(x => `${esc(x.author)} (${esc(x.why)})`).join(', ')}`);
       if (r.cacheFailed) parts.push('the catalog copy couldn’t be saved this time (it is refilled next time)');
+      if (based) parts.push(`${countUnit(based, 'follow’s', 'follows’')} current catalog noted as already seen (only later titles count as new)`);
+      if (r.siteMatched) parts.push(`${countUnit(r.siteMatched, 'official-site item', 'official-site items')} closed: Hardcover lists ${r.siteMatched === 1 ? 'that book' : 'those books'} for the author`);
       if (r.editions) parts.push(`${countUnit(r.editions, 'edition notice', 'edition notices')} on official sites left out`);
       booksReport = `<strong>Refresh books:</strong> ${parts.join(' · ')}.`;
       lane.after.push(() => reloadOpenView());
@@ -982,7 +1101,7 @@ async function browseBooks(kind, id) {
   const d = booksDialog;
   if (!d) return;
   const session = d.session;
-  d.status = 'searching'; redrawBooksDialog();
+  d.status = 'searching'; d.showHidden = new Set(); d.bulkAsk = null; redrawBooksDialog(); // (a fresh browse: every hidden group starts closed)
   try {
     if (kind === 'author') {
       const got = await hardcoverAuthor(id);
@@ -1004,9 +1123,9 @@ function bookBrowseHtml(b) {
   const back = '<button class="btn-link" onclick="booksDialog.browse = null; redrawBooksDialog()">← Back to results</button>';
   if (b.kind === 'series') {
     const s = b.series[0];
-    return `<div class="games-preview"><h3>${esc(s.name)}${s.author ? ` <span class="muted">by ${esc(s.author.name)}</span>` : ''}</h3>${bookSeriesListHtml(s)}${back}</div>`;
+    return `<div class="games-preview"><h3>${esc(s.name)}${s.author ? ` <span class="muted">by ${esc(s.author.name)}</span>` : ''}</h3>${bookSeriesListHtml(s, { inDialog: true })}${back}</div>`;
   }
-  return `<div class="games-preview"><h3>${esc(b.author.name)}</h3>${bookAuthorListHtml(b.author, new Map(b.series.map(s => [s.id, s])))}${back}</div>`;
+  return `<div class="games-preview"><h3>${esc(b.author.name)}</h3>${bookAuthorListHtml(b.author, new Map(b.series.map(s => [s.id, s])), true)}${back}</div>`;
 }
 function pickBookMatch(id) { const d = booksDialog; if (d && d.matchFor) linkBook(d.matchFor, d.recs.get(id)); }
 function openBookManual() {
@@ -1106,9 +1225,18 @@ async function saveBookEdit() {
 function redrawBooksDialog() {
   if (!booksDialog) return;
   const k = booksDialog.kind;
+  // Focus kept across the redraw: the same control (by its hook), or for an Add just done that book's new status control.
+  const boxNow = document.getElementById('bookDialogBox'), was = document.activeElement;
+  const wanted = booksDialog.focusHook || null; booksDialog.focusHook = null; // (a step that names where focus goes next: Add all)
+  const hook = wanted || (was && boxNow && typeof boxNow.contains === 'function' && boxNow.contains(was) && typeof was.getAttribute === 'function' ? was.getAttribute('data-baction') : null);
   showBooksDialog(k === 'review' ? booksReviewHtml() : k === 'date' ? bookDateDialogHtml() : k === 'edit' ? bookEditDialogHtml() : booksAddHtml());
-  // Review: after an item is decided, focus goes to the item now in its place (else the one before, else Close).
   const box = document.getElementById('bookDialogBox');
+  if (hook && box && typeof box.querySelector === 'function') {
+    const q = JSON.stringify.bind(JSON);
+    const el = box.querySelector(`[data-baction=${q(hook)}]`) || (/^bulk-/.test(hook) ? box.querySelector(`[data-baction=${q(`${hook.replace(/-(yes|no|none)$/, '')}-none`)}], [data-baction=${q(hook.replace(/-(yes|no|none)$/, ''))}]`) : null) || (/^add-/.test(hook) ? box.querySelector(`[data-baction=${q(`status-${hook.slice(4)}`)}]`) : null);
+    if (el && typeof el.focus === 'function') { el.focus(); return; }
+  }
+  // Review: after an item is decided, focus goes to the item now in its place (else the one before, else Close).
   if (k === 'review' && booksDialog.place != null && box && document.activeElement === box && typeof box.querySelector === 'function') {
     const n = box.querySelectorAll('li[data-bfinding]').length, at = Math.min(booksDialog.place, n - 1);
     const el = at >= 0 ? box.querySelector(`li[data-bfinding="${at}"] button`) : box.querySelector('.modal-actions button');

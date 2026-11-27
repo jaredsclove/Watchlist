@@ -1249,7 +1249,9 @@ body.queue-drag-active, body.queue-drag-active * { cursor: grabbing !important; 
 .games-report { font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 12px; margin: 8px 0; }
 .games-empty { background: var(--surface); border: 1px dashed var(--border2); border-radius: var(--radius-lg); padding: 16px; color: var(--text2); font-size: 14px; }
 .games-empty:focus { outline: none; }
-.games-screen select:not(.status-select):not(.priority-select), .game-dialog-box select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; font: inherit; font-size: 13px; max-width: 100%; }
+/* (a dialog's status and priority controls keep their own pill style: this rule's background shorthand would reset their arrow's
+   no-repeat, size and position, tiling the arrow across the control) */
+.games-screen select:not(.status-select):not(.priority-select), .game-dialog-box select:not(.status-select):not(.priority-select) { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; font: inherit; font-size: 13px; max-width: 100%; }
 /* Five columns (owner, 2026-11-12): the title no wider than it needs, room for a line of genres, Platform and Release apart
    so each lines up across rows; long titles wrap with their scores beside them. */
 .games-table { table-layout: fixed; }
@@ -1389,7 +1391,17 @@ td.spot-version-name { padding-left: 46px; font-size: 13px; color: var(--text2);
 .books-table th.col-rel { width: 16%; }
 .books-table th.col-status { width: 12%; }
 .book-author-cell, .book-series-cell { font-size: 13px; color: var(--text2); overflow-wrap: anywhere; }
-.book-ph { font-size: 11px; color: var(--text3, var(--text2)); margin-left: 6px; border-bottom: 1px dotted currentColor; }
+.book-bulk { margin: 6px 0; }
+.book-bulk-ask { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.book-bulk-ask p { margin: 0 0 6px; }
+.book-ph { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 4px; border-radius: 50%;
+  border: 1px dotted var(--text3, var(--text2)); color: var(--text2); font-size: 10px; line-height: 1; cursor: help; position: relative; vertical-align: 1px; }
+.book-ph:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.book-ph:focus::after, .book-ph:hover::after { content: attr(data-note); position: absolute; z-index: 20; top: 130%; left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: min(240px, 70vw); white-space: normal; padding: 6px 8px; border-radius: var(--radius); background: var(--surface2);
+  border: 1px solid var(--border2); color: var(--text); font-size: 12px; line-height: 1.4; text-align: left; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+/* (narrow screens: the note spans the screen below the mark, so it is never cut off at an edge) */
+@media (max-width: 600px) { .book-ph:focus::after, .book-ph:hover::after { position: fixed; left: 16px; right: 16px; top: auto; transform: none; width: auto; max-width: none; margin-top: 20px; } }
 .books-follows { display: flex; flex-direction: column; gap: 8px; }
 .book-follow .card-top { align-items: center; }
 .book-follow-body { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
