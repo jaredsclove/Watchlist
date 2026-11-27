@@ -196,7 +196,7 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
     compact headings, not panels: each author A–Z (a book's first-listed author; a book with none under "Unknown author", last),
     then that author's series A–Z, each in series order (numbered positions by number, then unnumbered by title), then
     "Standalone books" (no series placement) by date, undated last. A heading with no book shown isn't drawn. Each saved book
-    appears once, by its own saved author and series placement (an author the member credited in Review comes first); other authors are named beside the title ("with …"). Rows
+    appears once, by its own saved author and series placement (an author the member credited in Review comes first; a credit they replaced isn't shown); other authors are named beside the title ("with …"). Rows
     show the book's real series number (#3 stays #3 when #1 and #2 are filtered out), genres, date and status; there is no
     other sort. Desktop rows keep genres on one measured line with +N (Games' rule: refitted on resize; +N shows the rest,
     wrapped, and Fewer folds them; focus stays on it); cards (narrower than 1,100 px) list every genre under the same
@@ -274,9 +274,13 @@ own rows, and nothing to anyone signed out. Collaborative editing of a shared li
   - **Review** (pending first, then Later) shows each item's source (Hardcover, Official site, Your library), a short
     explanation and its source links: a new title (Add as Want to read, Not interested, Later); a date (Use this date, or Mark
     date as TBA, Keep current date); a credit gap (a verified series' book Hardcover credits to no other author of the series: Credit the
-    author, which saves a manual credit and shows it under them, in their author list and in the Library, where the book
-    moves to that author's group and its existing series, with Hardcover's own credit still named beside it, or Not
-    theirs); a match (a book saved by hand or from a site
+    author instead of one of Hardcover's credits (a wrong credit, such as a publisher: that one credit is no longer shown in
+    the member's lists; other co-authors stay), Credit the author as well (a missing author: every Hardcover credit stays
+    beside them), or Not theirs. Either saves a manual credit and shows the book under the author, in their author list and
+    in the Library, where it moves to that author's group and existing series. A replacement is a decision of its own
+    (`replace_credit`), applied only while that credit exists; a credit added earlier without one keeps Hardcover's credits,
+    and the book's ⋯ menu offers "Show <author> instead of <credit>" and, once replaced, "Show <credit> again". Hardcover's
+    record and the saved book are never changed); a match (a book saved by hand or from a site
     that a Hardcover record with the same title and author now matches: Link to Hardcover, which keeps its status, chosen
     date, skip and placement, or Different books); a possible duplicate (two saved books with the same title or series
     place: Different books, or Remove one copy, which excludes only that copy); a site that changed a lot. A decided item

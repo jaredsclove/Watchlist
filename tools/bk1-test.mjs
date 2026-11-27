@@ -80,6 +80,31 @@ const decB = (who, key, exp, value) => call(who, `public.library_book_decision_s
   await decB(A, 'f:zz-follow-1', { ids }, null);
 }
 
+section('BK1c: a replaced author credit');
+{
+  const MIGC = file('db/bk1c_credit_replace.sql'), bk1c = run => `select set_config('watchlist.bk1c_run', '${run}', false);\n` + MIGC;
+  ok(/set watchlist.bk1c_run/.test(await attempt(`select set_config('watchlist.bk1c_run', '', false);\n` + MIGC)), 'without a run id: refused');
+  const beforeC = await fpAll();
+  ok(!(await attempt(bk1c('local-bk1c'))), 'the migration commits');
+  ok(beforeC === await fpAll(), 'no other row changed');
+  ok(/already installed/.test(await attempt(bk1c('local-bk1c-again'))), 'a rerun is refused');
+  const capC = (await call(A, `public.stage5_capabilities()`)).r;
+  ok(capC.phase === 'contracted-bk1' && capC.backup_format === 10, 'phase and backup format unchanged');
+}
+const decC = (who, key, exp, value) => call(who, `public.library_book_decision_set('replace_credit', $1, $2::jsonb, $3::jsonb, null, null)`, [key, J(exp), J(value)]);
+{
+  const r = await decC(A, 'rc:700001:700777', null, { by: 700500 });
+  ok(r.ok && r.r.kind === 'replace_credit' && r.r.value.by === 700500, 'a replaced credit is kept', r.message);
+  let refused = 0;
+  for (const [key, v] of [['rc:700001:700777x', { by: 700500 }], ['rc:700001', { by: 700500 }], ['rc:700002:700777', { by: 700777 }], ['rc:700002:700777', { by: '700500' }],
+    ['rc:700002:700777', { by: 700500, x: 1 }], ['rc:700002:700777', {}], ['rc:700002:700777', { by: 0 }], ['rc:700002:700777', { by: 3000000000 }]]) if (/invalid_input/.test((await decC(A, key, null, v)).message || '')) refused++;
+  ok(refused === 8, 'a malformed key or value is refused', refused);
+  { const m = await attempt(`begin; select set_config('watchlist.library_write', 'on', true); insert into public.book_decisions (user_id, kind, key, value) values ('${A}', 'replace_credit', 'rc:1:2', '{"by": 2}'); commit;`); ok(/book_decisions_value_check/.test(m || ''), 'the table refuses a malformed one too', m); }
+  ok(/target_changed/.test((await decC(A, 'rc:700001:700777', null, { by: 700501 })).message), 'a stale write is refused');
+  ok((await as(B, `select count(*)::int n from public.book_decisions where kind = 'replace_credit'`))[0].n === 0, 'another member sees none');
+  ok((await decC(A, 'rc:700001:700777', { by: 700500 }, null)).r.removed === true, 'shown again: the decision is removed');
+}
+
 section('books: add, status, edit');
 const add = (who, book, status = 'want', clear = [], finding = null, refuse = null) => call(who, `public.library_book_add($1::jsonb, $2, $3::text[], $4, $5::text[])`, [J(book), status, arr(clear), finding, refuse ? arr(refuse) : null]);
 const setS = (who, e, exp, s) => call(who, `public.library_book_set($1, $2, $3)`, [e, exp, s]);

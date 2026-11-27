@@ -118,7 +118,8 @@ function bk1Handlers({ store, DbError }) {
       return clone(n);
     },
     library_book_decision_set({ p_kind: kind, p_key: key, p_expected: exp, p_value: value, p_finding: finding, p_outcome: outcome }) {
-      if (!['skip', 'exclude', 'keep_date', 'not_same', 'not_author', 'baseline'].includes(kind) || !KEY_RE.test(key || '') || (!!finding !== !!outcome)) invalid('decision');
+      if (!['skip', 'exclude', 'keep_date', 'not_same', 'not_author', 'baseline', 'replace_credit'].includes(kind) || !KEY_RE.test(key || '') || (!!finding !== !!outcome)) invalid('decision');
+      if (kind === 'replace_credit' && value != null && !(/^rc:[1-9]\d*:([1-9]\d*)$/.test(key) && Object.keys(value).join() === 'by' && Number.isInteger(value.by) && value.by > 0 && String(value.by) !== key.split(':')[2])) invalid('decision');
       const d = store.book_decisions.find(x => x.kind === kind && x.key === key);
       if (!!d !== (exp != null) || (d && !same(d.value, exp))) changed();
       if (outcome === 'done') close(finding);

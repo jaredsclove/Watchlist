@@ -28,9 +28,10 @@ const Q1_STEP = `select set_config('watchlist.q1_run', 'local-q1', false);\n` + 
 const G1_STEP = `select set_config('watchlist.g1_run', 'local-g1', false);\n` + file('db/g1_games.sql');
 // TC1 (the TMDB cache; its own suite is tools/tc1-test.mjs), with the local stand-in for pg_cron.
 const TC1_STEP = file('db/test/pg_cron_shim.sql') + `\nselect set_config('watchlist.tc1_run', 'local-tc1', false);\n` + file('db/tc1_tmdb_cache.sql');
-// BK1 (books; its own suite is tools/bk1-test.mjs).
+// BK1, BK1b and BK1c (books; their own suite is tools/bk1-test.mjs).
 const BK1_STEP = `select set_config('watchlist.bk1_run', 'local-bk1', false);\n` + file('db/bk1_books.sql')
-  + `\nselect set_config('watchlist.bk1b_run', 'local-bk1b', false);\n` + file('db/bk1b_baselines.sql');
+  + `\nselect set_config('watchlist.bk1b_run', 'local-bk1b', false);\n` + file('db/bk1b_baselines.sql')
+  + `\nselect set_config('watchlist.bk1c_run', 'local-bk1c', false);\n` + file('db/bk1c_credit_replace.sql');
 const old = d => as7(as8(d)); // a format-10 fixture as format 7
 
 // ── PGlite ──
