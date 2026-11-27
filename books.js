@@ -68,7 +68,8 @@ function bookEntryView(e) {
     genres: rec ? rec.genres : [], skipped: booksData.decisions.has(`skip|${bookEntryKey(e)}`) };
 }
 const booksToday = () => localTodayStr();
-const bookReviewCount = () => (booksData ? booksData.findings.filter(f => f.status === 'pending').length : 0);
+const bookReviewFindings = () => (booksData ? booksData.findings.filter(bookFindingOffered) : []);
+const bookReviewCount = () => bookReviewFindings().filter(f => f.status === 'pending').length;
 
 // ── The function ──
 async function booksFn(body) {
@@ -152,7 +153,7 @@ function renderBooksView() {
   applyBooksFocus(rec);
 }
 function booksActionsHtml() {
-  const n = bookReviewCount(), later = booksData.findings.length - n;
+  const n = bookReviewCount(), later = bookReviewFindings().length - n;
   return `<span class="games-actions"><button class="btn add-open-btn" data-baction="add" onclick="openBooksAdd(this)">+ Add book</button>
     <button class="btn" data-baction="refresh" onclick="refreshBooks()"${booksRefreshing ? ' disabled' : ''}>${booksRefreshing ? 'Refreshing…' : 'Refresh books'}</button>
     <button class="btn" data-baction="review" onclick="openBooksReview(this)">${n ? `Review (${n})` : later ? `Review (${later} later)` : 'Review'}</button></span>`;
@@ -940,14 +941,14 @@ function bookFindingActions(f, i) {
   const s = f.subject || {}, b = (label, fn, primary = false) => `<button class="btn${primary ? ' btn-accent' : ''}" onclick="${fn}">${esc(label)}</button>`;
   const later = f.status === 'later' ? b('Back to review', `bookFindingResolve(${i}, 'pending')`) : b('Later', `bookFindingResolve(${i}, 'later')`);
   if (f.kind === 'new_book') return `${b('Add as Want to read', `bookReviewAdd(${i})`, true)} ${b('Not interested', `bookReviewDismiss(${i})`)} ${later}`;
-  if (f.kind === 'date') return `${b('Use this date', `bookReviewUseDate(${i})`, true)} ${b('Keep current date', `bookReviewKeepDate(${i})`)} ${later}`;
+  if (f.kind === 'date') return `${b(s.suggested === 'TBA' ? 'Mark date as TBA' : 'Use this date', `bookReviewUseDate(${i})`, true)} ${b('Keep current date', `bookReviewKeepDate(${i})`)} ${later}`;
   if (f.kind === 'credit_gap') return `${b(`Credit ${s.author}`, `bookReviewCredit(${i}, true)`, true)} ${b(`Not ${s.author}’s`, `bookReviewCredit(${i}, false)`)} ${later}`;
   if (f.kind === 'match') return `${b('Link to Hardcover', `bookReviewMatch(${i}, true)`, true)} ${b('Different books', `bookReviewMatch(${i}, false)`)} ${later}`;
   if (f.kind === 'duplicate') return `${b('Different books', `bookReviewNotSame(${i})`, true)} ${(s.entries || []).map(e => b(`Remove “${e.title}” (${BOOK_STATUS_LABELS[e.status] || e.status})`, `bookReviewRemoveCopy(${i}, '${bkArg(e.id)}')`)).join(' ')} ${later}`;
   if (f.kind === 'site_changed') return `${b('Offer its links for review', `bookReviewSiteReset(${i})`, true)} ${b('Dismiss', `bookFindingResolve(${i}, 'done')`)}`;
   return later;
 }
-function bookReviewList() { return booksData.findings.slice().sort((a, b) => (a.status === 'later') - (b.status === 'later') || String(a.first_seen_at).localeCompare(String(b.first_seen_at))); }
+function bookReviewList() { return bookReviewFindings().sort((a, b) => (a.status === 'later') - (b.status === 'later') || String(a.first_seen_at).localeCompare(String(b.first_seen_at))); }
 function openBooksReview(opener) {
   booksDialog = { kind: 'review', session: ++booksDialogSeq, opener: opener || null };
   showBooksDialog(booksReviewHtml());
