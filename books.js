@@ -1,14 +1,16 @@
 // ─── Books (BK1, next-gen item 6; db/bk1_books.sql, books-data.js, supabase/functions/books) ─────────────────────────────
 // The Books area, drawn as Games and TV are (the tab row, the toolbar, aligned rows on wide screens and cards on narrow ones):
-// Library (each saved book with its author, series place, genres, date and status), Series (followed series in order, with the
-// next book) and Authors (followed authors: their books, series and official book page). Catalog data comes from Hardcover and
+// Library (saved books, grouped by author and series) and Following (followed authors with their books, series and official
+// book page, and followed series, each in order with the next book). Catalog data comes from Hardcover and
 // official sites through the books function; the page never holds Hardcover's token. Saving a book follows nothing; following
 // saves nothing, except that a followed series may add new main titles automatically when the member turns that on. Every change
 // goes through the one write lane and is read again through reloadOpenView; focus follows the list's rule (the same control of
 // the same row, else its ⋯ or expand button, else a neighbour's).
 
-const BOOKS_VIEWS = { books: 'library', booksseries: 'series', booksauthors: 'authors' };
-const BOOKS_VIEW_LABELS = { books: 'Library', booksseries: 'Series', booksauthors: 'Authors' };
+// Two tabs (owner, 2026-11-27): Library (saved books) and Following (followed authors, their series and other followed series;
+// unsaved titles, follows, official pages, automatic adding). The old #/books/series and #/books/authors open Following.
+const BOOKS_VIEWS = { books: 'library', booksfollowing: 'following' };
+const BOOKS_VIEW_LABELS = { books: 'Library', booksfollowing: 'Following' };
 const BOOKS_STATUS_DEFAULT = 'notdone';
 const BOOKS_STATUS_GROUP_LABELS = { notdone: 'All except Finished and Dropped', all: 'All' };
 const BOOK_STATUS_LOOK = { want: 'confirmed', reading: 'watching', paused: 'maybe', finished: 'complete', dropped: 'skipped' };
@@ -144,7 +146,7 @@ function renderBooksView() {
   const view = BOOKS_VIEWS[activeViewId];
   const head = `<h2 class="visually-hidden games-title" id="booksTitle" tabindex="-1">Books: ${esc(BOOKS_VIEW_LABELS[activeViewId])}</h2>
     ${booksReport ? `<div class="games-report" role="status" data-books-report="1">${booksReport}</div>` : ''}`;
-  const body = view === 'library' ? booksLibraryHtml() : view === 'series' ? booksSeriesHtml() : booksAuthorsHtml();
+  const body = view === 'library' ? booksLibraryHtml() : booksFollowingHtml();
   screen.innerHTML = head + body + '<p class="games-note books-credit">Book data from <a href="https://hardcover.app" target="_blank" rel="noopener noreferrer">Hardcover</a> and authors’ official sites.</p>';
   if (view === 'library') fitBookGenres(); // (before focus: a focused pill now behind +N hands focus to +N)
   applyBooksFocus(rec);
@@ -213,8 +215,8 @@ function bookMenuHtml(v) {
         <button class="popover-action" data-baction="date" onclick="closeRowMenu(this); openBookDate('${idArg}', this)">Choose a date…</button>
         <button class="popover-action" data-baction="edit" onclick="closeRowMenu(this); openBookEdit('${idArg}', this)">Edit title, author or series…</button>
         <button class="popover-action" data-baction="match" onclick="closeRowMenu(this); openBookMatch('${idArg}', this)">${e.hardcover_id ? 'Match to another Hardcover record…' : 'Match to Hardcover…'}</button>
-        ${followA.map(a => `<button class="popover-action" data-baction="follow-a${a.id}" onclick="closeRowMenu(this); followBookAuthor(${a.id}, '${bkArg(a.name)}')">Follow ${esc(a.name)}</button>`).join('')}
-        ${followS.map(s => `<button class="popover-action" data-baction="follow-s${s.id}" onclick="closeRowMenu(this); followBookSeries(${s.id}, '${bkArg(s.name)}')">Follow ${esc(s.name)}</button>`).join('')}
+        ${followA.map(a => `<button class="popover-action" data-baction="follow-a${a.id}" onclick="closeRowMenu(this); followBookAuthor(${a.id}, '${bkArg(a.name)}')">Follow the author ${esc(a.name)}</button>`).join('')}
+        ${followS.map(s => `<button class="popover-action" data-baction="follow-s${s.id}" onclick="closeRowMenu(this); followBookSeries(${s.id}, '${bkArg(s.name)}')">Follow the series ${esc(s.name)}</button>`).join('')}
         <button class="popover-action" data-baction="delete" onclick="closeRowMenu(this); confirmDeleteBook('${idArg}')">Remove from library…</button>
       </div></span>`;
 }
@@ -264,19 +266,29 @@ function booksLibraryHtml() {
   const toolbar = booksToolbarHtml({ line, panel, chips, count });
   if (!all.length) return toolbar + `<div class="games-empty" data-books-empty="1" tabindex="-1"><p>No books yet. Use <strong>+ Add book</strong> to search Hardcover, browse an author or enter a book by hand.</p></div>`;
   if (!list.length) return toolbar + `<div class="games-empty" data-books-empty="1" tabindex="-1"><p>No books match these filters.</p></div>`;
-  // Grouped (the Library's only order): author, then each series in reading order, then standalones by date; compact headings.
+  // Grouped (the Library's only order): author, then each series in reading order, then standalones by date. Each heading is a
+  // disclosure (open at first; page memory, booksCollapsed): an author's hides its series and standalones, whose own choices are
+  // kept; a closed heading gives its count of the books shown. Collapsing changes the display only.
   const groups = bookLibraryGroups(list), rows = [], cards = [];
-  const head = (cls, text, level) => { rows.push(`<tr class="book-group-row ${cls}"><th colspan="5">${esc(text)}</th></tr>`); cards.push(`<h${level} class="book-group-head ${cls}">${esc(text)}</h${level}>`); };
+  const head = (cls, key, text, count, level) => {
+    const open = !booksCollapsed.has(key), hook = `grp-${key}`;
+    const btn = `<button type="button" class="book-group-toggle" data-baction="${esc(hook)}" aria-expanded="${open}" onclick="toggleBookGroup('${bkArg(key)}')"><span class="expand-chevron" aria-hidden="true">${open ? '▾' : '▸'}</span><span class="book-group-name">${esc(text)}</span>${open ? '' : ` <span class="book-group-count">${esc(countUnit(count, 'book', 'books'))}</span>`}</button>`;
+    rows.push(`<tr class="book-group-row ${cls}"><th colspan="5">${btn}</th></tr>`);
+    cards.push(`<h${level} class="book-group-head ${cls}">${btn}</h${level}>`);
+    return open;
+  };
   const add = v => { const p = bookRowParts(v); rows.push(p.row); cards.push(p.card); };
   for (const g of groups) {
-    head('book-group-author', g.name, 3);
-    for (const s of g.series) { head('book-group-series', s.name, 4); s.books.forEach(add); }
-    if (g.standalone.length) { head('book-group-series', 'Standalone books', 4); g.standalone.forEach(add); }
+    const n = g.series.reduce((k, x) => k + x.books.length, 0) + g.standalone.length;
+    if (!head('book-group-author', `a|${g.key}`, g.name, n, 3)) continue;
+    for (const x of g.series) if (head('book-group-series', `s|${g.key}|${x.key}`, x.name, x.books.length, 4)) x.books.forEach(add);
+    if (g.standalone.length && head('book-group-series', `st|${g.key}`, 'Standalone books', g.standalone.length, 4)) g.standalone.forEach(add);
   }
   return toolbar + `<table class="games-table books-table" aria-label="Your books, by author and series"><thead><tr><th class="col-game">Book</th><th class="col-num"><span class="visually-hidden">Number in series</span><span aria-hidden="true">#</span></th><th class="col-cats">Genres</th><th class="col-rel">Release</th><th class="col-status">Status</th></tr></thead>
     <tbody>${rows.join('')}</tbody></table>
     <div class="card-list games-cards" aria-label="Your books, by author and series">${cards.join('')}</div>`;
 }
+function toggleBookGroup(key) { if (booksCollapsed.has(key)) booksCollapsed.delete(key); else booksCollapsed.add(key); renderBooksView(); }
 function setBooksFilter(key, value) {
   booksFilters[key] = value;
   renderBooksView();
@@ -321,7 +333,7 @@ function toggleBookHidden(owner, inDialog = false) {
   if (set.has(owner)) set.delete(owner); else set.add(owner);
   if (inDialog) redrawBooksDialog(); else renderBooksView();
 }
-// A series' list (the Series view's expanded row, and Browse in + Add book).
+// A series' list (a followed series in Following, and Browse in + Add book).
 function bookSeriesListHtml(s, { follow = null, inDialog = false } = {}) {
   const v = bookSeriesView(s, { entries: booksData.entries, decisions: booksData.decisions, today: booksToday() });
   const bulk = bookAddAllHtml(`s:${s.id}`, bookAddAllPlan({ kind: 'series', series: s }, bookPlanCtx()), inDialog, 'Add all in series');
@@ -338,45 +350,66 @@ function bookSeriesListHtml(s, { follow = null, inDialog = false } = {}) {
     ${v.companions.length ? `<p class="games-note">Companions (novellas and extras): listed and trackable, never the next book, never added automatically.</p><ul class="spot-versions">${v.companions.map(p => item(p, true)).join('')}</ul>` : ''}
     ${bookHiddenListHtml(`s:${s.id}`, v.hidden, inDialog)}`;
 }
-function booksSeriesHtml() {
-  const follows = booksData.follows.filter(f => f.kind === 'series').sort((a, b) => compareTitles(a.name, b.name));
-  const toolbar = booksToolbarHtml({ count: follows.length ? countUnit(follows.length, 'series followed', 'series followed') : '' });
-  if (!follows.length) return toolbar + `<div class="games-empty" data-books-empty="1" tabindex="-1"><p>You follow no series. Follow one from a book’s ⋯ menu or from <strong>+ Add book</strong>: its next book shows here.</p></div>`;
-  const parts = follows.map(f => {
-    const s = booksData.cache.series.get(f.hardcover_id), open = booksExpanded.has(f.id), id = esc(f.id), idArg = bkArg(f.id);
-    const v = s ? bookSeriesView(s, { entries: booksData.entries, decisions: booksData.decisions, today: booksToday() }) : null;
-    const next = !v ? '<span class="muted">Not read from Hardcover yet: use Refresh books</span>'
-      : v.next ? `<span class="fr-label">Next</span> <span class="fr-name">${esc(v.next.rec ? v.next.rec.title : v.next.entry.title)}</span> <span class="muted">#${esc(v.next.position)} · ${bookDateHtml(v.next.entry ? bookShownDate(v.next.entry, v.next.rec) : v.next.rec ? bookShownDate(null, v.next.rec) : null)}</span>`
-        : '<span class="fr-label">Next</span> <span class="status-pill s-caughtup">Caught up</span>';
-    const expand = `<button type="button" class="expand-btn" data-baction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Hide' : 'Show'} the books of ${f.name}`)}" onclick="event.stopPropagation(); toggleBookFollow('${idArg}')"><span class="expand-chevron">${open ? '▾' : '▸'}</span></button>`;
-    const auto = `<label class="settings-check book-auto"><input type="checkbox" data-baction="auto" ${f.auto_add ? 'checked' : ''} onchange="setSeriesAutoAdd('${idArg}', this.checked)"> Automatically add new titles on refresh</label>`;
-    const body = open ? `<div class="book-follow-body">${s ? bookSeriesListHtml(s, { follow: f }) : '<p class="muted">Nothing read from Hardcover yet: use Refresh books.</p>'}
-        ${auto}<p class="games-note">New main titles are added as Want to read when they have an English edition and nothing else holds their place; anything uncertain waits in Review.</p>
-        <button class="btn" data-baction="unfollow" onclick="unfollowBooks('${idArg}')">Stop following ${esc(f.name)}</button></div>` : '';
-    return `<div class="item-card show-group-card book-follow" data-bfollow="${id}">
-        <div class="card-top" onclick="toggleBookFollow('${idArg}')" style="cursor:pointer">${expand}<div class="card-title-block"><span class="card-title"><span class="show-title">${esc(f.name)}</span>${f.auto_add ? ' <span class="state-tag">Adds new titles</span>' : ''}</span></div></div>
-        <div class="card-meta"><span class="card-season fr-next">${next}</span></div>${body}</div>`;
-  });
-  return toolbar + `<div class="books-follows" aria-label="Followed series">${parts.join('')}</div>`;
+// Following: followed authors (each with their official page, series and other books; a series also followed on its own shows
+// there with its own follow controls), then followed series not shown under a followed author. Author and series follows stay
+// independent: following an author follows none of their series, and stopping one follow leaves the others.
+function bookSeriesFollowOf(id) { return booksData.follows.find(f => f.kind === 'series' && f.hardcover_id === id) || null; }
+// The followed series shown under each followed author: the author's verified series (as their list shows them).
+function booksSeriesUnderAuthors() {
+  const under = new Map(); // series id → author follow
+  for (const f of booksData.follows.filter(x => x.kind === 'author')) {
+    const a = booksData.cache.author.get(f.hardcover_id);
+    if (!a) continue;
+    const seriesList = (a.seriesIds || []).map(id => booksData.cache.series.get(id)).filter(Boolean);
+    bookAuthorView(a, { seriesList, associations: booksData.associations, entries: booksData.entries, decisions: booksData.decisions, today: booksToday() })
+      .verified.forEach(sr => { if (!under.has(sr.id)) under.set(sr.id, f); });
+  }
+  return under;
 }
-function booksAuthorsHtml() {
-  const follows = booksData.follows.filter(f => f.kind === 'author').sort((a, b) => compareTitles(a.name, b.name));
-  const toolbar = booksToolbarHtml({ count: follows.length ? countUnit(follows.length, 'author followed', 'authors followed') : '' });
-  if (!follows.length) return toolbar + `<div class="games-empty" data-books-empty="1" tabindex="-1"><p>You follow no authors. Find one with <strong>+ Add book</strong> (Authors): browse their books, then follow them to have Refresh books look for new ones.</p></div>`;
-  const parts = follows.map(f => {
-    const a = booksData.cache.author.get(f.hardcover_id), open = booksExpanded.has(f.id), id = esc(f.id), idArg = bkArg(f.id);
-    const site = booksData.sites.find(x => x.hardcover_author_id === f.hardcover_id);
-    const siteState = booksData.cache.site.get(f.hardcover_id);
-    const siteLine = site ? `Official book page: <a href="${esc(site.listing_url)}" target="_blank" rel="noopener noreferrer">${esc(site.listing_url.replace(/^https:\/\//, ''))}</a>${siteState && siteState.unsupported ? ' · <strong>not recognised: Hardcover only</strong>' : siteState && siteState.checked ? ` · checked ${esc(siteState.checked)}` : ''}`
-      : '<strong>Hardcover only</strong> (no official book page set)';
-    const expand = `<button type="button" class="expand-btn" data-baction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Hide' : 'Show'} the books of ${f.name}`)}" onclick="event.stopPropagation(); toggleBookFollow('${idArg}')"><span class="expand-chevron">${open ? '▾' : '▸'}</span></button>`;
-    const body = open ? `<div class="book-follow-body">${bookSiteFormHtml(f.hardcover_id, f.name, site)}${a ? bookAuthorListHtml(a) : '<p class="muted">Nothing read from Hardcover yet: use Refresh books.</p>'}
-        <button class="btn" data-baction="unfollow" onclick="unfollowBooks('${idArg}')">Stop following ${esc(f.name)}</button></div>` : '';
-    return `<div class="item-card show-group-card book-follow" data-bfollow="${id}">
-        <div class="card-top" onclick="toggleBookFollow('${idArg}')" style="cursor:pointer">${expand}<div class="card-title-block"><span class="card-title"><span class="show-title">${esc(f.name)}</span></span></div></div>
-        <div class="card-meta"><span class="card-season">${siteLine}</span></div>${body}</div>`;
-  });
-  return toolbar + `<div class="books-follows" aria-label="Followed authors">${parts.join('')}</div>`;
+// A followed series' own controls (in its card, or under its author): automatic adding and Stop following.
+function bookSeriesFollowControlsHtml(f, hookSuffix = '') {
+  return `<label class="settings-check book-auto"><input type="checkbox" data-baction="auto${hookSuffix}" ${f.auto_add ? 'checked' : ''} onchange="setSeriesAutoAdd('${bkArg(f.id)}', this.checked)"> Automatically add new titles of ${esc(f.name)} on refresh</label>
+    <button class="btn" data-baction="unfollow${hookSuffix}" onclick="unfollowBooks('${bkArg(f.id)}')">Stop following the series ${esc(f.name)}</button>`;
+}
+function bookSeriesNextHtml(s) {
+  const v = s ? bookSeriesView(s, { entries: booksData.entries, decisions: booksData.decisions, today: booksToday() }) : null;
+  return !v ? '<span class="muted">Not read from Hardcover yet: use Refresh books</span>'
+    : v.next ? `<span class="fr-label">Next</span> <span class="fr-name">${esc(v.next.rec ? v.next.rec.title : v.next.entry.title)}</span> <span class="muted">#${esc(v.next.position)} · ${bookDateHtml(v.next.entry ? bookShownDate(v.next.entry, v.next.rec) : v.next.rec ? bookShownDate(null, v.next.rec) : null)}</span>`
+      : '<span class="fr-label">Next</span> <span class="status-pill s-caughtup">Caught up</span>';
+}
+const bookExpandHtml = (f, open, what) => `<button type="button" class="expand-btn" data-baction="expand" aria-expanded="${open}" aria-label="${esc(`${open ? 'Hide' : 'Show'} ${what}`)}" onclick="event.stopPropagation(); toggleBookFollow('${bkArg(f.id)}')"><span class="expand-chevron">${open ? '▾' : '▸'}</span></button>`;
+function bookSeriesFollowCardHtml(f) {
+  const s = booksData.cache.series.get(f.hardcover_id), open = booksExpanded.has(f.id);
+  const body = open ? `<div class="book-follow-body">${s ? bookSeriesListHtml(s, { follow: f }) : '<p class="muted">Nothing read from Hardcover yet: use Refresh books.</p>'}
+      ${bookSeriesFollowControlsHtml(f)}<p class="games-note">New main titles are added as Want to read when they have an English edition and nothing else holds their place; anything uncertain waits in Review.</p></div>` : '';
+  return `<div class="item-card show-group-card book-follow" data-bfollow="${esc(f.id)}">
+      <div class="card-top" onclick="toggleBookFollow('${bkArg(f.id)}')" style="cursor:pointer">${bookExpandHtml(f, open, `the books of ${f.name}`)}<div class="card-title-block"><span class="card-title"><span class="show-title">${esc(f.name)}</span> <span class="state-tag">Series</span>${s && s.author ? ` <span class="muted">by ${esc(s.author.name)}</span>` : ''}${f.auto_add ? ' <span class="state-tag">Adds new titles</span>' : ''}</span></div></div>
+      <div class="card-meta"><span class="card-season fr-next">${bookSeriesNextHtml(s)}</span></div>${body}</div>`;
+}
+function bookAuthorFollowCardHtml(f, ownSeries) {
+  const a = booksData.cache.author.get(f.hardcover_id), open = booksExpanded.has(f.id);
+  const site = booksData.sites.find(x => x.hardcover_author_id === f.hardcover_id), siteState = booksData.cache.site.get(f.hardcover_id);
+  const siteLine = site ? `Official book page: <a href="${esc(site.listing_url)}" target="_blank" rel="noopener noreferrer">${esc(site.listing_url.replace(/^https:\/\//, ''))}</a>${siteState && siteState.unsupported ? ' · <strong>not recognised: Hardcover only</strong>' : siteState && siteState.checked ? ` · checked ${esc(siteState.checked)}` : ''}`
+    : '<strong>Hardcover only</strong> (no official book page set)';
+  const also = ownSeries.length ? `<span class="card-season book-also">Series also followed: ${ownSeries.map(x => `${esc(x.name)}${x.auto_add ? ' (adds new titles)' : ''}`).join(', ')}</span>` : '';
+  const body = open ? `<div class="book-follow-body">${bookSiteFormHtml(f.hardcover_id, f.name, site)}${a ? bookAuthorListHtml(a) : '<p class="muted">Nothing read from Hardcover yet: use Refresh books.</p>'}
+      <button class="btn" data-baction="unfollow" onclick="unfollowBooks('${bkArg(f.id)}')">Stop following the author ${esc(f.name)}</button>
+      <p class="games-note">Stopping this follow keeps any series of theirs you follow on its own, and your saved books.</p></div>` : '';
+  return `<div class="item-card show-group-card book-follow" data-bfollow="${esc(f.id)}">
+      <div class="card-top" onclick="toggleBookFollow('${bkArg(f.id)}')" style="cursor:pointer">${bookExpandHtml(f, open, `the books of ${f.name}`)}<div class="card-title-block"><span class="card-title"><span class="show-title">${esc(f.name)}</span> <span class="state-tag">Author</span></span></div></div>
+      <div class="card-meta"><span class="card-season">${siteLine}</span>${also}</div>${body}</div>`;
+}
+function booksFollowingHtml() {
+  const authors = booksData.follows.filter(f => f.kind === 'author').sort((a, b) => compareTitles(a.name, b.name));
+  const under = booksSeriesUnderAuthors();
+  const seriesF = booksData.follows.filter(f => f.kind === 'series');
+  const alone = seriesF.filter(f => !under.has(f.hardcover_id)).sort((a, b) => compareTitles(a.name, b.name));
+  const count = authors.length || seriesF.length ? `${countUnit(authors.length, 'author', 'authors')} · ${countUnit(seriesF.length, 'series', 'series')} followed` : '';
+  const toolbar = booksToolbarHtml({ count });
+  if (!authors.length && !seriesF.length) return toolbar + `<div class="games-empty" data-books-empty="1" tabindex="-1"><p>You follow no authors or series. Find one with <strong>+ Add book</strong> (Authors or Series): browse their books, then follow them to have Refresh books look for new ones. Following adds nothing to your library.</p></div>`;
+  const ownSeriesOf = f => seriesF.filter(x => under.get(x.hardcover_id) === f);
+  return toolbar + `${authors.length ? `<h3 class="book-follow-head">Authors</h3><div class="books-follows" aria-label="Followed authors">${authors.map(f => bookAuthorFollowCardHtml(f, ownSeriesOf(f))).join('')}</div>` : ''}
+    ${alone.length ? `<h3 class="book-follow-head">${authors.length ? 'Other series' : 'Series'}</h3><div class="books-follows" aria-label="Followed series">${alone.map(bookSeriesFollowCardHtml).join('')}</div>` : ''}`;
 }
 function bookSiteFormHtml(authorId, name, site) {
   const known = KNOWN_BOOK_SITES[authorId];
@@ -393,11 +426,14 @@ function bookAuthorListHtml(a, seriesSource = booksData.cache.series, inDialog =
   const v = bookAuthorView(a, { seriesList, associations: booksData.associations, entries: booksData.entries, decisions: booksData.decisions, today: booksToday() });
   const inVerified = new Set(v.verified.flatMap(s => s.books.map(b => b.rec.id)));
   const others = v.shown.filter(x => !inVerified.has(x.rec.id));
-  const followBtn = s => (booksData.follows.some(f => f.kind === 'series' && f.hardcover_id === s.id) ? '<span class="state-tag">Following</span>'
-    : `<button class="btn btn-link" data-baction="follow-s${s.id}" onclick="followBookSeries(${s.id}, '${bkArg(s.name)}')">Follow ${esc(s.name)}</button>`);
+  // A series of theirs: Follow it on its own, or, when it is followed, its own state (and in Following, its controls).
+  const followBtn = s => { const sf = bookSeriesFollowOf(s.id);
+    return sf ? `<span class="state-tag">Series followed${sf.auto_add ? ' · adds new titles' : ''}</span>`
+      : `<button class="btn btn-link" data-baction="follow-s${s.id}" onclick="followBookSeries(${s.id}, '${bkArg(s.name)}')">Follow the series ${esc(s.name)}</button>`; };
+  const ownControls = s => { const sf = !inDialog && bookSeriesFollowOf(s.id); return sf ? `<div class="book-series-controls">${bookSeriesFollowControlsHtml(sf, `-s${s.id}`)}</div>` : ''; };
   const gaps = v.gaps.length ? `<p class="games-note">${countUnit(v.gaps.length, 'book in their series is', 'books in their series are')} credited to someone else on Hardcover: ${v.gaps.map(g => `“${esc(g.rec.title)}”`).join(', ')}. Refresh books offers ${v.gaps.length === 1 ? 'it' : 'them'} in Review, where you can credit ${esc(a.name)}.</p>` : '';
   const bulk = bookAddAllHtml(`a:${a.id}`, bookAddAllPlan({ kind: 'author', author: a, seriesList }, bookPlanCtx()), inDialog, 'Add all books');
-  return `${bulk}${v.verified.map(s => `<div class="book-author-series"><h4 class="book-sub">${esc(s.name)} ${followBtn(s)}</h4>${bookSeriesListHtml(s, { inDialog })}</div>`).join('')}
+  return `${bulk}${v.verified.map(s => `<div class="book-author-series"><h4 class="book-sub">${esc(s.name)} ${followBtn(s)}</h4>${bookSeriesListHtml(s, { inDialog })}${ownControls(s)}</div>`).join('')}
     ${gaps}<h4 class="book-sub">${v.verified.length ? 'Other books' : 'Books'}</h4>
     <ul class="spot-versions">${others.map(x => `<li class="spot-version">${bookRecLine(x.rec, '', x.entry)} <span class="book-pick">${bookPickHtml(x.rec, x.entry, { hook: `a${x.rec.id}` })}</span></li>`).join('') || '<li class="muted">None.</li>'}</ul>
     ${bookHiddenListHtml(`a:${a.id}`, v.hidden, inDialog)}`;
@@ -682,7 +718,7 @@ async function followBookAuthor(id, name) {
       if (known && !hasSite) { const s = await sbRpc('library_book_site_set', { p_author_id: id, p_author_name: String(name).slice(0, 200), p_expected_url: null, p_url: known.listing }); if (booksData) booksData.sites.push(s); }
       if (booksData && f) booksData.follows.push(f);
       showSaved();
-      showNotice(`Following ${name}. Refresh books looks for their new books${known ? ' on Hardcover and their official site' : ' on Hardcover'}; you review each one. Nothing was added to your library.`);
+      showNotice(`Following ${name}. Refresh books looks for their new books${known ? ' on Hardcover and their official site' : ' on Hardcover'}; you review each one. Nothing was added to your library, and none of their series is followed unless you follow it too.`);
       if (booksDialog) redrawBooksDialog();
       if (isBooksView()) renderBooksView();
       lane.after.push(() => { if (isBooksView()) reloadOpenView(); });
@@ -701,7 +737,7 @@ async function followBookSeries(id, name) {
       if (known && !hasSite) { const x = await sbRpc('library_book_site_set', { p_author_id: author.id, p_author_name: String(author.name).slice(0, 200), p_expected_url: null, p_url: known.listing }); if (booksData) booksData.sites.push(x); }
       if (booksData && f) booksData.follows.push(f);
       showSaved();
-      showNotice(`Following ${name}. Its next book is in Books → Series. Nothing was added to your library; you can turn on automatic adding there.`);
+      showNotice(`Following ${name}. Its next book is in Books → Following. Nothing was added to your library; you can turn on automatic adding there.`);
       if (booksDialog) redrawBooksDialog();
       if (isBooksView()) renderBooksView();
       lane.after.push(() => { if (isBooksView()) reloadOpenView(); });
@@ -838,7 +874,7 @@ async function refreshBooks() {
   }
   const found = bookRefreshFindings(read, { entries: booksData.entries, follows, associations: booksData.associations, decisions: booksData.decisions, findings: booksData.findings, today });
   found.report.hardcoverFailed.push(...failed.filter(n => !found.report.hardcoverFailed.includes(n)));
-  // Sites the rule didn't recognise as a book list: remembered (replaceable) so the Authors view can say so.
+  // Sites the rule didn't recognise as a book list: remembered (replaceable) so Following can say so.
   const unsupported = found.report.hardcoverOnly.filter(x => /doesn’t look/.test(x.why));
   await runWrite('Refresh books', async lane => {
     let added = 0;

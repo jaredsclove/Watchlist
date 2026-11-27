@@ -147,13 +147,14 @@ async function open(app, view = 'books') { app.ctx.switchView(view); await settl
 async function refresh(app) { await app.ctx.refreshBooks(); await settle(); await settle(); }
 const store = (app, t) => app.store[t];
 
-test('the Books area: an app-bar button, its routes and three views', async () => {
+test('the Books area: an app-bar button, its routes and two views (the old Series and Authors routes open Following)', async () => {
   const app = await boot();
   assert.match(app.el('mediaSwitch').innerHTML, /id="areaBtn-books"[^>]*onclick="openBooks\(\)">Books<\/button>/);
   app.ctx.openBooks(); await settle();
   assert.strictEqual(app.get('activeArea'), 'books');
-  assert.deepStrictEqual(['books', 'booksseries', 'booksauthors'].map(v => app.get(`routeOfView("${v}")`)), ['#/books', '#/books/series', '#/books/authors']);
-  assert.strictEqual(text(app.el('tabBar').innerHTML), 'Library Series Authors');
+  assert.deepStrictEqual(['books', 'booksfollowing'].map(v => app.get(`routeOfView("${v}")`)), ['#/books', '#/books/following']);
+  assert.deepStrictEqual(['#/books/following', '#/books/series', '#/books/authors'].map(h => app.get(`viewOfRoute(${JSON.stringify(h)})`)), ['booksfollowing', 'booksfollowing', 'booksfollowing'], 'the old routes open Following');
+  assert.strictEqual(text(app.el('tabBar').innerHTML), 'Library Following');
   assert.match(text(screen(app)), /No books yet\. Use \+ Add book to search Hardcover, browse an author or enter a book by hand\./);
   assert.match(screen(app), /Book data from <a href="https:\/\/hardcover\.app"/);
   assert.deepStrictEqual(app.writes().filter(r => !/functions\/v1\/books/.test(r.url)), [], 'no database write');
@@ -168,7 +169,7 @@ test('Library: statuses, author and series columns, genres; dates as Hardcover g
   await open(app);
   const r1 = text(rowOf(app, e1.id));
   assert.match(r1, /ZZ Third Case/); assert.match(r1, /#3/, 'its number in the series (the author and series are its headings)');
-  assert.match(text(tableOf(app)), /ZZ Galbraith ZZ Strike ZZ Third Case/);
+  assert.match(text(tableOf(app)), /▾ ZZ Galbraith ▾ ZZ Strike ZZ Third Case/);
   assert.match(r1, /Jan 1, 2023/, 'the date as Hardcover gives it'); assert.match(rowOf(app, e1.id), /class="book-ph"[^>]*aria-label="Possible placeholder date\. Hardcover lists 1 January/, 'marked as possibly a placeholder (compact, explained on focus), not converted');
   assert.match(rowOf(app, e1.id), /<option value="reading" selected>Reading<\/option>/);
   assert.match(text(rowOf(app, e2.id)), /Jun 1, 2017 .*your date/, 'the member’s date shown and labelled');
@@ -188,7 +189,7 @@ test('Library: statuses, author and series columns, genres; dates as Hardcover g
 test('Series: main titles in order with the next book; Dropped and skipped books passed over; companions listed but never next; translations, box sets and extra records hidden, not merged', async () => {
   const e1 = entry(1, byId(1001), { status: 'finished' }), e2 = entry(2, byId(1002), { status: 'dropped' });
   const app = await boot({ entries: [e1, e2], follows: [follow(1, 'series', 9200, 'ZZ Strike')] });
-  await open(app, 'booksseries');
+  await open(app, 'booksfollowing');
   assert.match(text(screen(app)), /Not read from Hardcover yet: use Refresh books/);
   await refresh(app);
   const fid = ID('6d000000', 1);
@@ -209,11 +210,11 @@ test('Series: main titles in order with the next book; Dropped and skipped books
 
 test('Authors: their books plus their verified series; the publisher-credited series book is offered for review and a manual credit puts it under the author; another author’s book never is', async () => {
   const app = await boot({ follows: [follow(1, 'author', A_YA.id, A_YA.name)] });
-  await open(app, 'booksauthors');
+  await open(app, 'booksfollowing');
   await refresh(app);
   app.ctx.toggleBookFollow(ID('6d000000', 1)); await settle();
   const s = text(screen(app));
-  assert.match(s, /ZZ One of Us Follow ZZ One of Us .*#1 ZZ One of Us .*#2 ZZ One of Us Next .*#3 ZZ One of Us Back/, 'the verified series in order, its third book included');
+  assert.match(s, /ZZ One of Us Follow the series ZZ One of Us .*#1 ZZ One of Us .*#2 ZZ One of Us Next .*#3 ZZ One of Us Back/, 'the verified series in order, its third book included');
   assert.match(s, /credited to someone else on Hardcover: “ZZ One of Us Back”/);
   assert.match(s, /Other books .*ZZ Cousins .*ZZ Dying Debut Language unknown/, 'an announced book with unknown language stays, labelled');
   assert.ok(!/ZZ Cousins \(Spanish\)/.test(s.split('Show')[0]) && !/ZZ One of Us Collection/.test(s.split('Show')[0]), 'translations and collections are under Hidden');
@@ -231,7 +232,7 @@ test('Authors: their books plus their verified series; the publisher-credited se
   // A series of several authors: a book credited to the series' other author is that author's, not a gap.
   const two = await boot({ follows: [follow(1, 'author', A_YA.id, A_YA.name)], stub: { catalog: { books: [
     bk(2010, 'ZZ Shared One', { authors: [A_YA], series: inS(S_ONE, '4') }), bk(2011, 'ZZ Shared Two', { authors: [A_SPY], series: inS(S_ONE, '5') }), bk(2012, 'ZZ Shared Three', { authors: [A_SPY], series: inS(S_ONE, '6') })] } } });
-  await open(two, 'booksauthors'); await refresh(two);
+  await open(two, 'booksfollowing'); await refresh(two);
   assert.deepStrictEqual(store(two, 'book_findings').filter(f => f.kind === 'credit_gap').map(f => f.subject.hardcover_id), [2003], 'another author’s books in a shared series are never offered as a gap');
 });
 
@@ -401,7 +402,7 @@ test('sites: a redesigned site gives one notice instead of a flood; an unsupport
   await open(odd); await refresh(odd);
   assert.ok(!store(odd, 'book_findings').some(x => x.source === 'website'), 'nothing offered from it');
   assert.match(text(screen(odd)), /Hardcover only: ZZ McManus \(its page doesn’t look like a list of their books\)/);
-  await open(odd, 'booksauthors');
+  await open(odd, 'booksfollowing');
   odd.ctx.toggleBookFollow(ID('6d000000', 1)); await settle();
   assert.match(text(screen(odd)), /not recognised: Hardcover only/);
   // A site that can't be read: Hardcover's results still count.
@@ -478,7 +479,7 @@ const spyCatalog = { books: [bk(3003, 'ZZ Ransom', { authors: [A_SPY], series: i
 
 test('Silva walkthrough: a series-only follow checks only that series on the site; known books keep their Hardcover identity; the catalog at follow time is never “new”; following the author later adds no duplicates', async () => {
   const app = await boot({ sites: [spySite()], stub: { catalog: spyCatalog, sites: spySites() } });
-  await open(app, 'booksseries');
+  await open(app, 'booksfollowing');
   // Follow the series only: its starting catalog is noted (Ransom, the newest, included), nothing is added.
   await app.ctx.followBookSeries(9202, 'ZZ Allon'); await settle();
   const fs = store(app, 'book_follows')[0];
@@ -535,7 +536,7 @@ test('Add all in series and Add all books: main titles not saved, skipped or dis
   const kill = entry(1, byId(3001), { status: 'finished' }), spy = entry(2, byId(3009), { status: 'finished' });
   const decisions = [{ id: ID('6a900000', 60), kind: 'skip', key: 'hc:3002', value: {}, created_at: TS }, { id: ID('6a900000', 61), kind: 'exclude', key: 'hc:3004', value: { reason: 'dismissed' }, created_at: TS }];
   const app = await boot({ entries: [kill, spy], decisions, follows: [follow(1, 'series', 9202, 'ZZ Allon')], stub: { catalog: extra } });
-  await open(app, 'booksseries'); await refresh(app);
+  await open(app, 'booksfollowing'); await refresh(app);
   app.ctx.toggleBookFollow(ID('6d000000', 1)); await settle();
   app.ctx.toggleBookHidden('s:9202'); await settle(); // (showing Hidden makes nothing eligible)
   assert.match(text(screen(app)), /Add all in series \(2\)/);
@@ -561,7 +562,7 @@ test('Add all in series and Add all books: main titles not saved, skipped or dis
 test('Add all: a title dismissed meanwhile is refused and counted; a failure of unknown outcome stops it and is reported as such', async () => {
   const extra = { books: [bk(3003, 'ZZ Ransom', { authors: [A_SPY], series: inS(S_ALLON, '3'), date: '2024-01-01' }), bk(3006, 'ZZ Fourth', { authors: [A_SPY], series: inS(S_ALLON, '4'), date: '2025-09-01' }), bk(3008, 'ZZ Fifth', { authors: [A_SPY], series: inS(S_ALLON, '5'), date: '2026-01-01' })] };
   const app = await boot({ follows: [follow(1, 'series', 9202, 'ZZ Allon')], stub: { catalog: extra } });
-  await open(app, 'booksseries'); await refresh(app);
+  await open(app, 'booksfollowing'); await refresh(app);
   store(app, 'book_decisions').push({ id: ID('6a900000', 70), kind: 'exclude', key: 'hc:3001', value: { reason: 'dismissed' }, created_at: TS });
   let n = 0;
   app.loseNext(r => r.url.endsWith('/rpc/library_book_add') && ++n === 3, 'after');
@@ -574,7 +575,7 @@ test('Add all: a title dismissed meanwhile is refused and counted; a failure of 
 
 test('+ Add book browse: Show hidden opens and closes at once, starts closed on each fresh browse, never shares the main views’ choice; focus stays on the toggle; the dialog’s selects keep the app’s own arrow', async () => {
   const app = await boot({ follows: [follow(1, 'series', 9200, 'ZZ Strike')] });
-  await open(app, 'booksseries'); await refresh(app);
+  await open(app, 'booksfollowing'); await refresh(app);
   app.ctx.toggleBookFollow(ID('6d000000', 1)); app.ctx.toggleBookHidden('s:9200'); await settle();
   app.ctx.openBooksAdd(null); await settle();
   await app.ctx.browseBooks('series', 9200); await settle();
@@ -608,8 +609,8 @@ test('Library order (owner, 2026-11-27): author A–Z, each series A–Z in read
   const cache = all.filter(b => entries.some(x => x.hardcover_id === b.id)).map((b, i) => ({ id: ID('6e100000', i + 1), kind: 'book', key: String(b.id), data: JSON.parse(app0.run(`JSON.stringify(bookRecord(${JSON.stringify(b)}))`)), fetched_at: TS }));
   const app = await boot({ entries, cache });
   await open(app);
-  const order = [...tableOf(app).matchAll(/<tr class="(book-group-row [^"]+|game-row[^"]*)"(?: data-book="([^"]+)")?>(?:<th colspan="5">([^<]+))?/g)]
-    .map(m => (m[2] ? store(app, 'book_entries').find(x => x.id === m[2]).title : `[${m[3]}]`));
+  const order = [...tableOf(app).matchAll(/<tr class="(?:book-group-row [^"]+|game-row[^"]*)"(?: data-book="([^"]+)")?>(?:<th colspan="5"><button[^>]*>.*?<span class="book-group-name">([^<]+))?/g)]
+    .map(m => (m[1] ? store(app, 'book_entries').find(x => x.id === m[1]).title : `[${m[2]}]`));
   assert.deepStrictEqual(order, ['[ZZ Aaron]', '[Standalone books]', 'ZZ Joint Book',
     '[ZZ Galbraith]', '[ZZ Strike]', 'ZZ Second Case', 'ZZ Third Case',
     '[ZZ Silva]', '[ZZ Allon]', 'ZZ English Assassin', 'ZZ No Number', '[ZZ Osbourne]', 'ZZ Osbourne One', 'ZZ Osbourne Two', '[Standalone books]', 'ZZ Later Standalone', 'ZZ Undated Standalone',
@@ -621,10 +622,23 @@ test('Library order (owner, 2026-11-27): author A–Z, each series A–Z in read
   // All statuses: the Finished books join their groups in order; a genre filter keeps only headings with books.
   app.ctx.setBooksFilter('status', 'all'); await settle();
   assert.match(text(tableOf(app)), /ZZ Allon ZZ Kill Artist .*ZZ English Assassin .*Standalone books ZZ Unlikely Spy .*ZZ Later Standalone/);
+  // Collapsing (display only): an author hides its groups and shows its count; reopening keeps a series' own choice.
+  app.ctx.setBooksFilter('genre', ''); await settle();
+  app.dom.focus('booksScreen', '.books-table [data-baction="grp-s|id:9102|id:9203"]');
+  app.ctx.toggleBookGroup('s|id:9102|id:9203'); await settle();
+  assert.strictEqual(app.dom.active().getAttribute('data-baction'), 'grp-s|id:9102|id:9203', 'focus stays on the heading');
+  assert.match(tableOf(app), /aria-expanded="false"[^>]*>.*?ZZ Osbourne<\/span> <span class="book-group-count">2 books/);
+  assert.ok(!/ZZ Osbourne One/.test(tableOf(app)), 'its books are hidden');
+  app.ctx.toggleBookGroup('a|id:9102'); await settle();
+  assert.match(text(tableOf(app)), /▸ ZZ Silva 8 books ▾ Unknown author/, 'the author closed, with the count of its books shown');
+  app.ctx.toggleBookGroup('a|id:9102'); await settle();
+  assert.match(text(tableOf(app)), /ZZ No Number .*▸ ZZ Osbourne 2 books ▾ Standalone books/, 'reopened: the series keeps its own choice');
+  assert.strictEqual(store(app, 'book_entries').length, 12, 'collapsing changes nothing saved');
+  assert.deepStrictEqual(app.writes().filter(r => !/functions\/v1\/books|cache_put/.test(r.url)), [], 'and writes nothing');
   app.ctx.setBooksFilter('genre', 'Espionage'); await settle();
-  assert.deepStrictEqual([...tableOf(app).matchAll(/<th colspan="5">([^<]+)/g)].map(m => m[1]), ['ZZ Silva', 'ZZ Allon']);
+  assert.deepStrictEqual([...tableOf(app).matchAll(/<span class="book-group-name">([^<]+)/g)].map(m => m[1]), ['ZZ Silva', 'ZZ Allon']);
   // Cards: the same order with headings.
-  assert.match(text(screen(app).split('games-cards')[1]), /ZZ Silva ZZ Allon ZZ Kill Artist .*ZZ English Assassin/);
+  assert.match(text(screen(app).split('games-cards')[1]), /ZZ Silva ▾ ZZ Allon ZZ Kill Artist .*ZZ English Assassin/);
 });
 
 test('Library rows: genres on one line with +N (Games’ rule; every pill without layout); +N opens and closes, focus kept on it; genre pills still filter', async () => {
@@ -643,6 +657,34 @@ test('Library rows: genres on one line with +N (Games’ rule; every pill withou
   assert.strictEqual(app.dom.active().getAttribute('data-baction'), 'cats-more', 'focus stays on +N / Fewer');
   app.ctx.setBooksFilter('genre', 'Mystery'); await settle();
   assert.match(rowOf(app, e1.id), /aria-pressed="true"[^>]*>Mystery/);
+});
+
+test('Following: an author alone, a series alone, and both: a followed series shows once (under its followed author, with its own controls); the follows stay independent', async () => {
+  // A series alone: its card, with Next and automatic adding.
+  const one = await boot({ follows: [follow(2, 'series', 9202, 'ZZ Allon')] });
+  await open(one, 'booksfollowing'); await refresh(one);
+  assert.match(text(screen(one)), /0 authors · 1 series followed .*Series ▸ ZZ Allon Series by ZZ Silva Next ZZ Kill Artist/);
+  // An author alone: their series offered to follow on its own; following the author followed no series.
+  const two = await boot({ follows: [follow(1, 'author', A_SPY.id, A_SPY.name)] });
+  await open(two, 'booksfollowing'); await refresh(two);
+  two.ctx.toggleBookFollow(ID('6d000000', 1)); await settle();
+  assert.match(text(screen(two)), /Authors ▾ ZZ Silva Author .*ZZ Allon Follow the series ZZ Allon .*Add all in series .*Other books .*ZZ Unlikely Spy .*Add Stop following the author ZZ Silva/);
+  assert.ok(!/Other series|Series also followed/.test(text(screen(two))));
+  // Both: the series once, under the author, with its own controls; the author's card says so when closed.
+  const both = await boot({ follows: [follow(1, 'author', A_SPY.id, A_SPY.name), follow(2, 'series', 9202, 'ZZ Allon')] });
+  await open(both, 'booksfollowing'); await refresh(both);
+  assert.match(text(screen(both)), /1 author · 1 series followed .*ZZ Silva Author .*Series also followed: ZZ Allon/);
+  assert.ok(!/Other series|data-bfollow="[^"]*000000000002"/.test(screen(both)), 'no separate card for the series');
+  both.ctx.toggleBookFollow(ID('6d000000', 1)); await settle();
+  const sc = screen(both);
+  assert.strictEqual((sc.match(/data-baction="auto-s9202"/g) || []).length, 1, 'its automatic adding control, once');
+  assert.match(text(sc), /ZZ Allon Series followed .*Automatically add new titles of ZZ Allon on refresh Stop following the series ZZ Allon/);
+  await both.ctx.setSeriesAutoAdd(ID('6d000000', 2), true); await settle();
+  assert.ok(store(both, 'book_follows').find(f => f.kind === 'series').auto_add, 'set from under the author');
+  // Stopping the author keeps the series follow, which then has its own card.
+  await both.ctx.unfollowBooks(ID('6d000000', 1)); await settle();
+  assert.deepStrictEqual(store(both, 'book_follows').map(f => [f.kind, f.auto_add]), [['series', true]]);
+  assert.match(text(screen(both)), /0 authors · 1 series followed .*Series ▸ ZZ Allon Series by ZZ Silva Adds new titles/);
 });
 
 T.run();
